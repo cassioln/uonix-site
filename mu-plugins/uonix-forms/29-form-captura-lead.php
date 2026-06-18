@@ -135,10 +135,9 @@ function uonix_gerar_form_captura_html() {
 
 #uonix-custom-lead-form .uonix-form-group input:not(:focus):not(:placeholder-shown) ~ .uonix-floating-label {
     color: #64748b;
-}							 
-																							 
-																							 
-																							 
+}
+
+        #uonix-custom-lead-form .uonix-turnstile-widget { margin: 2px 0 4px; }
 
         /* ==========================================
            3. CHECKBOXES CUSTOMIZADOS E LINKS
@@ -260,6 +259,12 @@ function uonix_gerar_form_captura_html() {
                 <div class="uonix-helper-text" id="help_termo" style="margin-left: 34px;">É obrigatório aceitar a política de privacidade.</div>
             </div>
 
+            <?php
+            if ( function_exists( 'uonix_turnstile_render_widget' ) ) {
+                echo uonix_turnstile_render_widget( 'lead_download' );
+            }
+            ?>
+
             <div id="ucf_feedback_error" class="uonix-feedback-error"></div>
 
             <button type="submit" id="ucf_submit_btn" class="uonix-btn-submit-custom">
@@ -321,6 +326,12 @@ function uonix_gerar_form_captura_html() {
             telefoneInput.addEventListener('input', function() {
                 this.value = formatUonixPhone(this.value);
             });
+        }
+
+        function resetUonixTurnstile() {
+            if (window.uonixTurnstile) {
+                window.uonixTurnstile.reset(form);
+            }
         }
 
         form.addEventListener('submit', function(e) {
@@ -390,6 +401,7 @@ function uonix_gerar_form_captura_html() {
                 } else {
                     feedbackError.style.display = 'block';
                     feedbackError.innerHTML = '⚠ ' + data.data.message;
+                    resetUonixTurnstile();
                     btn.disabled = false;
                     btn.innerHTML = '<span>Baixar Material Grátis</span>';
                 }
@@ -397,6 +409,7 @@ function uonix_gerar_form_captura_html() {
             .catch(error => {
                 feedbackError.style.display = 'block';
                 feedbackError.innerHTML = '⚠ Falha na conexão. Tente novamente.';
+                resetUonixTurnstile();
                 btn.disabled = false;
                 btn.innerHTML = '<span>Baixar Material Grátis</span>';
             });
@@ -450,6 +463,10 @@ function uonix_processar_lead_customizado_handler() {
     }
     if (!$termo) {
         wp_send_json_error(['message' => 'É necessário aceitar os termos.']);
+    }
+
+    if ( function_exists( 'uonix_turnstile_send_json_error_if_invalid' ) ) {
+        uonix_turnstile_send_json_error_if_invalid( 'lead_download' );
     }
 
     $embedded_post_id = (int) get_option('page_on_front');

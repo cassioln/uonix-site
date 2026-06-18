@@ -493,6 +493,7 @@ function uonix_gerar_form_trabalhe_html() {
 
         .uonix-input-error { border-color: #dc2626 !important; background: #fffbfa !important; }
         .uonix-trab-box.uonix-error-box { border-color: #dc2626 !important; background: #fef2f2; }
+        #uonix-custom-trab-form .uonix-turnstile-widget { margin: 0; }
     </style>
 
     <form id="uonix-custom-trab-form" class="uonix-trab-wrapper" enctype="multipart/form-data" novalidate>
@@ -540,6 +541,12 @@ function uonix_gerar_form_trabalhe_html() {
                     <span class="uonix-trab-box" id="box_trab_termo"></span>
                     <span class="uonix-trab-check-text">Declaro que li e concordo com a <a href="/politica-de-privacidade/" target="_blank" style="color:#0e3780; text-decoration:underline;">Política de Privacidade</a> *</span>
                 </label>
+
+                <?php
+                if ( function_exists( 'uonix_turnstile_render_widget' ) ) {
+                    echo uonix_turnstile_render_widget( 'trabalhe_conosco' );
+                }
+                ?>
 
                 <div id="trab_feedback_error" class="uonix-feedback-error"></div>
 
@@ -594,6 +601,12 @@ function uonix_gerar_form_trabalhe_html() {
             telefoneInput.addEventListener('input', function() {
                 this.value = formatUonixPhone(this.value);
             });
+        }
+
+        function resetUonixTurnstile() {
+            if (window.uonixTurnstile) {
+                window.uonixTurnstile.reset(form);
+            }
         }
 
         fileInput.addEventListener('change', function(e) {
@@ -702,17 +715,19 @@ function uonix_gerar_form_trabalhe_html() {
                 } else {
                     feedbackError.style.display = 'block';
                     feedbackError.innerHTML = '⚠ ' + (data.data && data.data.message ? data.data.message : 'Erro ao enviar. Tente novamente.');
+                    resetUonixTurnstile();
                     btn.disabled = false;
                     btn.innerHTML = '<span>Enviar Candidatura</span>';
                 }
             })
-            .catch(error => {
-                feedbackError.style.display = 'block';
-                feedbackError.innerHTML = '⚠ Falha na conexão. Tente novamente.';
-                btn.disabled = false;
-                btn.innerHTML = '<span>Enviar Candidatura</span>';
-            });
-        });
+	            .catch(error => {
+	                feedbackError.style.display = 'block';
+	                feedbackError.innerHTML = '⚠ Falha na conexão. Tente novamente.';
+	                resetUonixTurnstile();
+	                btn.disabled = false;
+	                btn.innerHTML = '<span>Enviar Candidatura</span>';
+	            });
+	        });
 
         ['trab_nome', 'trab_email', 'trab_tel'].forEach(id => {
             document.getElementById(id).addEventListener('input', function() {
@@ -817,6 +832,10 @@ function uonix_processar_trabalhe_handler() {
 
     if (!is_email($email)) {
         wp_send_json_error(array('message' => 'E-mail inválido.'));
+    }
+
+    if ( function_exists( 'uonix_turnstile_send_json_error_if_invalid' ) ) {
+        uonix_turnstile_send_json_error_if_invalid( 'trabalhe_conosco' );
     }
 
     require_once(ABSPATH . 'wp-admin/includes/file.php');

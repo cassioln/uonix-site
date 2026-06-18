@@ -57,6 +57,7 @@ jobs:
           rsync -avz \
             --exclude='.DS_Store' \
             --exclude='._*' \
+            --exclude='uonix-local/***' \
             --include='uonix-core.php' \
             --include='uonix-*/' \
             --include='uonix-*/**' \

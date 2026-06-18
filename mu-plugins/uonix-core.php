@@ -57,7 +57,7 @@ if ( ! function_exists( 'uonix_mu_load_modules' ) ) {
 			'uonix-integrations/module.php',
 		);
 
-		if ( 'local' === UONIX_ENV ) {
+		if ( in_array( UONIX_ENV, array( 'local', 'development' ), true ) ) {
 			$modules[] = 'uonix-local/module.php';
 		}
 

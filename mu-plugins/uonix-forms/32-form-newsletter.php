@@ -98,6 +98,7 @@ function uonix_gerar_form_newsletter_html($atts) {
         .uonix-news-wrapper .uonix-input-error { border-color: #dc2626 !important; background: #fffbfa !important; }
         .uonix-news-wrapper .uonix-custom-box.uonix-error-box { border-color: #dc2626 !important; background: #fef2f2; }
         .uonix-news-wrapper .uonix-label-error { color: #dc2626 !important; }
+        .uonix-news-wrapper .uonix-turnstile-widget { margin: 0; }
         .uonix-news-wrapper .uonix-feedback-error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; display: none; padding: 12px; margin-top: 5px; border-radius: 6px; font-size: 13px; font-weight: 600; }
         
         .uonix-news-wrapper .uonix-success-wrapper { display: none; flex-direction: column; width: 100%; animation: uonixFadeInUp 0.5s ease forwards; padding-top: 5px;}
@@ -246,6 +247,12 @@ function uonix_gerar_form_newsletter_html($atts) {
                     </label>
                     <div class="uonix-helper-text" id="help_termo_<?php echo $unique_id; ?>" style="margin-left: 28px;">É obrigatório aceitar a política.</div>
 
+                    <?php
+                    if ( function_exists( 'uonix_turnstile_render_widget' ) ) {
+                        echo uonix_turnstile_render_widget( 'newsletter' );
+                    }
+                    ?>
+
                     <div class="uonix-feedback-error" id="error_<?php echo $unique_id; ?>"></div>
 
                     <button type="submit" id="btn_<?php echo $unique_id; ?>" class="uonix-btn-submit-news">
@@ -309,6 +316,12 @@ function uonix_gerar_form_newsletter_html($atts) {
         const boxTermo = document.getElementById('box_termo_' + uid);
         const labelTermo = document.getElementById('label_termo_' + uid);
 
+        function resetUonixTurnstile() {
+            if (window.uonixTurnstile) {
+                window.uonixTurnstile.reset(form);
+            }
+        }
+
         form.addEventListener('submit', function(e) {
             e.preventDefault();
             let hasError = false;
@@ -353,6 +366,7 @@ function uonix_gerar_form_newsletter_html($atts) {
                 } else {
                     feedbackError.style.display = 'block';
                     feedbackError.innerHTML = '⚠ ' + data.data.message;
+                    resetUonixTurnstile();
                     btn.disabled = false;
                     btn.innerHTML = '<span>Assinar</span>';
                 }
@@ -360,6 +374,7 @@ function uonix_gerar_form_newsletter_html($atts) {
             .catch(error => {
                 feedbackError.style.display = 'block';
                 feedbackError.innerHTML = '⚠ Falha na conexão. Tente novamente.';
+                resetUonixTurnstile();
                 btn.disabled = false;
                 btn.innerHTML = '<span>Assinar</span>';
             });
@@ -401,6 +416,10 @@ function uonix_processar_newsletter_handler() {
     }
     if (!$termo) {
         wp_send_json_error(['message' => 'É necessário aceitar os termos.']);
+    }
+
+    if ( function_exists( 'uonix_turnstile_send_json_error_if_invalid' ) ) {
+        uonix_turnstile_send_json_error_if_invalid( 'newsletter' );
     }
 
     $embedded_post_id = (int) get_option('page_on_front');

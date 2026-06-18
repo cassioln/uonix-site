@@ -7,7 +7,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-if ( ! defined( 'UONIX_ENV' ) || 'local' !== UONIX_ENV ) {
+if ( ! defined( 'UONIX_ENV' ) || ! in_array( UONIX_ENV, array( 'local', 'development' ), true ) ) {
     return;
 }
 
