@@ -1,10 +1,61 @@
 <?php
-/* * functions.php do Tema Filho
- * * O código das "Especificações Técnicas" foi migrado para o plugin Code Snippets.
- * O código dos "Botões (PDF e WhatsApp)" também está no Code Snippets.
+/**
+ * Functions do tema filho Kadence.
  *
- * Você pode adicionar outras funções aqui no futuro, se precisar.
+ * Os snippets em snippets/*.php sao carregados automaticamente em ordem alfabetica.
  */
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 
-// Fim do arquivo (não precisa fechar com >?php)
+if ( ! function_exists( 'uonix_child_load_snippets' ) ) {
+    /**
+     * Carrega snippets PHP do tema filho, simulando o plugin Code Snippets.
+     *
+     * Para desativar temporariamente um snippet, renomeie o arquivo para:
+     * - _nome-do-snippet.php
+     * - nome-do-snippet.disabled.php
+     */
+    function uonix_child_load_snippets() {
+        $snippets_dir = trailingslashit( get_stylesheet_directory() ) . 'snippets';
+
+        if ( ! is_dir( $snippets_dir ) ) {
+            return;
+        }
+
+        $snippet_files = glob( trailingslashit( $snippets_dir ) . '*.php' );
+
+        if ( empty( $snippet_files ) ) {
+            return;
+        }
+
+        natcasesort( $snippet_files );
+
+        foreach ( $snippet_files as $snippet_file ) {
+            $basename = basename( $snippet_file );
+
+            if (
+                'index.php' === $basename ||
+                '_' === substr( $basename, 0, 1 ) ||
+                '.disabled.php' === substr( $basename, -13 )
+            ) {
+                continue;
+            }
+
+            try {
+                require_once $snippet_file;
+            } catch ( Throwable $exception ) {
+                error_log(
+                    sprintf(
+                        'UONIX snippet error em %s: %s',
+                        $basename,
+                        $exception->getMessage()
+                    )
+                );
+            }
+        }
+    }
+}
+
+uonix_child_load_snippets();
