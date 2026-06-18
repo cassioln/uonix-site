@@ -1,0 +1,23 @@
+<?php
+/**
+ * Conteúdo, blog, comentários, footer e shortcodes editoriais.
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+uonix_mu_require_files(
+	__DIR__,
+	array(
+		'02-shortcodes-pdf-servicos.php',
+		'10-comentarios-master.php',
+		'11-comentarios-avatar-validacao.php',
+		'25-blog-pagina.php',
+		'26-blog-post-single.php',
+		'36-blog-carrosseis-busca.php',
+		'37-blog-arquivo-editor.php',
+		'44-footer-copyright.php',
+	),
+	'uonix-content'
+);

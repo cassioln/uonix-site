@@ -5,9 +5,9 @@ Repositório de código próprio do site Uonix.
 ## Estrutura
 
 - `.github/workflows/`: deploys via GitHub Actions.
-- `themes/kadence-child/`: tema filho ativo do site.
+- `themes/kadence-child/`: tema filho ativo do site e snippets visuais acoplados ao Kadence.
 - `plugins/plugins-customizados/`: plugins próprios, quando existirem.
-- `mu-plugins/`: must-use plugins próprios globais, quando existirem.
+- `mu-plugins/`: módulos globais do site carregados por `uonix-core.php`.
 - `local/`: ambiente local Podman.
 - `scripts/`: comandos auxiliares locais.
 - `docs/`: documentação operacional.
@@ -25,6 +25,7 @@ Plugins de terceiros, uploads e arquivos gerados pelo WordPress não são versio
 - Produção: `uonix.ksio.dev`
 - Tema principal: `themes/kadence-child`
 - Caminho staging do tema: `/home2/uonix/qa_uonix/wp-content/themes/kadence-child`
+- Caminho staging dos MU-plugins: `/home2/uonix/qa_uonix/wp-content/mu-plugins`
 
 ## Local
 

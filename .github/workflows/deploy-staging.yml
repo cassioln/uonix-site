@@ -48,6 +48,25 @@ jobs:
             themes/kadence-child/ \
             "$STAGING_SSH_USER@$STAGING_SSH_HOST:$STAGING_PATH/"
 
+      - name: Deploy MU plugins to staging
+        run: |
+          STAGING_MU_PLUGINS_PATH="$(dirname "$(dirname "$STAGING_PATH")")/mu-plugins"
+
+          ssh -p 22 -i ~/.ssh/staging_key \
+            "$STAGING_SSH_USER@$STAGING_SSH_HOST" \
+            "mkdir -p '$STAGING_MU_PLUGINS_PATH'"
+
+          rsync -avz \
+            --exclude='.DS_Store' \
+            --exclude='._*' \
+            --include='uonix-core.php' \
+            --include='uonix-*/' \
+            --include='uonix-*/**' \
+            --exclude='*' \
+            -e "ssh -p 22 -i ~/.ssh/staging_key" \
+            mu-plugins/ \
+            "$STAGING_SSH_USER@$STAGING_SSH_HOST:$STAGING_MU_PLUGINS_PATH/"
+
       - name: Clear staging page cache
         run: |
           ssh -p 22 -i ~/.ssh/staging_key \

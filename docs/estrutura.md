@@ -3,7 +3,8 @@
 ## Versionado
 
 - Tema filho Kadence.
-- Snippets carregados pelo tema filho.
+- MU-plugins modulares para regras de negócio, shortcodes e integrações.
+- Snippets visuais carregados pelo tema filho.
 - Workflows de deploy.
 - Scripts locais.
 - Documentação.
@@ -24,6 +25,7 @@ O ambiente em `local/` monta o tema filho diretamente do Git:
 
 ```text
 themes/kadence-child -> /var/www/html/wp-content/themes/kadence-child
+mu-plugins -> /var/www/html/wp-content/mu-plugins
 ```
 
 O diretório `local/wp-content/` fica fora do Git e serve apenas como runtime local para plugins, uploads, idiomas e arquivos gerados.

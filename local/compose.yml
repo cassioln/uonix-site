@@ -47,7 +47,7 @@ services:
       - wordpress_core:/var/www/html:z
       - ./wp-content:/var/www/html/wp-content:z
       - ../themes/kadence-child:/var/www/html/wp-content/themes/kadence-child:z
-      - ./mu-plugins:/var/www/html/wp-content/mu-plugins:z
+      - ../mu-plugins:/var/www/html/wp-content/mu-plugins:z
       - ./php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:z
 
   wpcli:
@@ -67,7 +67,7 @@ services:
       - wordpress_core:/var/www/html:z
       - ./wp-content:/var/www/html/wp-content:z
       - ../themes/kadence-child:/var/www/html/wp-content/themes/kadence-child:z
-      - ./mu-plugins:/var/www/html/wp-content/mu-plugins:z
+      - ../mu-plugins:/var/www/html/wp-content/mu-plugins:z
     working_dir: /var/www/html
     entrypoint:
       - php

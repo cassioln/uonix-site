@@ -46,6 +46,25 @@ jobs:
             themes/kadence-child/ \
             "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST:$PRODUCTION_PATH/"
 
+      - name: Deploy MU plugins to production
+        run: |
+          PRODUCTION_MU_PLUGINS_PATH="$(dirname "$(dirname "$PRODUCTION_PATH")")/mu-plugins"
+
+          ssh -p 22 -i ~/.ssh/production_key \
+            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST" \
+            "mkdir -p '$PRODUCTION_MU_PLUGINS_PATH'"
+
+          rsync -avz \
+            --exclude='.DS_Store' \
+            --exclude='._*' \
+            --include='uonix-core.php' \
+            --include='uonix-*/' \
+            --include='uonix-*/**' \
+            --exclude='*' \
+            -e "ssh -p 22 -i ~/.ssh/production_key" \
+            mu-plugins/ \
+            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST:$PRODUCTION_MU_PLUGINS_PATH/"
+
       - name: Clear production page cache
         run: |
           ssh -p 22 -i ~/.ssh/production_key \

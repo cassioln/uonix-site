@@ -1,0 +1,23 @@
+<?php
+/**
+ * Administração, dashboard, dados globais, login e utilitários internos.
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+uonix_mu_require_files(
+	__DIR__,
+	array(
+		'04-blog-admin-feedback.php',
+		'19-admin-taxonomias-produtos.php',
+		'39-admin-editor-dashboard.php',
+		'40-admin-dados-globais-rfq.php',
+		'41-admin-fluentforms-ux.php',
+		'45-login-personalizado.php',
+		'46-admin-limpeza-fluentforms.php',
+		'47-admin-curriculos-recebidos.php',
+	),
+	'uonix-admin'
+);

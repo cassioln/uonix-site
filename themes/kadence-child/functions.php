@@ -2,7 +2,8 @@
 /**
  * Functions do tema filho Kadence.
  *
- * Os snippets em snippets/*.php sao carregados automaticamente em ordem alfabetica.
+ * Carrega apenas os snippets visuais que continuam acoplados ao tema Kadence.
+ * Regras de negócio, shortcodes e integrações ficam em wp-content/mu-plugins.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -11,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 if ( ! function_exists( 'uonix_child_load_snippets' ) ) {
     /**
-     * Carrega snippets PHP do tema filho, simulando o plugin Code Snippets.
+     * Carrega snippets visuais do tema filho.
      *
      * Para desativar temporariamente um snippet, renomeie o arquivo para:
      * - _nome-do-snippet.php

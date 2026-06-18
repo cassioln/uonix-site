@@ -1,10 +1,12 @@
 # Ambiente Local Uonix
 
-Este ambiente roda WordPress localmente e monta o tema filho diretamente do repo:
+Este ambiente roda WordPress localmente e monta o código próprio diretamente do repo:
 
 `../themes/kadence-child -> /var/www/html/wp-content/themes/kadence-child`
 
-Assim, qualquer alteração no tema em `themes/kadence-child` aparece no WordPress local sem copiar arquivos.
+`../mu-plugins -> /var/www/html/wp-content/mu-plugins`
+
+Assim, qualquer alteração no tema ou nos MU-plugins aparece no WordPress local sem copiar arquivos.
 
 ## Comandos
 

@@ -1,10 +1,14 @@
 <?php
 /**
- * Forces local WordPress e-mails to Mailpit.
+ * Redireciona e-mails do WordPress local para o Mailpit.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
+}
+
+if ( ! defined( 'UONIX_ENV' ) || 'local' !== UONIX_ENV ) {
+    return;
 }
 
 add_action(
