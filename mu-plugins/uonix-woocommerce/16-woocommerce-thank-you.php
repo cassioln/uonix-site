@@ -29,6 +29,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 add_action('wp_footer', function() {
     if ( ! is_wc_endpoint_url( 'order-received' ) ) return;
+
+    $uonix_thankyou_address_lines = array( 'Não informado' );
+    $uonix_thankyou_order_id       = absint( get_query_var( 'order-received' ) );
+
+    if ( $uonix_thankyou_order_id && function_exists( 'wc_get_order' ) && function_exists( 'uonix_shared_get_order_billing_address_lines' ) ) {
+        $uonix_thankyou_order = wc_get_order( $uonix_thankyou_order_id );
+
+        if ( $uonix_thankyou_order ) {
+            $uonix_thankyou_address_lines = uonix_shared_get_order_billing_address_lines( $uonix_thankyou_order );
+        }
+    }
     ?>
     <style id="uonix-thankyou-v32-css">
         /* =========================================================
@@ -217,6 +228,10 @@ add_action('wp_footer', function() {
             line-height: 1.4 !important; background: #ffffff; font-size: 15px;
         }
 
+        .woocommerce-customer-details address .uonix-address-empty {
+            color: #64748b !important;
+        }
+
         /* OCULTAR ELEMENTOS REDUNDANTES */
         .woocommerce-order-details__title, .woocommerce-table--order-details tfoot, 
         .woocommerce-order-overview__total, .product-total, .product-quantity, .woocommerce-order-overview__payment-method, h2.woocommerce-column__title { 
@@ -314,6 +329,8 @@ add_action('wp_footer', function() {
     </div>
 
     <script id="uonix-thankyou-v30-js">
+    window.uonixThankYouAddressLines = <?php echo wp_json_encode( array_values( $uonix_thankyou_address_lines ) ); ?>;
+
     (function($) {
         $(document).ready(function() {
             // 1. Coleta de dados e Wrapper de Resumo
@@ -445,6 +462,15 @@ add_action('wp_footer', function() {
             var $address = $('.woocommerce-customer-details address');
             var numero = '';
 
+            function uonixEscapeHtml(value) {
+                return String(value || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
             function uonixEscapeRegExp(value) {
                 return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             }
@@ -486,6 +512,18 @@ add_action('wp_footer', function() {
 
             // remove telefone/email restantes no address
             $address.find('.woocommerce-customer-details--phone, .woocommerce-customer-details--email').remove();
+
+            if (Array.isArray(window.uonixThankYouAddressLines) && window.uonixThankYouAddressLines.length) {
+                $address.html(window.uonixThankYouAddressLines.map(function(line) {
+                    var escaped = uonixEscapeHtml(line);
+                    return escaped === 'Não informado'
+                        ? '<span class="uonix-address-empty">' + escaped + '</span>'
+                        : escaped;
+                }).join('<br>'));
+
+                $('#uonix-print-header').prependTo('.woocommerce-order');
+                return;
+            }
 
             // lê linhas do address atual
             var addressHtml = $address.html() || '';
@@ -543,14 +581,24 @@ add_action('wp_footer', function() {
                 complement = lines[1] || '';
             }
 
+            if (complement && city && complement.toLowerCase() === city.toLowerCase()) {
+                complement = '';
+            }
+
+            if (/^[A-Z]{2}$/.test(street) || /^\d{5}-?\d{3}$/.test(street)) {
+                street = '';
+            }
+
             // monta no padrão desejado
             var out = [];
             if (street) out.push(uonixJoinAddressNumber(street, numero));
             if (complement) out.push(complement);
-            if (city || uf) out.push((city ? city : '') + (city && uf ? ' / ' : '') + (uf ? uf : ''));
+            if (city && uf) out.push(city + ' / ' + uf);
+            else if (city) out.push('Cidade: ' + city);
+            else if (uf) out.push('Estado: ' + uf);
             if (cep) out.push('CEP: ' + cep);
 
-            if (out.length) $address.html(out.join('<br>'));
+            $address.html(out.length ? out.join('<br>') : '<span class="uonix-address-empty">Não informado</span>');
 
             // 5. Garante Header no Topo (Impressão)
             $('#uonix-print-header').prependTo('.woocommerce-order');

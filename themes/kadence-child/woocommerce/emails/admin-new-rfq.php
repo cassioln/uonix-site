@@ -45,6 +45,10 @@ if (strlen($documento_digits) === 11) {
     );
 }
 
+$endereco_linhas = function_exists( 'uonix_shared_get_order_billing_address_lines' )
+    ? uonix_shared_get_order_billing_address_lines( $order )
+    : array( 'Não informado' );
+
 do_action('woocommerce_email_header', $email_heading, $email);
 ?>
 
@@ -140,39 +144,8 @@ do_action('woocommerce_email_header', $email_heading, $email);
 
         <h4 style="margin: 20px 0 10px; color: #1a2b3c; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Endereço de Entrega/Faturamento:</h4>
         <div style="font-size: 14px; color: #555; line-height: 1.6;">
-            <?php 
-            // Extração dos campos individuais
-            $rua         = $order->get_billing_address_1();
-            $numero      = $order->get_meta('billing_address_3'); // Mapeado conforme seu formulário
-            $complemento = $order->get_billing_address_2();
-            $cidade      = $order->get_billing_city();
-            $estado      = $order->get_billing_state();
-            $cep         = $order->get_billing_postcode();
-            $linha_rua   = trim( preg_replace( '/\s+/', ' ', (string) $rua ) );
-
-            if ( ! empty( $numero ) ) {
-                $numero = trim( preg_replace( '/\s+/', ' ', (string) $numero ) );
-
-                if ( preg_match( '/(^|[\s,.-])' . preg_quote( $numero, '/' ) . '($|[\s,.-])/i', $linha_rua ) ) {
-                    $linha_rua = trim( preg_replace( '/,\s*(' . preg_quote( $numero, '/' ) . ')(?=$|[\s,.-])/i', ' $1', $linha_rua ) );
-                } else {
-                    $linha_rua .= ' ' . $numero;
-                }
-            }
-
-            // Linha 1: Rua, Numero
-            echo esc_html($linha_rua) . '<br>';
-
-            // Linha 2: Complemento (Somente se existir)
-            if ( ! empty( $complemento ) ) {
-                echo esc_html($complemento) . '<br>';
-            }
-
-            // Linha 3: Cidade / Estado
-            echo esc_html($cidade) . ' / ' . esc_html($estado) . '<br>';
-
-            // Linha 4: CEP
-            echo 'CEP: ' . esc_html($cep);
+            <?php
+            echo implode( '<br>', array_map( 'esc_html', $endereco_linhas ) );
             ?>
         </div>
 

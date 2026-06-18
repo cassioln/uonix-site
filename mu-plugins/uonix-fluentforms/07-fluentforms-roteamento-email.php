@@ -100,22 +100,33 @@ add_filter( 'wp_mail', function( $args ) {
             // Pega o link do currículo que passamos no passo 1
             $link_curriculo  = esc_url($_POST['link_curriculo_temp'] ?? '#');
             $data_atual      = date('d/m/Y');
+            $upload_dir      = wp_upload_dir();
+            $logo_url        = esc_url( trailingslashit( $upload_dir['baseurl'] ) . '2026/01/logo-uonix.png' );
+            $email_font      = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+
+            $candidato_nome_html  = esc_html( $candidato_nome );
+            $candidato_email_html = esc_html( $candidato_email );
+            $candidato_email_href = esc_url( 'mailto:' . $candidato_email );
+            $candidato_tel_html   = esc_html( $candidato_tel );
+            $candidato_tel_href   = esc_attr( 'tel:' . preg_replace( '/\D+/', '', $candidato_tel ) );
+            $candidato_msg_html   = nl2br( esc_html( $candidato_msg ) );
+            $data_atual_html      = esc_html( $data_atual );
             
             // Constrói o HTML bonito de recrutamento com aviso LGPD (Tudo direto no PHP!)
             $html_rh = '
             <p>&nbsp;</p>
-            <table style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05);" border="0" width="600" cellspacing="0" cellpadding="0" align="center">
+            <table style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); font-family: '.$email_font.';" border="0" width="600" cellspacing="0" cellpadding="0" align="center">
             <tbody>
             <tr>
             <td style="padding: 30px; border-bottom: 1px solid #eee; background-color: #f8fafc; border-radius: 8px 8px 0 0;" align="center">
-            <img src="/wp-content/uploads/2026/01/logo-uonix.png" alt="Uônix" width="200" />
+            <img src="'.$logo_url.'" alt="Uônix" width="200" style="display: block; max-width: 200px; height: auto;" />
             </td>
             </tr>
             <tr>
             <td style="padding: 40px;">
             <div style="text-align: center; margin-bottom: 35px;">
             <span style="display: inline-block; padding: 6px 14px; background-color: #e0e7ff; color: #0e3780; font-size: 11px; font-weight: bold; border-radius: 20px; text-transform: uppercase; letter-spacing: 1px;">Banco de Talentos</span>
-            <h2 style="color: #1a2b3c; margin: 15px 0 5px 0;">Novo Currículo Recebido</h2>
+            <h2 style="color: #1a2b3c; margin: 15px 0 5px 0; font-family: '.$email_font.';">Novo Currículo Recebido</h2>
             <p style="color: #64748b; font-size: 15px; margin: 0;">Uma nova candidatura acabou de chegar pelo site.</p>
             </div>
 
@@ -123,16 +134,16 @@ add_filter( 'wp_mail', function( $args ) {
             <tbody>
             <tr>
             <td style="padding: 14px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-size: 14px; width: 30%;"><strong>Candidato:</strong></td>
-            <td style="padding: 14px 0; border-bottom: 1px solid #f1f5f9; color: #1a2b3c; font-size: 16px; font-weight: bold; text-align: left;">'.$candidato_nome.'</td>
+            <td style="padding: 14px 0; border-bottom: 1px solid #f1f5f9; color: #1a2b3c; font-size: 16px; font-weight: bold; text-align: left;">'.$candidato_nome_html.'</td>
             </tr>
             <tr>
             <td style="padding: 14px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-size: 14px;"><strong>E-mail:</strong></td>
-            <td style="padding: 14px 0; border-bottom: 1px solid #f1f5f9; text-align: left;"><a href="mailto:'.$candidato_email.'" style="color: #0e3780; text-decoration: none; font-size: 15px;">'.$candidato_email.'</a></td>
+            <td style="padding: 14px 0; border-bottom: 1px solid #f1f5f9; text-align: left;"><a href="'.$candidato_email_href.'" style="color: #0e3780; text-decoration: none; font-size: 15px;">'.$candidato_email_html.'</a></td>
             </tr>
             <tr>
             <td style="padding: 14px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-size: 14px;"><strong>Telefone:</strong></td>
             <td style="padding: 14px 0; border-bottom: 1px solid #f1f5f9; text-align: left;">
-            <a href="tel:'.$candidato_tel.'" style="color: #0e3780; text-decoration: none; font-weight: bold; font-size: 15px;">'.$candidato_tel.'</a>
+            <a href="'.$candidato_tel_href.'" style="color: #0e3780; text-decoration: none; font-weight: bold; font-size: 15px;">'.$candidato_tel_html.'</a>
             </td>
             </tr>
             </tbody>
@@ -140,7 +151,7 @@ add_filter( 'wp_mail', function( $args ) {
 
             <div style="padding: 20px; background-color: #f8fafc; border-radius: 6px; border-left: 4px solid #0e3780; margin-bottom: 30px;">
             <strong style="color: #0e3780; font-size: 12px; text-transform: uppercase;">Apresentação do Candidato:</strong><br />
-            <p style="color: #475569; line-height: 1.6; font-size: 14px; margin-top: 8px;">'.nl2br(esc_html($candidato_msg)).'</p>
+            <p style="color: #475569; line-height: 1.6; font-size: 14px; margin-top: 8px;">'.$candidato_msg_html.'</p>
             </div>
 
             <div style="text-align: center; margin: 30px 0;">
@@ -148,11 +159,11 @@ add_filter( 'wp_mail', function( $args ) {
             </div>
 
             <div style="margin-bottom: 35px; padding: 15px; background-color: #fffbeb; border: 1px solid #fef3c7; border-radius: 6px; text-align: center;">
-            <strong style="color: #b45309; font-size: 12px; text-transform: uppercase;">🔒 Aviso de Segurança (LGPD)</strong>
+            <strong style="color: #b45309; font-size: 12px; text-transform: uppercase;">Aviso de Segurança (LGPD)</strong>
             <p style="color: #92400e; font-size: 12px; margin: 6px 0 0 0; line-height: 1.5;">O link acima expirará em 30 dias e o arquivo será excluído do servidor do site. Recomendamos que baixe e arquive este documento na base segura da empresa.</p>
             </div>
 
-            <p style="margin-top: 30px; color: #94a3b8; font-size: 11px; text-align: center;">Recebido em '.$data_atual.' | Origem: Página Trabalhe Conosco</p>
+            <p style="margin-top: 30px; color: #94a3b8; font-size: 11px; text-align: center;">Recebido em '.$data_atual_html.' | Origem: Página Trabalhe Conosco</p>
             </td>
             </tr>
             <tr>
@@ -265,4 +276,3 @@ add_filter( 'wp_mail', function( $args ) {
     }
     return $args;
 }, 99 );
-
