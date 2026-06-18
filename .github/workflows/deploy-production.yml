@@ -45,3 +45,24 @@ jobs:
             -e "ssh -p 22 -i ~/.ssh/production_key" \
             themes/kadence-child/ \
             "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST:$PRODUCTION_PATH/"
+
+      - name: Clear production page cache
+        run: |
+          ssh -p 22 -i ~/.ssh/production_key \
+            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST" \
+            "set -e;
+             theme_path='$PRODUCTION_PATH';
+             wp_content_dir=\$(dirname \"\$(dirname \"\$theme_path\")\");
+             wp_root_dir=\$(dirname \"\$wp_content_dir\");
+             speedycache_dir=\"\$wp_content_dir/cache/speedycache\";
+
+             if [ -d \"\$speedycache_dir\" ]; then
+               find \"\$speedycache_dir\" -mindepth 1 -maxdepth 1 -exec rm -rf {} +;
+               echo \"SpeedyCache cleared: \$speedycache_dir\";
+             else
+               echo \"SpeedyCache directory not found: \$speedycache_dir\";
+             fi;
+
+             if command -v wp >/dev/null 2>&1; then
+               wp --path=\"\$wp_root_dir\" cache flush || true;
+             fi"
