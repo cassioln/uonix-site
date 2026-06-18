@@ -538,8 +538,6 @@ add_action('wp_footer', function() {
                 var cityIndex = lines.indexOf(city);
                 if (cityIndex > 1) {
                     complement = lines.slice(1, cityIndex).join(' ');
-                } else if (lines.length > 3) {
-                    complement = lines[1] || '';
                 }
             } else if (lines.length > 1) {
                 complement = lines[1] || '';
