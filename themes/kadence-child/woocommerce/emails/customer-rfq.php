@@ -136,8 +136,19 @@ do_action('woocommerce_email_header', $email_heading, $email);
             $cidade      = $order->get_billing_city();
             $estado      = $order->get_billing_state();
             $cep         = $order->get_billing_postcode();
+            $linha_rua   = trim( preg_replace( '/\s+/', ' ', (string) $rua ) );
 
-            echo esc_html($rua) . ($numero ? ', ' . esc_html($numero) : '') . '<br>';
+            if ( ! empty( $numero ) ) {
+                $numero = trim( preg_replace( '/\s+/', ' ', (string) $numero ) );
+
+                if ( preg_match( '/(^|[\s,.-])' . preg_quote( $numero, '/' ) . '($|[\s,.-])/i', $linha_rua ) ) {
+                    $linha_rua = trim( preg_replace( '/,\s*(' . preg_quote( $numero, '/' ) . ')(?=$|[\s,.-])/i', ' $1', $linha_rua ) );
+                } else {
+                    $linha_rua .= ' ' . $numero;
+                }
+            }
+
+            echo esc_html($linha_rua) . '<br>';
             if ( ! empty( $complemento ) ) { echo esc_html($complemento) . '<br>'; }
             echo esc_html($cidade) . ' / ' . esc_html($estado) . '<br>';
             echo 'CEP: ' . esc_html($cep);

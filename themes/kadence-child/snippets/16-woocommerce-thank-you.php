@@ -445,6 +445,32 @@ add_action('wp_footer', function() {
             var $address = $('.woocommerce-customer-details address');
             var numero = '';
 
+            function uonixEscapeRegExp(value) {
+                return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            }
+
+            function uonixAddressHasNumber(address, number) {
+                address = $.trim(String(address || '').replace(/\s+/g, ' '));
+                number = $.trim(String(number || '').replace(/\s+/g, ' '));
+
+                if (!address || !number) return false;
+
+                return new RegExp('(^|[\\s,.-])' + uonixEscapeRegExp(number) + '($|[\\s,.-])', 'i').test(address);
+            }
+
+            function uonixJoinAddressNumber(address, number) {
+                address = $.trim(String(address || '').replace(/\s+/g, ' '));
+                number = $.trim(String(number || '').replace(/\s+/g, ' '));
+
+                if (!address || !number) return address;
+
+                if (uonixAddressHasNumber(address, number)) {
+                    return $.trim(address.replace(new RegExp(',\\s*(' + uonixEscapeRegExp(number) + ')(?=$|[\\s,.-])', 'i'), ' $1').replace(/\s+/g, ' '));
+                }
+
+                return address + ' ' + number;
+            }
+
             // tenta pegar "Numero:" dentro da tabela custom fields
             if ($customTable && $customTable.length) {
                 $customTable.find('tbody tr').each(function() {
@@ -521,7 +547,7 @@ add_action('wp_footer', function() {
 
             // monta no padrão desejado
             var out = [];
-            if (street) out.push(street + (numero ? ', ' + numero : ''));
+            if (street) out.push(uonixJoinAddressNumber(street, numero));
             if (complement) out.push(complement);
             if (city || uf) out.push((city ? city : '') + (city && uf ? ' / ' : '') + (uf ? uf : ''));
             if (cep) out.push('CEP: ' + cep);
@@ -535,5 +561,3 @@ add_action('wp_footer', function() {
     </script>
     <?php
 }, 100);
-
-
