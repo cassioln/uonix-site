@@ -1,0 +1,47 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy Kadence Child to production
+    runs-on: ubuntu-latest
+
+    env:
+      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+      PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+      PRODUCTION_PATH: ${{ vars.PRODUCTION_PATH }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate variables and secrets
+        run: |
+          test -n "$PRODUCTION_SSH_HOST" || (echo "Missing variable PRODUCTION_SSH_HOST" && exit 1)
+          test -n "$PRODUCTION_SSH_USER" || (echo "Missing variable PRODUCTION_SSH_USER" && exit 1)
+          test -n "$PRODUCTION_PATH" || (echo "Missing variable PRODUCTION_PATH" && exit 1)
+          test -n "${{ secrets.STAGING_SSH_KEY }}" || (echo "Missing secret STAGING_SSH_KEY" && exit 1)
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/production_key
+          chmod 600 ~/.ssh/production_key
+          ssh-keyscan -p 22 -H "$PRODUCTION_SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Test SSH connection
+        run: |
+          ssh -p 22 -i ~/.ssh/production_key \
+            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST" \
+            "echo SSH connection OK"
+
+      - name: Deploy theme to production
+        run: |
+          rsync -avz --delete \
+            --exclude='.DS_Store' \
+            --exclude='._*' \
+            -e "ssh -p 22 -i ~/.ssh/production_key" \
+            themes/kadence-child/ \
+            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST:$PRODUCTION_PATH/"
