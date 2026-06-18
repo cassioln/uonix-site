@@ -42,3 +42,14 @@ podman exec -i uonix-local-db mariadb -u uonix_user -puonix_pass uonix_db < ~/Do
 podman exec uonix-local-db mariadb -u uonix_user -puonix_pass uonix_db -e "UPDATE wpis_options SET option_value='http://localhost:8080' WHERE option_name IN ('siteurl','home');"
 podman-compose -p uonix-local -f local/compose.yml --profile tools run --rm --no-deps wpcli search-replace 'https://qa.uonix.ksio.dev' 'http://localhost:8080' --all-tables-with-prefix --skip-columns=guid
 ```
+
+## Clonar Ambientes
+
+Use o script central para clonar QA ou produção para localhost:
+
+```bash
+cd /Users/cassio/GitHubPessoal/uonix-site
+SSH_KEY="$HOME/.ssh/uonix_github_actions_staging_nopass" scripts/clone-environment.sh --source=qa --target=local --include-git-files=0 --preserve-destination-users=1 --yes
+```
+
+O script mantém o título local como `DEV - UONIX`, preserva GoSMTP/Turnstile/Loginizer do destino e deixa o Mailpit ativo apenas em localhost.

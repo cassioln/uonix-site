@@ -137,7 +137,8 @@ function uonix_gerar_form_captura_html() {
     color: #64748b;
 }
 
-        #uonix-custom-lead-form .uonix-turnstile-widget { margin: 2px 0 4px; }
+        #uonix-custom-lead-form .uonix-turnstile-widget { max-width: 100%; margin: 2px 0 4px; overflow: hidden; }
+        #uonix-custom-lead-form .uonix-turnstile-widget iframe { max-width: 100% !important; }
 
         /* ==========================================
            3. CHECKBOXES CUSTOMIZADOS E LINKS
@@ -261,7 +262,13 @@ function uonix_gerar_form_captura_html() {
 
             <?php
             if ( function_exists( 'uonix_turnstile_render_widget' ) ) {
-                echo uonix_turnstile_render_widget( 'lead_download' );
+                echo uonix_turnstile_render_widget(
+                    'lead_download',
+                    array(
+                        'theme'      => 'light',
+                        'appearance' => 'interaction-only',
+                    )
+                );
             }
             ?>
 

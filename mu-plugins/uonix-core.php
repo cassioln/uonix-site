@@ -10,7 +10,42 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 define( 'UONIX_MU_PATH', trailingslashit( WPMU_PLUGIN_DIR ) );
 define( 'UONIX_MU_URL', trailingslashit( WPMU_PLUGIN_URL ) );
-define( 'UONIX_ENV', function_exists( 'wp_get_environment_type' ) ? wp_get_environment_type() : 'production' );
+
+if ( ! function_exists( 'uonix_mu_detect_environment' ) ) {
+	/**
+	 * Detecta o ambiente pelo WordPress e pelo host, útil quando wp-config.php ainda não define WP_ENVIRONMENT_TYPE.
+	 */
+	function uonix_mu_detect_environment() {
+		$wp_environment = function_exists( 'wp_get_environment_type' ) ? wp_get_environment_type() : 'production';
+		$host           = '';
+
+		if ( function_exists( 'home_url' ) ) {
+			$host = wp_parse_url( home_url(), PHP_URL_HOST );
+		}
+
+		if ( empty( $host ) && ! empty( $_SERVER['HTTP_HOST'] ) ) {
+			$host = sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) );
+		}
+
+		$host = strtolower( preg_replace( '/:\d+$/', '', (string) $host ) );
+
+		if ( in_array( $host, array( 'localhost', '127.0.0.1', '::1' ), true ) ) {
+			return 'local';
+		}
+
+		if ( str_starts_with( $host, 'qa.' ) || str_contains( $host, 'qa.uonix.' ) ) {
+			return 'staging';
+		}
+
+		if ( in_array( $wp_environment, array( 'local', 'development', 'staging' ), true ) ) {
+			return 'development' === $wp_environment ? 'local' : $wp_environment;
+		}
+
+		return 'production';
+	}
+}
+
+define( 'UONIX_ENV', uonix_mu_detect_environment() );
 
 if ( ! function_exists( 'uonix_mu_require_files' ) ) {
 	/**
@@ -57,7 +92,7 @@ if ( ! function_exists( 'uonix_mu_load_modules' ) ) {
 			'uonix-integrations/module.php',
 		);
 
-		if ( in_array( UONIX_ENV, array( 'local', 'development' ), true ) ) {
+		if ( 'local' === UONIX_ENV ) {
 			$modules[] = 'uonix-local/module.php';
 		}
 

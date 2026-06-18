@@ -493,7 +493,8 @@ function uonix_gerar_form_trabalhe_html() {
 
         .uonix-input-error { border-color: #dc2626 !important; background: #fffbfa !important; }
         .uonix-trab-box.uonix-error-box { border-color: #dc2626 !important; background: #fef2f2; }
-        #uonix-custom-trab-form .uonix-turnstile-widget { margin: 0; }
+        #uonix-custom-trab-form .uonix-turnstile-widget { max-width: 100%; margin: 0; overflow: hidden; }
+        #uonix-custom-trab-form .uonix-turnstile-widget iframe { max-width: 100% !important; }
     </style>
 
     <form id="uonix-custom-trab-form" class="uonix-trab-wrapper" enctype="multipart/form-data" novalidate>
@@ -544,7 +545,13 @@ function uonix_gerar_form_trabalhe_html() {
 
                 <?php
                 if ( function_exists( 'uonix_turnstile_render_widget' ) ) {
-                    echo uonix_turnstile_render_widget( 'trabalhe_conosco' );
+                    echo uonix_turnstile_render_widget(
+                        'trabalhe_conosco',
+                        array(
+                            'theme'      => 'light',
+                            'appearance' => 'interaction-only',
+                        )
+                    );
                 }
                 ?>
 

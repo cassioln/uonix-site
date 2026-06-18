@@ -98,7 +98,8 @@ function uonix_gerar_form_newsletter_html($atts) {
         .uonix-news-wrapper .uonix-input-error { border-color: #dc2626 !important; background: #fffbfa !important; }
         .uonix-news-wrapper .uonix-custom-box.uonix-error-box { border-color: #dc2626 !important; background: #fef2f2; }
         .uonix-news-wrapper .uonix-label-error { color: #dc2626 !important; }
-        .uonix-news-wrapper .uonix-turnstile-widget { margin: 0; }
+        .uonix-news-wrapper .uonix-turnstile-widget { max-width: 100%; margin: 0; overflow: hidden; }
+        .uonix-news-wrapper .uonix-turnstile-widget iframe { max-width: 100% !important; }
         .uonix-news-wrapper .uonix-feedback-error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; display: none; padding: 12px; margin-top: 5px; border-radius: 6px; font-size: 13px; font-weight: 600; }
         
         .uonix-news-wrapper .uonix-success-wrapper { display: none; flex-direction: column; width: 100%; animation: uonixFadeInUp 0.5s ease forwards; padding-top: 5px;}
@@ -108,7 +109,7 @@ function uonix_gerar_form_newsletter_html($atts) {
         @keyframes uonixFadeInUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
 
         /* =======================================================
-           ESTILOS EXCLUSIVOS PARA O RODAPÉ (DARK MODE + FLUTUANTE)
+           ESTILOS EXCLUSIVOS PARA O RODAPÉ (ACCORDION COMPACTO)
            ======================================================= */
         
         .uonix-news-accordion-container {
@@ -136,24 +137,27 @@ function uonix_gerar_form_newsletter_html($atts) {
         }
         .uonix-news-accordion-container .uonix-news-trigger.is-active .trigger-icon { transform: rotate(180deg); }
 
-        /* A Caixa que Abre (AGORA FLUTUANTE COM FUNDO ESCURO BLINDADO) */
+        /* Caixa flutuante abre para cima para não quebrar no fim da página. */
         .uonix-news-accordion-container.is-accordion-layout .uonix-news-content {
             position: absolute;
-            top: 100%;
+            bottom: calc(100% + 10px);
             left: 0;
+            right: 0;
             width: 100%;
-            min-width: 280px;
+            min-width: 0;
+            max-width: 100%;
             z-index: 999999 !important; 
-            background-color: #1a202c !important; /* COR DE FUNDO FORÇADA E OPACA */
-            border: 1px solid rgba(255,255,255,0.15) !important;
+            box-sizing: border-box;
+            background-color: #ffffff !important;
+            border: 1px solid #e2e8f0 !important;
             border-radius: 8px;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.8) !important; /* Sombra pesada para destacar do fundo */
-            padding: 16px;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.28) !important;
+            padding: 14px;
             
             /* Estado Fechado */
             visibility: hidden;
             opacity: 0;
-            transform: translateY(0);
+            transform: translateY(8px);
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             pointer-events: none;
         }
@@ -162,44 +166,44 @@ function uonix_gerar_form_newsletter_html($atts) {
         .uonix-news-accordion-container.is-accordion-layout .uonix-news-content.is-open {
             visibility: visible;
             opacity: 1;
-            transform: translateY(12px); 
+            transform: translateY(0); 
             pointer-events: auto;
         }
 
-        /* Inputs Dark Mode */
+        /* Painel claro dentro do rodapé escuro. */
         .uonix-news-accordion-container.is-accordion-layout .uonix-form-group input {
-            background: rgba(255,255,255,0.03) !important; 
-            border: 1px solid rgba(255,255,255,0.2) !important;
-            color: #ffffff !important;
+            background: #ffffff !important; 
+            border: 1px solid #cbd5e1 !important;
+            color: #1a202c !important;
         }
         .uonix-news-accordion-container.is-accordion-layout .uonix-form-group input:focus {
-            border-color: var(--wp--preset--color--theme-palette-15, #f76a0c) !important;
-            background: rgba(0,0,0,0.25) !important;
+            border-color: #0e3780 !important;
+            background: #ffffff !important;
         }
-        .uonix-news-accordion-container.is-accordion-layout .uonix-floating-label { color: rgba(255,255,255,0.5); }
+        .uonix-news-accordion-container.is-accordion-layout .uonix-floating-label { color: #64748b; }
         .uonix-news-accordion-container.is-accordion-layout .uonix-form-group input:focus ~ .uonix-floating-label,
         .uonix-news-accordion-container.is-accordion-layout .uonix-form-group input:not(:placeholder-shown) ~ .uonix-floating-label {
-            color: var(--wp--preset--color--theme-palette-15, #f76a0c); 
-            background-color: #1a202c !important; /* Camufla exatamente com o fundo da caixa */
+            color: #0e3780; 
+            background-color: #ffffff !important;
         }
 
-		/* Checkbox Dark Mode */
+		/* Checkbox no painel do rodapé */
         .uonix-news-accordion-container.is-accordion-layout .uonix-custom-box {
-            background: transparent; border-color: rgba(255,255,255,0.3);
+            background: #ffffff; border-color: #cbd5e1;
         }
         .uonix-news-accordion-container.is-accordion-layout input:checked ~ .uonix-custom-box {
             background: var(--wp--preset--color--theme-palette-15, #f76a0c);
             border-color: var(--wp--preset--color--theme-palette-15, #f76a0c);
         }
-        .uonix-news-accordion-container.is-accordion-layout .uonix-check-text { color: rgba(255,255,255,0.7); font-size: 11px; }
+        .uonix-news-accordion-container.is-accordion-layout .uonix-check-text { color: #475569; font-size: 11px; }
         
         /* Ajuste do Link da Política de Privacidade */
         .uonix-news-accordion-container.is-accordion-layout .uonix-check-text a { 
-            color: #60a5fa !important; /* Azul claro para contraste em fundo escuro */
+            color: #0e3780 !important;
             text-decoration: underline !important;
         }
         .uonix-news-accordion-container.is-accordion-layout .uonix-check-text a:hover { 
-            color: #ffffff !important; 
+            color: #f76a0c !important; 
         }
         .uonix-news-accordion-container.is-accordion-layout .uonix-btn-submit-news:hover:not(:disabled) {
             background: #e05e07 !important; transform: translateY(-1px);
@@ -208,10 +212,10 @@ function uonix_gerar_form_newsletter_html($atts) {
 
         /* Sucesso Dark Mode */
         .uonix-news-accordion-container.is-accordion-layout .uonix-success-inline {
-            background: rgba(34, 197, 94, 0.1) !important; border: 1px solid rgba(34, 197, 94, 0.2) !important;
+            background: #f0fdf4 !important; border: 1px solid #bbf7d0 !important;
         }
-        .uonix-news-accordion-container.is-accordion-layout .uonix-success-text { color: #e2e8f0 !important;}
-        .uonix-news-accordion-container.is-accordion-layout .uonix-success-text strong { color: #4ade80 !important; }
+        .uonix-news-accordion-container.is-accordion-layout .uonix-success-text { color: #166534 !important;}
+        .uonix-news-accordion-container.is-accordion-layout .uonix-success-text strong { color: #166534 !important; }
     </style>
 
     <div class="uonix-news-accordion-container<?php echo $is_accordion ? ' is-accordion-layout' : ''; ?>" id="container_<?php echo $unique_id; ?>">
@@ -249,7 +253,13 @@ function uonix_gerar_form_newsletter_html($atts) {
 
                     <?php
                     if ( function_exists( 'uonix_turnstile_render_widget' ) ) {
-                        echo uonix_turnstile_render_widget( 'newsletter' );
+                        echo uonix_turnstile_render_widget(
+                            'newsletter',
+                            array(
+                                'theme'      => 'light',
+                                'appearance' => 'interaction-only',
+                            )
+                        );
                     }
                     ?>
 

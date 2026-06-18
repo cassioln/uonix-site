@@ -150,8 +150,11 @@ window.uonixTurnstileOnload = function() {
 if ( ! function_exists( 'uonix_turnstile_render_widget' ) ) {
 	/**
 	 * Imprime o container do widget. Em local retorna vazio.
+	 *
+	 * @param string $action  Nome da ação usada na validação.
+	 * @param array  $options Overrides visuais por formulário.
 	 */
-	function uonix_turnstile_render_widget( $action ) {
+	function uonix_turnstile_render_widget( $action, $options = array() ) {
 		if ( ! uonix_turnstile_is_enabled() ) {
 			return '';
 		}
@@ -159,6 +162,8 @@ if ( ! function_exists( 'uonix_turnstile_render_widget' ) ) {
 		uonix_turnstile_enqueue_assets();
 
 		$settings = uonix_turnstile_get_settings();
+		$options  = is_array( $options ) ? $options : array();
+		$settings = array_merge( $settings, array_intersect_key( $options, array_flip( array( 'theme', 'appearance', 'size' ) ) ) );
 		$action   = preg_replace( '/[^a-zA-Z0-9_-]/', '_', (string) $action );
 		$action   = substr( $action, 0, 32 );
 
