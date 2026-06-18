@@ -17,6 +17,7 @@ uonix_mu_require_files(
 		'15-carrinho-mini-cart-sidebar.php',
 		'16-woocommerce-thank-you.php',
 		'17-woocommerce-checkout-design.php',
+		'18-produto-alertas-variacao.php',
 		'20-catalogo-titulos-produtos.php',
 	),
 	'uonix-woocommerce'
