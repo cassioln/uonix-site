@@ -49,14 +49,26 @@ function uox_content_render_ksio_tools_home() {
 		<h1>ksio.dev</h1>
 		<p>Ferramentas internas de manutenção do site Uônix.</p>
 
-		<div class="card" style="max-width:720px;">
-			<h2>Limpeza de Conteúdo</h2>
-			<p>Remove entradas de formulários, currículos recebidos e pedidos WooCommerce selecionados.</p>
-			<p>
-				<a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=ksio-dev-limpeza-conteudo' ) ); ?>">
-					Abrir ferramenta
-				</a>
-			</p>
+		<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;max-width:920px;">
+			<div class="card" style="max-width:none;">
+				<h2>Limpeza de Conteúdo</h2>
+				<p>Remove entradas de formulários, currículos recebidos e pedidos WooCommerce selecionados.</p>
+				<p>
+					<a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=ksio-dev-limpeza-conteudo' ) ); ?>">
+						Abrir ferramenta
+					</a>
+				</p>
+			</div>
+
+			<div class="card" style="max-width:none;">
+				<h2>Clone de Ambientes</h2>
+				<p>Dispara clone entre produção, QA e localhost preservando configurações sensíveis por ambiente.</p>
+				<p>
+					<a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=ksio-dev-clone-ambientes' ) ); ?>">
+						Abrir ferramenta
+					</a>
+				</p>
+			</div>
 		</div>
 	</div>
 	<?php
