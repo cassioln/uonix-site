@@ -265,7 +265,8 @@ function uonix_gerar_form_captura_html() {
                 echo uonix_turnstile_render_widget(
                     'lead_download',
                     array(
-                        'theme' => 'light',
+                        'theme'      => 'light',
+                        'appearance' => 'interaction-only',
                     )
                 );
             }
