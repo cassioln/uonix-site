@@ -327,6 +327,73 @@ add_action('wp_footer', function () {
                 });
             }
 
+            var turnstileResetTimer = null;
+
+            function clearTurnstileResponse() {
+                $('form.checkout [name="cf-turnstile-response"], .woocommerce-checkout [name="cf-turnstile-response"]').val('');
+            }
+
+            function resetTurnstileCaptcha() {
+                var $widgets = $('form.checkout .cf-turnstile, .woocommerce-checkout .cf-turnstile');
+
+                if (!$widgets.length && !$('form.checkout [name="cf-turnstile-response"]').length) {
+                    return;
+                }
+
+                // O Turnstile gera token de uso unico; apos erro no checkout, precisa ser validado novamente.
+                clearTurnstileResponse();
+
+                if (!window.turnstile || typeof window.turnstile.reset !== 'function') {
+                    return;
+                }
+
+                if (!$widgets.length) {
+                    try {
+                        window.turnstile.reset();
+                    } catch (error) {}
+                    return;
+                }
+
+                var didReset = false;
+
+                $widgets.each(function () {
+                    var widgetId = $(this).attr('data-widget-id')
+                        || $(this).data('widgetId')
+                        || $(this).attr('data-turnstile-widget-id')
+                        || $(this).data('turnstileWidgetId')
+                        || $(this).attr('data-cf-turnstile-widget-id')
+                        || $(this).data('cfTurnstileWidgetId');
+
+                    if (!widgetId) {
+                        return;
+                    }
+
+                    try {
+                        window.turnstile.reset(widgetId);
+                        didReset = true;
+                    } catch (error) {
+                        didReset = false;
+                    }
+                });
+
+                if (!didReset) {
+                    try {
+                        window.turnstile.reset();
+                    } catch (error) {}
+                }
+            }
+
+            function scheduleTurnstileReset() {
+                if (turnstileResetTimer) {
+                    clearTimeout(turnstileResetTimer);
+                }
+
+                turnstileResetTimer = setTimeout(function () {
+                    resetTurnstileCaptcha();
+                    turnstileResetTimer = setTimeout(resetTurnstileCaptcha, 650);
+                }, 80);
+            }
+
             $(document).ready(function () {
                 reformatCheckoutTable();
 
@@ -341,6 +408,7 @@ add_action('wp_footer', function () {
                 $(document.body).on('checkout_error', function () {
                     $('#place_order').removeClass('uonix-loading');
                     $('body').addClass('uonix-has-error'); 
+                    scheduleTurnstileReset();
                 });
             });
 
@@ -352,5 +420,3 @@ add_action('wp_footer', function () {
     </script>
     <?php
 }, 100);
-
-
