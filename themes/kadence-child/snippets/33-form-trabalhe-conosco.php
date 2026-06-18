@@ -776,6 +776,12 @@ if ( ! function_exists( 'uonix_trabalhe_format_phone' ) ) {
     }
 }
 
+if ( ! function_exists( 'uonix_trabalhe_phone_digits' ) ) {
+    function uonix_trabalhe_phone_digits( $value ) {
+        return preg_replace( '/\D+/', '', (string) $value );
+    }
+}
+
 function uonix_processar_trabalhe_handler() {
     if (!function_exists('wpFluentForm')) {
         wp_send_json_error(array('message' => 'Sistema indisponível.'));
@@ -792,18 +798,20 @@ function uonix_processar_trabalhe_handler() {
         wp_send_json_error(array('message' => 'Não foi possível preparar a pasta segura de currículos.'));
     }
 
-    $nome     = uonix_trabalhe_upper_text(sanitize_text_field(wp_unslash($_POST['nome'] ?? '')));
-    $email    = strtolower(sanitize_email(wp_unslash($_POST['email'] ?? '')));
-    $telefone = uonix_trabalhe_format_phone(sanitize_text_field(wp_unslash($_POST['telefone'] ?? '')));
-    $mensagem = uonix_trabalhe_upper_textarea(sanitize_textarea_field(wp_unslash($_POST['mensagem'] ?? '')));
-    $news     = (isset($_POST['newsletters']) && $_POST['newsletters'] === 'sim') ? 'SIM' : '';
-    $termo    = isset($_POST['termo']) && $_POST['termo'] === 'sim';
+    $nome              = uonix_trabalhe_upper_text(sanitize_text_field(wp_unslash($_POST['nome'] ?? '')));
+    $email             = strtolower(sanitize_email(wp_unslash($_POST['email'] ?? '')));
+    $telefone_raw      = sanitize_text_field(wp_unslash($_POST['telefone'] ?? ''));
+    $telefone_digits   = uonix_trabalhe_phone_digits($telefone_raw);
+    $telefone          = uonix_trabalhe_format_phone($telefone_raw);
+    $mensagem          = uonix_trabalhe_upper_textarea(sanitize_textarea_field(wp_unslash($_POST['mensagem'] ?? '')));
+    $news              = (isset($_POST['newsletters']) && $_POST['newsletters'] === 'sim') ? 'SIM' : '';
+    $termo             = isset($_POST['termo']) && $_POST['termo'] === 'sim';
 
     if (empty($mensagem)) {
         $mensagem = 'NÃO PREENCHIDO';
     }
 
-    if (empty($nome) || empty($email) || empty($telefone) || !$termo || empty($_FILES['curriculo']['name'])) {
+    if (empty($nome) || empty($email) || empty($telefone_digits) || !$termo || empty($_FILES['curriculo']['name'])) {
         wp_send_json_error(array('message' => 'Campos obrigatórios ausentes.'));
     }
 
@@ -879,6 +887,7 @@ function uonix_processar_trabalhe_handler() {
     $download_token = $link_info['token'];
 
     $_POST['link_curriculo_temp'] = $link_curriculo;
+    $_POST['telefone_formatado_temp'] = $telefone;
 
     $embedded_post_id = (int) get_option('page_on_front');
 
@@ -896,7 +905,8 @@ function uonix_processar_trabalhe_handler() {
             '_wp_http_referer'             => $referer_path,
             'form_nome'                    => $nome,
             'form_email'                   => $email,
-            'form_telefone'                => $telefone,
+            // O Form 3 usa campo numérico; a formatação visual é aplicada no filtro de gravação.
+            'form_telefone'                => $telefone_digits,
             'form_empresa'                 => 'N/A - CANDIDATO',
             'form_assunto'                 => 'rh',
             'form_mensagem'                => $mensagem,
@@ -904,8 +914,8 @@ function uonix_processar_trabalhe_handler() {
             'link_curriculo'               => $link_curriculo,
         );
 
-        if ($news === 'sim') {
-            $dados_form['form_newsletters'] = 'SIM';
+        if ($news === 'SIM') {
+            $dados_form['form_newsletters'] = array('sim');
         }
 
         $submissionHandler->handleSubmission($dados_form, 3);
@@ -960,4 +970,3 @@ function uonix_apagar_curriculos_antigos() {
         }
     }
 }
-

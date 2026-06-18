@@ -48,16 +48,65 @@ if ( ! function_exists( 'uonix_ff_sync_format_phone' ) ) {
     }
 }
 
+if ( ! function_exists( 'uonix_ff_sync_phone_digits' ) ) {
+    function uonix_ff_sync_phone_digits( $value ) {
+        return preg_replace( '/\D+/', '', (string) $value );
+    }
+}
+
+add_filter('fluentform/insert_response_data', function ($formData, $formId) {
+    $formId = (int) $formId;
+
+    $text_keys = array(
+        2 => array('newsletters_nome', 'newsletters_sobrenome', 'newsletters_empresa', 'newsletters_endereco', 'newsletters_origem'),
+        3 => array('form_nome', 'form_empresa', 'form_mensagem'),
+        4 => array('capturalead_nome', 'capturalead_empresa', 'capturalead_origem'),
+    );
+
+    $email_keys = array(
+        2 => array('newsletters_email'),
+        3 => array('form_email'),
+        4 => array('capturalead_email'),
+    );
+
+    $phone_keys = array(
+        2 => array('newsletters_telefone'),
+        3 => array('form_telefone'),
+        4 => array('capturalead_telefone'),
+    );
+
+    foreach ($text_keys[$formId] ?? array() as $key) {
+        if (isset($formData[$key]) && is_scalar($formData[$key])) {
+            $formData[$key] = uonix_ff_sync_upper_text($formData[$key]);
+        }
+    }
+
+    foreach ($email_keys[$formId] ?? array() as $key) {
+        if (isset($formData[$key]) && is_scalar($formData[$key])) {
+            $formData[$key] = strtolower(sanitize_email($formData[$key]));
+        }
+    }
+
+    foreach ($phone_keys[$formId] ?? array() as $key) {
+        if (isset($formData[$key]) && is_scalar($formData[$key])) {
+            $formData[$key] = uonix_ff_sync_format_phone($formData[$key]);
+        }
+    }
+
+    return $formData;
+}, 20, 2);
+
 add_action('fluentform_submission_inserted', function ($entryId, $formData, $form) {
     // 1. Filtros de Segurança e Contexto
     if ((int) $form->id !== 3) return;
     if (!function_exists('wpFluentForm')) return;
 
     // 2. Extração de Dados
-    $email    = strtolower(sanitize_email($formData['form_email'] ?? ''));
-    $nome     = uonix_ff_sync_upper_text(sanitize_text_field($formData['form_nome'] ?? ''));
-    $empresa  = uonix_ff_sync_upper_text(sanitize_text_field($formData['form_empresa'] ?? ''));
-    $telefone = uonix_ff_sync_format_phone(sanitize_text_field($formData['form_telefone'] ?? ''));
+    $email           = strtolower(sanitize_email($formData['form_email'] ?? ''));
+    $nome            = uonix_ff_sync_upper_text(sanitize_text_field($formData['form_nome'] ?? ''));
+    $empresa         = uonix_ff_sync_upper_text(sanitize_text_field($formData['form_empresa'] ?? ''));
+    $telefone_digits = uonix_ff_sync_phone_digits(sanitize_text_field($formData['form_telefone'] ?? ''));
+    $telefone        = uonix_ff_sync_format_phone($telefone_digits);
 
     $partes_nome   = preg_split('/\s+/', trim($nome));
     $primeiro_nome = $partes_nome[0] ?? '';
@@ -117,13 +166,13 @@ add_action('fluentform_submission_inserted', function ($entryId, $formData, $for
             '_wp_http_referer'             => $referer_path,
             'capturalead_nome'             => $nome,
             'capturalead_email'            => $email,
-            'capturalead_telefone'         => $telefone,
+            'capturalead_telefone'         => $telefone_digits,
             'capturalead_empresa'          => $empresa,
             'capturalead_origem'           => $origem_fluxo,
         ];
 
         if ($opt_in) {
-            $payloadForm4['capturalead_newsletters'] = ['SIM'];
+            $payloadForm4['capturalead_newsletters'] = ['sim'];
         }
 
         $submissionHandler->handleSubmission($payloadForm4, 4);
@@ -137,7 +186,7 @@ add_action('fluentform_submission_inserted', function ($entryId, $formData, $for
                 'newsletters_nome'             => $primeiro_nome,
                 'newsletters_sobrenome'        => $ultimo_nome,
                 'newsletters_empresa'          => $empresa,
-                'newsletters_telefone'         => $telefone,
+                'newsletters_telefone'         => $telefone_digits,
                 'newsletters_termo'            => 'on',
                 'newsletters_origem'           => $origem_fluxo,
             ], 2);
@@ -173,12 +222,17 @@ add_action('wp_footer', function () {
             return phone;
         }
 
+        function onlyUonixPhoneDigits(value) {
+            return (value || '').replace(/\D/g, '').slice(0, 11);
+        }
+
         document.querySelectorAll('#fluentform_3 input[name="form_telefone"], form[data-form_id="3"] input[name="form_telefone"], input[name="form_telefone"]').forEach(function(input) {
             if (input.dataset.uonixPhoneMask === '1') {
                 return;
             }
 
             input.dataset.uonixPhoneMask = '1';
+            input.setAttribute('type', 'tel');
             input.setAttribute('inputmode', 'numeric');
             input.setAttribute('autocomplete', 'tel');
             input.setAttribute('maxlength', '15');
@@ -186,6 +240,21 @@ add_action('wp_footer', function () {
             input.addEventListener('input', function() {
                 this.value = formatUonixPhone(this.value);
             });
+
+            const form = input.closest('form');
+            if (form && form.dataset.uonixPhoneSubmitDigits !== '1') {
+                form.dataset.uonixPhoneSubmitDigits = '1';
+
+                form.addEventListener('submit', function() {
+                    form.querySelectorAll('input[name="form_telefone"]').forEach(function(phoneInput) {
+                        phoneInput.value = onlyUonixPhoneDigits(phoneInput.value);
+
+                        window.setTimeout(function() {
+                            phoneInput.value = formatUonixPhone(phoneInput.value);
+                        }, 400);
+                    });
+                }, true);
+            }
 
             input.value = formatUonixPhone(input.value);
         });

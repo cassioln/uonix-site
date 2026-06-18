@@ -93,7 +93,7 @@ add_filter( 'wp_mail', function( $args ) {
             // Resgatar os dados do candidato via $_POST
             $candidato_nome  = sanitize_text_field($_POST['nome'] ?? '');
             $candidato_email = sanitize_email($_POST['email'] ?? '');
-            $candidato_tel   = sanitize_text_field($_POST['telefone'] ?? '');
+            $candidato_tel   = sanitize_text_field($_POST['telefone_formatado_temp'] ?? ($_POST['telefone'] ?? ''));
             $candidato_msg   = sanitize_textarea_field($_POST['mensagem'] ?? '');
             if (empty($candidato_msg)) { $candidato_msg = 'Não preenchido'; }
             
@@ -265,5 +265,4 @@ add_filter( 'wp_mail', function( $args ) {
     }
     return $args;
 }, 99 );
-
 
