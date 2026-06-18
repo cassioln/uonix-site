@@ -57,6 +57,12 @@ if ( ! function_exists( 'uonix_form_captura_format_phone' ) ) {
     }
 }
 
+if ( ! function_exists( 'uonix_form_captura_phone_digits' ) ) {
+    function uonix_form_captura_phone_digits( $value ) {
+        return preg_replace( '/\D+/', '', (string) $value );
+    }
+}
+
 function uonix_gerar_form_captura_html() {
     ob_start(); ?>
     
@@ -428,12 +434,13 @@ function uonix_processar_lead_customizado_handler() {
         wp_send_json_error(['message' => 'Sistema temporariamente indisponível.']);
     }
 
-    $nome     = uonix_form_captura_upper_text(sanitize_text_field($_POST['nome'] ?? ''));
-    $empresa  = uonix_form_captura_upper_text(sanitize_text_field($_POST['empresa'] ?? ''));
-    $email    = strtolower(sanitize_email($_POST['email'] ?? ''));
-    $telefone = uonix_form_captura_format_phone(sanitize_text_field($_POST['telefone'] ?? ''));
-    $opt_in   = isset($_POST['newsletters']) && $_POST['newsletters'] === 'sim';
-    $termo    = isset($_POST['termo']) && $_POST['termo'] === 'sim';
+    $nome            = uonix_form_captura_upper_text(sanitize_text_field(wp_unslash($_POST['nome'] ?? '')));
+    $empresa         = uonix_form_captura_upper_text(sanitize_text_field(wp_unslash($_POST['empresa'] ?? '')));
+    $email           = strtolower(sanitize_email(wp_unslash($_POST['email'] ?? '')));
+    $telefone_raw    = sanitize_text_field(wp_unslash($_POST['telefone'] ?? ''));
+    $telefone_digits = uonix_form_captura_phone_digits($telefone_raw);
+    $opt_in          = isset($_POST['newsletters']) && $_POST['newsletters'] === 'sim';
+    $termo           = isset($_POST['termo']) && $_POST['termo'] === 'sim';
 
     if (empty($empresa)) {
         wp_send_json_error(['message' => 'Empresa é obrigatória.']);
@@ -454,33 +461,44 @@ function uonix_processar_lead_customizado_handler() {
         $submissionHandler = wpFluentForm()->make('\FluentForm\App\Services\Form\SubmissionHandlerService');
 
         // Form 4 (Leads)
-        $submissionHandler->handleSubmission([
+        $payload_form4 = [
             '__fluent_form_embded_post_id' => $embedded_post_id,
             '_wp_http_referer'             => $referer_path,
             'capturalead_nome'             => $nome,
             'capturalead_email'            => $email,
-            'capturalead_telefone'         => $telefone,
+            'capturalead_telefone'         => $telefone_digits,
             'capturalead_empresa'          => $empresa,
-            'capturalead_newsletters'      => $opt_in ? 'SIM' : 'NAO',
-            'capturalead_origem'           => 'DOWNLOAD CHECKLIST ANCORAGEM'
-        ], 4);
+            'capturalead_origem'           => 'DOWNLOAD CHECKLIST ANCORAGEM',
+        ];
+
+        if ($opt_in) {
+            $payload_form4['capturalead_newsletters'] = array('sim');
+        }
+
+        $submissionHandler->handleSubmission($payload_form4, 4);
 
         // Form 2 (Newsletter)
         if ($opt_in) {
-            $submissionHandler->handleSubmission([
-                '__fluent_form_embded_post_id' => $embedded_post_id,
-                '_wp_http_referer'             => $referer_path,
-                'newsletters_email'            => $email,
-                'newsletters_termo'            => 'on',
-                'newsletters_origem'           => 'DOWNLOAD CHECKLIST ANCORAGEM',
-            ], 2);
+            try {
+                $submissionHandler->handleSubmission([
+                    '__fluent_form_embded_post_id' => $embedded_post_id,
+                    '_wp_http_referer'             => $referer_path,
+                    'newsletters_email'            => $email,
+                    'newsletters_nome'             => $nome,
+                    'newsletters_empresa'          => $empresa,
+                    'newsletters_telefone'         => $telefone_digits,
+                    'newsletters_termo'            => 'on',
+                    'newsletters_origem'           => 'DOWNLOAD CHECKLIST ANCORAGEM',
+                ], 2);
+            } catch (\Throwable $e) {
+                error_log('Uônix Lead Form 2 Newsletter Mirror Error: ' . $e->getMessage());
+            }
         }
 
         wp_send_json_success(['message' => 'Download iniciado.']);
 
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         error_log('Uônix AJAX Sync Error: ' . $e->getMessage());
         wp_send_json_error(['message' => 'Erro interno do servidor. Tente novamente.']);
     }
 }
-

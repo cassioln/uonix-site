@@ -391,7 +391,7 @@ function uonix_processar_newsletter_handler() {
         wp_send_json_error(['message' => 'Sistema temporariamente indisponível.']);
     }
 
-    $email  = strtolower(sanitize_email($_POST['email'] ?? ''));
+    $email  = strtolower(sanitize_email(wp_unslash($_POST['email'] ?? '')));
     $termo  = isset($_POST['termo']) && $_POST['termo'] === 'sim';
     //$origem = sanitize_text_field($_POST['origem'] ?? 'Origem Desconhecida');
 	$origem = 'RODAPÉ';
@@ -420,20 +420,23 @@ function uonix_processar_newsletter_handler() {
             'newsletters_origem'           => $origem,
         ], 2);
 
-        // 2. Grava no Form 4 (Captura de Leads)
-        $submissionHandler->handleSubmission([
-            '__fluent_form_embded_post_id' => $embedded_post_id,
-            '_wp_http_referer'             => $referer_path,
-            'capturalead_email'            => $email,
-            'capturalead_newsletters'      => 'SIM',
-            'capturalead_origem'           => 'ASSINATURA NEWSLETTERS: ' . $origem
-        ], 4);
+        // 2. Espelha no Form 4 (Captura de Leads), sem bloquear a inscrição principal.
+        try {
+            $submissionHandler->handleSubmission([
+                '__fluent_form_embded_post_id' => $embedded_post_id,
+                '_wp_http_referer'             => $referer_path,
+                'capturalead_email'            => $email,
+                'capturalead_newsletters'      => array('sim'),
+                'capturalead_origem'           => 'ASSINATURA NEWSLETTERS: ' . $origem
+            ], 4);
+        } catch (\Throwable $e) {
+            error_log('Uônix Newsletter Form 4 Lead Mirror Error: ' . $e->getMessage());
+        }
 
         wp_send_json_success(['message' => 'Inscrição realizada.']);
 
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         error_log('Uônix AJAX Sync Error: ' . $e->getMessage());
         wp_send_json_error(['message' => 'Erro interno do servidor. Tente novamente.']);
     }
 }
-
