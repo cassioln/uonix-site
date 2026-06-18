@@ -19,3 +19,7 @@ wp-config.php
 backups/
 cache/
 tmp/
+
+# Local WordPress runtime
+local/.env
+local/wp-content/

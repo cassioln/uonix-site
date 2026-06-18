@@ -1,0 +1,65 @@
+version: "3.8"
+
+services:
+  db:
+    platform: linux/arm64
+    image: mariadb:10.11
+    container_name: uonix-local-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: uonix_db
+      MYSQL_USER: uonix_user
+      MYSQL_PASSWORD: uonix_pass
+    volumes:
+      - db_data:/var/lib/mysql:Z
+
+  wordpress:
+    platform: linux/arm64
+    image: wordpress:php8.2-apache
+    container_name: uonix-local-app
+    restart: unless-stopped
+    depends_on:
+      - db
+      - mailpit
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: uonix_user
+      WORDPRESS_DB_PASSWORD: uonix_pass
+      WORDPRESS_DB_NAME: uonix_db
+      WORDPRESS_DEBUG: 1
+      WORDPRESS_CONFIG_EXTRA: |
+        define( 'WP_HOME', 'http://localhost:8080' );
+        define( 'WP_SITEURL', 'http://localhost:8080' );
+        define( 'WP_DEBUG_LOG', true );
+        define( 'WP_DEBUG_DISPLAY', false );
+        define( 'WP_CACHE', false );
+        define( 'WP_ENVIRONMENT_TYPE', 'local' );
+        define( 'FS_METHOD', 'direct' );
+        define( 'WP_MEMORY_LIMIT', '256M' );
+        define( 'WP_MAX_MEMORY_LIMIT', '512M' );
+        @ini_set( 'display_errors', 0 );
+    volumes:
+      - wordpress_core:/var/www/html:Z
+      - ./wp-content:/var/www/html/wp-content:Z
+      - ../themes/kadence-child:/var/www/html/wp-content/themes/kadence-child:Z
+      - ./mu-plugins:/var/www/html/wp-content/mu-plugins:Z
+      - ./php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:Z
+
+  mailpit:
+    platform: linux/arm64
+    image: axllent/mailpit:latest
+    container_name: uonix-local-mailpit
+    restart: unless-stopped
+    hostname: mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  db_data:
+    name: uonix-site_db_data
+  wordpress_core:
+    name: uonix-site_wordpress_core
