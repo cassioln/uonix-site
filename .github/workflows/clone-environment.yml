@@ -1,0 +1,90 @@
+name: Clone Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Ambiente de origem
+        required: true
+        type: choice
+        options:
+          - prod
+          - qa
+      target:
+        description: Ambiente de destino
+        required: true
+        type: choice
+        options:
+          - qa
+          - prod
+      include_git_files:
+        description: Clonar tema filho e MU-plugins versionados
+        required: true
+        type: boolean
+        default: false
+      preserve_destination_users:
+        description: Preservar usuários atuais do destino
+        required: true
+        type: boolean
+        default: true
+      confirm_production:
+        description: Para destino prod, digite CLONAR PARA PRODUCAO
+        required: false
+        type: string
+
+jobs:
+  clone:
+    name: Clone ${{ inputs.source }} to ${{ inputs.target }}
+    runs-on: ubuntu-latest
+
+    env:
+      SSH_HOST: ${{ vars.STAGING_SSH_HOST }}
+      SSH_USER: ${{ vars.STAGING_SSH_USER }}
+      PROD_PATH: /home2/uonix/public_html
+      QA_PATH: /home2/uonix/qa_uonix
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate request
+        run: |
+          test -n "$SSH_HOST" || (echo "Missing STAGING_SSH_HOST variable" && exit 1)
+          test -n "$SSH_USER" || (echo "Missing STAGING_SSH_USER variable" && exit 1)
+          test -n "${{ secrets.STAGING_SSH_KEY }}" || (echo "Missing STAGING_SSH_KEY secret" && exit 1)
+
+          if [ "${{ inputs.source }}" = "${{ inputs.target }}" ]; then
+            echo "Source and target cannot be the same."
+            exit 1
+          fi
+
+          if [ "${{ inputs.target }}" = "prod" ] && [ "${{ inputs.confirm_production }}" != "CLONAR PARA PRODUCAO" ]; then
+            echo "Production clone requires exact confirmation."
+            exit 1
+          fi
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/uonix_clone_key
+          chmod 600 ~/.ssh/uonix_clone_key
+          ssh-keyscan -p 22 -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Test SSH and remote tools
+        run: |
+          ssh -p 22 -i ~/.ssh/uonix_clone_key "$SSH_USER@$SSH_HOST" \
+            "command -v wp && command -v rsync && command -v gzip && command -v tar"
+
+      - name: Run clone
+        env:
+          SSH_KEY: $HOME/.ssh/uonix_clone_key
+        run: |
+          chmod +x scripts/clone-environment.sh
+
+          scripts/clone-environment.sh \
+            --source="${{ inputs.source }}" \
+            --target="${{ inputs.target }}" \
+            --include-git-files="${{ inputs.include_git_files && '1' || '0' }}" \
+            --preserve-destination-users="${{ inputs.preserve_destination_users && '1' || '0' }}" \
+            --confirm-production="${{ inputs.confirm_production }}" \
+            --yes
