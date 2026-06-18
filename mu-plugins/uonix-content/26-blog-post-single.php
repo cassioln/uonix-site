@@ -1112,8 +1112,15 @@ function uonix_gerar_leia_mais_carousel() {
         );
     }
 
+    $swiper_base_path = UONIX_MU_PATH . 'uonix-content/assets/vendor/swiper/';
+    $swiper_base_url  = UONIX_MU_URL . 'uonix-content/assets/vendor/swiper/';
+    $swiper_css       = $swiper_base_url . 'swiper-bundle.min.css';
+    $swiper_js        = $swiper_base_url . 'swiper-bundle.min.js';
+    $swiper_css_ver   = file_exists( $swiper_base_path . 'swiper-bundle.min.css' ) ? filemtime( $swiper_base_path . 'swiper-bundle.min.css' ) : '11';
+    $swiper_js_ver    = file_exists( $swiper_base_path . 'swiper-bundle.min.js' ) ? filemtime( $swiper_base_path . 'swiper-bundle.min.js' ) : '11';
+
     ob_start(); ?>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+    <link rel="stylesheet" href="<?php echo esc_url( add_query_arg( 'ver', $swiper_css_ver, $swiper_css ) ); ?>" />
     <div class="uonix-premium-box uonix-rel-container">
         <div class="uonix-rel-header">
             <h3 class="uonix-section-title uonix-rel-title">Leia Também</h3>
@@ -1137,19 +1144,21 @@ function uonix_gerar_leia_mais_carousel() {
             </div>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+    <script src="<?php echo esc_url( add_query_arg( 'ver', $swiper_js_ver, $swiper_js ) ); ?>"></script>
     <script>
-        new Swiper('.swiper-leia-mais', {
-            slidesPerView: 1.2,
-            spaceBetween: 20,
-            loop: true,
-            autoplay: { delay: 4000, disableOnInteraction: false },
-            navigation: { nextEl: '.uonix-next', prevEl: '.uonix-prev' },
-            breakpoints: {
-                640: { slidesPerView: 3, spaceBetween: 25 },
-                1025: { slidesPerView: 3, spaceBetween: 30 }
-            }
-        });
+        if (typeof Swiper !== 'undefined') {
+            new Swiper('.swiper-leia-mais', {
+                slidesPerView: 1.2,
+                spaceBetween: 20,
+                loop: true,
+                autoplay: { delay: 4000, disableOnInteraction: false },
+                navigation: { nextEl: '.uonix-next', prevEl: '.uonix-prev' },
+                breakpoints: {
+                    640: { slidesPerView: 3, spaceBetween: 25 },
+                    1025: { slidesPerView: 3, spaceBetween: 30 }
+                }
+            });
+        }
     </script>
     <?php return ob_get_clean();
 }
@@ -1204,5 +1213,3 @@ function uonix_placeholders_comentarios_premium($fields) {
 
     return $fields;
 }
-
-

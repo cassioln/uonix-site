@@ -329,7 +329,11 @@ add_action( 'wp_enqueue_scripts', function() {
         return;
     }
 
-    wp_enqueue_script( 'sweetalert2', 'https://cdn.jsdelivr.net/npm/sweetalert2@11', array(), null, true );
+    $sweetalert_path = UONIX_MU_PATH . 'uonix-woocommerce/assets/vendor/sweetalert2/sweetalert2.all.min.js';
+    $sweetalert_url  = UONIX_MU_URL . 'uonix-woocommerce/assets/vendor/sweetalert2/sweetalert2.all.min.js';
+    $sweetalert_ver  = file_exists( $sweetalert_path ) ? (string) filemtime( $sweetalert_path ) : '11';
+
+    wp_enqueue_script( 'sweetalert2', $sweetalert_url, array(), $sweetalert_ver, true );
 
     wp_register_style( 'uonix-checkout-master', false, array(), '9.0.0' );
     wp_enqueue_style( 'uonix-checkout-master' );
@@ -908,5 +912,4 @@ add_filter( 'gettext', function( $translated_text, $text, $domain ) {
     }
     return $translated_text;
 }, 30, 3 );
-
 

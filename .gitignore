@@ -6,6 +6,8 @@ Thumbs.db
 
 node_modules/
 vendor/
+!mu-plugins/**/assets/vendor/
+!mu-plugins/**/assets/vendor/**
 
 *.sql
 *.sql.gz
