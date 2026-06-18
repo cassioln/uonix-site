@@ -1,4 +1,7 @@
+# macOS metadata
 .DS_Store
+._*
+.AppleDouble/
 Thumbs.db
 
 node_modules/
