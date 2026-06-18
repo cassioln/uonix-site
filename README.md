@@ -29,8 +29,8 @@ Plugins de terceiros, uploads e arquivos gerados pelo WordPress não são versio
 ## Local
 
 ```bash
-podman-compose -f local/compose.yml up -d
-podman-compose -f local/compose.yml down
+podman-compose -p uonix-local -f local/compose.yml up -d
+podman-compose -p uonix-local -f local/compose.yml down
 ```
 
 - WordPress local: `http://localhost:8080`
