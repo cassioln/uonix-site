@@ -16,7 +16,7 @@ uonix_mu_require_files(
 		'40-admin-dados-globais-rfq.php',
 		'41-admin-fluentforms-ux.php',
 		'45-login-personalizado.php',
-		'46-admin-limpeza-fluentforms.php',
+		'46-admin-limpeza-conteudo.php',
 		'47-admin-curriculos-recebidos.php',
 	),
 	'uonix-admin'
