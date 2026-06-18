@@ -6,6 +6,7 @@
 - MU-plugins modulares para regras de negócio, shortcodes e integrações.
 - Snippets visuais carregados pelo tema filho.
 - Workflows de deploy.
+- Workflow manual de clone entre ambientes.
 - Scripts locais.
 - Documentação.
 - Código próprio em `plugins/plugins-customizados/` e `mu-plugins/`.
