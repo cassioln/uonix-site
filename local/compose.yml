@@ -12,7 +12,7 @@ services:
       MYSQL_USER: uonix_user
       MYSQL_PASSWORD: uonix_pass
     volumes:
-      - db_data:/var/lib/mysql:Z
+      - db_data:/var/lib/mysql:z
 
   wordpress:
     platform: linux/arm64
@@ -29,6 +29,7 @@ services:
       WORDPRESS_DB_USER: uonix_user
       WORDPRESS_DB_PASSWORD: uonix_pass
       WORDPRESS_DB_NAME: uonix_db
+      WORDPRESS_TABLE_PREFIX: wpis_
       WORDPRESS_DEBUG: 1
       WORDPRESS_CONFIG_EXTRA: |
         define( 'WP_HOME', 'http://localhost:8080' );
@@ -42,11 +43,36 @@ services:
         define( 'WP_MAX_MEMORY_LIMIT', '512M' );
         @ini_set( 'display_errors', 0 );
     volumes:
-      - wordpress_core:/var/www/html:Z
-      - ./wp-content:/var/www/html/wp-content:Z
-      - ../themes/kadence-child:/var/www/html/wp-content/themes/kadence-child:Z
-      - ./mu-plugins:/var/www/html/wp-content/mu-plugins:Z
-      - ./php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:Z
+      - wordpress_core:/var/www/html:z
+      - ./wp-content:/var/www/html/wp-content:z
+      - ../themes/kadence-child:/var/www/html/wp-content/themes/kadence-child:z
+      - ./mu-plugins:/var/www/html/wp-content/mu-plugins:z
+      - ./php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:z
+
+  wpcli:
+    profiles:
+      - tools
+    platform: linux/arm64
+    image: wordpress:cli-php8.2
+    depends_on:
+      - db
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: uonix_user
+      WORDPRESS_DB_PASSWORD: uonix_pass
+      WORDPRESS_DB_NAME: uonix_db
+      WORDPRESS_TABLE_PREFIX: wpis_
+    volumes:
+      - wordpress_core:/var/www/html:z
+      - ./wp-content:/var/www/html/wp-content:z
+      - ../themes/kadence-child:/var/www/html/wp-content/themes/kadence-child:z
+      - ./mu-plugins:/var/www/html/wp-content/mu-plugins:z
+    working_dir: /var/www/html
+    entrypoint:
+      - php
+      - -d
+      - memory_limit=512M
+      - /usr/local/bin/wp
 
   mailpit:
     platform: linux/arm64
