@@ -19,6 +19,12 @@ A ferramenta `ksio.dev > Clone de Ambientes` prepara clones completos entre prod
 - Opções sensíveis do destino são preservadas: GoSMTP, Turnstile, captcha/Loginizer e `admin_email`.
 - Mailpit é carregado somente quando `UONIX_ENV` é `local`.
 
+## Arquivos Runtime
+
+- O clone sincroniza `uploads`, `plugins` e `languages`, sem incluir cache e arquivos temporários.
+- Os plugins `fluentform`, `gosmtp`, `gosmtp-pro`, `loginizer` e `loginizer-security` são gerenciados por ambiente e não são copiados entre ambientes.
+- Tema filho e MU-plugins versionados só entram no clone quando `--include-git-files=1`.
+
 ## GitHub Actions
 
 Para o painel disparar clones remotos, defina no `wp-config.php` do ambiente que usará a tela:
