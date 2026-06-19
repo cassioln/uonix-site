@@ -42,6 +42,15 @@ EXCLUDED_RSYNC_ARGS=(
   --exclude='uonix-local/'
 )
 
+PLUGIN_RSYNC_EXCLUDES=(
+  # Plugins com configuração própria por ambiente não entram em clones.
+  --exclude='fluentform/'
+  --exclude='gosmtp/'
+  --exclude='gosmtp-pro/'
+  --exclude='loginizer/'
+  --exclude='loginizer-security/'
+)
+
 usage() {
   cat <<USAGE
 Uso:
@@ -506,6 +515,11 @@ sync_one_dir() {
   local relative_dir="$3"
   local source_content
   local target_content
+  local rsync_args=("${EXCLUDED_RSYNC_ARGS[@]}")
+
+  if [ "$relative_dir" = "plugins" ]; then
+    rsync_args+=("${PLUGIN_RSYNC_EXCLUDES[@]}")
+  fi
 
   source_content="$(content_path "$source_env")"
   target_content="$(content_path "$target_env")"
@@ -516,12 +530,12 @@ src=$(printf '%q' "${source_content}/${relative_dir}")
 dst=$(printf '%q' "${target_content}/${relative_dir}")
 if [ -d \"\$src\" ]; then
   mkdir -p \"\$dst\"
-  rsync -a --delete $(shell_join "${EXCLUDED_RSYNC_ARGS[@]}") \"\$src/\" \"\$dst/\"
+  rsync -a --delete $(shell_join "${rsync_args[@]}") \"\$src/\" \"\$dst/\"
 fi"
   elif is_remote_env "$source_env"; then
     if remote_run "[ -d $(printf '%q' "${source_content}/${relative_dir}") ]"; then
       mkdir -p "${target_content}/${relative_dir}"
-      rsync -az --delete "${EXCLUDED_RSYNC_ARGS[@]}" \
+      rsync -az --delete "${rsync_args[@]}" \
         -e "ssh -p ${SSH_PORT} -i ${SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
         "${SSH_USER}@${SSH_HOST}:${source_content}/${relative_dir}/" \
         "${target_content}/${relative_dir}/"
@@ -529,14 +543,14 @@ fi"
   elif is_remote_env "$target_env"; then
     [ -d "${source_content}/${relative_dir}" ] || return 0
     remote_run "mkdir -p $(printf '%q' "${target_content}/${relative_dir}")"
-    rsync -az --delete "${EXCLUDED_RSYNC_ARGS[@]}" \
+    rsync -az --delete "${rsync_args[@]}" \
       -e "ssh -p ${SSH_PORT} -i ${SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
       "${source_content}/${relative_dir}/" \
       "${SSH_USER}@${SSH_HOST}:${target_content}/${relative_dir}/"
   else
     [ -d "${source_content}/${relative_dir}" ] || return 0
     mkdir -p "${target_content}/${relative_dir}"
-    rsync -a --delete "${EXCLUDED_RSYNC_ARGS[@]}" \
+    rsync -a --delete "${rsync_args[@]}" \
       "${source_content}/${relative_dir}/" \
       "${target_content}/${relative_dir}/"
   fi
