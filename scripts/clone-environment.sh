@@ -24,6 +24,10 @@ LOCAL_BACKUP_ROOT="${LOCAL_BACKUP_ROOT:-${ROOT_DIR}/backups/clone}"
 LOCAL_COMPOSE_FILE="${LOCAL_COMPOSE_FILE:-${ROOT_DIR}/local/compose.yml}"
 LOCAL_COMPOSE_PROJECT="${LOCAL_COMPOSE_PROJECT:-uonix-local}"
 LOCAL_WP_CONTENT="${LOCAL_WP_CONTENT:-${ROOT_DIR}/local/wp-content}"
+LOCAL_DB_CONTAINER="${LOCAL_DB_CONTAINER:-uonix-local-db}"
+LOCAL_DB_NAME="${LOCAL_DB_NAME:-uonix_db}"
+LOCAL_DB_USER="${LOCAL_DB_USER:-uonix_user}"
+LOCAL_DB_PASSWORD="${LOCAL_DB_PASSWORD:-uonix_pass}"
 
 EXCLUDED_RSYNC_ARGS=(
   --exclude='.DS_Store'
@@ -110,6 +114,41 @@ remote_run() {
 local_wp() {
   cd "$ROOT_DIR"
   podman-compose -p "$LOCAL_COMPOSE_PROJECT" -f "$LOCAL_COMPOSE_FILE" --profile tools run --rm --no-deps wpcli "$@"
+}
+
+local_db_dump() {
+  podman exec \
+    -e MYSQL_PWD="$LOCAL_DB_PASSWORD" \
+    "$LOCAL_DB_CONTAINER" \
+    mariadb-dump \
+    -u "$LOCAL_DB_USER" \
+    --skip-ssl \
+    --single-transaction \
+    --quick \
+    --skip-lock-tables \
+    "$LOCAL_DB_NAME" \
+    "$@"
+}
+
+local_db_import() {
+  podman exec -i \
+    -e MYSQL_PWD="$LOCAL_DB_PASSWORD" \
+    "$LOCAL_DB_CONTAINER" \
+    mariadb \
+    -u "$LOCAL_DB_USER" \
+    --skip-ssl \
+    "$LOCAL_DB_NAME"
+}
+
+local_db_query() {
+  podman exec \
+    -e MYSQL_PWD="$LOCAL_DB_PASSWORD" \
+    "$LOCAL_DB_CONTAINER" \
+    mariadb \
+    -u "$LOCAL_DB_USER" \
+    --skip-ssl \
+    "$LOCAL_DB_NAME" \
+    -e "$1"
 }
 
 is_remote_env() {
@@ -202,7 +241,7 @@ fi
 find $(printf '%q' "${REMOTE_BACKUP_ROOT}/${env}") -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +6 | cut -d' ' -f2- | xargs -r rm -rf"
   else
     mkdir -p "$dir"
-    local_wp db export - | gzip -c >"${dir}/db-${env}-${STAMP}.sql.gz"
+    local_db_dump | gzip -c >"${dir}/db-${env}-${STAMP}.sql.gz"
 
     if [ -d "$LOCAL_WP_CONTENT" ]; then
       tar -czf "${dir}/files-${env}-${STAMP}.tar.gz" \
@@ -243,8 +282,7 @@ wp --path=$(printf '%q' "$wp_root") db export $(printf '%q' "${dir}/users.sql") 
     mkdir -p "$dir"
     local prefix
     prefix="$(local_wp db prefix | tr -d '\r')"
-    local_wp db export "wp-content/uonix-clone-users-${STAMP}.sql" --tables="${prefix}users,${prefix}usermeta" >/dev/null
-    mv "${LOCAL_WP_CONTENT}/uonix-clone-users-${STAMP}.sql" "${dir}/users.sql"
+    local_db_dump "${prefix}users" "${prefix}usermeta" >"${dir}/users.sql"
   fi
 }
 
@@ -269,7 +307,7 @@ map_file=\"\$option_dir/map.tsv\"
   wp --path=$(printf '%q' "$wp_root") option list --search='*turnstile*' --fields=option_name --format=csv | tail -n +2 || true
   wp --path=$(printf '%q' "$wp_root") option list --search='*captcha*' --fields=option_name --format=csv | tail -n +2 || true
   wp --path=$(printf '%q' "$wp_root") option list --search='*loginizer*' --fields=option_name --format=csv | tail -n +2 || true
-} | sed '/^$/d' | sort -u > \"\$names_file\"
+} | tr -d '\r' | sed '/^$/d' | sort -u > \"\$names_file\"
 : > \"\$map_file\"
 while IFS= read -r option_name; do
   safe_name=\"\$(printf '%s' \"\$option_name\" | tr -c 'A-Za-z0-9_-' '_')\"
@@ -286,7 +324,7 @@ done < \"\$names_file\""
       local_wp option list --search='*turnstile*' --fields=option_name --format=csv | tail -n +2 || true
       local_wp option list --search='*captcha*' --fields=option_name --format=csv | tail -n +2 || true
       local_wp option list --search='*loginizer*' --fields=option_name --format=csv | tail -n +2 || true
-    } | sed '/^$/d' | sort -u >"${option_dir}/names.txt"
+    } | tr -d '\r' | sed '/^$/d' | sort -u >"${option_dir}/names.txt"
 
     : >"${option_dir}/map.tsv"
     while IFS= read -r option_name; do
@@ -313,7 +351,7 @@ export_source_db() {
       "${SSH_USER}@${SSH_HOST}" \
       "wp --path=$(printf '%q' "$wp_root") db export - | gzip -c" >"$dump_file"
   else
-    local_wp db export - | gzip -c >"$dump_file"
+    local_db_dump | gzip -c >"$dump_file"
   fi
 }
 
@@ -330,10 +368,7 @@ import_db_to_target() {
       "${SSH_USER}@${SSH_HOST}" \
       "wp --path=$(printf '%q' "$wp_root") db import -"
   else
-    mkdir -p "$LOCAL_WP_CONTENT"
-    gzip -dc "$dump_file" >"${LOCAL_WP_CONTENT}/uonix-clone-import.sql"
-    local_wp db import "wp-content/uonix-clone-import.sql"
-    rm -f "${LOCAL_WP_CONTENT}/uonix-clone-import.sql"
+    gzip -dc "$dump_file" | local_db_import
   fi
 }
 
@@ -356,9 +391,7 @@ if [ -s \"\$users_sql\" ]; then
 fi"
   else
     if [ -s "${dir}/users.sql" ]; then
-      cp "${dir}/users.sql" "${LOCAL_WP_CONTENT}/uonix-clone-users-restore.sql"
-      local_wp db import "wp-content/uonix-clone-users-restore.sql"
-      rm -f "${LOCAL_WP_CONTENT}/uonix-clone-users-restore.sql"
+      local_db_import <"${dir}/users.sql"
     fi
   fi
 }
@@ -380,7 +413,9 @@ map_file=\"\$option_dir/map.tsv\"
 while IFS=\$'\t' read -r safe_name option_name; do
   json_file=\"\$option_dir/\${safe_name}.json\"
   [ -s \"\$json_file\" ] || continue
-  wp --path=$(printf '%q' "$wp_root") option update \"\$option_name\" \"\$(cat \"\$json_file\")\" --format=json >/dev/null
+  if ! wp --path=$(printf '%q' "$wp_root") option update \"\$option_name\" \"\$(cat \"\$json_file\")\" --format=json >/dev/null; then
+    printf 'Aviso: não foi possível restaurar a opção %s\n' \"\$option_name\" >&2
+  fi
 done < \"\$map_file\""
   else
     local option_dir="${dir}/options"
@@ -391,7 +426,9 @@ done < \"\$map_file\""
     while IFS=$'\t' read -r safe_name option_name; do
       local json_file="${option_dir}/${safe_name}.json"
       [ -s "$json_file" ] || continue
-      local_wp option update "$option_name" "$(cat "$json_file")" --format=json >/dev/null
+      if ! local_wp option update "$option_name" "$(cat "$json_file")" --format=json >/dev/null; then
+        printf 'Aviso: não foi possível restaurar a opção %s\n' "$option_name" >&2
+      fi
     done <"$map_file"
   fi
 }
@@ -438,7 +475,7 @@ wp --path=$(printf '%q' "$wp_root") db query \"UPDATE \${prefix}posts SET post_a
     fallback_id="$(local_wp user list --role=administrator --field=ID | head -n 1 || true)"
     [ -n "$fallback_id" ] || fallback_id="$(local_wp user list --field=ID | head -n 1 || true)"
     [ -n "$valid_ids" ] || return 0
-    local_wp db query "UPDATE ${prefix}posts SET post_author = ${fallback_id} WHERE post_author NOT IN (${valid_ids})" >/dev/null
+    local_db_query "UPDATE ${prefix}posts SET post_author = ${fallback_id} WHERE post_author NOT IN (${valid_ids})" >/dev/null
   fi
 }
 
