@@ -78,7 +78,7 @@ jobs:
       - name: Test SSH and remote tools
         run: |
           ssh -p 22 -i ~/.ssh/uonix_clone_key "$SSH_USER@$SSH_HOST" \
-            "command -v wp && command -v rsync && command -v gzip && command -v tar"
+            "command -v wp && command -v rsync && command -v gzip && command -v tar && (command -v mysql || command -v mariadb)"
 
       - name: Run clone
         run: |

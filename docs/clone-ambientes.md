@@ -18,6 +18,7 @@ A ferramenta `ksio.dev > Clone de Ambientes` prepara clones completos entre prod
 - A retenção padrão mantém os últimos 5 backups por ambiente.
 - Usuários do destino são preservados por padrão.
 - Opções sensíveis do destino são preservadas: plugins gerenciados por ambiente, estado de ativação dos plugins, cron, GoSMTP/WP Mail SMTP, Turnstile, reCAPTCHA/hCaptcha, Mailchimp, captcha/Loginizer, Backuply, Fluent Forms e `admin_email`.
+- Opções sensíveis são restauradas por `option_name`, sem reaproveitar `option_id`, para evitar colisões com opções importadas da origem.
 - Mailpit é carregado somente quando `UONIX_ENV` é `local`.
 
 ## Arquivos Runtime

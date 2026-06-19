@@ -172,22 +172,21 @@ local_db_query() {
 local_db_dump_options() {
   local options_table="$1"
   local where="$2"
+  local query
+
+  query="$(option_upsert_select_sql "$options_table" "$where")"
 
   podman exec \
     -e MYSQL_PWD="$LOCAL_DB_PASSWORD" \
     "$LOCAL_DB_CONTAINER" \
-    mariadb-dump \
+    mariadb \
     -u "$LOCAL_DB_USER" \
     --skip-ssl \
-    --single-transaction \
-    --quick \
-    --skip-lock-tables \
-    --no-create-info \
-    --skip-triggers \
-    --replace \
+    --batch \
+    --raw \
+    --skip-column-names \
     "$LOCAL_DB_NAME" \
-    "$options_table" \
-    --where="$where"
+    -e "$query"
 }
 
 protected_options_where() {
@@ -209,6 +208,31 @@ OR option_name LIKE '%recaptcha%'
 OR option_name LIKE '%hcaptcha%'
 OR option_name LIKE '%wp_captcha%'
 OR option_name LIKE 'lz\_%'
+SQL
+}
+
+quote_sql_identifier() {
+  local identifier="$1"
+
+  identifier="${identifier//\`/\`\`}"
+  printf '`%s`' "$identifier"
+}
+
+option_upsert_select_sql() {
+  local options_table="$1"
+  local where="$2"
+  local quoted_table
+
+  quoted_table="$(quote_sql_identifier "$options_table")"
+
+  cat <<SQL
+SELECT CONCAT(
+  'INSERT INTO ${quoted_table} (\`option_name\`,\`option_value\`,\`autoload\`) VALUES (',
+  QUOTE(option_name), ',', QUOTE(option_value), ',', QUOTE(autoload),
+  ') ON DUPLICATE KEY UPDATE \`option_value\`=VALUES(\`option_value\`), \`autoload\`=VALUES(\`autoload\`);'
+)
+FROM ${quoted_table}
+WHERE ${where};
 SQL
 }
 
@@ -351,34 +375,32 @@ snapshot_options() {
   local env="$1"
   local dir="$2"
   local where
+  local query
 
   log "Preservando opções sensíveis do destino: ${env}"
   where="$(protected_options_where)"
 
   if is_remote_env "$env"; then
-    local wp_root
+    local wp_root prefix
     wp_root="$(wp_path "$env")"
+    prefix="$(wp_exec "$env" db prefix)"
+    query="$(option_upsert_select_sql "${prefix}options" "$where")"
 
     remote_run "set -euo pipefail
 mkdir -p $(printf '%q' "$dir")
-prefix=\"\$(wp --path=$(printf '%q' "$wp_root") db prefix)\"
 db_name=\"\$(wp --path=$(printf '%q' "$wp_root") config get DB_NAME)\"
 db_user=\"\$(wp --path=$(printf '%q' "$wp_root") config get DB_USER)\"
 db_pass=\"\$(wp --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\"
 db_host=\"\$(wp --path=$(printf '%q' "$wp_root") config get DB_HOST)\"
-MYSQL_PWD=\"\$db_pass\" mysqldump \
+mysql_cmd=\"\$(command -v mysql || command -v mariadb)\"
+MYSQL_PWD=\"\$db_pass\" \"\$mysql_cmd\" \
   --host=\"\$db_host\" \
   --user=\"\$db_user\" \
-  --single-transaction \
-  --quick \
-  --skip-lock-tables \
-  --no-tablespaces \
-  --no-create-info \
-  --skip-triggers \
-  --replace \
+  --batch \
+  --raw \
+  --skip-column-names \
   \"\$db_name\" \
-  \"\${prefix}options\" \
-  --where=$(printf '%q' "$where") > $(printf '%q' "${dir}/options.sql")"
+  -e $(printf '%q' "$query") > $(printf '%q' "${dir}/options.sql")"
   else
     local prefix
     mkdir -p "$dir"
@@ -620,6 +642,7 @@ command -v wp >/dev/null
 command -v rsync >/dev/null
 command -v gzip >/dev/null
 command -v tar >/dev/null
+(command -v mysql >/dev/null || command -v mariadb >/dev/null)
 test -d $(printf '%q' "$wp_root")
 test -d $(printf '%q' "$wp_content")
 wp --path=$(printf '%q' "$wp_root") db prefix >/dev/null
