@@ -16,13 +16,14 @@ A ferramenta `ksio.dev > Clone de Ambientes` prepara clones completos entre prod
 - O destino sempre recebe backup antes do clone.
 - A retenção padrão mantém os últimos 5 backups por ambiente.
 - Usuários do destino são preservados por padrão.
-- Opções sensíveis do destino são preservadas: GoSMTP, Turnstile, captcha/Loginizer e `admin_email`.
+- Opções sensíveis do destino são preservadas: plugins gerenciados por ambiente, estado de ativação dos plugins, cron, GoSMTP, Turnstile, captcha/Loginizer e `admin_email`.
 - Mailpit é carregado somente quando `UONIX_ENV` é `local`.
 
 ## Arquivos Runtime
 
 - O clone sincroniza `uploads`, `plugins` e `languages`, sem incluir cache e arquivos temporários.
 - Os plugins `backuply`, `backuply-pro`, `fluentform`, `gosmtp`, `gosmtp-pro`, `loginizer` e `loginizer-security` são gerenciados por ambiente e não são copiados entre ambientes.
+- As opções desses plugins em `wp_options` também são preservadas no destino para evitar sobrescrever chaves, SMTP, Turnstile, licença, cron e estado de ativação local.
 - Tema filho e MU-plugins versionados só entram no clone quando `--include-git-files=1`.
 
 ## GitHub Actions
