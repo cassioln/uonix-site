@@ -124,7 +124,7 @@ remote_run() {
 
 local_wp() {
   cd "$ROOT_DIR"
-  podman-compose -p "$LOCAL_COMPOSE_PROJECT" -f "$LOCAL_COMPOSE_FILE" --profile tools run --rm --no-deps -T wpcli "$@"
+  podman-compose -p "$LOCAL_COMPOSE_PROJECT" -f "$LOCAL_COMPOSE_FILE" --profile tools run --rm --no-deps -T wpcli "$@" </dev/null
 }
 
 local_db_dump() {
@@ -160,6 +160,42 @@ local_db_query() {
     --skip-ssl \
     "$LOCAL_DB_NAME" \
     -e "$1"
+}
+
+local_db_dump_options() {
+  local options_table="$1"
+  local where="$2"
+
+  podman exec \
+    -e MYSQL_PWD="$LOCAL_DB_PASSWORD" \
+    "$LOCAL_DB_CONTAINER" \
+    mariadb-dump \
+    -u "$LOCAL_DB_USER" \
+    --skip-ssl \
+    --single-transaction \
+    --quick \
+    --skip-lock-tables \
+    --no-create-info \
+    --skip-triggers \
+    --replace \
+    "$LOCAL_DB_NAME" \
+    "$options_table" \
+    --where="$where"
+}
+
+protected_options_where() {
+  cat <<'SQL'
+option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron','gosmtp_options','_fluentform_turnstile_details')
+OR option_name LIKE '%backuply%'
+OR option_name LIKE '%fluentform%'
+OR option_name LIKE '%fluentmail%'
+OR option_name LIKE '%gosmtp%'
+OR option_name LIKE '%loginizer%'
+OR option_name LIKE '%turnstile%'
+OR option_name LIKE '%captcha%'
+OR option_name LIKE '%wp_captcha%'
+OR option_name LIKE 'lz\_%'
+SQL
 }
 
 is_remote_env() {
@@ -300,52 +336,29 @@ wp --path=$(printf '%q' "$wp_root") db export $(printf '%q' "${dir}/users.sql") 
 snapshot_options() {
   local env="$1"
   local dir="$2"
+  local where
 
   log "Preservando opções sensíveis do destino: ${env}"
+  where="$(protected_options_where)"
 
   if is_remote_env "$env"; then
     local wp_root
     wp_root="$(wp_path "$env")"
 
     remote_run "set -euo pipefail
-option_dir=$(printf '%q' "${dir}/options")
-mkdir -p \"\$option_dir\"
-names_file=\"\$option_dir/names.txt\"
-map_file=\"\$option_dir/map.tsv\"
-{
-  printf '%s\n' admin_email gosmtp_options _fluentform_turnstile_details
-  wp --path=$(printf '%q' "$wp_root") option list --search='*gosmtp*' --fields=option_name --format=csv | tail -n +2 || true
-  wp --path=$(printf '%q' "$wp_root") option list --search='*turnstile*' --fields=option_name --format=csv | tail -n +2 || true
-  wp --path=$(printf '%q' "$wp_root") option list --search='*captcha*' --fields=option_name --format=csv | tail -n +2 || true
-  wp --path=$(printf '%q' "$wp_root") option list --search='*loginizer*' --fields=option_name --format=csv | tail -n +2 || true
-} | tr -d '\r' | sed '/^$/d' | sort -u > \"\$names_file\"
-: > \"\$map_file\"
-while IFS= read -r option_name; do
-  safe_name=\"\$(printf '%s' \"\$option_name\" | tr -c 'A-Za-z0-9_-' '_')\"
-  if wp --path=$(printf '%q' "$wp_root") option get \"\$option_name\" --format=json > \"\$option_dir/\${safe_name}.json\" 2>/dev/null; then
-    printf '%s\t%s\n' \"\$safe_name\" \"\$option_name\" >> \"\$map_file\"
-  fi
-done < \"\$names_file\""
+mkdir -p $(printf '%q' "$dir")
+prefix=\"\$(wp --path=$(printf '%q' "$wp_root") db prefix)\"
+wp --path=$(printf '%q' "$wp_root") db export $(printf '%q' "${dir}/options.sql") \
+  --tables=\"\${prefix}options\" \
+  --no-create-info \
+  --skip-triggers \
+  --replace \
+  --where=$(printf '%q' "$where") >/dev/null"
   else
-    local option_dir="${dir}/options"
-    mkdir -p "$option_dir"
-    {
-      printf '%s\n' admin_email gosmtp_options _fluentform_turnstile_details
-      local_wp option list --search='*gosmtp*' --fields=option_name --format=csv | tail -n +2 || true
-      local_wp option list --search='*turnstile*' --fields=option_name --format=csv | tail -n +2 || true
-      local_wp option list --search='*captcha*' --fields=option_name --format=csv | tail -n +2 || true
-      local_wp option list --search='*loginizer*' --fields=option_name --format=csv | tail -n +2 || true
-    } | tr -d '\r' | sed '/^$/d' | sort -u >"${option_dir}/names.txt"
-
-    : >"${option_dir}/map.tsv"
-    while IFS= read -r option_name; do
-      local safe_name
-      safe_name="$(printf '%s' "$option_name" | tr -c 'A-Za-z0-9_-' '_')"
-
-      if local_wp option get "$option_name" --format=json >"${option_dir}/${safe_name}.json" 2>/dev/null; then
-        printf '%s\t%s\n' "$safe_name" "$option_name" >>"${option_dir}/map.tsv"
-      fi
-    done <"${option_dir}/names.txt"
+    local prefix
+    mkdir -p "$dir"
+    prefix="$(local_wp db prefix | tr -d '\r')"
+    local_db_dump_options "${prefix}options" "$where" >"${dir}/options.sql"
   fi
 }
 
@@ -410,37 +423,29 @@ fi"
 restore_options() {
   local env="$1"
   local dir="$2"
+  local where
 
   log "Restaurando opções sensíveis do destino: ${env}"
+  where="$(protected_options_where)"
 
   if is_remote_env "$env"; then
     local wp_root
     wp_root="$(wp_path "$env")"
 
     remote_run "set -euo pipefail
-option_dir=$(printf '%q' "${dir}/options")
-map_file=\"\$option_dir/map.tsv\"
-[ -s \"\$map_file\" ] || exit 0
-while IFS=\$'\t' read -r safe_name option_name; do
-  json_file=\"\$option_dir/\${safe_name}.json\"
-  [ -s \"\$json_file\" ] || continue
-  if ! wp --path=$(printf '%q' "$wp_root") option update \"\$option_name\" \"\$(cat \"\$json_file\")\" --format=json >/dev/null; then
-    printf 'Aviso: não foi possível restaurar a opção %s\n' \"\$option_name\" >&2
-  fi
-done < \"\$map_file\""
+options_sql=$(printf '%q' "${dir}/options.sql")
+prefix=\"\$(wp --path=$(printf '%q' "$wp_root") db prefix)\"
+wp --path=$(printf '%q' "$wp_root") db query $(printf '%q' "DELETE FROM \\\`\${prefix}options\\\` WHERE ${where}") >/dev/null
+if [ -s \"\$options_sql\" ]; then
+  wp --path=$(printf '%q' "$wp_root") db import \"\$options_sql\" >/dev/null
+fi"
   else
-    local option_dir="${dir}/options"
-    local map_file="${option_dir}/map.tsv"
-
-    [ -s "$map_file" ] || return 0
-
-    while IFS=$'\t' read -r safe_name option_name; do
-      local json_file="${option_dir}/${safe_name}.json"
-      [ -s "$json_file" ] || continue
-      if ! local_wp option update "$option_name" "$(cat "$json_file")" --format=json >/dev/null; then
-        printf 'Aviso: não foi possível restaurar a opção %s\n' "$option_name" >&2
-      fi
-    done <"$map_file"
+    local prefix
+    prefix="$(local_wp db prefix | tr -d '\r')"
+    local_db_query "DELETE FROM \`${prefix}options\` WHERE ${where}" >/dev/null
+    if [ -s "${dir}/options.sql" ]; then
+      local_db_import <"${dir}/options.sql"
+    fi
   fi
 }
 
