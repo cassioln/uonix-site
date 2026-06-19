@@ -44,6 +44,8 @@ EXCLUDED_RSYNC_ARGS=(
 
 PLUGIN_RSYNC_EXCLUDES=(
   # Plugins com configuração própria por ambiente não entram em clones.
+  --exclude='backuply/'
+  --exclude='backuply-pro/'
   --exclude='fluentform/'
   --exclude='gosmtp/'
   --exclude='gosmtp-pro/'
@@ -122,7 +124,7 @@ remote_run() {
 
 local_wp() {
   cd "$ROOT_DIR"
-  podman-compose -p "$LOCAL_COMPOSE_PROJECT" -f "$LOCAL_COMPOSE_FILE" --profile tools run --rm --no-deps wpcli "$@"
+  podman-compose -p "$LOCAL_COMPOSE_PROJECT" -f "$LOCAL_COMPOSE_FILE" --profile tools run --rm --no-deps -T wpcli "$@"
 }
 
 local_db_dump() {

@@ -22,7 +22,7 @@ A ferramenta `ksio.dev > Clone de Ambientes` prepara clones completos entre prod
 ## Arquivos Runtime
 
 - O clone sincroniza `uploads`, `plugins` e `languages`, sem incluir cache e arquivos temporários.
-- Os plugins `fluentform`, `gosmtp`, `gosmtp-pro`, `loginizer` e `loginizer-security` são gerenciados por ambiente e não são copiados entre ambientes.
+- Os plugins `backuply`, `backuply-pro`, `fluentform`, `gosmtp`, `gosmtp-pro`, `loginizer` e `loginizer-security` são gerenciados por ambiente e não são copiados entre ambientes.
 - Tema filho e MU-plugins versionados só entram no clone quando `--include-git-files=1`.
 
 ## GitHub Actions
