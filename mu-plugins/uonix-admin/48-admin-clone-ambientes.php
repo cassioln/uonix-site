@@ -52,7 +52,7 @@ function uox_clone_has_github_token() {
 	return defined( 'UONIX_GITHUB_TOKEN' ) && '' !== trim( (string) UONIX_GITHUB_TOKEN );
 }
 
-function uox_clone_dispatch_workflow( $source, $target, $include_git_files, $preserve_users, $confirm_production ) {
+function uox_clone_dispatch_workflow( $source, $target, $include_git_files, $preserve_users, $dry_run, $confirm_production ) {
 	if ( ! uox_clone_has_github_token() ) {
 		return new WP_Error(
 			'uox_clone_missing_token',
@@ -83,6 +83,7 @@ function uox_clone_dispatch_workflow( $source, $target, $include_git_files, $pre
 						'target'                     => $target,
 						'include_git_files'          => uox_clone_bool_string( $include_git_files ),
 						'preserve_destination_users' => uox_clone_bool_string( $preserve_users ),
+						'dry_run'                    => uox_clone_bool_string( $dry_run ),
 						'confirm_production'         => $confirm_production,
 					),
 				)
@@ -107,7 +108,7 @@ function uox_clone_dispatch_workflow( $source, $target, $include_git_files, $pre
 	return true;
 }
 
-function uox_clone_build_local_command( $source, $target, $include_git_files, $preserve_users, $confirm_production ) {
+function uox_clone_build_local_command( $source, $target, $include_git_files, $preserve_users, $dry_run, $confirm_production ) {
 	$repo_path = uox_clone_get_local_repo_path();
 	$args      = array(
 		'cd ' . escapeshellarg( $repo_path ),
@@ -122,6 +123,10 @@ function uox_clone_build_local_command( $source, $target, $include_git_files, $p
 
 	if ( 'prod' === $target ) {
 		$args[] = '--confirm-production=' . escapeshellarg( $confirm_production );
+	}
+
+	if ( $dry_run ) {
+		$args[] = '--dry-run';
 	}
 
 	$args[] = '--yes';
@@ -141,6 +146,7 @@ function uox_clone_get_result_from_post() {
 
 	$include_git_files = ! empty( $_POST['uox_clone_include_git_files'] );
 	$preserve_users    = ! empty( $_POST['uox_clone_preserve_users'] );
+	$dry_run           = ! empty( $_POST['uox_clone_dry_run'] );
 	$confirm_production = isset( $_POST['uox_clone_confirm_production'] )
 		? sanitize_text_field( wp_unslash( $_POST['uox_clone_confirm_production'] ) )
 		: '';
@@ -153,7 +159,7 @@ function uox_clone_get_result_from_post() {
 		return new WP_Error( 'uox_clone_same_env', 'Origem e destino não podem ser iguais.' );
 	}
 
-	if ( 'prod' === $target && 'CLONAR PARA PRODUCAO' !== $confirm_production ) {
+	if ( 'prod' === $target && ! $dry_run && 'CLONAR PARA PRODUCAO' !== $confirm_production ) {
 		return new WP_Error(
 			'uox_clone_missing_production_confirmation',
 			'Para clonar para produção, digite CLONAR PARA PRODUCAO no campo de confirmação.'
@@ -163,12 +169,12 @@ function uox_clone_get_result_from_post() {
 	if ( 'local' === $source || 'local' === $target ) {
 		return array(
 			'type'    => 'command',
-			'message' => 'Execute o comando abaixo no terminal do Mac para clonar envolvendo localhost.',
-			'command' => uox_clone_build_local_command( $source, $target, $include_git_files, $preserve_users, $confirm_production ),
+			'message' => $dry_run ? 'Execute o comando abaixo no terminal do Mac para validar o clone sem alterar o destino.' : 'Execute o comando abaixo no terminal do Mac para clonar envolvendo localhost.',
+			'command' => uox_clone_build_local_command( $source, $target, $include_git_files, $preserve_users, $dry_run, $confirm_production ),
 		);
 	}
 
-	$dispatch = uox_clone_dispatch_workflow( $source, $target, $include_git_files, $preserve_users, $confirm_production );
+	$dispatch = uox_clone_dispatch_workflow( $source, $target, $include_git_files, $preserve_users, $dry_run, $confirm_production );
 
 	if ( is_wp_error( $dispatch ) ) {
 		return $dispatch;
@@ -296,6 +302,12 @@ function uox_clone_render_page() {
 					<label>
 						<input type="checkbox" name="uox_clone_include_git_files" value="1">
 						Incluir arquivos versionados do git no clone
+					</label>
+				</p>
+				<p>
+					<label>
+						<input type="checkbox" name="uox_clone_dry_run" value="1">
+						Somente validar, sem alterar o destino
 					</label>
 				</p>
 			</div>

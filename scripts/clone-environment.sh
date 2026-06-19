@@ -9,6 +9,7 @@ TARGET=""
 INCLUDE_GIT_FILES="0"
 PRESERVE_DESTINATION_USERS="1"
 YES="0"
+DRY_RUN="0"
 CONFIRM_PRODUCTION=""
 
 SSH_HOST="${SSH_HOST:-${STAGING_SSH_HOST:-108.179.252.137}}"
@@ -28,6 +29,7 @@ LOCAL_DB_CONTAINER="${LOCAL_DB_CONTAINER:-uonix-local-db}"
 LOCAL_DB_NAME="${LOCAL_DB_NAME:-uonix_db}"
 LOCAL_DB_USER="${LOCAL_DB_USER:-uonix_user}"
 LOCAL_DB_PASSWORD="${LOCAL_DB_PASSWORD:-uonix_pass}"
+LOCAL_TABLE_PREFIX="${LOCAL_TABLE_PREFIX:-wpis_}"
 
 EXCLUDED_RSYNC_ARGS=(
   --exclude='.DS_Store'
@@ -61,6 +63,7 @@ Uso:
 Opções:
   --include-git-files=0|1              Clona tema filho e MU-plugins versionados.
   --preserve-destination-users=0|1     Mantém usuários do destino após importar o banco.
+  --dry-run                            Valida conexão, caminhos e ferramentas sem alterar o destino.
   --yes                                Executa de fato a operação.
   --confirm-production=TEXTO           Obrigatório para clonar para produção.
 
@@ -124,7 +127,7 @@ remote_run() {
 
 local_wp() {
   cd "$ROOT_DIR"
-  podman-compose -p "$LOCAL_COMPOSE_PROJECT" -f "$LOCAL_COMPOSE_FILE" --profile tools run --rm --no-deps -T wpcli "$@" </dev/null
+  podman-compose -p "$LOCAL_COMPOSE_PROJECT" -f "$LOCAL_COMPOSE_FILE" --profile tools run --rm --no-deps -T wpcli --skip-plugins --skip-themes "$@" </dev/null
 }
 
 local_db_dump() {
@@ -149,6 +152,10 @@ local_db_import() {
     -u "$LOCAL_DB_USER" \
     --skip-ssl \
     "$LOCAL_DB_NAME"
+}
+
+local_db_prefix() {
+  printf '%s\n' "$LOCAL_TABLE_PREFIX"
 }
 
 local_db_query() {
@@ -185,14 +192,21 @@ local_db_dump_options() {
 
 protected_options_where() {
   cat <<'SQL'
-option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron','gosmtp_options','_fluentform_turnstile_details')
+option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron')
 OR option_name LIKE '%backuply%'
 OR option_name LIKE '%fluentform%'
+OR option_name LIKE '\_fluent\_%'
+OR option_name LIKE 'fluent\_%'
 OR option_name LIKE '%fluentmail%'
+OR option_name LIKE '%mailchimp%'
 OR option_name LIKE '%gosmtp%'
+OR option_name LIKE '%smtp%'
+OR option_name LIKE 'mailserver\_%'
 OR option_name LIKE '%loginizer%'
 OR option_name LIKE '%turnstile%'
 OR option_name LIKE '%captcha%'
+OR option_name LIKE '%recaptcha%'
+OR option_name LIKE '%hcaptcha%'
 OR option_name LIKE '%wp_captcha%'
 OR option_name LIKE 'lz\_%'
 SQL
@@ -328,7 +342,7 @@ wp --path=$(printf '%q' "$wp_root") db export $(printf '%q' "${dir}/users.sql") 
   else
     mkdir -p "$dir"
     local prefix
-    prefix="$(local_wp db prefix | tr -d '\r')"
+    prefix="$(local_db_prefix)"
     local_db_dump "${prefix}users" "${prefix}usermeta" >"${dir}/users.sql"
   fi
 }
@@ -348,16 +362,27 @@ snapshot_options() {
     remote_run "set -euo pipefail
 mkdir -p $(printf '%q' "$dir")
 prefix=\"\$(wp --path=$(printf '%q' "$wp_root") db prefix)\"
-wp --path=$(printf '%q' "$wp_root") db export $(printf '%q' "${dir}/options.sql") \
-  --tables=\"\${prefix}options\" \
+db_name=\"\$(wp --path=$(printf '%q' "$wp_root") config get DB_NAME)\"
+db_user=\"\$(wp --path=$(printf '%q' "$wp_root") config get DB_USER)\"
+db_pass=\"\$(wp --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\"
+db_host=\"\$(wp --path=$(printf '%q' "$wp_root") config get DB_HOST)\"
+MYSQL_PWD=\"\$db_pass\" mysqldump \
+  --host=\"\$db_host\" \
+  --user=\"\$db_user\" \
+  --single-transaction \
+  --quick \
+  --skip-lock-tables \
+  --no-tablespaces \
   --no-create-info \
   --skip-triggers \
   --replace \
-  --where=$(printf '%q' "$where") >/dev/null"
+  \"\$db_name\" \
+  \"\${prefix}options\" \
+  --where=$(printf '%q' "$where") > $(printf '%q' "${dir}/options.sql")"
   else
     local prefix
     mkdir -p "$dir"
-    prefix="$(local_wp db prefix | tr -d '\r')"
+    prefix="$(local_db_prefix)"
     local_db_dump_options "${prefix}options" "$where" >"${dir}/options.sql"
   fi
 }
@@ -435,14 +460,15 @@ restore_options() {
     remote_run "set -euo pipefail
 options_sql=$(printf '%q' "${dir}/options.sql")
 prefix=\"\$(wp --path=$(printf '%q' "$wp_root") db prefix)\"
-wp --path=$(printf '%q' "$wp_root") db query $(printf '%q' "DELETE FROM \\\`\${prefix}options\\\` WHERE ${where}") >/dev/null
+delete_sql=\"DELETE FROM \${prefix}options WHERE ${where}\"
+wp --path=$(printf '%q' "$wp_root") db query \"\$delete_sql\" >/dev/null
 if [ -s \"\$options_sql\" ]; then
   wp --path=$(printf '%q' "$wp_root") db import \"\$options_sql\" >/dev/null
 fi"
   else
     local prefix
-    prefix="$(local_wp db prefix | tr -d '\r')"
-    local_db_query "DELETE FROM \`${prefix}options\` WHERE ${where}" >/dev/null
+    prefix="$(local_db_prefix)"
+    local_db_query "DELETE FROM ${prefix}options WHERE ${where}" >/dev/null
     if [ -s "${dir}/options.sql" ]; then
       local_db_import <"${dir}/options.sql"
     fi
@@ -486,7 +512,7 @@ fallback_id=\"\$(wp --path=$(printf '%q' "$wp_root") user list --role=administra
 wp --path=$(printf '%q' "$wp_root") db query \"UPDATE \${prefix}posts SET post_author = \${fallback_id} WHERE post_author NOT IN (\${valid_ids})\" >/dev/null"
   else
     local prefix valid_ids fallback_id
-    prefix="$(local_wp db prefix | tr -d '\r')"
+    prefix="$(local_db_prefix)"
     valid_ids="$(local_wp user list --field=ID | paste -sd, -)"
     fallback_id="$(local_wp user list --role=administrator --field=ID | head -n 1 || true)"
     [ -n "$fallback_id" ] || fallback_id="$(local_wp user list --field=ID | head -n 1 || true)"
@@ -578,6 +604,60 @@ sync_runtime_files() {
   done
 }
 
+preflight_env() {
+  local env="$1"
+  local wp_root
+  local wp_content
+
+  log "Validando ambiente: ${env}"
+
+  if is_remote_env "$env"; then
+    wp_root="$(wp_path "$env")"
+    wp_content="${wp_root}/wp-content"
+
+    remote_run "set -euo pipefail
+command -v wp >/dev/null
+command -v rsync >/dev/null
+command -v gzip >/dev/null
+command -v tar >/dev/null
+test -d $(printf '%q' "$wp_root")
+test -d $(printf '%q' "$wp_content")
+wp --path=$(printf '%q' "$wp_root") db prefix >/dev/null
+wp --path=$(printf '%q' "$wp_root") option get home >/dev/null
+wp --path=$(printf '%q' "$wp_root") option get siteurl >/dev/null"
+  else
+    [ -f "$LOCAL_COMPOSE_FILE" ] || die "Compose local não encontrado: ${LOCAL_COMPOSE_FILE}"
+    [ -d "$LOCAL_WP_CONTENT" ] || die "wp-content local não encontrado: ${LOCAL_WP_CONTENT}"
+
+    local_db_query "SELECT 1" >/dev/null
+    local_db_query "SELECT option_value FROM \`${LOCAL_TABLE_PREFIX}options\` WHERE option_name IN ('home','siteurl')" >/dev/null
+  fi
+}
+
+dry_run_clone() {
+  local dirs=(uploads plugins languages)
+
+  if [ "$INCLUDE_GIT_FILES" = "1" ]; then
+    dirs+=(themes/kadence-child mu-plugins)
+  fi
+
+  log "Dry-run solicitado: nenhuma alteração será aplicada."
+  log "Origem: ${SOURCE} ($(env_url "$SOURCE"))"
+  log "Destino: ${TARGET} ($(env_url "$TARGET"))"
+  log "Arquivos versionados: ${INCLUDE_GIT_FILES}; preservar usuários: ${PRESERVE_DESTINATION_USERS}"
+
+  if [ "$TARGET" = "prod" ]; then
+    log "Destino produção: clone real exigirá --confirm-production='CLONAR PARA PRODUCAO'."
+  fi
+
+  preflight_env "$SOURCE"
+  preflight_env "$TARGET"
+
+  log "Diretórios que seriam sincronizados em wp-content: ${dirs[*]}"
+  log "Opções preservadas no destino: plugins gerenciados, active_plugins, cron, SMTP/captcha/Turnstile/admin_email."
+  log "Dry-run concluído sem alterações."
+}
+
 for arg in "$@"; do
   case "$arg" in
     --source=*) SOURCE="${arg#*=}" ;;
@@ -585,6 +665,7 @@ for arg in "$@"; do
     --include-git-files=*) INCLUDE_GIT_FILES="${arg#*=}" ;;
     --preserve-destination-users=*) PRESERVE_DESTINATION_USERS="${arg#*=}" ;;
     --confirm-production=*) CONFIRM_PRODUCTION="${arg#*=}" ;;
+    --dry-run) DRY_RUN="1" ;;
     --yes) YES="1" ;;
     -h|--help) usage; exit 0 ;;
     *) die "Argumento inválido: $arg" ;;
@@ -597,17 +678,22 @@ done
 [[ "$INCLUDE_GIT_FILES" =~ ^(0|1)$ ]] || die "--include-git-files precisa ser 0 ou 1"
 [[ "$PRESERVE_DESTINATION_USERS" =~ ^(0|1)$ ]] || die "--preserve-destination-users precisa ser 0 ou 1"
 
-if [ "$TARGET" = "prod" ] && [ "$CONFIRM_PRODUCTION" != "CLONAR PARA PRODUCAO" ]; then
+if [ "$TARGET" = "prod" ] && [ "$DRY_RUN" != "1" ] && [ "$CONFIRM_PRODUCTION" != "CLONAR PARA PRODUCAO" ]; then
   die "Para clonar para produção, informe --confirm-production='CLONAR PARA PRODUCAO'"
 fi
 
-if [ "$YES" != "1" ]; then
+if [ "$YES" != "1" ] && [ "$DRY_RUN" != "1" ]; then
   usage
   die "Execução bloqueada. Rode novamente com --yes depois de revisar origem e destino."
 fi
 
 if ( is_remote_env "$SOURCE" || is_remote_env "$TARGET" ) && [ ! -f "$SSH_KEY" ]; then
   die "Chave SSH não encontrada: ${SSH_KEY}"
+fi
+
+if [ "$DRY_RUN" = "1" ]; then
+  dry_run_clone
+  exit 0
 fi
 
 tmp_dir="$(mktemp -d)"

@@ -27,6 +27,11 @@ on:
         required: true
         type: boolean
         default: true
+      dry_run:
+        description: Validar sem alterar o destino
+        required: true
+        type: boolean
+        default: false
       confirm_production:
         description: Para destino prod, digite CLONAR PARA PRODUCAO
         required: false
@@ -58,7 +63,7 @@ jobs:
             exit 1
           fi
 
-          if [ "${{ inputs.target }}" = "prod" ] && [ "${{ inputs.confirm_production }}" != "CLONAR PARA PRODUCAO" ]; then
+          if [ "${{ inputs.target }}" = "prod" ] && [ "${{ inputs.dry_run }}" != "true" ] && [ "${{ inputs.confirm_production }}" != "CLONAR PARA PRODUCAO" ]; then
             echo "Production clone requires exact confirmation."
             exit 1
           fi
@@ -79,10 +84,16 @@ jobs:
         run: |
           chmod +x scripts/clone-environment.sh
 
+          dry_run_arg=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            dry_run_arg="--dry-run"
+          fi
+
           SSH_KEY="$HOME/.ssh/uonix_clone_key" scripts/clone-environment.sh \
             --source="${{ inputs.source }}" \
             --target="${{ inputs.target }}" \
             --include-git-files="${{ inputs.include_git_files && '1' || '0' }}" \
             --preserve-destination-users="${{ inputs.preserve_destination_users && '1' || '0' }}" \
             --confirm-production="${{ inputs.confirm_production }}" \
+            $dry_run_arg \
             --yes
