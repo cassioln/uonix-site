@@ -125,6 +125,40 @@ remote_run() {
   done
 }
 
+rsync_with_retry() {
+  local attempt
+  local output
+  local status
+
+  for attempt in 1 2 3 4 5; do
+    set +e
+    output="$("$@" 2>&1)"
+    status=$?
+    set -e
+
+    if [ "$status" -eq 0 ]; then
+      printf '%s\n' "$output"
+      return 0
+    fi
+
+    case "$status" in
+      10|12|30|35|255) ;;
+      *)
+        printf '%s\n' "$output" >&2
+        return "$status"
+        ;;
+    esac
+
+    if [ "$attempt" -eq 5 ]; then
+      printf '%s\n' "$output" >&2
+      return "$status"
+    fi
+
+    printf 'Rsync indisponível temporariamente; nova tentativa %d/5 em %ds.\n' "$(( attempt + 1 ))" "$(( attempt * 10 ))" >&2
+    sleep "$(( attempt * 10 ))"
+  done
+}
+
 local_wp() {
   cd "$ROOT_DIR"
   podman-compose -p "$LOCAL_COMPOSE_PROJECT" -f "$LOCAL_COMPOSE_FILE" --profile tools run --rm --no-deps -T wpcli --skip-plugins --skip-themes "$@" </dev/null
@@ -590,7 +624,7 @@ fi"
   elif is_remote_env "$source_env"; then
     if remote_run "[ -d $(printf '%q' "${source_content}/${relative_dir}") ]"; then
       mkdir -p "${target_content}/${relative_dir}"
-      rsync -az --delete "${rsync_args[@]}" \
+      rsync_with_retry rsync -az --delete "${rsync_args[@]}" \
         -e "ssh -p ${SSH_PORT} -i ${SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
         "${SSH_USER}@${SSH_HOST}:${source_content}/${relative_dir}/" \
         "${target_content}/${relative_dir}/"
@@ -598,14 +632,14 @@ fi"
   elif is_remote_env "$target_env"; then
     [ -d "${source_content}/${relative_dir}" ] || return 0
     remote_run "mkdir -p $(printf '%q' "${target_content}/${relative_dir}")"
-    rsync -az --delete "${rsync_args[@]}" \
+    rsync_with_retry rsync -az --delete "${rsync_args[@]}" \
       -e "ssh -p ${SSH_PORT} -i ${SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
       "${source_content}/${relative_dir}/" \
       "${SSH_USER}@${SSH_HOST}:${target_content}/${relative_dir}/"
   else
     [ -d "${source_content}/${relative_dir}" ] || return 0
     mkdir -p "${target_content}/${relative_dir}"
-    rsync -a --delete "${rsync_args[@]}" \
+    rsync_with_retry rsync -a --delete "${rsync_args[@]}" \
       "${source_content}/${relative_dir}/" \
       "${target_content}/${relative_dir}/"
   fi
