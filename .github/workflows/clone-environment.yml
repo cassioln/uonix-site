@@ -76,12 +76,10 @@ jobs:
             "command -v wp && command -v rsync && command -v gzip && command -v tar"
 
       - name: Run clone
-        env:
-          SSH_KEY: $HOME/.ssh/uonix_clone_key
         run: |
           chmod +x scripts/clone-environment.sh
 
-          scripts/clone-environment.sh \
+          SSH_KEY="$HOME/.ssh/uonix_clone_key" scripts/clone-environment.sh \
             --source="${{ inputs.source }}" \
             --target="${{ inputs.target }}" \
             --include-git-files="${{ inputs.include_git_files && '1' || '0' }}" \
