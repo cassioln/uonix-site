@@ -75,13 +75,36 @@ shell_join() {
 
 remote_run() {
   local script="$1"
+  local attempt
+  local output
+  local status
 
-  ssh -p "$SSH_PORT" \
-    -i "$SSH_KEY" \
-    -o BatchMode=yes \
-    -o StrictHostKeyChecking=accept-new \
-    "${SSH_USER}@${SSH_HOST}" \
-    "bash -s" <<<"$script"
+  for attempt in 1 2 3 4 5; do
+    set +e
+    output="$(
+      ssh -p "$SSH_PORT" \
+        -i "$SSH_KEY" \
+        -o BatchMode=yes \
+        -o StrictHostKeyChecking=accept-new \
+        "${SSH_USER}@${SSH_HOST}" \
+        "bash -s" <<<"$script" 2>&1
+    )"
+    status=$?
+    set -e
+
+    if [ "$status" -eq 0 ]; then
+      printf '%s\n' "$output"
+      return 0
+    fi
+
+    if [ "$status" -ne 255 ] || [ "$attempt" -eq 5 ]; then
+      printf '%s\n' "$output" >&2
+      return "$status"
+    fi
+
+    printf 'SSH indisponível temporariamente; nova tentativa %d/5 em %ds.\n' "$(( attempt + 1 ))" "$(( attempt * 10 ))" >&2
+    sleep "$(( attempt * 10 ))"
+  done
 }
 
 local_wp() {
