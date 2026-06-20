@@ -579,21 +579,41 @@ wp --path=$(printf '%q' "$wp_root") db query \"UPDATE \${prefix}posts SET post_a
 
 clear_cache() {
   local env="$1"
+  local cache_dirs=(
+    speedycache
+    min
+    critical-css
+    background-css
+    busting
+    wp-rocket
+  )
 
   log "Limpando cache do destino: ${env}"
 
   if is_remote_env "$env"; then
     local wp_root
+    local remote_cache_dirs
     wp_root="$(wp_path "$env")"
+    remote_cache_dirs="$(shell_join "${cache_dirs[@]}")"
 
     remote_run "set -euo pipefail
 wp_content=$(printf '%q' "${wp_root}/wp-content")
-if [ -d \"\$wp_content/cache/speedycache\" ]; then
-  find \"\$wp_content/cache/speedycache\" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+cache_root=\"\$wp_content/cache\"
+if [ -d \"\$cache_root\" ]; then
+  for cache_dir in ${remote_cache_dirs}; do
+    rm -rf \"\$cache_root/\$cache_dir\"
+  done
 fi
+wp --path=$(printf '%q' "$wp_root") transient delete --all || true
 wp --path=$(printf '%q' "$wp_root") cache flush || true"
   else
-    rm -rf "${LOCAL_WP_CONTENT}/cache/speedycache"/* 2>/dev/null || true
+    local cache_dir
+
+    for cache_dir in "${cache_dirs[@]}"; do
+      rm -rf "${LOCAL_WP_CONTENT}/cache/${cache_dir}" 2>/dev/null || true
+    done
+
+    local_wp transient delete --all || true
     local_wp cache flush || true
   fi
 }
