@@ -53,3 +53,11 @@ SSH_KEY="$HOME/.ssh/uonix_github_actions_staging_nopass" scripts/clone-environme
 ```
 
 O script mantém o título local como `DEV - UONIX`, preserva GoSMTP/Turnstile/Loginizer do destino e deixa o Mailpit ativo apenas em localhost.
+
+
+## Validar Clone Sem Alterar
+
+```bash
+cd /Users/cassio/GitHubPessoal/uonix-site
+SSH_KEY="$HOME/.ssh/uonix_github_actions_staging_nopass" scripts/clone-environment.sh --source=qa --target=local --include-git-files=0 --preserve-destination-users=1 --dry-run
+```

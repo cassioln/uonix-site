@@ -12,11 +12,13 @@ A ferramenta `ksio.dev > Clone de Ambientes` prepara clones completos entre prod
 
 ## Segurança
 
-- Clonar para produção exige a confirmação exata `CLONAR PARA PRODUCAO`.
-- O destino sempre recebe backup antes do clone.
+- Clonar para produção exige a confirmação exata `CLONAR PARA PRODUCAO`, exceto em `--dry-run`.
+- Use `--dry-run` para validar conexões, caminhos e ferramentas sem alterar banco ou arquivos.
+- O destino sempre recebe backup antes do clone real.
 - A retenção padrão mantém os últimos 5 backups por ambiente.
 - Usuários do destino são preservados por padrão.
-- Opções sensíveis do destino são preservadas: plugins gerenciados por ambiente, estado de ativação dos plugins, cron, GoSMTP, Turnstile, captcha/Loginizer e `admin_email`.
+- Opções sensíveis do destino são preservadas: plugins gerenciados por ambiente, estado de ativação dos plugins, cron, GoSMTP/WP Mail SMTP, Turnstile, reCAPTCHA/hCaptcha, Mailchimp, captcha/Loginizer, Backuply, Fluent Forms e `admin_email`.
+- Opções sensíveis são restauradas por `option_name`, sem reaproveitar `option_id`, para evitar colisões com opções importadas da origem.
 - Mailpit é carregado somente quando `UONIX_ENV` é `local`.
 
 ## Arquivos Runtime
@@ -38,7 +40,30 @@ define( 'UONIX_GITHUB_WORKFLOW_REF', 'qa' );
 
 O token deve ter permissão mínima para disparar workflows no repositório.
 
+## Matriz De Cenários
+
+Pares suportados:
+
+- `prod -> qa`
+- `qa -> prod`
+- `prod -> local`
+- `qa -> local`
+- `local -> qa`
+- `local -> prod`
+
+Destinos `prod` devem ser testados primeiro com `--dry-run`. Clone real para produção exige `--confirm-production='CLONAR PARA PRODUCAO'`.
+
 ## Comandos Locais
+
+Validar todos os pares sem alterar destino:
+
+```bash
+cd /Users/cassio/GitHubPessoal/uonix-site
+for pair in 'prod qa' 'qa prod' 'prod local' 'qa local' 'local qa' 'local prod'; do
+  set -- $pair
+  SSH_KEY="$HOME/.ssh/uonix_github_actions_staging_nopass" scripts/clone-environment.sh --source="$1" --target="$2" --include-git-files=0 --preserve-destination-users=1 --dry-run
+done
+```
 
 Clonar QA para localhost:
 
