@@ -49,11 +49,23 @@ services:
       - ../themes/kadence-child:/var/www/html/wp-content/themes/kadence-child:z
       - ../mu-plugins:/var/www/html/wp-content/mu-plugins:z
       - ./php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:z
+      # SSH para o Remote Explorer do Antigravity/VS Code (provisionado no boot)
+      - ./ssh/entrypoint-ssh.sh:/usr/local/bin/entrypoint-ssh.sh:ro
+      - ./ssh/provision-ssh.sh:/usr/local/bin/provision-ssh.sh:ro
+      - ./ssh/authorized_keys:/run/secrets/uonix_authorized_keys:ro
+      - ./ssh/authorized_keys.example:/run/secrets/uonix_authorized_keys_example:ro
+
+    # Sobe o sshd antes de delegar para o entrypoint oficial do WordPress.
+    entrypoint:
+      - /usr/local/bin/entrypoint-ssh.sh
+    command:
+      - apache2-foreground
 
   wpcli:
     profiles:
       - tools
     platform: linux/arm64
+
     image: wordpress:cli-php8.2
     depends_on:
       - db
