@@ -25,3 +25,9 @@ tmp/
 # Local WordPress runtime
 local/.env
 local/wp-content/
+
+# SSH do container (Remote Explorer) - chave pessoal de cada dev.
+# Versionamos apenas o template authorized_keys.example.
+local/ssh/authorized_keys
+.compose_check.txt
+
