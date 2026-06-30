@@ -34,25 +34,40 @@ LOCAL_TABLE_PREFIX="${LOCAL_TABLE_PREFIX:-wpis_}"
 EXCLUDED_RSYNC_ARGS=(
   --exclude='.DS_Store'
   --exclude='._*'
+  --exclude='*~'
+  --exclude='*.log'
   --exclude='cache/'
   --exclude='speedycache/'
   --exclude='wc-logs/'
   --exclude='wp-staging/'
   --exclude='wpmc-trash/'
   --exclude='wp-personal-data-exports/'
+  --exclude='curriculos-recebidos/'
+  --exclude='FLUENT_PDF_TEMPLATES/'
   --exclude='gosmtp-attachments/'
+  --exclude='loginizer-config/'
+  --exclude='speedycache-binary/'
+  --exclude='ai1wm-backups/'
+  --exclude='wpvivid_uploads/'
+  --exclude='wpvividbackups/'
+  --exclude='wpvivid_staging/'
+  --exclude='logs/'
   --exclude='uonix-local/'
 )
 
 PLUGIN_RSYNC_EXCLUDES=(
   # Plugins com configuração própria por ambiente não entram em clones.
+  --exclude='all-in-one-wp-migration-10GB/'
   --exclude='backuply/'
   --exclude='backuply-pro/'
+  --exclude='fluent-smtp/'
   --exclude='fluentform/'
   --exclude='gosmtp/'
   --exclude='gosmtp-pro/'
   --exclude='loginizer/'
   --exclude='loginizer-security/'
+  --exclude='wp-mail-logging/'
+  --exclude='wpvivid-backuprestore/'
 )
 
 usage() {
@@ -329,6 +344,7 @@ protected_options_where() {
   cat <<'SQL'
 option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron')
 OR option_name LIKE '%backuply%'
+OR option_name LIKE '%ai1wm%'
 OR option_name LIKE '%fluentform%'
 OR option_name LIKE '\_fluent\_%'
 OR option_name LIKE 'fluent\_%'
@@ -344,6 +360,9 @@ OR option_name LIKE '%recaptcha%'
 OR option_name LIKE '%hcaptcha%'
 OR option_name LIKE '%wp_captcha%'
 OR option_name LIKE 'lz\_%'
+OR option_name LIKE '%wp_mail_logging%'
+OR option_name LIKE '%mail_logging%'
+OR option_name LIKE '%wpvivid%'
 SQL
 }
 

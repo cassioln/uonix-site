@@ -11,6 +11,9 @@ vendor/
 
 *.sql
 *.sql.gz
+*.wpress
+*.log
+*~
 *.zip
 *.tar
 *.tar.gz
@@ -30,4 +33,3 @@ local/wp-content/
 # Versionamos apenas o template authorized_keys.example.
 local/ssh/authorized_keys
 .compose_check.txt
-

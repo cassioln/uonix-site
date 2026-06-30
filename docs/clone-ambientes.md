@@ -23,8 +23,9 @@ A ferramenta `ksio.dev > Clone de Ambientes` prepara clones completos entre prod
 
 ## Arquivos Runtime
 
-- O clone sincroniza `uploads`, `plugins` e `languages`, sem incluir cache e arquivos temporários.
-- Os plugins `backuply`, `backuply-pro`, `fluentform`, `gosmtp`, `gosmtp-pro`, `loginizer` e `loginizer-security` são gerenciados por ambiente e não são copiados entre ambientes.
+- O clone sincroniza `uploads`, `plugins` e `languages`, sem incluir cache, logs, backups, staging, arquivos temporários ou PII de currículos.
+- Em `uploads`, ficam fora da migração: `curriculos-recebidos`, `FLUENT_PDF_TEMPLATES`, `gosmtp-attachments`, `loginizer-config`, `speedycache-binary`, `wc-logs`, `wp-personal-data-exports`, `wp-staging`, `wpvivid_*`, `wpmc-trash`, `*.log` e arquivos temporários `*~`.
+- Os plugins `all-in-one-wp-migration-10GB`, `backuply`, `backuply-pro`, `fluent-smtp`, `fluentform`, `gosmtp`, `gosmtp-pro`, `loginizer`, `loginizer-security`, `wp-mail-logging` e `wpvivid-backuprestore` são gerenciados por ambiente e não são copiados entre ambientes.
 - As opções desses plugins em `wp_options` também são preservadas no destino para evitar sobrescrever chaves, SMTP, Turnstile, licença, cron e estado de ativação local.
 - Tema filho e MU-plugins versionados só entram no clone quando `--include-git-files=1`.
 
