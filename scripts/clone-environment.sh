@@ -125,6 +125,106 @@ remote_run() {
   done
 }
 
+remote_stream_to_file() {
+  local remote_command="$1"
+  local output_file="$2"
+  local attempt
+  local err_file
+  local partial_file
+  local status
+
+  partial_file="${output_file}.partial"
+
+  for attempt in 1 2 3 4 5; do
+    err_file="$(mktemp)"
+    rm -f "$partial_file"
+
+    set +e
+    ssh -p "$SSH_PORT" \
+      -i "$SSH_KEY" \
+      -o BatchMode=yes \
+      -o StrictHostKeyChecking=accept-new \
+      "${SSH_USER}@${SSH_HOST}" \
+      "$remote_command" >"$partial_file" 2>"$err_file"
+    status=$?
+    set -e
+
+    if [ "$status" -eq 0 ]; then
+      cat "$err_file" >&2
+      rm -f "$err_file"
+      mv "$partial_file" "$output_file"
+      return 0
+    fi
+
+    if [ "$status" -ne 255 ] || [ "$attempt" -eq 5 ]; then
+      cat "$err_file" >&2
+      rm -f "$err_file" "$partial_file"
+      return "$status"
+    fi
+
+    cat "$err_file" >&2
+    rm -f "$err_file" "$partial_file"
+    printf 'SSH indisponível temporariamente; nova tentativa %d/5 em %ds.\n' "$(( attempt + 1 ))" "$(( attempt * 10 ))" >&2
+    sleep "$(( attempt * 10 ))"
+  done
+}
+
+remote_import_gzip_dump() {
+  local dump_file="$1"
+  local remote_command="$2"
+  local marker="__UONIX_REMOTE_IMPORT_STARTED__"
+  local attempt
+  local gzip_err_file
+  local ssh_err_file
+  local gzip_status
+  local ssh_status
+  local status
+  local remote_started
+
+  for attempt in 1 2 3 4 5; do
+    gzip_err_file="$(mktemp)"
+    ssh_err_file="$(mktemp)"
+
+    set +e
+    gzip -dc "$dump_file" 2>"$gzip_err_file" | ssh -p "$SSH_PORT" \
+      -i "$SSH_KEY" \
+      -o BatchMode=yes \
+      -o StrictHostKeyChecking=accept-new \
+      "${SSH_USER}@${SSH_HOST}" \
+      "printf '%s\n' '$marker' >&2; $remote_command" 2>"$ssh_err_file"
+    gzip_status="${PIPESTATUS[0]}"
+    ssh_status="${PIPESTATUS[1]}"
+    set -e
+
+    remote_started="0"
+    if grep -q "$marker" "$ssh_err_file"; then
+      remote_started="1"
+    fi
+
+    sed "/$marker/d" "$ssh_err_file" >&2
+    cat "$gzip_err_file" >&2
+
+    if [ "$gzip_status" -eq 0 ] && [ "$ssh_status" -eq 0 ]; then
+      rm -f "$gzip_err_file" "$ssh_err_file"
+      return 0
+    fi
+
+    status="$ssh_status"
+    if [ "$status" -eq 0 ]; then
+      status="$gzip_status"
+    fi
+
+    if [ "$ssh_status" -ne 255 ] || [ "$remote_started" = "1" ] || [ "$attempt" -eq 5 ]; then
+      rm -f "$gzip_err_file" "$ssh_err_file"
+      return "$status"
+    fi
+
+    rm -f "$gzip_err_file" "$ssh_err_file"
+    printf 'SSH indisponível temporariamente; nova tentativa %d/5 em %ds.\n' "$(( attempt + 1 ))" "$(( attempt * 10 ))" >&2
+    sleep "$(( attempt * 10 ))"
+  done
+}
+
 rsync_with_retry() {
   local attempt
   local output
@@ -452,9 +552,9 @@ export_source_db() {
   if is_remote_env "$env"; then
     local wp_root
     wp_root="$(wp_path "$env")"
-    ssh -p "$SSH_PORT" -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-      "${SSH_USER}@${SSH_HOST}" \
-      "wp --path=$(printf '%q' "$wp_root") db export - | gzip -c" >"$dump_file"
+    remote_stream_to_file \
+      "wp --path=$(printf '%q' "$wp_root") db export - | gzip -c" \
+      "$dump_file"
   else
     local_db_dump | gzip -c >"$dump_file"
   fi
@@ -469,8 +569,8 @@ import_db_to_target() {
   if is_remote_env "$env"; then
     local wp_root
     wp_root="$(wp_path "$env")"
-    gzip -dc "$dump_file" | ssh -p "$SSH_PORT" -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-      "${SSH_USER}@${SSH_HOST}" \
+    remote_import_gzip_dump \
+      "$dump_file" \
       "wp --path=$(printf '%q' "$wp_root") db import -"
   else
     gzip -dc "$dump_file" | local_db_import
