@@ -40,6 +40,8 @@ podman-compose -p uonix-local -f local/compose.yml down
 
 Para o local ficar fiel ao servidor, mantenha `local/wp-content/plugins` e `local/wp-content/uploads` sincronizados fora do Git e importe um dump atual do banco.
 
+O passo a passo para recriar o ambiente local apos apagar containers, imagens ou volumes fica em [local/README.md](local/README.md).
+
 ## Clone de Ambientes
 
 A ferramenta `ksio.dev > Clone de Ambientes` dispara o workflow `.github/workflows/clone-environment.yml` para clones remotos entre produção e QA. Clones envolvendo localhost geram um comando para rodar no Mac.
