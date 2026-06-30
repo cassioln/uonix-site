@@ -20,6 +20,8 @@ if [ -d "${DOWNLOADS_DIR}/plugins" ]; then
     --exclude='gosmtp-pro/' \
     --exclude='loginizer/' \
     --exclude='loginizer-security/' \
+    --exclude='speedycache/' \
+    --exclude='speedycache-pro/' \
     --exclude='wp-mail-logging/' \
     --exclude='wp-staging/' \
     --exclude='wpvivid-backuprestore/' \
