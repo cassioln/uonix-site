@@ -178,6 +178,7 @@ remote_import_gzip_dump() {
   local ssh_err_file
   local gzip_status
   local ssh_status
+  local pipe_status
   local status
   local remote_started
 
@@ -192,8 +193,9 @@ remote_import_gzip_dump() {
       -o StrictHostKeyChecking=accept-new \
       "${SSH_USER}@${SSH_HOST}" \
       "printf '%s\n' '$marker' >&2; $remote_command" 2>"$ssh_err_file"
-    gzip_status="${PIPESTATUS[0]}"
-    ssh_status="${PIPESTATUS[1]}"
+    pipe_status=("${PIPESTATUS[@]}")
+    gzip_status="${pipe_status[0]}"
+    ssh_status="${pipe_status[1]}"
     set -e
 
     remote_started="0"
