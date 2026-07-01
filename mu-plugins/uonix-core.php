@@ -89,6 +89,7 @@ if ( ! function_exists( 'uonix_mu_load_modules' ) ) {
 			'uonix-fluentforms/module.php',
 			'uonix-forms/module.php',
 			'uonix-admin/module.php',
+			'uonix-performance/module.php',
 			'uonix-integrations/module.php',
 		);
 
