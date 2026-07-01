@@ -40,6 +40,8 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 		?>
 		<style id="uonix-home-critical-pruning-css">
 			#mega-menu-wrap-primary .mega-menu,
+			#mega-menu-wrap-menu-extra-2 .mega-menu,
+			#mega-menu-wrap-menu-extra-3 .mega-menu,
 			#mega-menu-wrap-footer .mega-menu {
 				display: flex;
 				align-items: center;
@@ -49,24 +51,146 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 				list-style: none;
 			}
 			#mega-menu-wrap-primary .mega-menu > li,
+			#mega-menu-wrap-menu-extra-2 .mega-menu > li,
+			#mega-menu-wrap-menu-extra-3 .mega-menu > li,
 			#mega-menu-wrap-footer .mega-menu > li {
 				position: relative;
 				list-style: none;
 			}
 			#mega-menu-wrap-primary .mega-menu-link,
+			#mega-menu-wrap-menu-extra-2 .mega-menu-link,
+			#mega-menu-wrap-menu-extra-3 .mega-menu-link,
 			#mega-menu-wrap-footer .mega-menu-link {
 				display: flex;
 				align-items: center;
 				text-decoration: none;
 				white-space: nowrap;
 			}
+			#mega-menu-wrap-primary .mega-menu-toggle,
+			#mega-menu-wrap-primary .mega-close,
+			#mega-menu-wrap-menu-extra-2 .mega-menu-toggle,
+			#mega-menu-wrap-menu-extra-2 .mega-close,
+			#mega-menu-wrap-menu-extra-3 .mega-menu-toggle,
+			#mega-menu-wrap-menu-extra-3 .mega-close,
+			#mega-menu-wrap-footer .mega-menu-toggle,
+			#mega-menu-wrap-footer .mega-close {
+				display: none;
+			}
 			#mega-menu-wrap-primary .mega-sub-menu,
+			#mega-menu-wrap-menu-extra-2 .mega-sub-menu,
+			#mega-menu-wrap-menu-extra-3 .mega-sub-menu,
 			#mega-menu-wrap-footer .mega-sub-menu {
 				display: none;
 			}
 			#mega-menu-wrap-primary .mega-menu-item:hover > .mega-sub-menu,
-			#mega-menu-wrap-primary .mega-menu-item:focus-within > .mega-sub-menu {
+			#mega-menu-wrap-primary .mega-menu-item:focus-within > .mega-sub-menu,
+			#mega-menu-wrap-menu-extra-2 .mega-menu-item:hover > .mega-sub-menu,
+			#mega-menu-wrap-menu-extra-2 .mega-menu-item:focus-within > .mega-sub-menu,
+			#mega-menu-wrap-menu-extra-3 .mega-menu-item:hover > .mega-sub-menu,
+			#mega-menu-wrap-menu-extra-3 .mega-menu-item:focus-within > .mega-sub-menu {
 				display: block;
+			}
+			#mega-menu-wrap-primary .mega-menu {
+				justify-content: center;
+				text-align: center;
+			}
+			#mega-menu-wrap-primary .mega-menu > li {
+				display: inline-flex;
+				align-items: center;
+				height: 40px;
+				margin: 0 10px 0 0;
+				vertical-align: middle;
+			}
+			#mega-menu-wrap-primary .mega-menu > li > .mega-menu-link {
+				height: 40px;
+				padding: 0 10px;
+				color: #f1f1f1;
+				font-size: 18px;
+				font-weight: 300;
+				line-height: 40px;
+				text-align: center;
+				text-transform: uppercase;
+			}
+			#mega-menu-wrap-primary .mega-menu > li > .mega-menu-link:hover,
+			#mega-menu-wrap-primary .mega-menu > li > .mega-menu-link:focus {
+				color: #ffffff;
+			}
+			#mega-menu-wrap-primary .mega-indicator::after {
+				content: "";
+				display: inline-block;
+				width: 0.75em;
+				height: 0.75em;
+				margin-left: 6px;
+				background: currentColor;
+				clip-path: polygon(20% 35%, 50% 65%, 80% 35%, 90% 45%, 50% 85%, 10% 45%);
+			}
+			#mega-menu-wrap-menu-extra-2 .mega-menu,
+			#mega-menu-wrap-menu-extra-3 .mega-menu {
+				justify-content: center;
+			}
+			#mega-menu-wrap-menu-extra-2 .mega-menu > li,
+			#mega-menu-wrap-menu-extra-3 .mega-menu > li {
+				display: inline-flex;
+				align-items: center;
+				margin: 0;
+			}
+			#mega-menu-wrap-menu-extra-2 #mega-menu-item-4811 > .mega-menu-link,
+			#mega-menu-wrap-menu-extra-3 #mega-menu-item-4819 > .mega-menu-link {
+				position: relative;
+				gap: 0;
+				padding: 5px 15px;
+				color: #003399;
+				font-size: 0;
+				font-weight: 600;
+				line-height: 1.1;
+			}
+			#mega-menu-wrap-menu-extra-2 #mega-menu-item-4811 > .mega-menu-link::before,
+			#mega-menu-wrap-menu-extra-3 #mega-menu-item-4819 > .mega-menu-link::before {
+				content: "";
+				display: block;
+				flex: 0 0 auto;
+				background: #003399;
+				-webkit-mask-position: center;
+				mask-position: center;
+				-webkit-mask-repeat: no-repeat;
+				mask-repeat: no-repeat;
+				-webkit-mask-size: contain;
+				mask-size: contain;
+			}
+			#mega-menu-wrap-menu-extra-2 #mega-menu-item-4811 > .mega-menu-link::before {
+				width: 33px;
+				height: 33px;
+				margin: 4px 12px 0 0;
+				-webkit-mask-image: url("/wp-content/uploads/2026/03/ico-contato.svg");
+				mask-image: url("/wp-content/uploads/2026/03/ico-contato.svg");
+			}
+			#mega-menu-wrap-menu-extra-3 #mega-menu-item-4819 > .mega-menu-link::before {
+				width: 50px;
+				height: 55px;
+				margin: 6px 6px 0 0;
+				-webkit-mask-image: url("/wp-content/uploads/2026/03/ico-carrinho.svg");
+				mask-image: url("/wp-content/uploads/2026/03/ico-carrinho.svg");
+			}
+			#mega-menu-wrap-menu-extra-2 #mega-menu-item-4811 > .mega-menu-link::after,
+			#mega-menu-wrap-menu-extra-3 #mega-menu-item-4819 > .mega-menu-link::after {
+				display: block;
+				color: #003399;
+				font-size: 17px;
+				font-weight: 600;
+				line-height: 1.1;
+				text-align: left;
+				text-transform: capitalize;
+				white-space: pre-line;
+			}
+			#mega-menu-wrap-menu-extra-2 #mega-menu-item-4811 > .mega-menu-link::after {
+				content: "Central de\a Atendimento";
+			}
+			#mega-menu-wrap-menu-extra-3 #mega-menu-item-4819 > .mega-menu-link::after {
+				content: "Itens do\a Or\00e7 amento";
+			}
+			#mega-menu-wrap-menu-extra-2 .mega-indicator,
+			#mega-menu-wrap-menu-extra-3 .mega-indicator {
+				display: none;
 			}
 			#mega-menu-wrap-mobile .mega-menu {
 				display: none;
@@ -447,6 +571,7 @@ if ( ! function_exists( 'uonix_home_strip_filter_asset_tags' ) ) {
 		$html = uonix_home_defer_styles_by_id(
 			$html,
 			array(
+				'megamenu-css',
 				'fluent-form-styles-css',
 				'fluentform-public-default-css',
 				'kadence-woocommerce-css',
@@ -478,6 +603,7 @@ if ( ! function_exists( 'uonix_home_deferred_styles_loader' ) ) {
 			(function() {
 				var loaded = {};
 				var groupById = {
+					'megamenu-css': 'menu',
 					'fluent-form-styles-css': 'form',
 					'fluentform-public-default-css': 'form',
 					'kadence-woocommerce-css': 'woo'
@@ -544,9 +670,11 @@ if ( ! function_exists( 'uonix_home_deferred_styles_loader' ) ) {
 				}
 
 				function init() {
+					bindLoad('.mega-menu-wrap', 'menu');
 					bindLoad('.fluentform, .fluent_form_3, form[id^="fluentform_"]', 'form');
 					bindLoad('.wc-block-mini-cart, .uonix-menu-cart, .add_to_cart_button, .wcps-container', 'woo');
 					observeLoad('.fluentform, .fluent_form_3, form[id^="fluentform_"]', 'form');
+					window.setTimeout(function() { loadGroup('menu'); }, 12000);
 					window.setTimeout(function() { loadGroup('woo'); }, 14000);
 				}
 
