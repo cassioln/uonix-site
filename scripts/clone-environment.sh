@@ -31,6 +31,12 @@ LOCAL_DB_USER="${LOCAL_DB_USER:-uonix_user}"
 LOCAL_DB_PASSWORD="${LOCAL_DB_PASSWORD:-uonix_pass}"
 LOCAL_TABLE_PREFIX="${LOCAL_TABLE_PREFIX:-wpis_}"
 
+COMPRESSX_CRITICAL_IMAGE_PATHS=(
+  /wp-content/uploads/2026/03/olhal-ancoragem-uonix-catalago.png
+  /wp-content/uploads/2026/03/thumb-acessorios.png
+  /wp-content/uploads/2026/01/alfa_servicos-e-treinamentos.webp
+)
+
 EXCLUDED_RSYNC_ARGS=(
   --exclude='.DS_Store'
   --exclude='._*'
@@ -60,6 +66,7 @@ PLUGIN_RSYNC_EXCLUDES=(
   --exclude='all-in-one-wp-migration-10GB/'
   --exclude='backuply/'
   --exclude='backuply-pro/'
+  --exclude='compressx/'
   --exclude='fluent-smtp/'
   --exclude='fluentform/'
   --exclude='gosmtp/'
@@ -347,6 +354,7 @@ protected_options_where() {
 option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron')
 OR option_name LIKE '%backuply%'
 OR option_name LIKE '%ai1wm%'
+OR option_name LIKE 'compressx%'
 OR option_name LIKE '%fluentform%'
 OR option_name LIKE '\_fluent\_%'
 OR option_name LIKE 'fluent\_%'
@@ -479,7 +487,7 @@ if [ -d $(printf '%q' "$wp_content") ]; then
   tar -czf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") \
     -C $(printf '%q' "$wp_content") \
     --exclude='cache' --exclude='speedycache' --exclude='wc-logs' --exclude='wp-staging' \
-    uploads plugins languages 2>/dev/null || true
+    uploads plugins languages compressx compressx-nextgen .htaccess 2>/dev/null || true
 fi
 find $(printf '%q' "${REMOTE_BACKUP_ROOT}/${env}") -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +6 | cut -d' ' -f2- | xargs -r rm -rf"
   else
@@ -490,7 +498,7 @@ find $(printf '%q' "${REMOTE_BACKUP_ROOT}/${env}") -mindepth 1 -maxdepth 1 -type
       tar -czf "${dir}/files-${env}-${STAMP}.tar.gz" \
         -C "$LOCAL_WP_CONTENT" \
         --exclude='cache' --exclude='speedycache' --exclude='wc-logs' --exclude='wp-staging' \
-        uploads plugins languages 2>/dev/null || true
+        uploads plugins languages compressx compressx-nextgen .htaccess 2>/dev/null || true
     fi
 
     while IFS= read -r old_backup; do
@@ -742,6 +750,66 @@ wp --path=$(printf '%q' "$wp_root") cache flush || true"
   fi
 }
 
+validate_compressx_delivery() {
+  local env="$1"
+  local base_url
+  local image_path
+  local url
+  local headers_file
+  local content_type
+  local content_length
+  local http_status
+  local failed="0"
+
+  if [ "$env" = "local" ]; then
+    log "Pulando validação CompressX para local; dev/local pode não servir AVIF/WebP via HTTPS."
+    return 0
+  fi
+
+  command -v curl >/dev/null || die "curl não encontrado para validar CompressX."
+
+  base_url="$(env_url "$env")"
+  log "Validando entrega CompressX no destino: ${env}"
+
+  for image_path in "${COMPRESSX_CRITICAL_IMAGE_PATHS[@]}"; do
+    url="${base_url}${image_path}"
+    headers_file="$(mktemp)"
+
+    if ! curl -k -L -sS -o /dev/null -D "$headers_file" \
+      -H 'Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8' \
+      "$url"; then
+      rm -f "$headers_file"
+      printf 'Erro: CompressX não conseguiu validar a imagem: %s\n' "$url" >&2
+      failed="1"
+      continue
+    fi
+
+    http_status="$(
+      awk '/^HTTP\// { status = $2 } END { print status }' "$headers_file"
+    )"
+    content_type="$(
+      awk 'BEGIN { IGNORECASE = 1 } /^content-type:/ { value = $0 } END { gsub(/\r/, "", value); sub(/^[^:]+:[[:space:]]*/, "", value); sub(/;.*/, "", value); print tolower(value) }' "$headers_file"
+    )"
+    content_length="$(
+      awk 'BEGIN { IGNORECASE = 1 } /^content-length:/ { value = $0 } END { gsub(/\r/, "", value); sub(/^[^:]+:[[:space:]]*/, "", value); print value }' "$headers_file"
+    )"
+    rm -f "$headers_file"
+
+    case "$content_type" in
+      image/avif|image/webp)
+        log "CompressX OK: ${image_path} -> ${content_type}${content_length:+ (${content_length} bytes)}"
+        ;;
+      *)
+        printf 'Erro: CompressX retornou %s para %s (HTTP %s, content-length %s). Esperado image/avif ou image/webp.\n' \
+          "${content_type:-sem content-type}" "$url" "${http_status:-?}" "${content_length:-?}" >&2
+        failed="1"
+        ;;
+    esac
+  done
+
+  [ "$failed" = "0" ] || die "Validação CompressX falhou no destino: ${env}"
+}
+
 sync_one_dir() {
   local source_env="$1"
   local target_env="$2"
@@ -855,7 +923,7 @@ dry_run_clone() {
   preflight_env "$TARGET"
 
   log "Diretórios que seriam sincronizados em wp-content: ${dirs[*]}"
-  log "Opções preservadas no destino: plugins gerenciados, active_plugins, cron, SMTP/captcha/Turnstile/admin_email."
+  log "Opções preservadas no destino: plugins gerenciados, active_plugins, cron, SMTP/captcha/Turnstile/CompressX/admin_email."
   log "Dry-run concluído sem alterações."
 }
 
@@ -921,5 +989,6 @@ wp_exec "$TARGET" option update blogname "$(env_title "$TARGET")" >/dev/null
 remap_missing_authors "$TARGET"
 sync_runtime_files "$SOURCE" "$TARGET"
 clear_cache "$TARGET"
+validate_compressx_delivery "$TARGET"
 
 log "Clone concluído: ${SOURCE} -> ${TARGET}"
