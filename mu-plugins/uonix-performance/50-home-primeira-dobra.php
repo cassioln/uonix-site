@@ -447,7 +447,6 @@ if ( ! function_exists( 'uonix_home_strip_filter_asset_tags' ) ) {
 		$html = uonix_home_defer_styles_by_id(
 			$html,
 			array(
-				'megamenu-css',
 				'fluent-form-styles-css',
 				'fluentform-public-default-css',
 				'kadence-woocommerce-css',
@@ -479,7 +478,6 @@ if ( ! function_exists( 'uonix_home_deferred_styles_loader' ) ) {
 			(function() {
 				var loaded = {};
 				var groupById = {
-					'megamenu-css': 'menu',
 					'fluent-form-styles-css': 'form',
 					'fluentform-public-default-css': 'form',
 					'kadence-woocommerce-css': 'woo'
@@ -546,11 +544,9 @@ if ( ! function_exists( 'uonix_home_deferred_styles_loader' ) ) {
 				}
 
 				function init() {
-					bindLoad('.mega-menu-wrap', 'menu');
 					bindLoad('.fluentform, .fluent_form_3, form[id^="fluentform_"]', 'form');
 					bindLoad('.wc-block-mini-cart, .uonix-menu-cart, .add_to_cart_button, .wcps-container', 'woo');
 					observeLoad('.fluentform, .fluent_form_3, form[id^="fluentform_"]', 'form');
-					window.setTimeout(function() { loadGroup('menu'); }, 12000);
 					window.setTimeout(function() { loadGroup('woo'); }, 14000);
 				}
 
