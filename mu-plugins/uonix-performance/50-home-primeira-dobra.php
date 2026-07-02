@@ -76,6 +76,29 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 			#mega-menu-wrap-footer .mega-close {
 				display: none;
 			}
+			#mega-menu-wrap-primary #mega-menu-primary > li.mega-menu-item-has-children > a.mega-menu-link > span.mega-indicator {
+				display: inline-flex !important;
+				align-items: center;
+				justify-content: center;
+				width: 0.85em;
+				height: 0.85em;
+				margin-left: 8px;
+				color: inherit;
+				opacity: 1 !important;
+			}
+			#mega-menu-wrap-primary #mega-menu-primary > li.mega-menu-item-has-children > a.mega-menu-link > span.mega-indicator::after {
+				content: "" !important;
+				display: block !important;
+				width: 0.42em !important;
+				height: 0.42em !important;
+				border-right: 2px solid currentColor !important;
+				border-bottom: 2px solid currentColor !important;
+				background: transparent !important;
+				-webkit-mask-image: none !important;
+				mask-image: none !important;
+				transform: rotate(45deg) translate(-1px, -1px);
+				opacity: 1 !important;
+			}
 			#mega-menu-wrap-primary .mega-sub-menu,
 			#mega-menu-wrap-menu-extra-2 .mega-sub-menu,
 			#mega-menu-wrap-menu-extra-3 .mega-sub-menu,
