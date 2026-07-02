@@ -75,26 +75,28 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 				display: none;
 			}
 			#mega-menu-wrap-primary #mega-menu-primary > li.mega-menu-item-has-children > a.mega-menu-link > span.mega-indicator {
-				display: inline-flex !important;
-				align-items: center;
-				justify-content: center;
-				width: 0.85em;
-				height: 0.85em;
-				margin-left: 8px;
+				display: inline-block !important;
+				height: 100%;
+				margin: 0 0 0 6px;
 				color: inherit;
+				font-size: inherit;
+				line-height: inherit;
 				opacity: 1 !important;
 			}
 			#mega-menu-wrap-primary #mega-menu-primary > li.mega-menu-item-has-children > a.mega-menu-link > span.mega-indicator::after {
 				content: "" !important;
-				display: block !important;
-				width: 0.42em !important;
-				height: 0.42em !important;
-				border-right: 2px solid currentColor !important;
-				border-bottom: 2px solid currentColor !important;
-				background: transparent !important;
-				-webkit-mask-image: none !important;
-				mask-image: none !important;
-				transform: rotate(45deg) translate(-1px, -1px);
+				display: inline-block !important;
+				width: 1em !important;
+				height: 1em !important;
+				background-color: currentColor !important;
+				-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M6 9h12l-6 6z'/%3E%3C/svg%3E") !important;
+				mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M6 9h12l-6 6z'/%3E%3C/svg%3E") !important;
+				-webkit-mask-position: center !important;
+				mask-position: center !important;
+				-webkit-mask-repeat: no-repeat !important;
+				mask-repeat: no-repeat !important;
+				-webkit-mask-size: contain !important;
+				mask-size: contain !important;
 				opacity: 1 !important;
 			}
 			#mega-menu-wrap-primary .mega-sub-menu,
@@ -143,15 +145,6 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 				color: #ffffff;
 				font-weight: normal;
 				text-decoration: none;
-			}
-			#mega-menu-wrap-primary .mega-indicator::after {
-				content: "";
-				display: inline-block;
-				width: 0.75em;
-				height: 0.75em;
-				margin-left: 6px;
-				background: currentColor;
-				clip-path: polygon(20% 35%, 50% 65%, 80% 35%, 90% 45%, 50% 85%, 10% 45%);
 			}
 			#mega-menu-wrap-menu-extra-2 .mega-menu,
 			#mega-menu-wrap-menu-extra-3 .mega-menu {
