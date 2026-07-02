@@ -91,6 +91,32 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 			#mega-menu-wrap-primary .mega-menu-item:focus-within > .mega-sub-menu {
 				display: block;
 			}
+			#mega-menu-wrap-footer .mega-menu-toggle,
+			#mega-menu-wrap-footer .mega-close {
+				display: none;
+			}
+			#mega-menu-wrap-footer #mega-menu-footer {
+				display: block !important;
+				text-align: left;
+			}
+			#mega-menu-wrap-footer #mega-menu-footer > li.mega-menu-item {
+				display: block;
+				width: 100%;
+				height: auto;
+				margin: 0;
+			}
+			#mega-menu-wrap-footer #mega-menu-footer > li.mega-menu-item > a.mega-menu-link {
+				display: block;
+				height: 30px;
+				padding: 0 10px;
+				color: #ffffff;
+				font-size: 17px;
+				font-weight: normal;
+				line-height: 30px;
+				text-align: left;
+				text-transform: none;
+				white-space: normal;
+			}
 			#mega-menu-wrap-mobile .mega-menu-toggle {
 				display: none;
 			}
