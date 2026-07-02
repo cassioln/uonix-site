@@ -212,19 +212,71 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 				content: "Itens do\a Or\00e7 amento";
 			}
 			#mega-menu-wrap-menu-extra-2 .mega-indicator,
-			#mega-menu-wrap-menu-extra-3 .mega-indicator {
+			#mega-menu-wrap-menu-extra-3 .mega-indicator,
+			#mega-menu-wrap-mobile .mega-menu-toggle {
 				display: none;
 			}
 			#mega-menu-wrap-mobile .mega-menu {
+				display: flex;
+				flex-direction: column;
+				flex-wrap: nowrap;
+				margin: 0;
+				padding: 0;
+				list-style: none;
+			}
+			#mega-menu-wrap-mobile #mega-menu-mobile > li.mega-menu-item {
+				display: list-item;
+				clear: both;
+				margin: 0;
+				list-style: none;
+			}
+			#mega-menu-wrap-mobile #mega-menu-mobile > li.mega-menu-item > a.mega-menu-link {
+				display: block;
+				min-height: 55px;
+				padding: 0 10px;
+				border-bottom: 1px solid #e2e8f0;
+				color: #333;
+				font-size: 18px;
+				font-weight: 500;
+				line-height: 55px;
+				text-decoration: none;
+				text-transform: uppercase;
+			}
+			#mega-menu-wrap-mobile #mega-menu-mobile > li.mega-current-menu-item > a.mega-menu-link,
+			#mega-menu-wrap-mobile #mega-menu-mobile > li.mega-current_page_item > a.mega-menu-link {
+				border-left: 4px solid #f76a0c;
+				color: #f76a0c;
+				font-weight: 800;
+				padding-left: 15px;
+			}
+			#mega-menu-wrap-mobile #mega-menu-mobile ul.mega-sub-menu {
 				display: none;
 				margin: 0;
 				padding: 0;
 				list-style: none;
 			}
-			#mega-menu-wrap-mobile .mega-menu-toggle {
-				display: flex;
+			#mega-menu-wrap-mobile #mega-menu-mobile li.mega-toggle-on > ul.mega-sub-menu {
+				display: block;
+			}
+			#mega-menu-wrap-mobile #mega-menu-mobile .mega-indicator {
+				display: inline-flex !important;
 				align-items: center;
-				justify-content: flex-end;
+				justify-content: center;
+				float: right;
+				width: 40px;
+				height: 40px;
+				margin-top: 7px;
+				border-radius: 4px;
+				background-color: #f1f5f9;
+			}
+			#mega-menu-wrap-mobile #mega-menu-mobile .mega-indicator::after {
+				content: "";
+				display: block;
+				width: 10px;
+				height: 10px;
+				border-right: 3px solid #333;
+				border-bottom: 3px solid #333;
+				transform: rotate(45deg) translate(-2px, -2px);
 			}
 			#mega-menu-wrap-mobile .mega-toggle-animated {
 				display: inline-flex;
@@ -693,7 +745,7 @@ if ( ! function_exists( 'uonix_home_deferred_styles_loader' ) ) {
 				}
 
 				function init() {
-					bindLoad('.mega-menu-wrap', 'menu');
+					bindLoad('.mega-menu-wrap, .wp-block-kadence-off-canvas-trigger, [id^="kadence-off-canvas-trigger"]', 'menu');
 					bindLoad('.fluentform, .fluent_form_3, form[id^="fluentform_"]', 'form');
 					bindLoad('.wc-block-mini-cart, .uonix-menu-cart, .add_to_cart_button, .wcps-container', 'woo');
 					observeLoad('.fluentform, .fluent_form_3, form[id^="fluentform_"]', 'form');
