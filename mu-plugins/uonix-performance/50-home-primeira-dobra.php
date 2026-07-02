@@ -126,6 +126,7 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 				height: 40px;
 				padding: 0 10px;
 				color: #f1f1f1;
+				font-family: inherit;
 				font-size: 18px;
 				font-weight: 300;
 				line-height: 40px;
@@ -133,8 +134,15 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 				text-transform: uppercase;
 			}
 			#mega-menu-wrap-primary .mega-menu > li > .mega-menu-link:hover,
-			#mega-menu-wrap-primary .mega-menu > li > .mega-menu-link:focus {
+			#mega-menu-wrap-primary .mega-menu > li > .mega-menu-link:focus,
+			#mega-menu-wrap-primary .mega-menu > li.mega-toggle-on > .mega-menu-link,
+			#mega-menu-wrap-primary .mega-menu > li.mega-current-menu-item > .mega-menu-link,
+			#mega-menu-wrap-primary .mega-menu > li.mega-current-menu-ancestor > .mega-menu-link,
+			#mega-menu-wrap-primary .mega-menu > li.mega-current-page-ancestor > .mega-menu-link {
+				background: linear-gradient(to bottom, rgba(255, 255, 255, 0.11), transparent);
 				color: #ffffff;
+				font-weight: normal;
+				text-decoration: none;
 			}
 			#mega-menu-wrap-primary .mega-indicator::after {
 				content: "";
@@ -153,17 +161,23 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 			#mega-menu-wrap-menu-extra-3 .mega-menu > li {
 				display: inline-flex;
 				align-items: center;
-				margin: 0;
+				margin: 0 10px 0 0;
+			}
+			#mega-menu-wrap-menu-extra-2 .mega-menu > li.mega-menu-item-has-children,
+			#mega-menu-wrap-menu-extra-3 .mega-menu > li.mega-menu-item-has-children {
+				margin-top: 10px;
 			}
 			#mega-menu-wrap-menu-extra-2 #mega-menu-item-4811 > .mega-menu-link,
 			#mega-menu-wrap-menu-extra-3 #mega-menu-item-4819 > .mega-menu-link {
 				position: relative;
 				gap: 0;
+				height: 40px;
 				padding: 5px 15px;
 				color: #003399;
 				font-size: 0;
-				font-weight: 600;
-				line-height: 1.1;
+				font-weight: 300;
+				line-height: 40px;
+				text-transform: uppercase;
 			}
 			#mega-menu-wrap-menu-extra-2 #mega-menu-item-4811 > .mega-menu-link::before,
 			#mega-menu-wrap-menu-extra-3 #mega-menu-item-4819 > .mega-menu-link::before {
@@ -198,6 +212,7 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 				color: #003399;
 				font-size: 17px;
 				font-weight: 600;
+				font-family: var(--global-heading-font-family, "Barlow Semi Condensed", sans-serif);
 				line-height: 1.1;
 				text-align: left;
 				text-transform: capitalize;
@@ -207,7 +222,7 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 				content: "Central de\a Atendimento";
 			}
 			#mega-menu-wrap-menu-extra-3 #mega-menu-item-4819 > .mega-menu-link::after {
-				content: "Itens do\a Or\00e7 amento";
+				content: "Itens do\aOr\00e7 amento";
 			}
 			#mega-menu-wrap-menu-extra-2 .mega-indicator,
 			#mega-menu-wrap-menu-extra-3 .mega-indicator,
