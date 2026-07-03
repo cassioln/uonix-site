@@ -34,3 +34,7 @@ O workflow `.github/workflows/clone-environment.yml` é manual e clona banco e a
 ## Pós-deploy
 
 Os workflows tentam limpar cache de página do SpeedyCache e executar `wp cache flush` quando WP-CLI estiver disponível.
+
+O site mantém `speedycache` free como cache de página. O deploy não depende de `speedycache-pro`.
+
+O bloqueio de XML-RPC/pingback fica em `mu-plugins/uonix-security/` e não depende de Loginizer Pro.
