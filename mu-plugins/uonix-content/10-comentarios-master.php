@@ -684,14 +684,35 @@ add_action('wp_footer', function() {
            CLOUDFLARE TURNSTILE
            --------------------------------------------------------- */
 
-        #commentform .cf-turnstile,
-        #commentform .uonix-turnstile-widget {
+        #commentform .uonix-comment-turnstile {
+            display: block !important;
+            width: 100% !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+        }
+
+        #commentform .cf-turnstile {
             display: block !important;
             width: 100% !important;
             min-height: 65px !important;
             margin: 10px 0 18px 0 !important;
             border-radius: 8px !important;
             transition: all 0.2s ease !important;
+        }
+
+        #commentform .uonix-turnstile-widget {
+            display: block !important;
+            width: 100% !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            border-radius: 8px !important;
+            transition: all 0.2s ease !important;
+        }
+
+        #commentform .uonix-comment-turnstile.uonix-turnstile-visible .uonix-turnstile-widget,
+        #commentform .uonix-turnstile-widget.uonix-turnstile-error {
+            min-height: 65px !important;
+            margin: 10px 0 18px 0 !important;
         }
 
         #commentform .cf-turnstile iframe,
@@ -909,6 +930,28 @@ add_action('wp_footer', function() {
                 $form.find('[name="cf-turnstile-response"]').val('');
             }
 
+            function uonixSyncTurnstileVisibility() {
+                var $form = $('#commentform');
+
+                $form.find('.cf-turnstile, .uonix-turnstile-widget').each(function() {
+                    var widget = this;
+                    var iframe = widget.querySelector('iframe');
+                    var hasVisibleFrame = false;
+                    var hasError = widget.classList.contains('uonix-turnstile-error');
+                    var wrapper = widget.closest('.uonix-comment-turnstile');
+
+                    if (iframe) {
+                        hasVisibleFrame = iframe.offsetWidth > 0 && iframe.offsetHeight > 0;
+                    }
+
+                    widget.classList.toggle('uonix-turnstile-visible', hasVisibleFrame || hasError);
+
+                    if (wrapper) {
+                        wrapper.classList.toggle('uonix-turnstile-visible', hasVisibleFrame || hasError);
+                    }
+                });
+            }
+
             function uonixForceTurnstileRenderIfBlank() {
                 var $form = $('#commentform');
                 var $turnstile = $form.find('.cf-turnstile, .uonix-turnstile-widget').first();
@@ -993,10 +1036,15 @@ add_action('wp_footer', function() {
 
                         element.setAttribute('data-uonix-rendered', '1');
                         element.removeAttribute('data-uonix-rendering');
+                        uonixSyncTurnstileVisibility();
+                        setTimeout(uonixSyncTurnstileVisibility, 250);
+                        setTimeout(uonixSyncTurnstileVisibility, 900);
+                        setTimeout(uonixSyncTurnstileVisibility, 1800);
 
                         return true;
                     } catch (e) {
                         element.removeAttribute('data-uonix-rendering');
+                        uonixSyncTurnstileVisibility();
                         return false;
                     }
                 }
@@ -1080,6 +1128,7 @@ add_action('wp_footer', function() {
                 $error.text(message).slideDown(180);
                 $turnstile.addClass('uonix-turnstile-error');
                 $turnstile.attr('aria-invalid', 'true');
+                uonixSyncTurnstileVisibility();
             }
 
             function uonixClearTurnstileError() {
@@ -1095,6 +1144,8 @@ add_action('wp_footer', function() {
                     $turnstile.removeClass('uonix-turnstile-error');
                     $turnstile.removeAttr('aria-invalid');
                 }
+
+                uonixSyncTurnstileVisibility();
             }
 
             var uonixCommentObserver = null;
@@ -1142,6 +1193,8 @@ add_action('wp_footer', function() {
                     uonixPrepareLoggedInCompany();
                     uonixNormalizeCommentFormOrder();
                     uonixForceTurnstileRenderIfBlank();
+                    uonixSyncTurnstileVisibility();
+                    setTimeout(uonixSyncTurnstileVisibility, 600);
                 } finally {
                     var commentsArea = document.getElementById('comments');
 
