@@ -53,6 +53,33 @@ if ( ! function_exists( 'uonix_comment_sync_upper_text' ) ) {
     }
 }
 
+if ( ! function_exists( 'uonix_comment_turnstile_widget_html' ) ) {
+    function uonix_comment_turnstile_widget_html() {
+        if ( ! function_exists( 'uonix_turnstile_render_widget' ) ) {
+            return '';
+        }
+
+        if ( ! apply_filters( 'uonix_turnstile_protect_comment_form', true ) ) {
+            return '';
+        }
+
+        $widget = uonix_turnstile_render_widget(
+            'comment_post',
+            array(
+                'theme'      => 'light',
+                'appearance' => 'interaction-only',
+                'size'       => 'flexible',
+            )
+        );
+
+        if ( '' === $widget ) {
+            return '';
+        }
+
+        return '<div class="uonix-comment-turnstile" aria-label="Verificação de segurança">' . $widget . '</div>';
+    }
+}
+
 // ==============================================================================
 // 1. FRONT-END: DEFINIÇÃO DOS CAMPOS E REORGANIZAÇÃO DO LAYOUT
 // ==============================================================================
@@ -93,6 +120,16 @@ add_filter('comment_form_default_fields', function($fields) {
 });
 
 add_action('comment_form_after_fields', 'uonix_bottom_checkboxes_injection');
+
+add_filter('comment_form_submit_field', function($submit_field) {
+    $turnstile = uonix_comment_turnstile_widget_html();
+
+    if ( '' === $turnstile ) {
+        return $submit_field;
+    }
+
+    return $turnstile . $submit_field;
+}, 20);
 
 function uonix_get_logged_user_billing_company() {
     if (!is_user_logged_in()) {
@@ -163,6 +200,43 @@ add_filter('comment_form_field_comment', function($field) {
 // ==============================================================================
 // 2. BACK-END: PROCESSAMENTO E INTEGRAÇÃO FLUENT FORMS
 // ==============================================================================
+
+add_filter('preprocess_comment', function($commentdata) {
+    if ( ! apply_filters( 'uonix_turnstile_protect_comment_form', true ) ) {
+        return $commentdata;
+    }
+
+    if ( ! function_exists( 'uonix_turnstile_validate_request' ) || ! function_exists( 'uonix_turnstile_is_enabled' ) || ! uonix_turnstile_is_enabled() ) {
+        return $commentdata;
+    }
+
+    $script_name = isset($_SERVER['SCRIPT_NAME']) ? basename((string) $_SERVER['SCRIPT_NAME']) : '';
+
+    if ( 'wp-comments-post.php' !== $script_name ) {
+        return $commentdata;
+    }
+
+    $comment_type = isset($commentdata['comment_type']) ? (string) $commentdata['comment_type'] : '';
+
+    if ( '' !== $comment_type && 'comment' !== $comment_type ) {
+        return $commentdata;
+    }
+
+    $validation = uonix_turnstile_validate_request( 'comment_post' );
+
+    if ( is_wp_error( $validation ) ) {
+        wp_die(
+            new WP_Error(
+                'uonix_turnstile_comment_failed',
+                'Turnstile: ' . $validation->get_error_message()
+            ),
+            'Falha na verificação de segurança',
+            array( 'response' => 403 )
+        );
+    }
+
+    return $commentdata;
+}, 1);
 
 add_action('comment_post', function($comment_id) {
     $empresa_postada = isset($_POST['company']) ? uonix_comment_sync_upper_text(sanitize_text_field(wp_unslash($_POST['company']))) : '';
@@ -610,7 +684,8 @@ add_action('wp_footer', function() {
            CLOUDFLARE TURNSTILE
            --------------------------------------------------------- */
 
-        #commentform .cf-turnstile {
+        #commentform .cf-turnstile,
+        #commentform .uonix-turnstile-widget {
             display: block !important;
             width: 100% !important;
             min-height: 65px !important;
@@ -619,7 +694,8 @@ add_action('wp_footer', function() {
             transition: all 0.2s ease !important;
         }
 
-        #commentform .cf-turnstile iframe {
+        #commentform .cf-turnstile iframe,
+        #commentform .uonix-turnstile-widget iframe {
             display: block !important;
         }
 
@@ -646,7 +722,8 @@ add_action('wp_footer', function() {
             font-weight: 800;
         }
 
-        #commentform .cf-turnstile.uonix-turnstile-error {
+        #commentform .cf-turnstile.uonix-turnstile-error,
+        #commentform .uonix-turnstile-widget.uonix-turnstile-error {
             padding: 8px !important;
             border: 2px solid #d92d20 !important;
             background: #fff5f4 !important;
@@ -739,7 +816,7 @@ add_action('wp_footer', function() {
 
             function uonixEnsureTurnstileErrorElement() {
                 var $form = $('#commentform');
-                var $turnstile = $form.find('.cf-turnstile').first();
+                var $turnstile = $form.find('.cf-turnstile, .uonix-turnstile-widget').first();
 
                 if (!$turnstile.length) {
                     return $();
@@ -757,7 +834,7 @@ add_action('wp_footer', function() {
 
             function uonixMoveTurnstileBeforeSubmit() {
                 var $form = $('#commentform');
-                var $turnstile = $form.find('.cf-turnstile').first();
+                var $turnstile = $form.find('.cf-turnstile, .uonix-turnstile-widget').first();
                 var $submitWrap = $form.find('.form-submit').first();
 
                 if (!$turnstile.length || !$submitWrap.length) {
@@ -807,7 +884,7 @@ add_action('wp_footer', function() {
                 var $bottom = $form.find('.uonix-bottom-checkboxes-wrapper').first();
                 var $lgpd = $form.find('.uonix-lgpd-disclaimer').first();
                 var $error = $form.find('.uonix-turnstile-error-message').first();
-                var $turnstile = $form.find('.cf-turnstile').first();
+                var $turnstile = $form.find('.cf-turnstile, .uonix-turnstile-widget').first();
                 var $submitWrap = $form.find('.form-submit').first();
 
                 var $anchor = $error.length ? $error : ($turnstile.length ? $turnstile : $submitWrap);
@@ -834,7 +911,7 @@ add_action('wp_footer', function() {
 
             function uonixForceTurnstileRenderIfBlank() {
                 var $form = $('#commentform');
-                var $turnstile = $form.find('.cf-turnstile').first();
+                var $turnstile = $form.find('.cf-turnstile, .uonix-turnstile-widget').first();
 
                 if (!$turnstile.length) {
                     return;
@@ -883,9 +960,12 @@ add_action('wp_footer', function() {
 
                         var widgetId = window.turnstile.render(element, {
                             sitekey: sitekey,
+                            action: $turnstile.attr('data-action') || 'comment_post',
                             theme: $turnstile.attr('data-theme') || 'light',
                             language: $turnstile.attr('data-language') || 'pt-BR',
                             size: $turnstile.attr('data-size') || 'flexible',
+                            appearance: $turnstile.attr('data-appearance') || 'interaction-only',
+                            'response-field': false,
                             callback: function(token) {
                                 var $tokenInput = $form.find('input[name="cf-turnstile-response"]').last();
 
@@ -943,7 +1023,7 @@ add_action('wp_footer', function() {
 
             function uonixResetTurnstileWidget() {
                 var $form = $('#commentform');
-                var $turnstile = $form.find('.cf-turnstile').first();
+                var $turnstile = $form.find('.cf-turnstile, .uonix-turnstile-widget').first();
 
                 if (!$turnstile.length) {
                     return;
@@ -969,7 +1049,7 @@ add_action('wp_footer', function() {
             }
 
             function uonixHasTurnstileToken($form) {
-                var $turnstile = $form.find('.cf-turnstile').first();
+                var $turnstile = $form.find('.cf-turnstile, .uonix-turnstile-widget').first();
 
                 if (!$turnstile.length) {
                     return true;
@@ -990,7 +1070,7 @@ add_action('wp_footer', function() {
 
             function uonixShowTurnstileError(message) {
                 var $form = $('#commentform');
-                var $turnstile = $form.find('.cf-turnstile').first();
+                var $turnstile = $form.find('.cf-turnstile, .uonix-turnstile-widget').first();
                 var $error = uonixEnsureTurnstileErrorElement();
 
                 if (!$turnstile.length || !$error.length) {
@@ -1004,7 +1084,7 @@ add_action('wp_footer', function() {
 
             function uonixClearTurnstileError() {
                 var $form = $('#commentform');
-                var $turnstile = $form.find('.cf-turnstile').first();
+                var $turnstile = $form.find('.cf-turnstile, .uonix-turnstile-widget').first();
                 var $error = $form.find('.uonix-turnstile-error-message').first();
 
                 if ($error.length) {
