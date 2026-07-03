@@ -345,13 +345,23 @@ add_action('wp_footer', function () {
         ul.woocommerce-error li strong { font-weight: 800 !important; color: #0e3780 !important; }
 
         .uonix-checkout-turnstile {
-            margin: 18px 0 16px;
+            margin: 0;
             padding-left: 10px;
+            min-height: 0;
         }
 
         .uonix-checkout-turnstile .uonix-turnstile-widget {
             display: block !important;
             width: 100% !important;
+            min-height: 0 !important;
+        }
+
+        .uonix-checkout-turnstile.uonix-turnstile-visible {
+            margin: 18px 0 16px;
+        }
+
+        .uonix-checkout-turnstile.uonix-turnstile-visible .uonix-turnstile-widget,
+        .uonix-checkout-turnstile .uonix-turnstile-widget.uonix-turnstile-error {
             min-height: 65px !important;
         }
 
@@ -404,6 +414,26 @@ add_action('wp_footer', function () {
                 return $('form.checkout .cf-turnstile, form.checkout .uonix-turnstile-widget, .woocommerce-checkout .cf-turnstile, .woocommerce-checkout .uonix-turnstile-widget');
             }
 
+            function syncTurnstileVisibility() {
+                getTurnstileWidgets().each(function () {
+                    var widget = this;
+                    var iframe = widget.querySelector('iframe');
+                    var hasVisibleFrame = false;
+                    var hasError = widget.classList.contains('uonix-turnstile-error');
+                    var wrapper = widget.closest('.uonix-checkout-turnstile');
+
+                    if (iframe) {
+                        hasVisibleFrame = iframe.offsetWidth > 0 && iframe.offsetHeight > 0;
+                    }
+
+                    widget.classList.toggle('uonix-turnstile-visible', hasVisibleFrame || hasError);
+
+                    if (wrapper) {
+                        wrapper.classList.toggle('uonix-turnstile-visible', hasVisibleFrame || hasError);
+                    }
+                });
+            }
+
             function resetTurnstileCaptcha() {
                 var $widgets = getTurnstileWidgets();
 
@@ -419,6 +449,10 @@ add_action('wp_footer', function () {
                         window.uonixTurnstile.reset(this);
                     });
                 }
+
+                syncTurnstileVisibility();
+                setTimeout(syncTurnstileVisibility, 250);
+                setTimeout(syncTurnstileVisibility, 900);
 
                 if (!window.turnstile || typeof window.turnstile.reset !== 'function') {
                     return;
@@ -475,6 +509,9 @@ add_action('wp_footer', function () {
 
             $(document).ready(function () {
                 reformatCheckoutTable();
+                syncTurnstileVisibility();
+                setTimeout(syncTurnstileVisibility, 600);
+                setTimeout(syncTurnstileVisibility, 1600);
 
                 // Interações de clique no Enviar
                 $('form.checkout').on('checkout_place_order', function () {
@@ -494,6 +531,9 @@ add_action('wp_footer', function () {
             // Monitora atualizações de Ajax do WooCommerce
             $(document.body).on('updated_checkout', function () {
                 reformatCheckoutTable();
+                syncTurnstileVisibility();
+                setTimeout(syncTurnstileVisibility, 600);
+                setTimeout(syncTurnstileVisibility, 1600);
             });
         })(jQuery);
     </script>
