@@ -83,6 +83,7 @@ if ( ! function_exists( 'uonix_mu_load_modules' ) ) {
 	function uonix_mu_load_modules() {
 		$modules = array(
 			'uonix-shared/module.php',
+			'uonix-security/module.php',
 			'uonix-content/module.php',
 			'uonix-woocommerce/module.php',
 			'uonix-navigation/module.php',
