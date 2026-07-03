@@ -1,6 +1,7 @@
 # Cloudflare Turnstile
 
-Os formulários customizados da Uonix usam o módulo `mu-plugins/uonix-integrations/34-turnstile-custom-forms.php`.
+Os formulários protegidos da Uonix usam o módulo `mu-plugins/uonix-integrations/34-turnstile-custom-forms.php`.
+Essa proteção não depende do Loginizer Pro.
 
 ## Ambientes
 
@@ -28,5 +29,8 @@ Não versione a secret key no repositório. Em QA e produção, prefira manter a
 - `[uonix_form_captura]`, usado pelo `[uonix_sticky_lead]`.
 - `[uonix_form_newsletter]`.
 - `[uonix_form_trabalhe]`.
+- Formulário nativo de comentários do WordPress.
+- Checkout clássico do WooCommerce.
 
 O token é validado no backend antes da gravação no Fluent Forms.
+Nos comentários, a validação ocorre antes da criação do comentário. No checkout, a validação ocorre no hook de validação do WooCommerce antes da criação do pedido/orçamento.
