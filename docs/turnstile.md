@@ -15,6 +15,8 @@ O módulo usa, nesta ordem:
 1. Constantes definidas no `wp-config.php`.
 2. Opções globais do Fluent Forms em `_fluentform_turnstile_details`.
 
+Todos os widgets renderizados pelo helper Uonix usam `appearance="interaction-only"`, independentemente da aparência salva no Fluent Forms. Assim o Turnstile fica invisível quando a Cloudflare consegue validar sem desafio e só mostra interação quando necessário.
+
 Exemplo para `wp-config.php`, acima de `/* That's all, stop editing! */`:
 
 ```php

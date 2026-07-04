@@ -43,7 +43,7 @@ if ( ! function_exists( 'uonix_turnstile_get_settings' ) ) {
 			'siteKey'    => defined( 'UONIX_TURNSTILE_SITE_KEY' ) ? UONIX_TURNSTILE_SITE_KEY : ( $fluent_settings['siteKey'] ?? '' ),
 			'secretKey'  => defined( 'UONIX_TURNSTILE_SECRET_KEY' ) ? UONIX_TURNSTILE_SECRET_KEY : ( $fluent_settings['secretKey'] ?? '' ),
 			'theme'      => $fluent_settings['theme'] ?? 'auto',
-			'appearance' => $fluent_settings['appearance'] ?? 'always',
+			'appearance' => 'interaction-only',
 			'size'       => 'flexible',
 		);
 
@@ -152,7 +152,7 @@ if ( ! function_exists( 'uonix_turnstile_enqueue_assets' ) ) {
 			action: container.dataset.action || 'uonix_form',
 			theme: container.dataset.theme || 'auto',
 			size: container.dataset.size || 'flexible',
-			appearance: container.dataset.appearance || 'always',
+			appearance: container.dataset.appearance || 'interaction-only',
 			'response-field': false,
 			callback: function(token) {
 				setToken(form, token);
@@ -359,6 +359,7 @@ if ( ! function_exists( 'uonix_turnstile_render_widget' ) ) {
 		$settings = uonix_turnstile_get_settings();
 		$options  = is_array( $options ) ? $options : array();
 		$settings = array_merge( $settings, array_intersect_key( $options, array_flip( array( 'theme', 'appearance', 'size' ) ) ) );
+		$settings['appearance'] = 'interaction-only';
 		$action   = preg_replace( '/[^a-zA-Z0-9_-]/', '_', (string) $action );
 		$action   = substr( $action, 0, 32 );
 
