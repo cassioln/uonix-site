@@ -17,15 +17,16 @@ A ferramenta `ksio.dev > Clone de Ambientes` prepara clones completos entre prod
 - O destino sempre recebe backup antes do clone real.
 - A retenção padrão mantém os últimos 5 backups por ambiente.
 - Usuários do destino são preservados por padrão.
-- Opções sensíveis do destino são preservadas: plugins gerenciados por ambiente, estado de ativação dos plugins, cron, GoSMTP/WP Mail SMTP, Turnstile, reCAPTCHA/hCaptcha, Mailchimp, captcha/Loginizer, Backuply, Fluent Forms, CompressX e `admin_email`.
+- Opções sensíveis do destino são preservadas: plugins gerenciados por ambiente, estado de ativação dos plugins, cron, FluentSMTP/SMTP, Turnstile, reCAPTCHA/hCaptcha, Mailchimp, captcha/Loginizer, Backuply, Fluent Forms, CompressX e `admin_email`.
 - Opções sensíveis são restauradas por `option_name`, sem reaproveitar `option_id`, para evitar colisões com opções importadas da origem.
 - Mailpit é carregado somente quando `UONIX_ENV` é `local`.
 
 ## Arquivos Runtime
 
 - O clone sincroniza `uploads`, `plugins` e `languages`, sem incluir cache, logs, backups, staging, arquivos temporários ou PII de currículos.
-- Em `uploads`, ficam fora da migração: `curriculos-recebidos`, `FLUENT_PDF_TEMPLATES`, `gosmtp-attachments`, `loginizer-config`, `speedycache-binary`, `wc-logs`, `wp-personal-data-exports`, `wp-staging`, `wpvivid_*`, `wpmc-trash`, `*.log` e arquivos temporários `*~`.
+- Em `uploads`, ficam fora da migração: `curriculos-recebidos`, `FLUENT_PDF_TEMPLATES`, `gosmtp-attachments` legado, `loginizer-config`, `speedycache-binary`, `wc-logs`, `wp-personal-data-exports`, `wp-staging`, `wpvivid_*`, `wpmc-trash`, `*.log` e arquivos temporários `*~`.
 - Os plugins `all-in-one-wp-migration-10GB`, `backuply`, `backuply-pro`, `compressx`, `fluent-smtp`, `fluentform`, `gosmtp`, `gosmtp-pro`, `loginizer`, `loginizer-security`, `speedycache`, `speedycache-pro`, `wp-mail-logging` e `wpvivid-backuprestore` são gerenciados por ambiente e não são copiados entre ambientes.
+- `fluent-smtp` é o SMTP suportado para QA e produção. `gosmtp` e `gosmtp-pro` são legados removidos: o clone não copia esses diretórios e, em clone real, remove os plugins e opções `gosmtp%` do destino se algum ambiente antigo ainda tiver resíduos instalados.
 - `loginizer-security` e `speedycache-pro` não devem ser reativados por clone padrão quando não houver licença Pro. O bloqueio XML-RPC/pingback fica no MU plugin `uonix-security`; cache de página continua com `speedycache` free.
 - As opções desses plugins em `wp_options` também são preservadas no destino para evitar sobrescrever chaves, SMTP, Turnstile, licença, cron e estado de ativação local.
 - Os diretórios `wp-content/compressx` e `wp-content/compressx-nextgen` são runtime do CompressX, entram no backup do destino e não são sincronizados entre ambientes no clone padrão. Se o destino não tiver WebP/AVIF gerado, rode ou repare o CompressX no próprio destino.

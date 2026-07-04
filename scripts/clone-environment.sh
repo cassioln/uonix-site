@@ -69,6 +69,7 @@ PLUGIN_RSYNC_EXCLUDES=(
   --exclude='compressx/'
   --exclude='fluent-smtp/'
   --exclude='fluentform/'
+  # GoSMTP é legado removido; manter excluído impede que volte por runtime antigo.
   --exclude='gosmtp/'
   --exclude='gosmtp-pro/'
   --exclude='loginizer/'
@@ -78,6 +79,9 @@ PLUGIN_RSYNC_EXCLUDES=(
   --exclude='wp-mail-logging/'
   --exclude='wpvivid-backuprestore/'
 )
+
+SUPPORTED_SMTP_PLUGIN="fluent-smtp"
+LEGACY_SMTP_PLUGINS=(gosmtp gosmtp-pro)
 
 usage() {
   cat <<USAGE
@@ -709,6 +713,35 @@ wp --path=$(printf '%q' "$wp_root") db query \"UPDATE \${prefix}posts SET post_a
   fi
 }
 
+enforce_smtp_plugin_policy() {
+  local env="$1"
+  local plugin
+  local options_table
+  local prefix
+
+  log "Aplicando política SMTP do destino: ${env}"
+
+  if wp_exec "$env" plugin is-installed "$SUPPORTED_SMTP_PLUGIN" >/dev/null 2>&1; then
+    wp_exec "$env" plugin activate "$SUPPORTED_SMTP_PLUGIN" >/dev/null 2>&1 || die "Não foi possível ativar ${SUPPORTED_SMTP_PLUGIN} no destino: ${env}"
+  elif [ "$env" != "local" ]; then
+    die "${SUPPORTED_SMTP_PLUGIN} não está instalado no destino remoto: ${env}"
+  else
+    log "${SUPPORTED_SMTP_PLUGIN} não está instalado no local; mantendo clone local sem SMTP de produção."
+  fi
+
+  for plugin in "${LEGACY_SMTP_PLUGINS[@]}"; do
+    if wp_exec "$env" plugin is-installed "$plugin" >/dev/null 2>&1; then
+      wp_exec "$env" plugin deactivate "$plugin" >/dev/null 2>&1 || true
+      wp_exec "$env" plugin delete "$plugin" >/dev/null 2>&1 || die "Não foi possível remover plugin SMTP legado ${plugin} no destino: ${env}"
+      log "Plugin SMTP legado removido do destino: ${plugin}"
+    fi
+  done
+
+  prefix="$(wp_exec "$env" db prefix | awk 'NF { value = $0 } END { print value }')"
+  options_table="$(quote_sql_identifier "${prefix}options")"
+  wp_exec "$env" db query "DELETE FROM ${options_table} WHERE option_name LIKE '%gosmtp%'" >/dev/null
+}
+
 clear_cache() {
   local env="$1"
   local cache_dirs=(
@@ -924,6 +957,7 @@ dry_run_clone() {
 
   log "Diretórios que seriam sincronizados em wp-content: ${dirs[*]}"
   log "Opções preservadas no destino: plugins gerenciados, active_plugins, cron, SMTP/captcha/Turnstile/CompressX/admin_email."
+  log "Política SMTP pós-clone: ativar fluent-smtp em QA/prod e remover gosmtp/gosmtp-pro se existirem."
   log "Dry-run concluído sem alterações."
 }
 
@@ -988,6 +1022,7 @@ wp_exec "$TARGET" option update siteurl "$(env_url "$TARGET")" >/dev/null
 wp_exec "$TARGET" option update blogname "$(env_title "$TARGET")" >/dev/null
 remap_missing_authors "$TARGET"
 sync_runtime_files "$SOURCE" "$TARGET"
+enforce_smtp_plugin_policy "$TARGET"
 clear_cache "$TARGET"
 validate_compressx_delivery "$TARGET"
 
