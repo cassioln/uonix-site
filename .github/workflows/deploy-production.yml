@@ -393,6 +393,7 @@ jobs:
             echo 'Nenhum backup foi criado; não houve transferência para reverter.'
             exit 0
           fi
+          backup_id="${BACKUP_DIR##*/}"
 
           sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
@@ -445,7 +446,7 @@ jobs:
             --dump-header "$headers" --output /dev/null --write-out '%{url_effective}' "$TARGET_URL/")"
           [ "$effective_url" = "$TARGET_URL/" ]
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noindex'
-          echo "Rollback validado a partir do backup $BACKUP_ID."
+          echo "Rollback validado a partir do backup $backup_id."
 
       - name: Retain five code backups
         if: ${{ success() }}
