@@ -145,7 +145,11 @@ fr1_test_users_snapshot() (
       # shellcheck disable=SC2329
       stat() {
         [ "${1:-}" = '-c' ] || return 93
-        command stat -f '%Lp' "$3"
+        if command stat -c '%a' "$3" >/dev/null 2>&1; then
+          command stat -c '%a' "$3"
+        else
+          command stat -f '%Lp' "$3"
+        fi
       }
       # Evaluated remote shell snippets invoke this test-local mock indirectly.
       # shellcheck disable=SC2329
@@ -212,7 +216,11 @@ fr1_test_users_restore_variant() (
       # shellcheck disable=SC2329
       stat() {
         [ "${1:-}" = '-c' ] || return 95
-        command stat -f '%Lp' "$3"
+        if command stat -c '%a' "$3" >/dev/null 2>&1; then
+          command stat -c '%a' "$3"
+        else
+          command stat -f '%Lp' "$3"
+        fi
       }
       # Evaluated remote shell snippets invoke this test-local mock indirectly.
       # shellcheck disable=SC2329
@@ -1880,7 +1888,10 @@ fi
 source "$CLONE_SCRIPT"
 c3r9_resolver_log="$TMP_DIR/c3r9-resolver-boundaries.log"
 c3r9_bridge_root="$TMP_DIR/c3r9-bridge"
+c3r9_author_map="$TMP_DIR/c3r9-source-authors.tsv"
 mkdir -p "$c3r9_bridge_root"
+printf '1\t61646D696E\n' > "$c3r9_author_map"
+chmod 600 "$c3r9_author_map"
 
 log() { :; }
 is_remote_env() { [ "$1" != local ]; }
@@ -1917,7 +1928,7 @@ run_c3r9_boundary() {
     export_source_db) export_source_db qa "$TMP_DIR/c3r9-source.sql.gz" ;;
     import_db_to_target) import_db_to_target qa "$TMP_DIR/c3r9-source.sql.gz" ;;
     restore_users) restore_users qa "$TMP_DIR/c3r9-backup" ;;
-    remap_missing_authors) remap_missing_authors qa ;;
+    remap_missing_authors) remap_missing_authors qa "$c3r9_author_map" ;;
     clear_cache) clear_cache qa ;;
     rollback_target) rollback_target qa "$TMP_DIR/c3r9-backup" ;;
     *) return 99 ;;
@@ -2715,14 +2726,16 @@ esac
 [ "$c3r10_identity_failures" -eq 0 ] || exit 1
 
 # remap_missing_authors é exercida diretamente, sem mock da função sob teste.
-# Falhas dos produtores locais, conjuntos vazios ou IDs inválidos precisam parar
-# antes de qualquer query/mutação e preservar o status operacional quando o
-# chamador usa uma OR-list/if (que suprime errexit).
+# O mapa canônico precisa chegar à função atual; falhas de prefixo, fallback e
+# lookup devem preservar o status e impedir qualquer UPDATE parcial.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
 remap_query_log="$TMP_DIR/remap-missing-authors-queries.log"
-remap_all_calls_file="$TMP_DIR/remap-missing-authors-all-calls"
+remap_lookup_calls_file="$TMP_DIR/remap-missing-authors-lookup-calls"
+remap_map_file="$TMP_DIR/remap-missing-authors-source.tsv"
 remap_failures=0
+printf '5\t616C696365\n7\t\n' > "$remap_map_file"
+chmod 600 "$remap_map_file"
 
 record_remap_failure() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -2737,22 +2750,25 @@ local_db_prefix() {
   printf 'wpis_\n'
 }
 local_wp() {
+  local lookup_calls
+
   case " $* " in
-    *' --role=administrator '*)
+    *' user list --role=administrator --field=ID '*)
       printf '%s\n' "$REMAP_ADMIN_IDS"
       return "$REMAP_ADMIN_STATUS"
       ;;
-    *)
-      REMAP_ALL_CALLS="$(<"$remap_all_calls_file")"
-      REMAP_ALL_CALLS=$((REMAP_ALL_CALLS + 1))
-      printf '%s\n' "$REMAP_ALL_CALLS" > "$remap_all_calls_file"
-      if [ "$REMAP_ALL_CALLS" -eq 1 ]; then
-        printf '%s\n' "$REMAP_VALID_IDS"
-        return "$REMAP_VALID_STATUS"
-      fi
+    *' user list --field=ID '*)
       printf '%s\n' "$REMAP_FALLBACK_IDS"
       return "$REMAP_FALLBACK_STATUS"
       ;;
+    *' db query '*)
+      lookup_calls="$(<"$remap_lookup_calls_file")"
+      lookup_calls=$((lookup_calls + 1))
+      printf '%s\n' "$lookup_calls" > "$remap_lookup_calls_file"
+      printf '%s\n' "$REMAP_LOOKUP_ID"
+      return "$REMAP_LOOKUP_STATUS"
+      ;;
+    *) return 98 ;;
   esac
 }
 local_db_query() {
@@ -2765,21 +2781,26 @@ run_remap_case() {
   local expected_status="$2"
   local expected_query_count="$3"
   local expected_query="${4:-}"
+  local expected_lookup_count="${5:-0}"
   local actual_status
+  local actual_lookup_count
 
   REMAP_QUERY_COUNT=0
   : > "$remap_query_log"
-  printf '0\n' > "$remap_all_calls_file"
-  if remap_missing_authors local >/dev/null 2>&1; then
+  printf '0\n' > "$remap_lookup_calls_file"
+  if remap_missing_authors local "$remap_map_file" >/dev/null 2>&1; then
     actual_status=0
   else
     actual_status=$?
   fi
+  actual_lookup_count="$(<"$remap_lookup_calls_file")"
 
   [ "$actual_status" -eq "$expected_status" ] || record_remap_failure \
     "${case_name}: status esperado ${expected_status}, obtido ${actual_status}"
   [ "$REMAP_QUERY_COUNT" -eq "$expected_query_count" ] || record_remap_failure \
     "${case_name}: queries esperadas ${expected_query_count}, obtidas ${REMAP_QUERY_COUNT}"
+  [ "$actual_lookup_count" -eq "$expected_lookup_count" ] || record_remap_failure \
+    "${case_name}: lookups esperados ${expected_lookup_count}, obtidos ${actual_lookup_count}"
   if [ -n "$expected_query" ]; then
     [ "$(tail -n 1 "$remap_query_log")" = "$expected_query" ] || record_remap_failure \
       "${case_name}: query válida inesperada: $(tail -n 1 "$remap_query_log")"
@@ -2788,42 +2809,46 @@ run_remap_case() {
 
 PRESERVE_DESTINATION_USERS=1
 REMAP_PREFIX_STATUS=81
-REMAP_VALID_STATUS=0
-REMAP_VALID_IDS='1
-2'
 REMAP_ADMIN_STATUS=0
 REMAP_ADMIN_IDS=9
 REMAP_FALLBACK_STATUS=0
 REMAP_FALLBACK_IDS=9
+REMAP_LOOKUP_STATUS=0
+REMAP_LOOKUP_ID=12
 run_remap_case 'prefix-failure' 81 0
 
 REMAP_PREFIX_STATUS=0
-REMAP_VALID_STATUS=82
-run_remap_case 'valid-user-list-failure' 82 0
+REMAP_ADMIN_STATUS=82
+run_remap_case 'administrator-list-failure' 82 0
 
-REMAP_VALID_STATUS=0
-REMAP_VALID_IDS=''
-run_remap_case 'empty-valid-id-list' 1 0
-
-REMAP_VALID_IDS='1
-abc'
-run_remap_case 'malformed-valid-id-list' 1 0
-
-REMAP_VALID_IDS='1
-2'
 REMAP_ADMIN_STATUS=0
 REMAP_ADMIN_IDS=''
+REMAP_FALLBACK_STATUS=83
+run_remap_case 'fallback-list-failure' 83 0
+
 REMAP_FALLBACK_STATUS=0
 REMAP_FALLBACK_IDS=''
 run_remap_case 'empty-fallback-id' 1 0
 
-REMAP_FALLBACK_IDS='xyz'
+REMAP_ADMIN_IDS='xyz'
+REMAP_FALLBACK_IDS=9
 run_remap_case 'malformed-fallback-id' 1 0
 
 REMAP_ADMIN_IDS=9
-REMAP_FALLBACK_IDS=9
+REMAP_LOOKUP_STATUS=84
+run_remap_case 'author-lookup-failure' 84 0 '' 1
+
+REMAP_LOOKUP_STATUS=0
+REMAP_LOOKUP_ID='abc'
+run_remap_case 'malformed-lookup-id' 1 0 '' 1
+
+REMAP_LOOKUP_ID=''
+run_remap_case 'empty-lookup-uses-fallback' 0 1 \
+  'UPDATE wpis_posts SET post_author = CASE post_author WHEN 5 THEN 9 WHEN 7 THEN 9 ELSE 9 END WHERE post_author IN (5,7)' 1
+
+REMAP_LOOKUP_ID=12
 run_remap_case 'valid-author-remap' 0 1 \
-  'UPDATE wpis_posts SET post_author = 9 WHERE post_author NOT IN (1,2)'
+  'UPDATE wpis_posts SET post_author = CASE post_author WHEN 5 THEN 12 WHEN 7 THEN 9 ELSE 9 END WHERE post_author IN (5,7)' 1
 
 [ "$remap_failures" -eq 0 ] || exit 1
 
