@@ -57,8 +57,11 @@ function uonix_editor_classico_para_blog($usar_blocos, $tipo_de_post) {
 add_action('wp_head', 'uonix_estilos_premium_blog_archive');
 
 function uonix_estilos_premium_blog_archive() {
+    $is_shop             = function_exists( 'is_shop' ) && is_shop();
+    $is_product_taxonomy = function_exists( 'is_product_taxonomy' ) && is_product_taxonomy();
+
     // Só carrega se for a página inicial do blog, categoria ou tag (e ignora as páginas da loja)
-    if ( ( is_home() || is_category() || is_tag() || is_archive() ) && !is_shop() && !is_product_taxonomy() && !is_search() ) {
+    if ( ( is_home() || is_category() || is_tag() || is_archive() ) && ! $is_shop && ! $is_product_taxonomy && !is_search() ) {
         ?>
         <style>
             /* ==========================================================================

@@ -51,7 +51,7 @@ function uonix_replace_br_in_product_titles( $title, $post_id ) {
  */
 function uonix_replace_br_in_product_titles_wc( $title, $product ) {
 
-	if ( ! $product instanceof WC_Product ) {
+	if ( ! class_exists( 'WC_Product' ) || ! $product instanceof WC_Product ) {
 		return $title;
 	}
 
@@ -69,7 +69,7 @@ function uonix_replace_br_in_product_titles_wc( $title, $product ) {
 function uonix_should_keep_br() {
 
 	// Produto individual
-	if ( is_product() ) {
+	if ( function_exists( 'is_product' ) && is_product() ) {
 		return true;
 	}
 

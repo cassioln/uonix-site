@@ -15,7 +15,7 @@ if ( ! function_exists( 'uonix_is_public_front_page' ) ) {
 
 if ( ! function_exists( 'uonix_home_performance_resource_hints' ) ) {
 	function uonix_home_performance_resource_hints() {
-		if ( ! uonix_is_public_front_page() || 'local' === UONIX_ENV ) {
+		if ( ! uonix_is_public_front_page() ) {
 			return;
 		}
 
@@ -26,8 +26,14 @@ if ( ! function_exists( 'uonix_home_performance_resource_hints' ) ) {
 			esc_url( $lcp_image )
 		);
 
-		echo '<link rel="preconnect" href="https://tag.goadopt.io" crossorigin>' . "\n";
-		echo '<link rel="dns-prefetch" href="//tag.goadopt.io">' . "\n";
+		$analytics_configuration = function_exists( 'uonix_analytics_configuration' )
+			? uonix_analytics_configuration()
+			: false;
+
+		if ( false !== $analytics_configuration ) {
+			echo '<link rel="preconnect" href="https://tag.goadopt.io" crossorigin>' . "\n";
+			echo '<link rel="dns-prefetch" href="//tag.goadopt.io">' . "\n";
+		}
 	}
 }
 add_action( 'wp_head', 'uonix_home_performance_resource_hints', 1 );
