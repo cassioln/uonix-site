@@ -43,7 +43,7 @@ if ( ! function_exists( 'uonix_turnstile_get_settings' ) ) {
 			'siteKey'    => defined( 'UONIX_TURNSTILE_SITE_KEY' ) ? UONIX_TURNSTILE_SITE_KEY : ( $fluent_settings['siteKey'] ?? '' ),
 			'secretKey'  => defined( 'UONIX_TURNSTILE_SECRET_KEY' ) ? UONIX_TURNSTILE_SECRET_KEY : ( $fluent_settings['secretKey'] ?? '' ),
 			'theme'      => $fluent_settings['theme'] ?? 'auto',
-			'appearance' => $fluent_settings['appearance'] ?? 'always',
+			'appearance' => 'interaction-only',
 			'size'       => 'flexible',
 		);
 
@@ -68,7 +68,7 @@ if ( ! function_exists( 'uonix_turnstile_is_enabled' ) ) {
 
 if ( ! function_exists( 'uonix_turnstile_enqueue_assets' ) ) {
 	/**
-	 * Carrega a API oficial do Turnstile e inicializa todos os widgets Uonix da página.
+	 * Registra um loader local; a API oficial so e baixada quando o formulario entra em uso.
 	 */
 	function uonix_turnstile_enqueue_assets() {
 		if ( ! uonix_turnstile_is_enabled() ) {
@@ -77,66 +77,261 @@ if ( ! function_exists( 'uonix_turnstile_enqueue_assets' ) ) {
 
 		static $inline_added = false;
 
-		$handle = 'uonix-turnstile-api';
-		$src    = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=uonixTurnstileOnload';
+		$handle = 'uonix-turnstile-lazy';
 
 		if ( ! wp_script_is( $handle, 'registered' ) ) {
-			wp_register_script( $handle, $src, array(), null, true );
+			wp_register_script( $handle, false, array(), null, true );
 		}
 
 		if ( ! $inline_added ) {
 			wp_add_inline_script(
 				$handle,
-				"window.uonixTurnstile = window.uonixTurnstile || {
-	widgets: {},
-	renderAll: function(root) {
-		if (!window.turnstile) return;
-		(root || document).querySelectorAll('.uonix-turnstile-widget:not([data-uonix-rendered=\"1\"])').forEach(function(container) {
-			var form = container.closest('form');
-			var widgetId = window.turnstile.render(container, {
-				sitekey: container.dataset.sitekey,
-				action: container.dataset.action || 'uonix_form',
-				theme: container.dataset.theme || 'auto',
-				size: container.dataset.size || 'flexible',
-				appearance: container.dataset.appearance || 'always',
-				'response-field': false,
-				callback: function(token) {
-					if (!form) return;
-					var input = form.querySelector('input[name=\"cf-turnstile-response\"]');
-					if (!input) {
-						input = document.createElement('input');
-						input.type = 'hidden';
-						input.name = 'cf-turnstile-response';
-						form.appendChild(input);
+				"(function() {
+	if (window.uonixTurnstile && window.uonixTurnstile.lazyReady) {
+		return;
+	}
+
+	var apiSrc = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=uonixTurnstileOnload';
+	var apiPromise = null;
+
+	function getTokenInput(form) {
+		var input;
+
+		if (!form) {
+			return null;
+		}
+
+		input = form.querySelector('input[name=\"cf-turnstile-response\"]');
+
+		if (!input) {
+			input = document.createElement('input');
+			input.type = 'hidden';
+			input.name = 'cf-turnstile-response';
+			form.appendChild(input);
+		}
+
+		return input;
+	}
+
+	function setToken(form, token) {
+		var input = getTokenInput(form);
+
+		if (input) {
+			input.value = token || '';
+		}
+	}
+
+	function isVisibleTree(node) {
+		var current = node;
+		var style;
+
+		while (current && current !== document.documentElement) {
+			style = window.getComputedStyle(current);
+
+			if (style.display === 'none' || style.visibility === 'hidden') {
+				return false;
+			}
+
+			current = current.parentElement;
+		}
+
+		return true;
+	}
+
+	function renderContainer(container) {
+		var form;
+		var widgetId;
+
+		if (!window.turnstile || !container || container.dataset.uonixRendered === '1' || !isVisibleTree(container)) {
+			return;
+		}
+
+		form = container.closest('form');
+		widgetId = window.turnstile.render(container, {
+			sitekey: container.dataset.sitekey,
+			action: container.dataset.action || 'uonix_form',
+			theme: container.dataset.theme || 'auto',
+			size: container.dataset.size || 'flexible',
+			appearance: container.dataset.appearance || 'interaction-only',
+			'response-field': false,
+			callback: function(token) {
+				setToken(form, token);
+
+				if (form && form.dataset.uonixTurnstilePendingSubmit === '1') {
+					form.dataset.uonixTurnstilePendingSubmit = '';
+
+					if (typeof form.requestSubmit === 'function') {
+						form.requestSubmit();
+					} else {
+						form.submit();
 					}
-					input.value = token;
-				},
-				'expired-callback': function() {
-					if (!form) return;
-					var input = form.querySelector('input[name=\"cf-turnstile-response\"]');
-					if (input) input.value = '';
-				},
-				'error-callback': function() {
-					if (!form) return;
-					var input = form.querySelector('input[name=\"cf-turnstile-response\"]');
-					if (input) input.value = '';
+				}
+			},
+			'expired-callback': function() {
+				setToken(form, '');
+			},
+			'error-callback': function() {
+				setToken(form, '');
+			}
+		});
+
+		container.dataset.uonixRendered = '1';
+		container.dataset.uonixWidgetId = widgetId;
+	}
+
+	function renderAll(root) {
+		if (!window.turnstile) {
+			return;
+		}
+
+		(root || document).querySelectorAll('.uonix-turnstile-widget').forEach(renderContainer);
+	}
+
+	function loadApi() {
+		var existing;
+		var script;
+
+		if (window.turnstile) {
+			return Promise.resolve();
+		}
+
+		if (apiPromise) {
+			return apiPromise;
+		}
+
+		existing = document.querySelector('script[src*=\"challenges.cloudflare.com/turnstile/v0/api.js\"]');
+
+		apiPromise = new Promise(function(resolve, reject) {
+			if (existing) {
+				existing.addEventListener('load', resolve, { once: true });
+				existing.addEventListener('error', reject, { once: true });
+
+				if (window.turnstile) {
+					resolve();
+				}
+
+				return;
+			}
+
+			script = document.createElement('script');
+			script.src = apiSrc;
+			script.async = true;
+			script.defer = true;
+			script.onload = resolve;
+			script.onerror = reject;
+			document.head.appendChild(script);
+		});
+
+		return apiPromise;
+	}
+
+	function prepare(root) {
+		return loadApi()
+			.then(function() {
+				renderAll(root || document);
+			})
+			.catch(function() {});
+	}
+
+	function formHasToken(form) {
+		var input = form ? form.querySelector('input[name=\"cf-turnstile-response\"]') : null;
+
+		return !!(input && input.value);
+	}
+
+	function prepareFromEventTarget(target) {
+		var form = target && target.closest ? target.closest('form') : null;
+
+		if (form && form.querySelector('.uonix-turnstile-widget') && isVisibleTree(form)) {
+			prepare(form);
+		}
+	}
+
+	function observeWidgets() {
+		var widgets = document.querySelectorAll('.uonix-turnstile-widget');
+
+		if (!widgets.length) {
+			return;
+		}
+
+		if (!('IntersectionObserver' in window)) {
+			return;
+		}
+
+		var observer = new IntersectionObserver(function(entries) {
+			entries.forEach(function(entry) {
+				if (entry.isIntersecting && isVisibleTree(entry.target)) {
+					prepare(entry.target.closest('form') || entry.target);
+					observer.unobserve(entry.target);
 				}
 			});
-			container.dataset.uonixRendered = '1';
-			container.dataset.uonixWidgetId = widgetId;
+		}, { rootMargin: '240px 0px' });
+
+		widgets.forEach(function(widget) {
+			observer.observe(widget);
 		});
-	},
-	reset: function(form) {
-		if (!window.turnstile || !form) return;
-		var container = form.querySelector('.uonix-turnstile-widget[data-uonix-widget-id]');
-		var input = form.querySelector('input[name=\"cf-turnstile-response\"]');
-		if (input) input.value = '';
-		if (container) window.turnstile.reset(container.dataset.uonixWidgetId);
 	}
-};
-window.uonixTurnstileOnload = function() {
-	window.uonixTurnstile.renderAll(document);
-};",
+
+	document.addEventListener('focusin', function(event) {
+		prepareFromEventTarget(event.target);
+	}, true);
+
+	document.addEventListener('pointerdown', function(event) {
+		prepareFromEventTarget(event.target);
+	}, true);
+
+	document.addEventListener('submit', function(event) {
+		var form = event.target;
+
+		if (!form || !form.querySelector || !form.querySelector('.uonix-turnstile-widget') || formHasToken(form)) {
+			return;
+		}
+
+		event.preventDefault();
+		form.dataset.uonixTurnstilePendingSubmit = '1';
+		prepare(form);
+	}, true);
+
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', observeWidgets);
+	} else {
+		observeWidgets();
+	}
+
+	window.uonixTurnstile = {
+		lazyReady: true,
+		widgets: {},
+		load: loadApi,
+		renderAll: renderAll,
+		prepare: prepare,
+		reset: function(form) {
+			var container;
+			var input;
+
+			if (!form) {
+				return;
+			}
+
+			input = form.querySelector('input[name=\"cf-turnstile-response\"]');
+
+			if (input) {
+				input.value = '';
+			}
+
+			container = form.querySelector('.uonix-turnstile-widget[data-uonix-widget-id]');
+
+			if (window.turnstile && container) {
+				window.turnstile.reset(container.dataset.uonixWidgetId);
+			} else {
+				prepare(form);
+			}
+		}
+	};
+
+	window.uonixTurnstileOnload = function() {
+		window.uonixTurnstile.renderAll(document);
+	};
+})();",
 				'before'
 			);
 
@@ -164,6 +359,7 @@ if ( ! function_exists( 'uonix_turnstile_render_widget' ) ) {
 		$settings = uonix_turnstile_get_settings();
 		$options  = is_array( $options ) ? $options : array();
 		$settings = array_merge( $settings, array_intersect_key( $options, array_flip( array( 'theme', 'appearance', 'size' ) ) ) );
+		$settings['appearance'] = 'interaction-only';
 		$action   = preg_replace( '/[^a-zA-Z0-9_-]/', '_', (string) $action );
 		$action   = substr( $action, 0, 32 );
 

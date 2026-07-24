@@ -1,0 +1,156 @@
+name: Validate
+
+on:
+  pull_request:
+    branches: [master, qa, dev]
+  push:
+    branches: [master, qa, dev, local]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    name: PHP ${{ matrix.php-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ['8.3', '8.5']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          coverage: none
+
+      - name: Lint managed PHP
+        run: find mu-plugins themes/kadence-child -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Test environment contract
+        run: php scripts/tests/test-environment-map.php
+
+      - name: Test e-mail policy
+        run: php scripts/tests/test-email-policy.php
+
+      - name: Test indexing policy
+        run: php scripts/tests/test-indexing-policy.php
+
+      - name: Test analytics policy
+        run: php scripts/tests/test-analytics-policy.php
+
+      - name: Test blog archive without WooCommerce
+        run: php scripts/tests/test-blog-archive-optional-woocommerce.php
+
+      - name: Test WooCommerce-optional callbacks
+        run: php scripts/tests/test-woocommerce-optional-plugin.php
+
+      - name: Test clone administration panel
+        run: php scripts/tests/test-clone-admin.php
+
+  shell-and-config:
+    name: Shell, workflows, Node and Compose
+    runs-on: ubuntu-latest
+    env:
+      SHELLCHECK_VERSION: '0.11.0'
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go for actionlint
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes podman-compose
+
+          shellcheck_archive="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          shellcheck_url="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/${shellcheck_archive}"
+          curl --fail --location --retry 3 --silent --show-error "$shellcheck_url" -o "/tmp/${shellcheck_archive}"
+          printf '%s  %s\n' "$SHELLCHECK_SHA256" "/tmp/${shellcheck_archive}" | sha256sum --check --strict
+          tar -xJf "/tmp/${shellcheck_archive}" -C /tmp "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          sudo install -m 0755 "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
+
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+      - name: Validate Bash syntax
+        run: |
+          while IFS= read -r -d '' file; do
+            bash -n "$file"
+          done < <(find scripts -type f -name '*.sh' -print0)
+
+      - name: Run ShellCheck
+        run: find scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck -x
+
+      - name: Test shell environment map
+        run: bash scripts/tests/test-environment-map.sh
+
+      - name: Test SSH transport
+        run: bash scripts/tests/test-ssh-transport.sh
+
+      - name: Test clone guards
+        run: bash scripts/tests/test-clone-guards.sh
+
+      - name: Test clone workflow contract
+        run: bash scripts/tests/test-clone-workflow.sh
+
+      - name: Test local documentation credential handling
+        run: bash scripts/tests/test-local-readme-credentials.sh
+
+      - name: Test clone author remapping
+        run: bash scripts/tests/test-clone-author-remap.sh
+
+      - name: Test production workflow contract
+        run: bash scripts/tests/test-production-workflow.sh
+
+      - name: Test clone destination lock
+        run: bash scripts/tests/test-clone-lock.sh
+
+      - name: Test deploy Variable contract
+        run: bash scripts/tests/test-deploy-variable-contract.sh
+
+      - name: Test post-clone core validation
+        run: bash scripts/tests/test-post-clone-core-validation.sh
+
+      - name: Test post-clone policy validation
+        run: bash scripts/tests/test-post-clone-policy-validation.sh
+
+      - name: Test post-clone e-mail validation
+        run: bash scripts/tests/test-post-clone-email-validation.sh
+
+      - name: Test post-clone Turnstile and CompressX validation
+        run: bash scripts/tests/test-post-clone-turnstile-compressx-validation.sh
+
+      - name: Test clone safety boundaries
+        run: bash scripts/tests/test-clone-safety.sh
+
+      - name: Test deploy bundle
+        run: bash scripts/tests/test-deploy-bundle.sh
+
+      - name: Validate workflows
+        run: |
+          actionlint_path="$(go env GOPATH)/bin/actionlint"
+          "$actionlint_path"
+
+      - name: Validate PageSpeed script
+        run: node --check scripts/pagespeed-check.mjs
+
+      - name: Parse local Compose configuration
+        run: podman-compose -p uonix-local -f local/compose.yml config

@@ -26,13 +26,76 @@ if ( ! defined( 'ABSPATH' ) ) {
  * - UI Enterprise (Design System Uônix + Flexbox Grid).
  */
 
+if ( ! function_exists( 'uonix_analytics_configuration' ) ) {
+    /**
+     * Retorna a configuração completa somente para produção explicitamente habilitada.
+     *
+     * O GA4 é entregue pelo container GTM; não há ID de analytics em QA, DEV ou local.
+     *
+     * @param string|null $environment      Ambiente explícito ou UONIX_ENV.
+     * @param bool|null   $enabled          Flag explícita ou UONIX_ANALYTICS_ENABLED.
+     * @param string|null $gtm_container_id ID explícito ou UONIX_GTM_CONTAINER_ID.
+     * @param string|null $adopt_website_id ID explícito ou UONIX_ADOPT_WEBSITE_ID.
+     * @return array|false
+     */
+    function uonix_analytics_configuration( $environment = null, $enabled = null, $gtm_container_id = null, $adopt_website_id = null ) {
+        $environment = null === $environment && defined( 'UONIX_ENV' ) ? UONIX_ENV : $environment;
+        $enabled     = null === $enabled && defined( 'UONIX_ANALYTICS_ENABLED' ) ? UONIX_ANALYTICS_ENABLED : $enabled;
+
+        if ( null === $gtm_container_id && defined( 'UONIX_GTM_CONTAINER_ID' ) ) {
+            $gtm_container_id = UONIX_GTM_CONTAINER_ID;
+        }
+
+        if ( null === $adopt_website_id && defined( 'UONIX_ADOPT_WEBSITE_ID' ) ) {
+            $adopt_website_id = UONIX_ADOPT_WEBSITE_ID;
+        }
+
+        $gtm_container_id = trim( (string) $gtm_container_id );
+        $adopt_website_id = trim( (string) $adopt_website_id );
+
+        if ( 'production' !== $environment || true !== $enabled || '' === $gtm_container_id || '' === $adopt_website_id ) {
+            return false;
+        }
+
+        return array(
+            'gtm_container_id' => $gtm_container_id,
+            'adopt_website_id' => $adopt_website_id,
+        );
+    }
+}
+
+if ( ! function_exists( 'uonix_analytics_admin_notice' ) ) {
+    /**
+     * Avisa sobre configuração incompleta sem exibir qualquer identificador.
+     */
+    function uonix_analytics_admin_notice() {
+        $environment = defined( 'UONIX_ENV' ) ? UONIX_ENV : null;
+        $enabled     = defined( 'UONIX_ANALYTICS_ENABLED' ) ? UONIX_ANALYTICS_ENABLED : false;
+
+        if ( 'production' !== $environment || true !== $enabled || false !== uonix_analytics_configuration() ) {
+            return;
+        }
+
+        echo '<div class="notice notice-warning"><p>'
+            . esc_html( 'Analytics/consentimento não carregados: configure todos os IDs obrigatórios da produção.' )
+            . '</p></div>';
+    }
+}
+add_action( 'admin_notices', 'uonix_analytics_admin_notice' );
+
 // 1. Inserção no Cabeçalho (<head>) - Prioridade Máxima
-add_action('wp_head', function() {
-    if (is_admin()) return;
+if ( ! function_exists( 'uonix_render_analytics_head' ) ) {
+function uonix_render_analytics_head( $configuration = null ) {
+    $configuration = null === $configuration ? uonix_analytics_configuration() : $configuration;
+
+    if ( is_admin() || ! is_array( $configuration ) ) return;
+
+    $gtm_container_id = $configuration['gtm_container_id'];
+    $adopt_website_id = $configuration['adopt_website_id'];
     ?>
     
-    <meta name="adopt-website-id" content="4e6a8df6-4bee-43c7-86d9-7b91ccc9df56" />
-    <script src="//tag.goadopt.io/injector.js?website_code=4e6a8df6-4bee-43c7-86d9-7b91ccc9df56" class="adopt-injector"></script>
+    <meta name="adopt-website-id" content="<?php echo esc_attr( $adopt_website_id ); ?>" />
+    <script src="<?php echo esc_url( 'https://tag.goadopt.io/injector.js?website_code=' . rawurlencode( $adopt_website_id ) ); ?>" class="adopt-injector"></script>
 
     <style id="uonix-cookie-premium-controls">
         /* =========================================================
@@ -356,18 +419,25 @@ add_action('wp_head', function() {
     new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
     j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-    })(window,document,'script','dataLayer','GTM-P8TR5CCH');</script>
+    })(window,document,'script','dataLayer',<?php echo wp_json_encode( $gtm_container_id ); ?>);</script>
     <?php
-}, 1);
+}
+}
+add_action( 'wp_head', 'uonix_render_analytics_head', 1 );
 
 // 2. Inserção logo após a abertura do <body> (GTM Noscript + Root controlado)
-add_action('wp_body_open', function() {
-    if (is_admin()) return;
+if ( ! function_exists( 'uonix_render_analytics_body' ) ) {
+function uonix_render_analytics_body( $configuration = null ) {
+    $configuration = null === $configuration ? uonix_analytics_configuration() : $configuration;
+
+    if ( is_admin() || ! is_array( $configuration ) ) return;
+
+    $gtm_container_id = $configuration['gtm_container_id'];
     ?>
     
     <div id="uonix-cookie-root" aria-live="polite"></div>
 
-    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-P8TR5CCH"
+    <noscript><iframe src="<?php echo esc_url( 'https://www.googletagmanager.com/ns.html?id=' . rawurlencode( $gtm_container_id ) ); ?>"
     height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 
     <script>
@@ -448,6 +518,8 @@ add_action('wp_body_open', function() {
     })();
     </script>
     <?php
-});
+}
+}
+add_action( 'wp_body_open', 'uonix_render_analytics_body' );
 
 
