@@ -10,90 +10,295 @@ on:
         options:
           - prod
           - qa
+          - dev
       target:
         description: Ambiente de destino
         required: true
         type: choice
         options:
-          - qa
           - prod
-      include_git_files:
-        description: Clonar tema filho e MU-plugins versionados
+          - qa
+          - dev
+      mode:
+        description: Validar ou executar após um novo dry-run obrigatório
+        required: true
+        type: choice
+        default: dry-run
+        options:
+          - dry-run
+          - execute
+      replace_users:
+        description: Substituir usuários do destino (desmarcado preserva usuários/capabilities)
         required: true
         type: boolean
         default: false
-      preserve_destination_users:
-        description: Preservar usuários atuais do destino
-        required: true
-        type: boolean
-        default: true
-      dry_run:
-        description: Validar sem alterar o destino
-        required: true
-        type: boolean
-        default: false
-      confirm_production:
-        description: Para destino prod, digite CLONAR PARA PRODUCAO
+      confirmation:
+        description: Para executar em prod, digite CLONAR <ORIGEM> PARA PROD @ <SHA>
         required: false
         type: string
 
-jobs:
-  clone:
-    name: Clone ${{ inputs.source }} to ${{ inputs.target }}
-    runs-on: ubuntu-latest
+permissions:
+  contents: read
 
+concurrency:
+  group: uonix-environment-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  validate-request:
+    name: Validate clone request before credentials
+    runs-on: ubuntu-latest
+    outputs:
+      environment_name: ${{ steps.request.outputs.environment_name }}
+      script_confirmation: ${{ steps.request.outputs.script_confirmation }}
+      production_url: ${{ steps.request.outputs.production_url }}
+      qa_url: ${{ steps.request.outputs.qa_url }}
+      development_url: ${{ steps.request.outputs.development_url }}
+      locaweb_ssh_host: ${{ steps.request.outputs.locaweb_ssh_host }}
+      locaweb_ssh_port: ${{ steps.request.outputs.locaweb_ssh_port }}
+      locaweb_ssh_user: ${{ steps.request.outputs.locaweb_ssh_user }}
+      locaweb_document_root: ${{ steps.request.outputs.locaweb_document_root }}
+      locaweb_account_root: ${{ steps.request.outputs.locaweb_account_root }}
+      locaweb_php_bin: ${{ steps.request.outputs.locaweb_php_bin }}
+      locaweb_wp_bin: ${{ steps.request.outputs.locaweb_wp_bin }}
+      hostgator_ssh_host: ${{ steps.request.outputs.hostgator_ssh_host }}
+      hostgator_ssh_port: ${{ steps.request.outputs.hostgator_ssh_port }}
+      hostgator_ssh_user: ${{ steps.request.outputs.hostgator_ssh_user }}
+      hostgator_qa_root: ${{ steps.request.outputs.hostgator_qa_root }}
+      hostgator_dev_root: ${{ steps.request.outputs.hostgator_dev_root }}
+      hostgator_clone_backup_root: ${{ steps.request.outputs.hostgator_clone_backup_root }}
     env:
-      SSH_HOST: ${{ vars.STAGING_SSH_HOST }}
-      SSH_USER: ${{ vars.STAGING_SSH_USER }}
-      PROD_PATH: /home2/uonix/public_html
-      QA_PATH: /home2/uonix/qa_uonix
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+      QA_URL: ${{ vars.QA_URL }}
+      DEVELOPMENT_URL: ${{ vars.DEVELOPMENT_URL }}
+      LOCAWEB_SSH_HOST: ${{ vars.LOCAWEB_SSH_HOST }}
+      LOCAWEB_SSH_PORT: ${{ vars.LOCAWEB_SSH_PORT }}
+      LOCAWEB_SSH_USER: ${{ vars.LOCAWEB_SSH_USER }}
+      LOCAWEB_DOCUMENT_ROOT: ${{ vars.LOCAWEB_DOCUMENT_ROOT }}
+      LOCAWEB_ACCOUNT_ROOT: ${{ vars.LOCAWEB_ACCOUNT_ROOT }}
+      LOCAWEB_PHP_BIN: ${{ vars.LOCAWEB_PHP_BIN }}
+      LOCAWEB_WP_BIN: ${{ vars.LOCAWEB_WP_BIN }}
+      HOSTGATOR_SSH_HOST: ${{ vars.HOSTGATOR_SSH_HOST }}
+      HOSTGATOR_SSH_PORT: ${{ vars.HOSTGATOR_SSH_PORT }}
+      HOSTGATOR_SSH_USER: ${{ vars.HOSTGATOR_SSH_USER }}
+      HOSTGATOR_QA_ROOT: ${{ vars.HOSTGATOR_QA_ROOT }}
+      HOSTGATOR_DEV_ROOT: ${{ vars.HOSTGATOR_DEV_ROOT }}
+      HOSTGATOR_CLONE_BACKUP_ROOT: ${{ vars.HOSTGATOR_CLONE_BACKUP_ROOT || '/home2/uonix/_uonix-clone-backups' }}
+      UONIX_CLONE_REQUEST_SOURCE: ${{ inputs.source }}
+      UONIX_CLONE_REQUEST_TARGET: ${{ inputs.target }}
+      UONIX_CLONE_REQUEST_MODE: ${{ inputs.mode }}
+      UONIX_CLONE_REQUEST_REPLACE_USERS: ${{ inputs.replace_users }}
+      UONIX_CLONE_REQUEST_CONFIRMATION: ${{ inputs.confirmation }}
+      UONIX_ENABLE_CLONE_PRODUCTION: ${{ vars.ENABLE_CLONE_PRODUCTION }}
+      UONIX_REQUEST_SHA: ${{ github.sha }}
+      UONIX_REQUEST_REF: ${{ github.ref }}
+    steps:
+      - name: Validate clone request before credentials
+        id: request
+        run: |
+          set -euo pipefail
+          [ "$UONIX_REQUEST_REF" = 'refs/heads/master' ]
+          case "$UONIX_REQUEST_SHA" in *[!0-9a-f]*|'') exit 1 ;; esac
+          [ "${#UONIX_REQUEST_SHA}" -eq 40 ]
+          [ "$UONIX_CLONE_REQUEST_SOURCE" != "$UONIX_CLONE_REQUEST_TARGET" ]
+          case "${UONIX_CLONE_REQUEST_SOURCE}:${UONIX_CLONE_REQUEST_TARGET}" in
+            prod:qa|prod:dev|qa:prod|qa:dev|dev:prod|dev:qa) ;;
+            *) echo 'Par remoto inválido.' >&2; exit 1 ;;
+          esac
+          case "$UONIX_CLONE_REQUEST_MODE" in dry-run|execute) ;; *) exit 1 ;; esac
+          case "$UONIX_CLONE_REQUEST_REPLACE_USERS" in true|false) ;; *) exit 1 ;; esac
+
+          environment_name='clone-operations'
+          script_confirmation=''
+          if [ "$UONIX_CLONE_REQUEST_MODE" = execute ] && [ "$UONIX_CLONE_REQUEST_TARGET" = prod ]; then
+            [ "$UONIX_ENABLE_CLONE_PRODUCTION" = true ]
+            source_upper="$(printf '%s' "$UONIX_CLONE_REQUEST_SOURCE" | tr '[:lower:]' '[:upper:]')"
+            expected_confirmation="CLONAR ${source_upper} PARA PROD @ ${UONIX_REQUEST_SHA}"
+            [ "$UONIX_CLONE_REQUEST_CONFIRMATION" = "$expected_confirmation" ]
+            environment_name='production-clone'
+            script_confirmation="CLONAR ${source_upper} PARA PROD"
+          else
+            [ -z "$UONIX_CLONE_REQUEST_CONFIRMATION" ]
+          fi
+
+          [ "$PRODUCTION_URL" = 'https://site.uonix.com.br' ]
+          [ "$QA_URL" = 'https://uonix.ksio.dev' ]
+          [ "$DEVELOPMENT_URL" = 'https://test.uonix.ksio.dev' ]
+          [ "$LOCAWEB_SSH_HOST" = 'ftp.site.uonix.com.br' ]
+          [ "$LOCAWEB_SSH_PORT" = '22' ]
+          [ "$LOCAWEB_SSH_USER" = 'siteuonix1' ]
+          [ "$LOCAWEB_DOCUMENT_ROOT" = '/home/storage/f/34/12/siteuonix1/public_html' ]
+          [ "$LOCAWEB_ACCOUNT_ROOT" = '/home/storage/f/34/12/siteuonix1' ]
+          [ "$LOCAWEB_PHP_BIN" = '/usr/bin/php85' ]
+          [ "$LOCAWEB_WP_BIN" = '/home/storage/f/34/12/siteuonix1/bin/wp-cli.phar' ]
+          [ "$HOSTGATOR_SSH_HOST" = '108.179.252.137' ]
+          [ "$HOSTGATOR_SSH_PORT" = '22' ]
+          [ "$HOSTGATOR_SSH_USER" = 'uonix' ]
+          [ "$HOSTGATOR_QA_ROOT" = '/home2/uonix/public_html' ]
+          [ "$HOSTGATOR_DEV_ROOT" = '/home2/uonix/dev_uonix' ]
+          [ "$HOSTGATOR_CLONE_BACKUP_ROOT" = '/home2/uonix/_uonix-clone-backups' ]
+
+          {
+            printf 'environment_name=%s\n' "$environment_name"
+            printf 'script_confirmation=%s\n' "$script_confirmation"
+            printf 'production_url=%s\n' "$PRODUCTION_URL"
+            printf 'qa_url=%s\n' "$QA_URL"
+            printf 'development_url=%s\n' "$DEVELOPMENT_URL"
+            printf 'locaweb_ssh_host=%s\n' "$LOCAWEB_SSH_HOST"
+            printf 'locaweb_ssh_port=%s\n' "$LOCAWEB_SSH_PORT"
+            printf 'locaweb_ssh_user=%s\n' "$LOCAWEB_SSH_USER"
+            printf 'locaweb_document_root=%s\n' "$LOCAWEB_DOCUMENT_ROOT"
+            printf 'locaweb_account_root=%s\n' "$LOCAWEB_ACCOUNT_ROOT"
+            printf 'locaweb_php_bin=%s\n' "$LOCAWEB_PHP_BIN"
+            printf 'locaweb_wp_bin=%s\n' "$LOCAWEB_WP_BIN"
+            printf 'hostgator_ssh_host=%s\n' "$HOSTGATOR_SSH_HOST"
+            printf 'hostgator_ssh_port=%s\n' "$HOSTGATOR_SSH_PORT"
+            printf 'hostgator_ssh_user=%s\n' "$HOSTGATOR_SSH_USER"
+            printf 'hostgator_qa_root=%s\n' "$HOSTGATOR_QA_ROOT"
+            printf 'hostgator_dev_root=%s\n' "$HOSTGATOR_DEV_ROOT"
+            printf 'hostgator_clone_backup_root=%s\n' "$HOSTGATOR_CLONE_BACKUP_ROOT"
+          } >> "$GITHUB_OUTPUT"
+
+  clone:
+    name: Clone ${{ inputs.source }} to ${{ inputs.target }} (${{ inputs.mode }})
+    needs: validate-request
+    runs-on: ubuntu-latest
+    environment: ${{ needs.validate-request.outputs.environment_name }}
+    env:
+      PRODUCTION_URL: ${{ needs.validate-request.outputs.production_url }}
+      QA_URL: ${{ needs.validate-request.outputs.qa_url }}
+      DEVELOPMENT_URL: ${{ needs.validate-request.outputs.development_url }}
+      LOCAWEB_SSH_HOST: ${{ needs.validate-request.outputs.locaweb_ssh_host }}
+      LOCAWEB_SSH_PORT: ${{ needs.validate-request.outputs.locaweb_ssh_port }}
+      LOCAWEB_SSH_USER: ${{ needs.validate-request.outputs.locaweb_ssh_user }}
+      LOCAWEB_DOCUMENT_ROOT: ${{ needs.validate-request.outputs.locaweb_document_root }}
+      LOCAWEB_ACCOUNT_ROOT: ${{ needs.validate-request.outputs.locaweb_account_root }}
+      LOCAWEB_PHP_BIN: ${{ needs.validate-request.outputs.locaweb_php_bin }}
+      LOCAWEB_WP_BIN: ${{ needs.validate-request.outputs.locaweb_wp_bin }}
+      HOSTGATOR_SSH_HOST: ${{ needs.validate-request.outputs.hostgator_ssh_host }}
+      HOSTGATOR_SSH_PORT: ${{ needs.validate-request.outputs.hostgator_ssh_port }}
+      HOSTGATOR_SSH_USER: ${{ needs.validate-request.outputs.hostgator_ssh_user }}
+      HOSTGATOR_QA_ROOT: ${{ needs.validate-request.outputs.hostgator_qa_root }}
+      HOSTGATOR_DEV_ROOT: ${{ needs.validate-request.outputs.hostgator_dev_root }}
+      HOSTGATOR_CLONE_BACKUP_ROOT: ${{ needs.validate-request.outputs.hostgator_clone_backup_root }}
+      UONIX_CLONE_REQUEST_SOURCE: ${{ inputs.source }}
+      UONIX_CLONE_REQUEST_TARGET: ${{ inputs.target }}
+      UONIX_CLONE_REQUEST_MODE: ${{ inputs.mode }}
+      UONIX_CLONE_REQUEST_REPLACE_USERS: ${{ inputs.replace_users }}
+      UONIX_CLONE_SCRIPT_CONFIRMATION: ${{ needs.validate-request.outputs.script_confirmation }}
+      UONIX_CLONE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout canonical implementation
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
-      - name: Validate request
+      - name: Install encrypted transport dependencies
         run: |
-          test -n "$SSH_HOST" || (echo "Missing STAGING_SSH_HOST variable" && exit 1)
-          test -n "$SSH_USER" || (echo "Missing STAGING_SSH_USER variable" && exit 1)
-          test -n "${{ secrets.STAGING_SSH_KEY }}" || (echo "Missing STAGING_SSH_KEY secret" && exit 1)
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes rsync sshpass
 
-          if [ "${{ inputs.source }}" = "${{ inputs.target }}" ]; then
-            echo "Source and target cannot be the same."
-            exit 1
+      - name: Validate request without touching a host
+        run: |
+          set -euo pipefail
+          test "${UONIX_CLONE_REQUEST_SOURCE}" != "${UONIX_CLONE_REQUEST_TARGET}"
+          case "${UONIX_CLONE_REQUEST_SOURCE}:${UONIX_CLONE_REQUEST_TARGET}" in
+            prod:qa|prod:dev|qa:prod|qa:dev|dev:prod|dev:qa) ;;
+            *) echo 'Par remoto inválido.' >&2; exit 1 ;;
+          esac
+          case "${UONIX_CLONE_REQUEST_MODE}" in dry-run|execute) ;; *) exit 1 ;; esac
+          case "${UONIX_CLONE_REQUEST_REPLACE_USERS}" in true|false) ;; *) exit 1 ;; esac
+
+      - name: Materialize credentials as private files
+        env:
+          HOSTGATOR_SSH_PRIVATE_KEY: ${{ secrets.HOSTGATOR_SSH_PRIVATE_KEY }}
+          HOSTGATOR_SSH_KNOWN_HOSTS: ${{ secrets.HOSTGATOR_SSH_KNOWN_HOSTS }}
+          LOCAWEB_SSH_PASSWORD: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+          LOCAWEB_SSH_KNOWN_HOSTS: ${{ secrets.LOCAWEB_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          set +x
+          test -n "$HOSTGATOR_SSH_PRIVATE_KEY"
+          test -n "$HOSTGATOR_SSH_KNOWN_HOSTS"
+          test -n "$LOCAWEB_SSH_PASSWORD"
+          test -n "$LOCAWEB_SSH_KNOWN_HOSTS"
+          printf '::add-mask::%s\n' "$LOCAWEB_SSH_PASSWORD"
+          umask 077
+          credentials="$RUNNER_TEMP/uonix-clone-credentials"
+          mkdir -p "$credentials"
+          printf '%s\n' "$HOSTGATOR_SSH_PRIVATE_KEY" > "$credentials/hostgator-key"
+          printf '%s\n' "$HOSTGATOR_SSH_KNOWN_HOSTS" > "$credentials/hostgator-known-hosts"
+          printf '%s' "$LOCAWEB_SSH_PASSWORD" > "$credentials/locaweb-password"
+          printf '%s\n' "$LOCAWEB_SSH_KNOWN_HOSTS" > "$credentials/locaweb-known-hosts"
+          chmod 600 "$credentials"/*
+          {
+            printf 'HOSTGATOR_SSH_KEY=%s\n' "$credentials/hostgator-key"
+            printf 'HOSTGATOR_SSH_KNOWN_HOSTS_FILE=%s\n' "$credentials/hostgator-known-hosts"
+            printf 'LOCAWEB_SSH_PASSWORD_FILE=%s\n' "$credentials/locaweb-password"
+            printf 'LOCAWEB_SSH_KNOWN_HOSTS_FILE=%s\n' "$credentials/locaweb-known-hosts"
+          } >> "$GITHUB_ENV"
+
+      - name: Mandatory dry-run
+        run: |
+          set -euo pipefail
+          export UONIX_CLONE_SUMMARY_FILE="${RUNNER_TEMP}/uonix-clone-summary.txt"
+          replace_users=()
+          if [ "${UONIX_CLONE_REQUEST_REPLACE_USERS}" = true ]; then
+            replace_users+=(--replace-users)
           fi
+          scripts/clone-environment.sh \
+            --source="${UONIX_CLONE_REQUEST_SOURCE}" \
+            --target="${UONIX_CLONE_REQUEST_TARGET}" \
+            --dry-run \
+            "${replace_users[@]}"
 
-          if [ "${{ inputs.target }}" = "prod" ] && [ "${{ inputs.dry_run }}" != "true" ] && [ "${{ inputs.confirm_production }}" != "CLONAR PARA PRODUCAO" ]; then
-            echo "Production clone requires exact confirmation."
-            exit 1
+      - name: Execute only after the green dry-run
+        if: ${{ inputs.mode == 'execute' }}
+        run: |
+          set -euo pipefail
+          export UONIX_CLONE_SUMMARY_FILE="${RUNNER_TEMP}/uonix-clone-summary.txt"
+          replace_users=()
+          confirmation=()
+          if [ "${UONIX_CLONE_REQUEST_REPLACE_USERS}" = true ]; then
+            replace_users+=(--replace-users)
           fi
-
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/uonix_clone_key
-          chmod 600 ~/.ssh/uonix_clone_key
-          ssh-keyscan -p 22 -H "$SSH_HOST" >> ~/.ssh/known_hosts
-
-      - name: Test SSH and remote tools
-        run: |
-          ssh -p 22 -i ~/.ssh/uonix_clone_key "$SSH_USER@$SSH_HOST" \
-            "command -v wp && command -v rsync && command -v gzip && command -v tar && (command -v mysql || command -v mariadb)"
-
-      - name: Run clone
-        run: |
-          chmod +x scripts/clone-environment.sh
-
-          dry_run_arg=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            dry_run_arg="--dry-run"
+          if [ "${UONIX_CLONE_REQUEST_TARGET}" = prod ]; then
+            [ -n "$UONIX_CLONE_SCRIPT_CONFIRMATION" ]
+            confirmation+=(--confirmation="$UONIX_CLONE_SCRIPT_CONFIRMATION")
           fi
+          scripts/clone-environment.sh \
+            --source="${UONIX_CLONE_REQUEST_SOURCE}" \
+            --target="${UONIX_CLONE_REQUEST_TARGET}" \
+            --execute \
+            "${replace_users[@]}" \
+            "${confirmation[@]}"
 
-          SSH_KEY="$HOME/.ssh/uonix_clone_key" scripts/clone-environment.sh \
-            --source="${{ inputs.source }}" \
-            --target="${{ inputs.target }}" \
-            --include-git-files="${{ inputs.include_git_files && '1' || '0' }}" \
-            --preserve-destination-users="${{ inputs.preserve_destination_users && '1' || '0' }}" \
-            --confirm-production="${{ inputs.confirm_production }}" \
-            $dry_run_arg \
-            --yes
+      - name: Publish sanitized operation summary
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          export UONIX_CLONE_SUMMARY_FILE="${RUNNER_TEMP}/uonix-clone-summary.txt"
+          {
+            printf '## Clone Uonix\n\n'
+            printf -- "- Origem: \`%s\`\n" "${UONIX_CLONE_REQUEST_SOURCE}"
+            printf -- "- Destino: \`%s\`\n" "${UONIX_CLONE_REQUEST_TARGET}"
+            printf -- "- Modo solicitado: \`%s\`\n" "${UONIX_CLONE_REQUEST_MODE}"
+            if [ -s "$UONIX_CLONE_SUMMARY_FILE" ]; then
+              while IFS='=' read -r key value; do
+                case "$key" in
+                  source|target|mode|replace_users|backup_id|runtime_file_count|runtime_directory_count)
+                    printf -- "- %s: \`%s\`\n" "$key" "$value"
+                    ;;
+                esac
+              done < "$UONIX_CLONE_SUMMARY_FILE"
+            else
+              printf -- '- Resultado: nenhuma mutação concluída; consulte o log do gate que falhou.\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove credential files
+        if: ${{ always() }}
+        run: |
+          rm -rf "$RUNNER_TEMP/uonix-clone-credentials"

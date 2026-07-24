@@ -11,12 +11,17 @@ Assim, qualquer alteração no tema ou nos MU-plugins aparece no WordPress local
 ## Comandos
 
 ```bash
-cd /Users/cassio/GitHubPessoal/uonix-site
+cd "$(git rev-parse --show-toplevel)"
 podman-compose -p uonix-local -f local/compose.yml up -d
 podman-compose -p uonix-local -f local/compose.yml down
 podman-compose -p uonix-local -f local/compose.yml logs -f wordpress
 podman-compose -p uonix-local -f local/compose.yml --profile tools run --rm --no-deps wpcli cache flush
+podman-compose -p uonix-local -f local/compose.yml --profile tools run --rm --no-deps wpcli option update blogname 'LOCAL - UONIX'
 ```
+
+O Compose define explicitamente `WP_ENVIRONMENT_TYPE=local`, mantém indexação e analytics desativados e entrega todo e-mail ao Mailpit.
+
+A topologia canônica é: produção provisória em `https://site.uonix.com.br/`, QA em `https://uonix.ksio.dev/`, DEV em `https://test.uonix.ksio.dev/` e este ambiente local em `http://localhost:8080/`. Consulte [docs/ambientes.md](../docs/ambientes.md) antes de importar ou clonar dados.
 
 ## Acessos
 
@@ -39,7 +44,7 @@ Use este fluxo quando containers ou imagens forem apagados por acidente.
 1. Entre no repo:
 
 ```bash
-cd /Users/cassio/GitHubPessoal/uonix-site
+cd "$(git rev-parse --show-toplevel)"
 ```
 
 2. Confira se os volumes de dados ainda existem:
@@ -94,14 +99,15 @@ Esperado:
 
 - `curl` retorna `HTTP/1.1 200 OK`.
 - `home` e `siteurl` retornam `http://localhost:8080`.
-- `blogname` retorna `DEV - UONIX`.
+- `blogname` retorna `LOCAL - UONIX`.
 
 8. Se o volume do banco tambem foi removido, suba os containers vazios e recarregue os dados a partir de QA:
 
 ```bash
 podman-compose -p uonix-local -f local/compose.yml up -d
-SSH_KEY="$HOME/.ssh/uonix_github_actions_staging_nopass" scripts/clone-environment.sh --source=qa --target=local --include-git-files=0 --preserve-destination-users=1 --dry-run
-SSH_KEY="$HOME/.ssh/uonix_github_actions_staging_nopass" scripts/clone-environment.sh --source=qa --target=local --include-git-files=0 --preserve-destination-users=1 --yes
+HOSTGATOR_SSH_KEY='/caminho/para/chave-aprovada' HOSTGATOR_SSH_KNOWN_HOSTS_FILE='/caminho/para/known-hosts-aprovado' scripts/clone-environment.sh --source=qa --target=local --dry-run
+# Somente após gates humanos, backup validado e revisão do dry-run:
+HOSTGATOR_SSH_KEY='/caminho/para/chave-aprovada' HOSTGATOR_SSH_KNOWN_HOSTS_FILE='/caminho/para/known-hosts-aprovado' scripts/clone-environment.sh --source=qa --target=local --execute
 ```
 
 Esse clone sobrescreve somente o ambiente local. Ele preserva as opcoes locais sensiveis e ajusta `home`, `siteurl` e `blogname` para localhost.
@@ -115,10 +121,15 @@ Para recriar do zero intencionalmente, pare os containers e remova os volumes de
 Exemplo com um dump em `~/Downloads/uonix_qa.sql`:
 
 ```bash
-podman exec uonix-local-db mariadb -u root -proot_password -e "DROP DATABASE IF EXISTS uonix_db; CREATE DATABASE uonix_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL PRIVILEGES ON uonix_db.* TO 'uonix_user'@'%'; FLUSH PRIVILEGES;"
-podman exec -i uonix-local-db mariadb -u uonix_user -puonix_pass uonix_db < ~/Downloads/uonix_qa.sql
-podman exec uonix-local-db mariadb -u uonix_user -puonix_pass uonix_db -e "UPDATE wpis_options SET option_value='http://localhost:8080' WHERE option_name IN ('siteurl','home');"
-podman-compose -p uonix-local -f local/compose.yml --profile tools run --rm --no-deps wpcli search-replace 'https://qa.uonix.ksio.dev' 'http://localhost:8080' --all-tables-with-prefix --skip-columns=guid
+read -rsp 'Senha MariaDB root local: ' MYSQL_PWD; printf '\n'; export MYSQL_PWD
+podman exec -e MYSQL_PWD uonix-local-db mariadb -u root -e "DROP DATABASE IF EXISTS uonix_db; CREATE DATABASE uonix_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL PRIVILEGES ON uonix_db.* TO 'uonix_user'@'%'; FLUSH PRIVILEGES;"
+unset MYSQL_PWD
+
+read -rsp 'Senha MariaDB do usuário local: ' MYSQL_PWD; printf '\n'; export MYSQL_PWD
+podman exec -e MYSQL_PWD -i uonix-local-db mariadb -u uonix_user uonix_db < ~/Downloads/uonix_qa.sql
+podman exec -e MYSQL_PWD uonix-local-db mariadb -u uonix_user uonix_db -e "UPDATE wpis_options SET option_value='http://localhost:8080' WHERE option_name IN ('siteurl','home');"
+unset MYSQL_PWD
+podman-compose -p uonix-local -f local/compose.yml --profile tools run --rm --no-deps wpcli search-replace 'https://uonix.ksio.dev' 'http://localhost:8080' --all-tables-with-prefix --skip-columns=guid
 ```
 
 ## Clonar Ambientes
@@ -126,16 +137,16 @@ podman-compose -p uonix-local -f local/compose.yml --profile tools run --rm --no
 Use o script central para clonar QA ou produção para localhost:
 
 ```bash
-cd /Users/cassio/GitHubPessoal/uonix-site
-SSH_KEY="$HOME/.ssh/uonix_github_actions_staging_nopass" scripts/clone-environment.sh --source=qa --target=local --include-git-files=0 --preserve-destination-users=1 --yes
+cd "$(git rev-parse --show-toplevel)"
+HOSTGATOR_SSH_KEY='/caminho/para/chave-aprovada' HOSTGATOR_SSH_KNOWN_HOSTS_FILE='/caminho/para/known-hosts-aprovado' scripts/clone-environment.sh --source=qa --target=local --dry-run
 ```
 
-O script mantém o título local como `DEV - UONIX`, preserva GoSMTP/Turnstile/Loginizer do destino e deixa o Mailpit ativo apenas em localhost.
+O script mantém o título local como `LOCAL - UONIX`, preserva SMTP/Turnstile/Loginizer do destino e deixa o Mailpit ativo apenas em localhost.
 
 
 ## Validar Clone Sem Alterar
 
 ```bash
-cd /Users/cassio/GitHubPessoal/uonix-site
-SSH_KEY="$HOME/.ssh/uonix_github_actions_staging_nopass" scripts/clone-environment.sh --source=qa --target=local --include-git-files=0 --preserve-destination-users=1 --dry-run
+cd "$(git rev-parse --show-toplevel)"
+HOSTGATOR_SSH_KEY='/caminho/para/chave-aprovada' HOSTGATOR_SSH_KNOWN_HOSTS_FILE='/caminho/para/known-hosts-aprovado' scripts/clone-environment.sh --source=qa --target=local --dry-run
 ```

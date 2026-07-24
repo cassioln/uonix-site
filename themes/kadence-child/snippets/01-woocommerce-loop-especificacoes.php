@@ -31,7 +31,11 @@ add_action( 'woocommerce_after_shop_loop_item', 'uonix_botao_ver_detalhes', 10 )
 
 function uonix_botao_ver_detalhes() {
     global $product;
-    
+
+    if ( ! is_object( $product ) || ! method_exists( $product, 'get_id' ) ) {
+        return;
+    }
+
     // Pega o link do produto
     $link = get_permalink( $product->get_id() );
     
@@ -52,6 +56,10 @@ function uonix_botao_ver_detalhes() {
 add_action( 'woocommerce_no_products_found', 'uonix_link_voltar_vazio', 20 );
 
 function uonix_link_voltar_vazio() {
+    if ( ! function_exists( 'wc_get_page_id' ) ) {
+        return;
+    }
+
     // Define para onde o link vai (Página principal da Loja)
     $link_destino = get_permalink( wc_get_page_id( 'shop' ) );
     
@@ -89,7 +97,7 @@ function uonix_renomear_aba_specs( $tabs ) {
 add_action( 'wp_head', 'uonix_css_tabela_specs' );
 
 function uonix_css_tabela_specs() {
-    if ( ! is_product() ) {
+    if ( ! function_exists( 'is_product' ) || ! is_product() ) {
         return;
     }
     ?>

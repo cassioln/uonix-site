@@ -58,7 +58,7 @@ if ( ! function_exists( 'uonix_checkout_turnstile_widget_html' ) ) {
 }
 
 add_action( 'woocommerce_review_order_before_submit', function() {
-    if ( ! is_checkout() || is_wc_endpoint_url( 'order-received' ) ) {
+    if ( ! function_exists( 'is_checkout' ) || ! function_exists( 'is_wc_endpoint_url' ) || ! is_checkout() || is_wc_endpoint_url( 'order-received' ) ) {
         return;
     }
 
@@ -82,7 +82,7 @@ add_action( 'woocommerce_after_checkout_validation', function( $data, $errors ) 
 }, 10, 2 );
 
 add_action('wp_footer', function () {
-    if (!is_checkout() || is_wc_endpoint_url('order-received')) {
+    if ( ! function_exists( 'is_checkout' ) || ! function_exists( 'is_wc_endpoint_url' ) || ! is_checkout() || is_wc_endpoint_url( 'order-received' ) ) {
         return;
     }
     ?>
