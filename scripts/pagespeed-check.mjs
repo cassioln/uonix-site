@@ -5,8 +5,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const DEFAULT_URLS = [
-  'https://qa.uonix.ksio.dev/',
+  'https://site.uonix.com.br/',
   'https://uonix.ksio.dev/',
+  'https://test.uonix.ksio.dev/',
 ];
 
 const DEFAULT_AUDITS = [
@@ -89,7 +90,8 @@ function printHelp() {
   node scripts/pagespeed-check.mjs [opcoes]
 
 Opcoes:
-  --url URL            URL a medir. Pode repetir. Padrao: QA e producao ksio.
+  --url URL            URL a medir. Pode repetir. Padrao: producao provisoria, QA e DEV.
+                       https://site.uonix.com.br/, https://uonix.ksio.dev/ e https://test.uonix.ksio.dev/.
   --strategy mobile    Estrategia Lighthouse: mobile ou desktop. Pode repetir.
   --category perf      Categoria PageSpeed. Padrao: performance.
   --env .env           Arquivo com PAGESPEED_API_KEY=... ou a chave crua.
@@ -98,7 +100,7 @@ Opcoes:
   --locale pt-BR       Locale da API.
 
 Exemplo:
-  node scripts/pagespeed-check.mjs --url=https://qa.uonix.ksio.dev/ --strategy=mobile --out=tmp/pagespeed/qa.json
+  node scripts/pagespeed-check.mjs --url=https://uonix.ksio.dev/ --strategy=mobile --out=tmp/pagespeed/qa.json
 `);
 }
 

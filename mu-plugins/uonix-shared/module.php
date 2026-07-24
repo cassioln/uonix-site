@@ -7,4 +7,5 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+require_once __DIR__ . '/environment.php';
 require_once __DIR__ . '/helpers.php';
