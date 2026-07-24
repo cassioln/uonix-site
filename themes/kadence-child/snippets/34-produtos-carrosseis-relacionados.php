@@ -23,7 +23,7 @@ add_action('wp_footer', 'uonix_carrossel_produtos_relacionados_script');
 
 function uonix_carrossel_produtos_relacionados_script() {
     // Roda apenas na página do carrinho
-    if (is_cart()) {
+    if ( function_exists( 'is_cart' ) && is_cart() ) {
         ?>
         <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -120,7 +120,7 @@ add_action('wp_footer', 'uonix_produtos_relacionados_carrossel_mobile');
 
 function uonix_produtos_relacionados_carrossel_mobile() {
     // Executa apenas na página de produto individual
-    if (is_product()) {
+    if ( function_exists( 'is_product' ) && is_product() ) {
         ?>
         <style>
         /* ==========================================================================
