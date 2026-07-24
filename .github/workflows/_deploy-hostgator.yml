@@ -1,0 +1,445 @@
+name: Deploy HostGator (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment_name:
+        description: GitHub Environment name
+        required: true
+        type: string
+      target_root:
+        description: WordPress document root
+        required: true
+        type: string
+      target_url:
+        description: Public URL used by smoke tests
+        required: true
+        type: string
+      include_local_module:
+        description: Include the inert uonix-local module in this non-production bundle
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uonix-environment-${{ inputs.environment_name == 'qa-hostgator' && 'qa' || inputs.environment_name == 'development-hostgator' && 'dev' || 'invalid' }}
+  cancel-in-progress: false
+
+jobs:
+  validate-request:
+    name: Validate reusable deployment request
+    runs-on: ubuntu-latest
+    outputs:
+      environment_name: ${{ steps.request.outputs.environment_name }}
+      target_root: ${{ steps.request.outputs.target_root }}
+      target_url: ${{ steps.request.outputs.target_url }}
+      include_local_module: ${{ steps.request.outputs.include_local_module }}
+      expected_uonix_env: ${{ steps.request.outputs.expected_uonix_env }}
+
+    steps:
+      - name: Validate deployment request before credentials
+        id: request
+        env:
+          DEPLOY_ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          DEPLOY_TARGET_ROOT: ${{ inputs.target_root }}
+          DEPLOY_TARGET_URL: ${{ inputs.target_url }}
+          DEPLOY_INCLUDE_LOCAL_MODULE: ${{ inputs.include_local_module }}
+        run: |
+          set -euo pipefail
+          case "$DEPLOY_ENVIRONMENT_NAME" in
+            qa-hostgator)
+              expected_root='/home2/uonix/public_html'
+              expected_url='https://uonix.ksio.dev'
+              expected_uonix_env='staging'
+              ;;
+            development-hostgator)
+              expected_root='/home2/uonix/dev_uonix'
+              expected_url='https://test.uonix.ksio.dev'
+              expected_uonix_env='development'
+              ;;
+            *)
+              printf 'Environment name is not an allowed HostGator target.\n' >&2
+              exit 1
+              ;;
+          esac
+          case "$DEPLOY_INCLUDE_LOCAL_MODULE" in
+            true|false) ;;
+            *) printf 'include_local_module must be boolean.\n' >&2; exit 1 ;;
+          esac
+          if [ "$DEPLOY_TARGET_ROOT" != "$expected_root" ]; then
+            printf 'Document root does not match the selected environment.\n' >&2
+            exit 1
+          fi
+          if [ "$DEPLOY_TARGET_URL" != "$expected_url" ]; then
+            printf 'Target URL does not match the selected environment.\n' >&2
+            exit 1
+          fi
+          {
+            printf 'environment_name=%s\n' "$DEPLOY_ENVIRONMENT_NAME"
+            printf 'target_root=%s\n' "$expected_root"
+            printf 'target_url=%s\n' "$expected_url"
+            printf 'include_local_module=%s\n' "$DEPLOY_INCLUDE_LOCAL_MODULE"
+            printf 'expected_uonix_env=%s\n' "$expected_uonix_env"
+          } >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy managed code to ${{ needs.validate-request.outputs.environment_name }}
+    needs: validate-request
+    runs-on: ubuntu-latest
+    environment: ${{ needs.validate-request.outputs.environment_name }}
+    env:
+      SSH_HOST: ${{ vars.HOSTGATOR_SSH_HOST }}
+      SSH_PORT: ${{ vars.HOSTGATOR_SSH_PORT }}
+      SSH_USER: ${{ vars.HOSTGATOR_SSH_USER }}
+      TARGET_ROOT: ${{ needs.validate-request.outputs.target_root }}
+      TARGET_URL: ${{ needs.validate-request.outputs.target_url }}
+      INCLUDE_LOCAL_MODULE: ${{ needs.validate-request.outputs.include_local_module }}
+      EXPECTED_UONIX_ENV: ${{ needs.validate-request.outputs.expected_uonix_env }}
+      DEPLOY_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      DEPLOY_LOCK_ACQUIRED: 'false'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install rsync
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes rsync
+
+      - name: Build deterministic deploy bundle
+        run: |
+          set -euo pipefail
+          scripts/prepare-deploy-bundle.sh \
+            --environment="$EXPECTED_UONIX_ENV" \
+            --output=.deploy
+
+          if [ "$INCLUDE_LOCAL_MODULE" = true ]; then
+            rsync -a --exclude='.DS_Store' --exclude='._*' \
+              mu-plugins/uonix-local/ \
+              .deploy/mu-plugins/uonix-local/
+            (
+              cd .deploy
+              find theme mu-plugins -type f -print | LC_ALL=C sort | while IFS= read -r relative_path; do
+                checksum="$(shasum -a 256 "$relative_path" | cut -d ' ' -f 1)"
+                printf '%s  %s\n' "$checksum" "$relative_path"
+              done > manifest.sha256
+            )
+          fi
+
+      - name: Validate configuration and pin SSH credentials
+        env:
+          HOSTGATOR_SSH_PRIVATE_KEY: ${{ secrets.HOSTGATOR_SSH_PRIVATE_KEY }}
+          HOSTGATOR_SSH_KNOWN_HOSTS: ${{ secrets.HOSTGATOR_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_HOST"
+          test -n "$SSH_PORT"
+          test -n "$SSH_USER"
+          test -n "$TARGET_ROOT"
+          test -n "$TARGET_URL"
+          test -n "$HOSTGATOR_SSH_PRIVATE_KEY"
+          test -n "$HOSTGATOR_SSH_KNOWN_HOSTS"
+          case "$INCLUDE_LOCAL_MODULE" in true|false) ;; *) exit 1 ;; esac
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$HOSTGATOR_SSH_PRIVATE_KEY" > "$HOME/.ssh/hostgator_key"
+          printf '%s\n' "$HOSTGATOR_SSH_KNOWN_HOSTS" > "$HOME/.ssh/hostgator_known_hosts"
+          chmod 600 "$HOME/.ssh/hostgator_key" "$HOME/.ssh/hostgator_known_hosts"
+
+      - name: Preflight SSH before any remote write
+        run: |
+          set -euo pipefail
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/hostgator_key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
+            -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            bash -s -- "$TARGET_ROOT" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"
+          test -d "$document_root"
+          command -v wp >/dev/null
+          command -v rsync >/dev/null
+          command -v sha256sum >/dev/null
+          wp --path="$document_root" core is-installed
+          REMOTE
+
+      - name: Acquire shared environment lock
+        run: |
+          set -euo pipefail
+          lock_path="$TARGET_ROOT/.uonix-operation.lock"
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/hostgator_key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
+            "$SSH_USER@$SSH_HOST" \
+            bash -s -- "$lock_path" "$DEPLOY_RUN_ID" <<'REMOTE'
+          set -euo pipefail
+          lock_path="$1"
+          owner="$2"
+          case "$owner" in ''|*[!A-Za-z0-9._-]*) exit 1 ;; esac
+          umask 077
+          if ! mkdir "$lock_path"; then
+            printf 'Environment is already locked: %s\n' "$lock_path" >&2
+            exit 2
+          fi
+          if ! printf '%s\n' "$owner" > "$lock_path/owner"; then
+            rmdir "$lock_path" 2>/dev/null || true
+            exit 1
+          fi
+          chmod 700 "$lock_path"
+          chmod 600 "$lock_path/owner"
+          REMOTE
+          printf 'DEPLOY_LOCK_ACQUIRED=true\n' >> "$GITHUB_ENV"
+
+      - name: Back up managed remote paths
+        run: |
+          set -euo pipefail
+          backup_id="$(date -u +%Y%m%d-%H%M%S)"
+          backup_relative="_uonix-deploy-backups/$EXPECTED_UONIX_ENV/$backup_id"
+
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/hostgator_key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
+            "$SSH_USER@$SSH_HOST" \
+            bash -s -- "$TARGET_ROOT" "$backup_relative" <<'REMOTE'
+          set -euo pipefail
+          shopt -s nullglob
+          document_root="$1"
+          backup_dir="$HOME/$2"
+          managed="$backup_dir/managed"
+          mkdir -p "$managed/themes" "$managed/mu-plugins"
+
+          if [ -e "$document_root/wp-content/themes/kadence-child" ]; then
+            cp -a "$document_root/wp-content/themes/kadence-child" "$managed/themes/"
+          fi
+          if [ -e "$document_root/wp-content/mu-plugins/uonix-core.php" ]; then
+            cp -a "$document_root/wp-content/mu-plugins/uonix-core.php" "$managed/mu-plugins/"
+          fi
+          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            cp -a "$module" "$managed/mu-plugins/"
+          done
+          find "$managed" -type f -print | LC_ALL=C sort > "$backup_dir/files.txt"
+          REMOTE
+
+          printf 'BACKUP_ID=%s\n' "$backup_id" >> "$GITHUB_ENV"
+          printf 'BACKUP_RELATIVE=%s\n' "$backup_relative" >> "$GITHUB_ENV"
+
+      - name: Publish only managed paths and verify manifest
+        run: |
+          set -euo pipefail
+          remote="$SSH_USER@$SSH_HOST"
+          ssh_transport="ssh -p $SSH_PORT -i $HOME/.ssh/hostgator_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/hostgator_known_hosts"
+
+          rsync -az --delete -e "$ssh_transport" \
+            .deploy/theme/ \
+            "$remote:$TARGET_ROOT/wp-content/themes/kadence-child/"
+          rsync -az -e "$ssh_transport" \
+            .deploy/mu-plugins/uonix-core.php \
+            "$remote:$TARGET_ROOT/wp-content/mu-plugins/uonix-core.php"
+
+          expected_modules=()
+          for module in .deploy/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            module_name="$(basename "$module")"
+            expected_modules+=("$module_name")
+            rsync -az --delete -e "$ssh_transport" \
+              "$module/" \
+              "$remote:$TARGET_ROOT/wp-content/mu-plugins/$module_name/"
+          done
+
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/hostgator_key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
+            "$remote" \
+            bash -s -- "$TARGET_ROOT" "${expected_modules[@]}" <<'REMOTE'
+          set -euo pipefail
+          shopt -s nullglob
+          document_root="$1"
+          shift
+          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            module_name="$(basename "$module")"
+            keep=false
+            for expected in "$@"; do
+              if [ "$module_name" = "$expected" ]; then
+                keep=true
+                break
+              fi
+            done
+            if [ "$keep" = false ]; then
+              rm -rf -- "$module"
+            fi
+          done
+          REMOTE
+
+          rsync -az -e "$ssh_transport" \
+            .deploy/manifest.sha256 \
+            "$remote:$BACKUP_RELATIVE/manifest.expected.sha256"
+
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/hostgator_key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
+            "$remote" \
+            bash -s -- "$TARGET_ROOT" "$BACKUP_RELATIVE/manifest.expected.sha256" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"
+          manifest="$HOME/$2"
+          while read -r checksum relative_path; do
+            case "$relative_path" in
+              theme/*) target="$document_root/wp-content/themes/kadence-child/${relative_path#theme/}" ;;
+              mu-plugins/*) target="$document_root/wp-content/mu-plugins/${relative_path#mu-plugins/}" ;;
+              *) exit 1 ;;
+            esac
+            test -f "$target"
+            actual="$(sha256sum "$target" | cut -d ' ' -f 1)"
+            test "$actual" = "$checksum"
+          done < "$manifest"
+          REMOTE
+
+      - name: Clear cache and run smoke tests
+        run: |
+          set -euo pipefail
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/hostgator_key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
+            "$SSH_USER@$SSH_HOST" \
+            bash -s -- "$TARGET_ROOT" "$EXPECTED_UONIX_ENV" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"
+          expected_environment="$2"
+          speedycache="$document_root/wp-content/cache/speedycache"
+          if [ -d "$speedycache" ]; then
+            find "$speedycache" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+          fi
+          wp --path="$document_root" cache flush
+          wp --path="$document_root" core is-installed
+          test "$(wp --path="$document_root" eval 'echo defined("UONIX_ENV") ? UONIX_ENV : "";')" = "$expected_environment"
+          REMOTE
+          curl --fail --silent --show-error --location --max-time 30 --output /dev/null "$TARGET_URL/"
+
+      - name: Roll back managed code after failure
+        if: ${{ failure() }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKUP_RELATIVE:-}" ]; then
+            echo 'Nenhum backup foi criado; não houve transferência para reverter.'
+            exit 0
+          fi
+
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/hostgator_key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
+            "$SSH_USER@$SSH_HOST" \
+            bash -s -- "$TARGET_ROOT" "$BACKUP_RELATIVE" <<'REMOTE'
+          set -euo pipefail
+          shopt -s nullglob
+          document_root="$1"
+          managed="$HOME/$2/managed"
+
+          rm -rf -- "$document_root/wp-content/themes/kadence-child"
+          rm -f -- "$document_root/wp-content/mu-plugins/uonix-core.php"
+          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
+            [ -d "$module" ] && rm -rf -- "$module"
+          done
+
+          if [ -d "$managed/themes/kadence-child" ]; then
+            cp -a "$managed/themes/kadence-child" "$document_root/wp-content/themes/"
+          fi
+          if [ -f "$managed/mu-plugins/uonix-core.php" ]; then
+            cp -a "$managed/mu-plugins/uonix-core.php" "$document_root/wp-content/mu-plugins/"
+          fi
+          for module in "$managed"/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            cp -a "$module" "$document_root/wp-content/mu-plugins/"
+          done
+
+          speedycache="$document_root/wp-content/cache/speedycache"
+          if [ -d "$speedycache" ]; then
+            find "$speedycache" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+          fi
+          wp --path="$document_root" cache flush
+          wp --path="$document_root" core is-installed
+          REMOTE
+          curl --fail --silent --show-error --location --max-time 30 --output /dev/null "$TARGET_URL/"
+          echo "Rollback validado a partir do backup $BACKUP_ID."
+
+      - name: Retain five code backups
+        if: ${{ success() }}
+        run: |
+          set -euo pipefail
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/hostgator_key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
+            "$SSH_USER@$SSH_HOST" \
+            bash -s -- "$EXPECTED_UONIX_ENV" <<'REMOTE'
+          set -euo pipefail
+          backup_root="$HOME/_uonix-deploy-backups/$1"
+          if [ -d "$backup_root" ]; then
+            find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print | LC_ALL=C sort -r | tail -n +6 | while IFS= read -r old_backup; do
+              rm -rf -- "$old_backup"
+            done
+          fi
+          REMOTE
+
+      - name: Release shared environment lock
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$HOME/.ssh/hostgator_key" ] || [ ! -f "$HOME/.ssh/hostgator_known_hosts" ]; then
+            exit 0
+          fi
+          lock_path="$TARGET_ROOT/.uonix-operation.lock"
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/hostgator_key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
+            "$SSH_USER@$SSH_HOST" \
+            bash -s -- "$lock_path" "$DEPLOY_RUN_ID" "$DEPLOY_LOCK_ACQUIRED" <<'REMOTE'
+          set -euo pipefail
+          lock_path="$1"
+          owner="$2"
+          acquired="$3"
+          case "$owner" in ''|*[!A-Za-z0-9._-]*) exit 1 ;; esac
+          case "$acquired" in true|false) ;; *) exit 1 ;; esac
+          [ -d "$lock_path" ] || exit 0
+          current_owner="$(cat "$lock_path/owner" 2>/dev/null || true)"
+          if [ "$current_owner" = "$owner" ]; then
+            rm -f -- "$lock_path/owner"
+            rmdir "$lock_path"
+            exit 0
+          fi
+          if [ "$acquired" = true ]; then
+            printf 'Refusing to release a lock owned by another operation.\n' >&2
+            exit 1
+          fi
+          REMOTE

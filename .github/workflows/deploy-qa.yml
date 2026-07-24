@@ -1,0 +1,25 @@
+name: Deploy QA
+
+on:
+  push:
+    branches: [qa]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate before QA deploy
+    uses: ./.github/workflows/validate.yml
+
+  deploy:
+    name: Deploy QA to HostGator
+    needs: validate
+    if: ${{ vars.ENABLE_DEPLOY_QA == 'true' }}
+    uses: ./.github/workflows/_deploy-hostgator.yml
+    with:
+      environment_name: qa-hostgator
+      target_root: ${{ vars.HOSTGATOR_QA_ROOT }}
+      target_url: ${{ vars.QA_URL }}
+      include_local_module: false

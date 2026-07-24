@@ -39,6 +39,8 @@ services:
         define( 'WP_DEBUG_DISPLAY', false );
         define( 'WP_CACHE', false );
         define( 'WP_ENVIRONMENT_TYPE', 'local' );
+        define( 'UONIX_ALLOW_INDEXING', false );
+        define( 'UONIX_ANALYTICS_ENABLED', false );
         define( 'FS_METHOD', 'direct' );
         define( 'WP_MEMORY_LIMIT', '256M' );
         define( 'WP_MAX_MEMORY_LIMIT', '512M' );
@@ -82,6 +84,8 @@ services:
         define( 'WP_DEBUG_DISPLAY', false );
         define( 'WP_CACHE', false );
         define( 'WP_ENVIRONMENT_TYPE', 'local' );
+        define( 'UONIX_ALLOW_INDEXING', false );
+        define( 'UONIX_ANALYTICS_ENABLED', false );
         define( 'FS_METHOD', 'direct' );
         define( 'WP_MEMORY_LIMIT', '256M' );
         define( 'WP_MAX_MEMORY_LIMIT', '512M' );

@@ -24,7 +24,17 @@ function uox_clone_env_labels() {
 	return array(
 		'prod'  => 'Produção',
 		'qa'    => 'QA',
-		'local' => 'Localhost',
+		'dev'   => 'DEV',
+		'local' => 'Local',
+	);
+}
+
+function uox_clone_env_details() {
+	return array(
+		'prod'  => array( 'url' => 'https://site.uonix.com.br', 'host' => 'Locaweb' ),
+		'qa'    => array( 'url' => 'https://uonix.ksio.dev', 'host' => 'HostGator / public_html' ),
+		'dev'   => array( 'url' => 'https://test.uonix.ksio.dev', 'host' => 'HostGator / dev_uonix' ),
+		'local' => array( 'url' => 'http://localhost:8080', 'host' => 'Podman no Mac' ),
 	);
 }
 
@@ -41,7 +51,19 @@ function uox_clone_get_github_repo() {
 }
 
 function uox_clone_get_workflow_ref() {
-	return defined( 'UONIX_GITHUB_WORKFLOW_REF' ) ? UONIX_GITHUB_WORKFLOW_REF : 'qa';
+	return 'master';
+}
+
+function uox_clone_execution_mode( $source, $target ) {
+	return ( 'local' === $source || 'local' === $target ) ? 'mac' : 'github-runner';
+}
+
+function uox_clone_required_confirmation( $source, $target ) {
+	return sprintf( 'CLONAR %s PARA %s', strtoupper( $source ), strtoupper( $target ) );
+}
+
+function uox_clone_pair_requires_ssh_window( $source, $target ) {
+	return 'prod' === $source || 'prod' === $target;
 }
 
 function uox_clone_get_local_repo_path() {
@@ -52,7 +74,7 @@ function uox_clone_has_github_token() {
 	return defined( 'UONIX_GITHUB_TOKEN' ) && '' !== trim( (string) UONIX_GITHUB_TOKEN );
 }
 
-function uox_clone_dispatch_workflow( $source, $target, $include_git_files, $preserve_users, $dry_run, $confirm_production ) {
+function uox_clone_dispatch_workflow( $source, $target, $mode, $replace_users, $confirmation ) {
 	if ( ! uox_clone_has_github_token() ) {
 		return new WP_Error(
 			'uox_clone_missing_token',
@@ -79,12 +101,11 @@ function uox_clone_dispatch_workflow( $source, $target, $include_git_files, $pre
 				array(
 					'ref'    => uox_clone_get_workflow_ref(),
 					'inputs' => array(
-						'source'                     => $source,
-						'target'                     => $target,
-						'include_git_files'          => uox_clone_bool_string( $include_git_files ),
-						'preserve_destination_users' => uox_clone_bool_string( $preserve_users ),
-						'dry_run'                    => uox_clone_bool_string( $dry_run ),
-						'confirm_production'         => $confirm_production,
+						'source'        => $source,
+						'target'        => $target,
+						'mode'          => $mode,
+						'replace_users' => uox_clone_bool_string( $replace_users ),
+						'confirmation'  => $confirmation,
 					),
 				)
 			),
@@ -96,40 +117,33 @@ function uox_clone_dispatch_workflow( $source, $target, $include_git_files, $pre
 	}
 
 	$status = (int) wp_remote_retrieve_response_code( $response );
-
 	if ( 204 !== $status ) {
-		$body = wp_remote_retrieve_body( $response );
 		return new WP_Error(
 			'uox_clone_dispatch_failed',
-			sprintf( 'GitHub Actions retornou HTTP %d. Resposta: %s', $status, $body )
+			sprintf( 'GitHub Actions retornou HTTP %d. Consulte os logs administrativos para mais detalhes.', $status )
 		);
 	}
 
 	return true;
 }
 
-function uox_clone_build_local_command( $source, $target, $include_git_files, $preserve_users, $dry_run, $confirm_production ) {
+function uox_clone_build_local_command( $source, $target, $mode, $replace_users, $confirmation ) {
 	$repo_path = uox_clone_get_local_repo_path();
 	$args      = array(
 		'cd ' . escapeshellarg( $repo_path ),
 		'&&',
-		'SSH_KEY="$HOME/.ssh/uonix_github_actions_staging_nopass"',
 		'scripts/clone-environment.sh',
 		'--source=' . escapeshellarg( $source ),
 		'--target=' . escapeshellarg( $target ),
-		'--include-git-files=' . ( $include_git_files ? '1' : '0' ),
-		'--preserve-destination-users=' . ( $preserve_users ? '1' : '0' ),
+		'dry-run' === $mode ? '--dry-run' : '--execute',
 	);
 
-	if ( 'prod' === $target ) {
-		$args[] = '--confirm-production=' . escapeshellarg( $confirm_production );
+	if ( $replace_users ) {
+		$args[] = '--replace-users';
 	}
-
-	if ( $dry_run ) {
-		$args[] = '--dry-run';
+	if ( 'execute' === $mode && 'prod' === $target ) {
+		$args[] = '--confirmation=' . escapeshellarg( $confirmation );
 	}
-
-	$args[] = '--yes';
 
 	return implode( ' ', $args );
 }
@@ -141,48 +155,52 @@ function uox_clone_get_result_from_post() {
 
 	check_admin_referer( 'uox_clone_nonce' );
 
-	$source = isset( $_POST['uox_clone_source'] ) ? sanitize_key( wp_unslash( $_POST['uox_clone_source'] ) ) : '';
-	$target = isset( $_POST['uox_clone_target'] ) ? sanitize_key( wp_unslash( $_POST['uox_clone_target'] ) ) : '';
-
-	$include_git_files = ! empty( $_POST['uox_clone_include_git_files'] );
-	$preserve_users    = ! empty( $_POST['uox_clone_preserve_users'] );
-	$dry_run           = ! empty( $_POST['uox_clone_dry_run'] );
-	$confirm_production = isset( $_POST['uox_clone_confirm_production'] )
-		? sanitize_text_field( wp_unslash( $_POST['uox_clone_confirm_production'] ) )
+	$source       = isset( $_POST['uox_clone_source'] ) ? sanitize_key( wp_unslash( $_POST['uox_clone_source'] ) ) : '';
+	$target       = isset( $_POST['uox_clone_target'] ) ? sanitize_key( wp_unslash( $_POST['uox_clone_target'] ) ) : '';
+	$mode         = isset( $_POST['uox_clone_mode'] ) ? sanitize_key( wp_unslash( $_POST['uox_clone_mode'] ) ) : 'dry-run';
+	$replace_users = ! empty( $_POST['uox_clone_replace_users'] );
+	$confirmation = isset( $_POST['uox_clone_confirmation'] )
+		? sanitize_text_field( wp_unslash( $_POST['uox_clone_confirmation'] ) )
 		: '';
 
 	if ( ! uox_clone_is_valid_env( $source ) || ! uox_clone_is_valid_env( $target ) ) {
 		return new WP_Error( 'uox_clone_invalid_env', 'Origem ou destino inválido.' );
 	}
-
+	if ( ! in_array( $mode, array( 'dry-run', 'execute' ), true ) ) {
+		return new WP_Error( 'uox_clone_invalid_mode', 'Modo inválido; escolha dry-run ou execute.' );
+	}
 	if ( $source === $target ) {
 		return new WP_Error( 'uox_clone_same_env', 'Origem e destino não podem ser iguais.' );
 	}
 
-	if ( 'prod' === $target && ! $dry_run && 'CLONAR PARA PRODUCAO' !== $confirm_production ) {
+	$required_confirmation = uox_clone_required_confirmation( $source, $target );
+	if ( 'prod' === $target && 'execute' === $mode && $required_confirmation !== $confirmation ) {
 		return new WP_Error(
 			'uox_clone_missing_production_confirmation',
-			'Para clonar para produção, digite CLONAR PARA PRODUCAO no campo de confirmação.'
+			sprintf( 'Para clonar para produção, digite %s no campo de confirmação.', $required_confirmation )
 		);
 	}
 
-	if ( 'local' === $source || 'local' === $target ) {
+	$ssh_notice = uox_clone_pair_requires_ssh_window( $source, $target )
+		? ' Antes de prosseguir, habilite no painel a janela SSH Locaweb de três horas.'
+		: '';
+
+	if ( 'mac' === uox_clone_execution_mode( $source, $target ) ) {
 		return array(
 			'type'    => 'command',
-			'message' => $dry_run ? 'Execute o comando abaixo no terminal do Mac para validar o clone sem alterar o destino.' : 'Execute o comando abaixo no terminal do Mac para clonar envolvendo localhost.',
-			'command' => uox_clone_build_local_command( $source, $target, $include_git_files, $preserve_users, $dry_run, $confirm_production ),
+			'message' => ( 'dry-run' === $mode ? 'Execute no Mac para validar sem alterar o destino.' : 'Execute no Mac somente após revisar o dry-run.' ) . $ssh_notice,
+			'command' => uox_clone_build_local_command( $source, $target, $mode, $replace_users, $confirmation ),
 		);
 	}
 
-	$dispatch = uox_clone_dispatch_workflow( $source, $target, $include_git_files, $preserve_users, $dry_run, $confirm_production );
-
+	$dispatch = uox_clone_dispatch_workflow( $source, $target, $mode, $replace_users, $confirmation );
 	if ( is_wp_error( $dispatch ) ) {
 		return $dispatch;
 	}
 
 	return array(
 		'type'    => 'success',
-		'message' => 'Workflow de clone disparado no GitHub Actions. Acompanhe a execução no repositório.',
+		'message' => 'Workflow de clone disparado em master. Acompanhe o dry-run obrigatório no GitHub Actions.' . $ssh_notice,
 	);
 }
 
@@ -217,19 +235,20 @@ function uox_clone_render_page() {
 		wp_die( 'Você não tem permissão para acessar esta página.' );
 	}
 
-	$result = uox_clone_get_result_from_post();
-	$envs   = uox_clone_env_labels();
+	$result  = uox_clone_get_result_from_post();
+	$envs    = uox_clone_env_labels();
+	$details = uox_clone_env_details();
 
 	?>
 	<div class="wrap">
 		<h1>Clone de Ambientes</h1>
-		<p>Ferramenta interna para clonar banco e arquivos runtime entre produção, QA e localhost.</p>
+		<p>Ferramenta interna para clonar banco e arquivos runtime entre produção, QA, DEV e local.</p>
 
 		<?php uox_clone_render_notice( $result ); ?>
 
 		<div class="notice notice-warning" style="padding:12px;">
-			<p><strong>Atenção:</strong> esta ferramenta cria backup antes do clone, mas a operação substitui banco e arquivos runtime do destino.</p>
-			<p>Use produção como destino somente após validar origem, backup e confirmação manual.</p>
+			<p><strong>Atenção:</strong> toda execução cria backup antes da mutação e preserva usuários por padrão.</p>
+			<p>Qualquer par envolvendo produção exige habilitar previamente a janela SSH Locaweb de três horas. Produção como destino exige a frase exata <code>CLONAR &lt;ORIGEM&gt; PARA PROD</code>.</p>
 		</div>
 
 		<div class="card" style="max-width:920px;margin-bottom:16px;">
@@ -260,6 +279,22 @@ function uox_clone_render_page() {
 			</table>
 		</div>
 
+		<div class="card" style="max-width:920px;margin-bottom:16px;">
+			<h2>Mapa dos ambientes</h2>
+			<table class="widefat striped">
+				<thead><tr><th>Ambiente</th><th>URL</th><th>Host</th></tr></thead>
+				<tbody>
+					<?php foreach ( $envs as $key => $label ) : ?>
+						<tr>
+							<td><strong><?php echo esc_html( $label ); ?></strong></td>
+							<td><code><?php echo esc_html( $details[ $key ]['url'] ); ?></code></td>
+							<td><?php echo esc_html( $details[ $key ]['host'] ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+		</div>
+
 		<form method="post" style="max-width:920px;">
 			<?php wp_nonce_field( 'uox_clone_nonce' ); ?>
 			<input type="hidden" name="uox_clone_action" value="clone">
@@ -281,9 +316,9 @@ function uox_clone_render_page() {
 						<th scope="row"><label for="uox_clone_target">Destino</label></th>
 						<td>
 							<select id="uox_clone_target" name="uox_clone_target" required>
-								<option value="qa">QA</option>
-								<option value="local">Localhost</option>
-								<option value="prod">Produção</option>
+								<?php foreach ( $envs as $value => $label ) : ?>
+									<option value="<?php echo esc_attr( $value ); ?>"><?php echo esc_html( $label ); ?></option>
+								<?php endforeach; ?>
 							</select>
 						</td>
 					</tr>
@@ -291,35 +326,30 @@ function uox_clone_render_page() {
 			</div>
 
 			<div class="card" style="max-width:none;margin-bottom:16px;">
-				<h2>Opções</h2>
+				<h2>Modo e opções</h2>
 				<p>
-					<label>
-						<input type="checkbox" name="uox_clone_preserve_users" value="1" checked>
-						Preservar usuários atuais do destino
-					</label>
+					<label for="uox_clone_mode"><strong>Modo</strong></label><br>
+					<select id="uox_clone_mode" name="uox_clone_mode">
+						<option value="dry-run" selected>Dry-run — somente validar</option>
+						<option value="execute">Execute — dry-run obrigatório e depois mutação</option>
+					</select>
 				</p>
 				<p>
 					<label>
-						<input type="checkbox" name="uox_clone_include_git_files" value="1">
-						Incluir arquivos versionados do git no clone
-					</label>
-				</p>
-				<p>
-					<label>
-						<input type="checkbox" name="uox_clone_dry_run" value="1">
-						Somente validar, sem alterar o destino
+						<input type="checkbox" name="uox_clone_replace_users" value="1">
+						Substituir usuários do destino (desmarcado preserva usuários e capabilities)
 					</label>
 				</p>
 			</div>
 
 			<div class="card" style="max-width:none;margin-bottom:16px;">
 				<h2>Confirmação de produção</h2>
-				<p>Obrigatório apenas quando o destino for produção.</p>
+				<p>Obrigatória apenas em modo execute quando o destino for produção. Exemplo: <code>CLONAR QA PARA PROD</code>.</p>
 				<input
 					type="text"
-					name="uox_clone_confirm_production"
+					name="uox_clone_confirmation"
 					value=""
-					placeholder="CLONAR PARA PRODUCAO"
+					placeholder="CLONAR QA PARA PROD"
 					style="width:100%;max-width:360px;"
 				>
 			</div>
