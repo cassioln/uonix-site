@@ -16,6 +16,10 @@ themes/kadence-child/snippets/
 - Ajustes visuais de catálogo, produto e layout do tema: `themes/kadence-child/snippets/`.
 - Helpers reutilizáveis: `mu-plugins/uonix-shared/`.
 
+## Ambientes
+
+Comportamentos que variam por ambiente devem usar o helper versionado em `mu-plugins/uonix-shared/environment.php`, sem duplicar hostnames em snippets visuais. O contrato canônico cobre produção provisória (`https://site.uonix.com.br/`), QA (`https://uonix.ksio.dev/`), DEV (`https://test.uonix.ksio.dev/`) e local (`http://localhost:8080/`) em [ambientes.md](ambientes.md).
+
 ## Regras
 
 - Cada módulo tem um `module.php` com lista explícita de arquivos.

@@ -30,8 +30,59 @@ if ( ! defined( 'ABSPATH' ) ) {
  * - Limpa nomes de produtos (<br> por -).
  */
 
+if ( ! function_exists( 'uonix_checkout_turnstile_widget_html' ) ) {
+    function uonix_checkout_turnstile_widget_html() {
+        if ( ! function_exists( 'uonix_turnstile_render_widget' ) ) {
+            return '';
+        }
+
+        if ( ! apply_filters( 'uonix_turnstile_protect_woocommerce_checkout', true ) ) {
+            return '';
+        }
+
+        $widget = uonix_turnstile_render_widget(
+            'woocommerce_checkout',
+            array(
+                'theme'      => 'light',
+                'appearance' => 'interaction-only',
+                'size'       => 'flexible',
+            )
+        );
+
+        if ( '' === $widget ) {
+            return '';
+        }
+
+        return '<div class="uonix-checkout-turnstile" aria-label="Verificação de segurança">' . $widget . '</div>';
+    }
+}
+
+add_action( 'woocommerce_review_order_before_submit', function() {
+    if ( ! function_exists( 'is_checkout' ) || ! function_exists( 'is_wc_endpoint_url' ) || ! is_checkout() || is_wc_endpoint_url( 'order-received' ) ) {
+        return;
+    }
+
+    echo uonix_checkout_turnstile_widget_html();
+}, 8 );
+
+add_action( 'woocommerce_after_checkout_validation', function( $data, $errors ) {
+    if ( ! apply_filters( 'uonix_turnstile_protect_woocommerce_checkout', true ) ) {
+        return;
+    }
+
+    if ( ! function_exists( 'uonix_turnstile_validate_request' ) || ! function_exists( 'uonix_turnstile_is_enabled' ) || ! uonix_turnstile_is_enabled() ) {
+        return;
+    }
+
+    $validation = uonix_turnstile_validate_request( 'woocommerce_checkout' );
+
+    if ( is_wp_error( $validation ) ) {
+        $errors->add( 'uonix_turnstile_checkout_failed', $validation->get_error_message() );
+    }
+}, 10, 2 );
+
 add_action('wp_footer', function () {
-    if (!is_checkout() || is_wc_endpoint_url('order-received')) {
+    if ( ! function_exists( 'is_checkout' ) || ! function_exists( 'is_wc_endpoint_url' ) || ! is_checkout() || is_wc_endpoint_url( 'order-received' ) ) {
         return;
     }
     ?>
@@ -293,6 +344,32 @@ add_action('wp_footer', function () {
         ul.woocommerce-error li a:hover { color: #dc2626 !important; }
         ul.woocommerce-error li strong { font-weight: 800 !important; color: #0e3780 !important; }
 
+        .uonix-checkout-turnstile {
+            margin: 0;
+            padding-left: 10px;
+            min-height: 0;
+        }
+
+        .uonix-checkout-turnstile .uonix-turnstile-widget {
+            display: block !important;
+            width: 100% !important;
+            min-height: 0 !important;
+        }
+
+        .uonix-checkout-turnstile.uonix-turnstile-visible {
+            margin: 18px 0 16px;
+        }
+
+        .uonix-checkout-turnstile.uonix-turnstile-visible .uonix-turnstile-widget,
+        .uonix-checkout-turnstile .uonix-turnstile-widget.uonix-turnstile-error {
+            min-height: 65px !important;
+        }
+
+        .uonix-checkout-turnstile .uonix-turnstile-widget iframe {
+            display: block !important;
+            max-width: 100% !important;
+        }
+
         @media (max-width: 768px) { .woocommerce-checkout h3 { font-size: 20px !important; } }
     </style>
 
@@ -333,8 +410,32 @@ add_action('wp_footer', function () {
                 $('form.checkout [name="cf-turnstile-response"], .woocommerce-checkout [name="cf-turnstile-response"]').val('');
             }
 
+            function getTurnstileWidgets() {
+                return $('form.checkout .cf-turnstile, form.checkout .uonix-turnstile-widget, .woocommerce-checkout .cf-turnstile, .woocommerce-checkout .uonix-turnstile-widget');
+            }
+
+            function syncTurnstileVisibility() {
+                getTurnstileWidgets().each(function () {
+                    var widget = this;
+                    var iframe = widget.querySelector('iframe');
+                    var hasVisibleFrame = false;
+                    var hasError = widget.classList.contains('uonix-turnstile-error');
+                    var wrapper = widget.closest('.uonix-checkout-turnstile');
+
+                    if (iframe) {
+                        hasVisibleFrame = iframe.offsetWidth > 0 && iframe.offsetHeight > 0;
+                    }
+
+                    widget.classList.toggle('uonix-turnstile-visible', hasVisibleFrame || hasError);
+
+                    if (wrapper) {
+                        wrapper.classList.toggle('uonix-turnstile-visible', hasVisibleFrame || hasError);
+                    }
+                });
+            }
+
             function resetTurnstileCaptcha() {
-                var $widgets = $('form.checkout .cf-turnstile, .woocommerce-checkout .cf-turnstile');
+                var $widgets = getTurnstileWidgets();
 
                 if (!$widgets.length && !$('form.checkout [name="cf-turnstile-response"]').length) {
                     return;
@@ -342,6 +443,16 @@ add_action('wp_footer', function () {
 
                 // O Turnstile gera token de uso unico; apos erro no checkout, precisa ser validado novamente.
                 clearTurnstileResponse();
+
+                if (window.uonixTurnstile) {
+                    $('form.checkout').each(function () {
+                        window.uonixTurnstile.reset(this);
+                    });
+                }
+
+                syncTurnstileVisibility();
+                setTimeout(syncTurnstileVisibility, 250);
+                setTimeout(syncTurnstileVisibility, 900);
 
                 if (!window.turnstile || typeof window.turnstile.reset !== 'function') {
                     return;
@@ -359,6 +470,8 @@ add_action('wp_footer', function () {
                 $widgets.each(function () {
                     var widgetId = $(this).attr('data-widget-id')
                         || $(this).data('widgetId')
+                        || $(this).attr('data-uonix-widget-id')
+                        || $(this).data('uonixWidgetId')
                         || $(this).attr('data-turnstile-widget-id')
                         || $(this).data('turnstileWidgetId')
                         || $(this).attr('data-cf-turnstile-widget-id')
@@ -396,6 +509,9 @@ add_action('wp_footer', function () {
 
             $(document).ready(function () {
                 reformatCheckoutTable();
+                syncTurnstileVisibility();
+                setTimeout(syncTurnstileVisibility, 600);
+                setTimeout(syncTurnstileVisibility, 1600);
 
                 // Interações de clique no Enviar
                 $('form.checkout').on('checkout_place_order', function () {
@@ -415,6 +531,9 @@ add_action('wp_footer', function () {
             // Monitora atualizações de Ajax do WooCommerce
             $(document.body).on('updated_checkout', function () {
                 reformatCheckoutTable();
+                syncTurnstileVisibility();
+                setTimeout(syncTurnstileVisibility, 600);
+                setTimeout(syncTurnstileVisibility, 1600);
             });
         })(jQuery);
     </script>

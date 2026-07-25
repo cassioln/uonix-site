@@ -28,7 +28,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 
 add_action('wp_footer', function() {
-    if ( ! is_wc_endpoint_url( 'order-received' ) ) return;
+    if ( ! function_exists( 'is_wc_endpoint_url' ) || ! is_wc_endpoint_url( 'order-received' ) ) return;
 
     $uonix_thankyou_address_lines = array( 'Não informado' );
     $uonix_thankyou_order_id       = absint( get_query_var( 'order-received' ) );
