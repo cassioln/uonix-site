@@ -1,0 +1,25 @@
+name: Deploy Development
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate before development deploy
+    uses: ./.github/workflows/validate.yml
+
+  deploy:
+    name: Deploy development to HostGator
+    needs: validate
+    if: ${{ vars.ENABLE_DEPLOY_DEVELOPMENT == 'true' }}
+    uses: ./.github/workflows/_deploy-hostgator.yml
+    with:
+      environment_name: development-hostgator
+      target_root: ${{ vars.HOSTGATOR_DEV_ROOT }}
+      target_url: ${{ vars.DEVELOPMENT_URL }}
+      include_local_module: false

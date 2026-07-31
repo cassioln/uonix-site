@@ -43,7 +43,7 @@ function uonix_whatsapp_svg() {
 }
 
 function uonix_product_whatsapp_box() {
-    if (!is_product()) {
+    if ( ! function_exists( 'is_product' ) || ! is_product() ) {
         return;
     }
 
@@ -71,7 +71,7 @@ function uonix_product_whatsapp_box() {
 }
 
 function uonix_product_premium_footer_assets() {
-    if (!is_product()) {
+    if ( ! function_exists( 'is_product' ) || ! is_product() ) {
         return;
     }
 

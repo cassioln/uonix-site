@@ -2,87 +2,498 @@ name: Deploy Production
 
 on:
   workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Digite PUBLICAR <SHA> EM SITE.UONIX.COM.BR
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uonix-environment-prod
+  cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy Kadence Child to production
+  authorize:
+    name: Authorize canonical production request
     runs-on: ubuntu-latest
-
     env:
-      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
-      PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
-      PRODUCTION_PATH: ${{ vars.PRODUCTION_PATH }}
+      UONIX_ENABLE_DEPLOY_PRODUCTION: ${{ vars.ENABLE_DEPLOY_PRODUCTION }}
+      UONIX_PRODUCTION_CONFIRMATION: ${{ inputs.confirmation }}
+      UONIX_REQUEST_SHA: ${{ github.sha }}
+      UONIX_REQUEST_REF: ${{ github.ref }}
+      LOCAWEB_SSH_HOST: ${{ vars.LOCAWEB_SSH_HOST }}
+      LOCAWEB_SSH_PORT: ${{ vars.LOCAWEB_SSH_PORT }}
+      LOCAWEB_SSH_USER: ${{ vars.LOCAWEB_SSH_USER }}
+      LOCAWEB_ACCOUNT_ROOT: ${{ vars.LOCAWEB_ACCOUNT_ROOT }}
+      LOCAWEB_DOCUMENT_ROOT: ${{ vars.LOCAWEB_DOCUMENT_ROOT }}
+      LOCAWEB_PHP_BIN: ${{ vars.LOCAWEB_PHP_BIN }}
+      LOCAWEB_WP_BIN: ${{ vars.LOCAWEB_WP_BIN }}
+      TARGET_URL: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - name: Validate production request and canonical target
+        run: |
+          set -euo pipefail
+          [ "$UONIX_ENABLE_DEPLOY_PRODUCTION" = true ]
+          [ "$UONIX_REQUEST_REF" = 'refs/heads/master' ]
+          case "$UONIX_REQUEST_SHA" in *[!0-9a-f]*|'') exit 1 ;; esac
+          [ "${#UONIX_REQUEST_SHA}" -eq 40 ]
+          expected_confirmation="PUBLICAR ${UONIX_REQUEST_SHA} EM SITE.UONIX.COM.BR"
+          [ "$UONIX_PRODUCTION_CONFIRMATION" = "$expected_confirmation" ]
+          [ "$LOCAWEB_SSH_HOST" = 'ftp.site.uonix.com.br' ]
+          [ "$LOCAWEB_SSH_PORT" = '22' ]
+          [ "$LOCAWEB_SSH_USER" = 'siteuonix1' ]
+          [ "$LOCAWEB_ACCOUNT_ROOT" = '/home/storage/f/34/12/siteuonix1' ]
+          [ "$LOCAWEB_DOCUMENT_ROOT" = '/home/storage/f/34/12/siteuonix1/public_html' ]
+          [ "$LOCAWEB_PHP_BIN" = '/usr/bin/php85' ]
+          [ "$LOCAWEB_WP_BIN" = '/home/storage/f/34/12/siteuonix1/bin/wp-cli.phar' ]
+          [ "$TARGET_URL" = 'https://site.uonix.com.br' ]
+
+  validate:
+    name: Validate before production
+    needs: authorize
+    uses: ./.github/workflows/validate.yml
+
+  deploy:
+    name: Deploy managed code to Locaweb
+    needs: [authorize, validate]
+    runs-on: ubuntu-latest
+    environment: production-locaweb
+    env:
+      LOCAWEB_SSH_HOST: ${{ vars.LOCAWEB_SSH_HOST }}
+      LOCAWEB_SSH_PORT: ${{ vars.LOCAWEB_SSH_PORT }}
+      LOCAWEB_SSH_USER: ${{ vars.LOCAWEB_SSH_USER }}
+      LOCAWEB_ACCOUNT_ROOT: ${{ vars.LOCAWEB_ACCOUNT_ROOT }}
+      LOCAWEB_DOCUMENT_ROOT: ${{ vars.LOCAWEB_DOCUMENT_ROOT }}
+      LOCAWEB_PHP_BIN: ${{ vars.LOCAWEB_PHP_BIN }}
+      LOCAWEB_WP_BIN: ${{ vars.LOCAWEB_WP_BIN }}
+      TARGET_URL: ${{ vars.PRODUCTION_URL }}
+      DEPLOY_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      DEPLOY_LOCK_ACQUIRED: 'false'
 
     steps:
+      - name: Validate canonical production target before credentials
+        run: |
+          set -euo pipefail
+          [ "$LOCAWEB_SSH_HOST" = 'ftp.site.uonix.com.br' ]
+          [ "$LOCAWEB_SSH_PORT" = '22' ]
+          [ "$LOCAWEB_SSH_USER" = 'siteuonix1' ]
+          [ "$LOCAWEB_ACCOUNT_ROOT" = '/home/storage/f/34/12/siteuonix1' ]
+          [ "$LOCAWEB_DOCUMENT_ROOT" = '/home/storage/f/34/12/siteuonix1/public_html' ]
+          [ "$LOCAWEB_PHP_BIN" = '/usr/bin/php85' ]
+          [ "$LOCAWEB_WP_BIN" = '/home/storage/f/34/12/siteuonix1/bin/wp-cli.phar' ]
+          [ "$TARGET_URL" = 'https://site.uonix.com.br' ]
+          case "$DEPLOY_RUN_ID" in ''|*[!A-Za-z0-9._-]*) exit 1 ;; esac
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
-      - name: Validate variables and secrets
+      - name: Install SSH and rsync tools
         run: |
-          test -n "$PRODUCTION_SSH_HOST" || (echo "Missing variable PRODUCTION_SSH_HOST" && exit 1)
-          test -n "$PRODUCTION_SSH_USER" || (echo "Missing variable PRODUCTION_SSH_USER" && exit 1)
-          test -n "$PRODUCTION_PATH" || (echo "Missing variable PRODUCTION_PATH" && exit 1)
-          test -n "${{ secrets.STAGING_SSH_KEY }}" || (echo "Missing secret STAGING_SSH_KEY" && exit 1)
+          sudo apt-get update
+          sudo apt-get install --yes rsync sshpass
 
-      - name: Setup SSH
+      - name: Pin known_hosts after canonical validation
+        env:
+          LOCAWEB_SSH_KNOWN_HOSTS: ${{ secrets.LOCAWEB_SSH_KNOWN_HOSTS }}
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/production_key
-          chmod 600 ~/.ssh/production_key
-          ssh-keyscan -p 22 -H "$PRODUCTION_SSH_HOST" >> ~/.ssh/known_hosts
+          set -euo pipefail
+          test -n "$LOCAWEB_SSH_KNOWN_HOSTS"
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$LOCAWEB_SSH_KNOWN_HOSTS" > "$HOME/.ssh/locaweb_known_hosts"
+          chmod 600 "$HOME/.ssh/locaweb_known_hosts"
 
-      - name: Test SSH connection
+      - name: Preflight SSH window before any remote write
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
         run: |
-          ssh -p 22 -i ~/.ssh/production_key \
-            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST" \
-            "echo SSH connection OK"
+          set -euo pipefail
+          if ! sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            -o ConnectTimeout=15 \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"
+          php_bin="$2"
+          wp_bin="$3"
+          test -d "$document_root"
+          command -v rsync >/dev/null
+          command -v sha256sum >/dev/null
+          test -x "$php_bin"
+          test -f "$wp_bin"
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" core is-installed
+          REMOTE
+          then
+            echo 'SSH Locaweb indisponível ou WordPress ainda não preparado. Habilite a janela SSH por 3 horas; nenhum arquivo foi alterado.' >&2
+            exit 1
+          fi
 
-      - name: Deploy theme to production
+      - name: Build deterministic deploy bundle
+        run: scripts/prepare-deploy-bundle.sh --environment=production --output=.deploy
+
+      - name: Acquire exclusive production lock
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
         run: |
-          rsync -avz --delete \
-            --exclude='.DS_Store' \
-            --exclude='._*' \
-            -e "ssh -p 22 -i ~/.ssh/production_key" \
-            themes/kadence-child/ \
-            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST:$PRODUCTION_PATH/"
+          set -euo pipefail
+          lock_path="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            bash -s -- "$lock_path" "$DEPLOY_RUN_ID" <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          lock_path="$1"
+          run_id="$2"
+          mkdir -- "$lock_path"
+          if ! {
+            printf '%s\n' "$run_id" > "$lock_path/owner"
+            chmod 600 "$lock_path/owner"
+          }; then
+            rm -f -- "$lock_path/owner"
+            rmdir -- "$lock_path" 2>/dev/null || true
+            exit 1
+          fi
+          REMOTE
+          printf 'DEPLOY_LOCK_ACQUIRED=true\n' >> "$GITHUB_ENV"
 
-      - name: Deploy MU plugins to production
+      - name: Back up managed remote paths
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
         run: |
-          PRODUCTION_MU_PLUGINS_PATH="$(dirname "$(dirname "$PRODUCTION_PATH")")/mu-plugins"
+          set -euo pipefail
+          backup_id="$DEPLOY_RUN_ID"
+          backup_dir="$LOCAWEB_ACCOUNT_ROOT/_uonix-deploy-backups/$backup_id"
 
-          ssh -p 22 -i ~/.ssh/production_key \
-            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST" \
-            "mkdir -p '$PRODUCTION_MU_PLUGINS_PATH'"
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$backup_dir" <<'REMOTE'
+          set -euo pipefail
+          shopt -s nullglob
+          document_root="$1"
+          backup_dir="$2"
+          managed="$backup_dir/managed"
+          mkdir -p "$managed/themes" "$managed/mu-plugins"
 
-          rsync -avz \
-            --exclude='.DS_Store' \
-            --exclude='._*' \
-            --exclude='uonix-local/***' \
-            --include='uonix-core.php' \
-            --include='uonix-*/' \
-            --include='uonix-*/**' \
-            --exclude='*' \
-            -e "ssh -p 22 -i ~/.ssh/production_key" \
-            mu-plugins/ \
-            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST:$PRODUCTION_MU_PLUGINS_PATH/"
+          if [ -e "$document_root/wp-content/themes/kadence-child" ]; then
+            cp -a "$document_root/wp-content/themes/kadence-child" "$managed/themes/"
+          fi
 
-      - name: Clear production page cache
+          if [ -e "$document_root/wp-content/mu-plugins/uonix-core.php" ]; then
+            cp -a "$document_root/wp-content/mu-plugins/uonix-core.php" "$managed/mu-plugins/"
+          fi
+
+          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            cp -a "$module" "$managed/mu-plugins/"
+          done
+
+          find "$managed" -type f -print | LC_ALL=C sort > "$backup_dir/files.txt"
+          REMOTE
+
+          printf 'BACKUP_ID=%s\n' "$backup_id" >> "$GITHUB_ENV"
+          printf 'BACKUP_DIR=%s\n' "$backup_dir" >> "$GITHUB_ENV"
+          printf 'Backup de código criado: %s\n' "$backup_id"
+
+      - name: Publish only managed paths and verify manifest
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
         run: |
-          ssh -p 22 -i ~/.ssh/production_key \
-            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST" \
-            "set -e;
-             theme_path='$PRODUCTION_PATH';
-             wp_content_dir=\$(dirname \"\$(dirname \"\$theme_path\")\");
-             wp_root_dir=\$(dirname \"\$wp_content_dir\");
-             speedycache_dir=\"\$wp_content_dir/cache/speedycache\";
+          set -euo pipefail
+          remote="$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST"
+          ssh_transport="sshpass -e ssh -p $LOCAWEB_SSH_PORT -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/locaweb_known_hosts"
 
-             if [ -d \"\$speedycache_dir\" ]; then
-               find \"\$speedycache_dir\" -mindepth 1 -maxdepth 1 -exec rm -rf {} +;
-               echo \"SpeedyCache cleared: \$speedycache_dir\";
-             else
-               echo \"SpeedyCache directory not found: \$speedycache_dir\";
-             fi;
+          rsync -az --delete \
+            -e "$ssh_transport" \
+            .deploy/theme/ \
+            "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/themes/kadence-child/"
 
-             if command -v wp >/dev/null 2>&1; then
-               wp --path=\"\$wp_root_dir\" cache flush || true;
-             fi"
+          rsync -az \
+            -e "$ssh_transport" \
+            .deploy/mu-plugins/uonix-core.php \
+            "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/mu-plugins/uonix-core.php"
+
+          expected_modules=()
+          for module in .deploy/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            module_name="$(basename "$module")"
+            expected_modules+=("$module_name")
+            rsync -az --delete \
+              -e "$ssh_transport" \
+              "$module/" \
+              "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/mu-plugins/$module_name/"
+          done
+
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$remote" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "${expected_modules[@]}" <<'REMOTE'
+          set -euo pipefail
+          shopt -s nullglob
+          document_root="$1"
+          shift
+
+          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            module_name="$(basename "$module")"
+            keep=false
+            for expected in "$@"; do
+              if [ "$module_name" = "$expected" ]; then
+                keep=true
+                break
+              fi
+            done
+            if [ "$keep" = false ]; then
+              rm -rf -- "$module"
+            fi
+          done
+          REMOTE
+
+          rsync -az \
+            -e "$ssh_transport" \
+            .deploy/manifest.sha256 \
+            "$remote:$BACKUP_DIR/manifest.expected.sha256"
+
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$remote" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$BACKUP_DIR/manifest.expected.sha256" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"
+          manifest="$2"
+
+          while read -r checksum relative_path; do
+            case "$relative_path" in
+              theme/*)
+                target="$document_root/wp-content/themes/kadence-child/${relative_path#theme/}"
+                ;;
+              mu-plugins/*)
+                target="$document_root/wp-content/mu-plugins/${relative_path#mu-plugins/}"
+                ;;
+              *)
+                printf 'Path não gerenciado no manifest: %s\n' "$relative_path" >&2
+                exit 1
+                ;;
+            esac
+
+            test -f "$target"
+            actual="$(sha256sum "$target" | cut -d ' ' -f 1)"
+            test "$actual" = "$checksum"
+          done < "$manifest"
+          REMOTE
+
+      - name: Clear cache and run smoke tests
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$TARGET_URL" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"
+          php_bin="$2"
+          wp_bin="$3"
+          target_url="$4"
+          speedycache="$document_root/wp-content/cache/speedycache"
+
+          if [ -d "$speedycache" ]; then
+            find "$speedycache" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+          fi
+
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" cache flush
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" core is-installed
+          test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'echo defined("UONIX_ENV") ? UONIX_ENV : "";')" = production
+          test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get home)" = "$target_url"
+          test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get siteurl)" = "$target_url"
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval '
+          if (
+              ! defined( "UONIX_ALLOW_INDEXING" )
+              || false !== UONIX_ALLOW_INDEXING
+              || ! function_exists( "uonix_environment_allows_indexing" )
+              || uonix_environment_allows_indexing()
+              || "0" !== (string) get_option( "blog_public" )
+          ) {
+              exit( 1 );
+          }
+          '
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval '
+          if ( ! function_exists( "uonix_analytics_configuration" ) ) {
+              exit( 1 );
+          }
+          $configuration = uonix_analytics_configuration();
+          if (
+              false !== $configuration
+              && (
+                  ! is_array( $configuration )
+                  || ! defined( "UONIX_ENV" )
+                  || "production" !== UONIX_ENV
+                  || ! defined( "UONIX_ANALYTICS_ENABLED" )
+                  || true !== UONIX_ANALYTICS_ENABLED
+              )
+          ) {
+              exit( 1 );
+          }
+          '
+          REMOTE
+          headers="$(mktemp)"
+          trap 'rm -f "$headers"' EXIT
+          effective_url="$(curl --fail --silent --show-error --location --max-time 30 \
+            --dump-header "$headers" --output /dev/null --write-out '%{url_effective}' "$TARGET_URL/")"
+          [ "$effective_url" = "$TARGET_URL/" ]
+          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noindex'
+          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*nofollow'
+          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noarchive'
+
+      - name: Roll back managed code after failure
+        if: ${{ failure() }}
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKUP_DIR:-}" ]; then
+            echo 'Nenhum backup foi criado; não houve transferência para reverter.'
+            exit 0
+          fi
+          backup_id="${BACKUP_DIR##*/}"
+
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$BACKUP_DIR" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$TARGET_URL" <<'REMOTE'
+          set -euo pipefail
+          shopt -s nullglob
+          document_root="$1"
+          backup_dir="$2"
+          php_bin="$3"
+          wp_bin="$4"
+          target_url="$5"
+          managed="$backup_dir/managed"
+
+          rm -rf -- "$document_root/wp-content/themes/kadence-child"
+          rm -f -- "$document_root/wp-content/mu-plugins/uonix-core.php"
+          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
+            [ -d "$module" ] && rm -rf -- "$module"
+          done
+
+          if [ -d "$managed/themes/kadence-child" ]; then
+            cp -a "$managed/themes/kadence-child" "$document_root/wp-content/themes/"
+          fi
+          if [ -f "$managed/mu-plugins/uonix-core.php" ]; then
+            cp -a "$managed/mu-plugins/uonix-core.php" "$document_root/wp-content/mu-plugins/"
+          fi
+          for module in "$managed"/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            cp -a "$module" "$document_root/wp-content/mu-plugins/"
+          done
+
+          speedycache="$document_root/wp-content/cache/speedycache"
+          if [ -d "$speedycache" ]; then
+            find "$speedycache" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+          fi
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" cache flush
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" core is-installed
+          test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get home)" = "$target_url"
+          test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get siteurl)" = "$target_url"
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'if (!defined("UONIX_ALLOW_INDEXING") || false !== UONIX_ALLOW_INDEXING || !function_exists("uonix_environment_allows_indexing") || uonix_environment_allows_indexing()) { exit(1); }'
+          REMOTE
+          headers="$(mktemp)"
+          trap 'rm -f "$headers"' EXIT
+          effective_url="$(curl --fail --silent --show-error --location --max-time 30 \
+            --dump-header "$headers" --output /dev/null --write-out '%{url_effective}' "$TARGET_URL/")"
+          [ "$effective_url" = "$TARGET_URL/" ]
+          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noindex'
+          echo "Rollback validado a partir do backup $backup_id."
+
+      - name: Retain five code backups
+        if: ${{ success() }}
+        continue-on-error: true
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Variables in this command expand on the remote host.
+          # shellcheck disable=SC2016
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            'backup_root=/home/storage/f/34/12/siteuonix1/_uonix-deploy-backups; if [ -d "$backup_root" ]; then find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print | LC_ALL=C sort -r | tail -n +6 | while IFS= read -r old_backup; do rm -rf -- "$old_backup"; done; fi'
+
+      - name: Release exclusive production lock
+        if: ${{ always() }}
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          lock_path="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            bash -s -- "$lock_path" "$DEPLOY_RUN_ID" "$DEPLOY_LOCK_ACQUIRED" <<'REMOTE'
+          set -euo pipefail
+          lock_path="$1"
+          run_id="$2"
+          lock_acquired="$3"
+          if [ "$lock_acquired" = true ]; then
+            test -f "$lock_path/owner"
+            test "$(cat "$lock_path/owner")" = "$run_id"
+            rm -f -- "$lock_path/owner"
+            rmdir -- "$lock_path"
+          fi
+          REMOTE
+
+# Operational rule: if the three-hour SSH window is closed, preflight fails
+# before backup or transfer. This workflow never falls back to FTP/SFTP.

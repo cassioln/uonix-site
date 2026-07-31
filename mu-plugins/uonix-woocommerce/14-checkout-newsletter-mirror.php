@@ -20,6 +20,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  * UÔNIX: Newsletter Mirror (Solução Definitiva para Checkout)
  */
 add_action('wp_head', function () {
+	if ( ! function_exists( 'is_checkout' ) ) {
+		return;
+	}
+
 	?>
 	<style>
 		/* 1. ESTILO DOS CHECKBOXES (Customizados) */
@@ -95,7 +99,7 @@ add_action( 'woocommerce_checkout_before_terms_and_conditions', function() {
 });
 
 add_action('wp_footer', function() {
-    if ( ! is_checkout() ) return;
+    if ( ! function_exists( 'is_checkout' ) || ! is_checkout() ) return;
     ?>
     <style>
         /* 2. Esconde o campo original do plugin para não aparecer duplicado */

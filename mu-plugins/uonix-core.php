@@ -11,6 +11,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 define( 'UONIX_MU_PATH', trailingslashit( WPMU_PLUGIN_DIR ) );
 define( 'UONIX_MU_URL', trailingslashit( WPMU_PLUGIN_URL ) );
 
+require_once UONIX_MU_PATH . 'uonix-shared/environment.php';
+
 if ( ! function_exists( 'uonix_mu_detect_environment' ) ) {
 	/**
 	 * Detecta o ambiente pelo WordPress e pelo host, útil quando wp-config.php ainda não define WP_ENVIRONMENT_TYPE.
@@ -27,21 +29,11 @@ if ( ! function_exists( 'uonix_mu_detect_environment' ) ) {
 			$host = sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) );
 		}
 
-		$host = strtolower( preg_replace( '/:\d+$/', '', (string) $host ) );
-
-		if ( in_array( $host, array( 'localhost', '127.0.0.1', '::1' ), true ) ) {
-			return 'local';
-		}
-
-		if ( str_starts_with( $host, 'qa.' ) || str_contains( $host, 'qa.uonix.' ) ) {
-			return 'staging';
-		}
-
-		if ( in_array( $wp_environment, array( 'local', 'development', 'staging' ), true ) ) {
-			return 'development' === $wp_environment ? 'local' : $wp_environment;
-		}
-
-		return 'production';
+		return uonix_resolve_environment(
+			$wp_environment,
+			defined( 'WP_ENVIRONMENT_TYPE' ),
+			$host
+		);
 	}
 }
 

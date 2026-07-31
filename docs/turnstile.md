@@ -6,7 +6,9 @@ Essa proteção não depende do Loginizer Pro.
 ## Ambientes
 
 - `local`: Turnstile fica desativado automaticamente.
-- `staging` / `production`: Turnstile fica ativo quando encontra chaves configuradas.
+- QA (`WP_ENVIRONMENT_TYPE=staging`, `https://uonix.ksio.dev/`): usa somente chaves de teste configuradas fora do Git.
+- DEV (`WP_ENVIRONMENT_TYPE=development`, `https://test.uonix.ksio.dev/`): usa somente chaves de teste configuradas fora do Git.
+- Produção provisória (`WP_ENVIRONMENT_TYPE=production`, `https://site.uonix.com.br/`): pode usar chaves próprias configuradas fora do Git.
 
 ## Chaves
 
@@ -24,7 +26,7 @@ define( 'UONIX_TURNSTILE_SITE_KEY', 'sua-site-key' );
 define( 'UONIX_TURNSTILE_SECRET_KEY', 'sua-secret-key' );
 ```
 
-Não versione a secret key no repositório. Em QA e produção, prefira manter as chaves no painel do Fluent Forms ou em constantes do `wp-config.php` do servidor.
+Não versione a secret key no repositório. Em QA, DEV e produção provisória, mantenha as chaves no painel do Fluent Forms ou em constantes privadas do `wp-config.php` de cada ambiente. O contrato de URL e política por ambiente está em [ambientes.md](ambientes.md).
 
 ## Formulários protegidos
 
