@@ -114,6 +114,9 @@ jobs:
             || { echo 'PyYAML ausente: instalando para auditar a cobertura de testes'; python3 -m pip install --quiet pyyaml; }
           bash scripts/tests/test-ci-covers-all-tests.sh
 
+      - name: Test reusable workflow secret propagation
+        run: bash scripts/tests/test-reusable-workflow-secrets.sh
+
       - name: Test clone rollback
         run: bash scripts/tests/test-clone-rollback.sh
 
