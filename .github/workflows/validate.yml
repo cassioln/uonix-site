@@ -108,6 +108,18 @@ jobs:
       - name: Test clone guards
         run: bash scripts/tests/test-clone-guards.sh
 
+      - name: Test CI covers every test
+        run: |
+          python3 -c 'import yaml' \
+            || { echo 'PyYAML ausente: instalando para auditar a cobertura de testes'; python3 -m pip install --quiet pyyaml; }
+          bash scripts/tests/test-ci-covers-all-tests.sh
+
+      - name: Test clone rollback
+        run: bash scripts/tests/test-clone-rollback.sh
+
+      - name: Test deploy remote blocks
+        run: bash scripts/tests/test-deploy-remote-blocks.sh
+
       - name: Test clone workflow contract
         run: bash scripts/tests/test-clone-workflow.sh
 
@@ -151,6 +163,9 @@ jobs:
 
       - name: Validate PageSpeed script
         run: node --check scripts/pagespeed-check.mjs
+
+      - name: Test PageSpeed check script
+        run: node --test scripts/tests/test-pagespeed-check.mjs
 
       - name: Parse local Compose configuration
         run: podman-compose -p uonix-local -f local/compose.yml config

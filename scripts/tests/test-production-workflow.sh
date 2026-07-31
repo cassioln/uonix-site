@@ -199,5 +199,80 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
     if marker.exists() and marker.read_text(encoding='utf-8'):
         raise AssertionError('autorização abriu transporte')
 
+# T59A — política de convergência com allowlist explícita (decisão registrada).
+#
+# O publish do reusable é destrutivo por construção: rsync --delete no tema e em cada
+# módulo, mais remoção de módulos uonix-* órfãos no destino. Isso conflita com a
+# preservação de extras remotos que sustentou T56A/T56/T57. A política escolhida é
+# convergência COM allowlist: só caminhos declarados podem ser apagados, o que estiver
+# fora da allowlist é preservado, e o delta a remover é inventariado e copiado para o
+# backup ANTES de qualquer remoção.
+#
+# Caso concreto que motivou a decisão: DEV serve mu-plugins/uonix-local (Mailpit),
+# carregado por uonix-core.php, mas os workflows passam include_local_module=false.
+# A remoção de órfãos apagaria esse módulo silenciosamente.
+require(
+    hostgator,
+    r'UONIX_DELETE_POLICY_ALLOWLIST',
+    'política de allowlist de remoção ausente no reusable',
+)
+require(
+    hostgator,
+    r'preserve_orphan_modules|UONIX_PRESERVED_MODULES',
+    'módulos preservados fora da allowlist não declarados',
+)
+require(
+    hostgator,
+    r'orphan-inventory|orphan_inventory',
+    'inventário do delta de órfãos ausente antes da remoção',
+)
+
+orphan_step = named_step_run(hostgator, 'Publish only managed paths and verify manifest')
+backup_step = named_step_run(hostgator, 'Back up managed remote paths')
+rollback_step = named_step_run(hostgator, 'Roll back managed code after failure')
+if 'uonix-local' not in hostgator:
+    raise AssertionError('uonix-local não é reconhecido como módulo preservado')
+if hostgator.index('- name: Back up managed remote paths') > hostgator.index(
+    '- name: Publish only managed paths and verify manifest'
+):
+    raise AssertionError('backup deve preceder a publicação destrutiva')
+
+
+def strip_comments(document):
+    """Descarta comentários: uma guarda satisfeita por comentário não protege nada."""
+    return '\n'.join(
+        line for line in document.splitlines()
+        if not line.lstrip().startswith('#')
+    )
+
+
+# GAP-1 (revisão independente do PR #5): a asserção anterior era satisfeita pela mera
+# presença de UONIX_DELETE_POLICY_ALLOWLIST em um COMENTÁRIO, então reintroduzir
+# `rm -rf` de órfãos mantinha o teste verde. Agora o código executável é avaliado.
+orphan_code = strip_comments(orphan_step)
+if 'rm -rf' in orphan_code:
+    raise AssertionError(
+        'step de publicação voltou a remover caminhos; órfãos devem ser preservados'
+    )
+for step_name, step_code in (
+    ('backup', strip_comments(backup_step)),
+    ('publicação', orphan_code),
+    ('rollback', strip_comments(rollback_step)),
+):
+    if '${#allowlist[@]}" -eq 0' not in step_code and '${#expected_modules[@]}" -eq 0' not in step_code:
+        raise AssertionError(f'step de {step_name} sem gate fail-closed para allowlist vazia')
+    if 'uonix-*[!A-Za-z0-9._-]*' not in step_code:
+        raise AssertionError(f'step de {step_name} sem validação de nome de módulo')
+if 'umask 077' not in strip_comments(backup_step):
+    raise AssertionError('heredoc de backup sem umask restritivo')
+if 'for module_name in "${allowlist[@]}"' not in strip_comments(rollback_step):
+    raise AssertionError('rollback não reverte os módulos publicados por este deploy')
+forbid(
+    orphan_step,
+    r'rsync[^\n]*--delete[^\n]*\$TARGET_ROOT/wp-content/?\s',
+    '--delete aplicado na raiz do wp-content',
+)
+del backup_step
+
 print('PASS: produção e clone exigem autorização, allowlist, serialização e smoke fail-closed.')
 PY
