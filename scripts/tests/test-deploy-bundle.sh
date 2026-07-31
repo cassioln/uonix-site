@@ -96,4 +96,26 @@ for environment in qa development; do
   )
 done
 
+# Os workflows de deploy passam o tipo de ambiente WordPress (uonix_env_type), não o
+# nome canônico curto: qa-hostgator resolve para 'staging'. Todos os aliases do mapa
+# declarativo em scripts/lib/environment-map.sh devem ser aceitos, e o bundle não pode
+# variar com o alias — o conteúdo publicado é idêntico em todos os ambientes remotos.
+for environment in prod production qa staging dev development; do
+  alias_output="${TMP_DIR}/bundle-alias-${environment}"
+  bash "$SCRIPT" --environment="$environment" --output="$alias_output" \
+    || fail "alias de ambiente rejeitado: ${environment}"
+  [ ! -e "$alias_output/mu-plugins/uonix-local" ] || fail "uonix-local entrou no bundle ${environment}"
+  cmp -s "${TMP_DIR}/manifest.first" "$alias_output/manifest.sha256" \
+    || fail "manifest divergiu para o alias ${environment}"
+  (
+    cd "$alias_output"
+    shasum -a 256 -c manifest.sha256 >/dev/null
+  )
+done
+
+if bash "$SCRIPT" --environment=nao-existe --output="${TMP_DIR}/bundle-invalid" >/dev/null 2>&1; then
+  fail 'ambiente inválido foi aceito'
+fi
+[ ! -e "${TMP_DIR}/bundle-invalid" ] || fail 'ambiente inválido produziu bundle'
+
 printf 'PASS: bundle determinístico contém somente tema e MU-plugins gerenciados.\n'
