@@ -8,7 +8,16 @@ TEMP_OUTPUT=""
 
 usage() {
   cat <<'EOF'
-Uso: scripts/prepare-deploy-bundle.sh --environment=production|qa|development --output=PATH
+Uso: scripts/prepare-deploy-bundle.sh --environment=ENV --output=PATH
+
+ENV aceita os nomes canônicos e seus aliases, conforme
+scripts/lib/environment-map.sh:
+  prod | production
+  qa   | staging
+  dev  | development
+
+O conteúdo do bundle não varia com o ambiente: uonix-local é sempre excluído e
+o módulo é reinserido pelo workflow quando include_local_module for true.
 EOF
 }
 
@@ -36,8 +45,11 @@ for argument in "$@"; do
   esac
 done
 
+# Aceita os nomes canônicos e os aliases do mapa declarativo de ambientes
+# (scripts/lib/environment-map.sh). Os workflows de deploy passam o tipo de ambiente
+# WordPress — qa-hostgator resolve para 'staging' — e não o nome canônico curto.
 case "$ENVIRONMENT" in
-  production|qa|development) ;;
+  prod|production|qa|staging|dev|development) ;;
   '') fail '--environment é obrigatório' ;;
   *) fail "ambiente remoto inválido: ${ENVIRONMENT}" ;;
 esac
