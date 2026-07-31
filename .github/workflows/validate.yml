@@ -161,5 +161,8 @@ jobs:
       - name: Validate PageSpeed script
         run: node --check scripts/pagespeed-check.mjs
 
+      - name: Test PageSpeed check script
+        run: node --test scripts/tests/test-pagespeed-check.mjs
+
       - name: Parse local Compose configuration
         run: podman-compose -p uonix-local -f local/compose.yml config

@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# Garante que todo teste presente em scripts/tests/ é executado pelo CI.
+# Garante que todo teste presente em scripts/tests/ é realmente executado pelo CI.
 #
-# Motivação: o CI lista cada teste individualmente em validate.yml. Ao adicionar
-# scripts/tests/test-deploy-remote-blocks.sh, o arquivo passou verde localmente mas
-# NUNCA rodou no CI — a suíte "16/16" era apenas local. test-clone-rollback.sh
-# estava na mesma situação. Um teste que não roda no CI não protege ninguém.
+# Motivação: validate.yml lista cada teste individualmente, sem descoberta. Ao
+# adicionar scripts/tests/test-deploy-remote-blocks.sh o arquivo passou verde
+# localmente mas NUNCA rodou no CI, então o "CI success" não provava nada sobre o
+# comportamento que ele verificava. test-clone-rollback.sh e test-pagespeed-check.mjs
+# estavam na mesma situação. Um teste que não roda no CI não protege ninguém.
+#
+# O guarda reprova quatro situações:
+#   1. teste presente no repositório e não referenciado por nenhum workflow;
+#   2. workflow referenciando teste inexistente (renomeio sem atualizar o CI);
+#   3. teste referenciado dentro de um step desativado ou tolerante a falha;
+#   4. teste em subdiretório de scripts/tests/, que uma varredura rasa não veria.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -14,30 +21,73 @@ import pathlib
 import re
 import sys
 
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover - PyYAML faz parte do ambiente de CI
+    raise SystemExit('PyYAML indisponível: não é possível auditar a cobertura de testes')
+
 root = pathlib.Path(sys.argv[1])
 workflows = root / '.github/workflows'
 tests_dir = root / 'scripts/tests'
 
-# rglob, não iterdir: um teste em scripts/tests/<sub>/ escaparia de uma varredura
-# rasa e voltaria a ficar fora do CI — exatamente a classe de falha que este guarda
-# existe para impedir.
+# Todo sufixo executável usado por testes neste repositório. Restringir a .sh/.php
+# tornava o guarda cego a test-pagespeed-check.mjs, que é um teste real e órfão.
+TEST_SUFFIXES = {'.sh', '.php', '.mjs', '.js', '.py'}
+REFERENCE = re.compile(r'scripts/tests/([A-Za-z0-9._/-]+\.(?:sh|php|mjs|js|py))')
+
+# rglob, não iterdir: um teste em scripts/tests/<sub>/ escaparia de varredura rasa.
 present = {
     str(path.relative_to(tests_dir)) for path in tests_dir.rglob('*')
-    if path.is_file() and path.suffix in {'.sh', '.php'}
+    if path.is_file() and path.suffix in TEST_SUFFIXES
 }
 
-referenced = set()
-disabled = []
-for workflow in workflows.glob('*.yml'):
+
+def is_disabled(value) -> bool:
+    """Um step vale como desativado quando sua condição é constantemente falsa.
+
+    Cobre `if: false`, `if: ${{ false }}` e variações de espaçamento/caixa. Uma
+    comparação de substring literal deixava passar `if: ${{ false }}`.
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value is False
+    text = str(value).strip()
+    inner = re.fullmatch(r'\$\{\{(.*)\}\}', text)
+    if inner:
+        text = inner.group(1).strip()
+    return text.lower() in {'false', '0', 'off', 'no'}
+
+
+referenced: set[str] = set()
+unprotected: list[str] = []
+
+for workflow in sorted(workflows.glob('*.y*ml')):
     text = workflow.read_text(encoding='utf-8')
-    referenced.update(re.findall(r'scripts/tests/([A-Za-z0-9._/-]+\.(?:sh|php))', text))
-    # Um teste referenciado dentro de um step tolerante a falha não protege nada:
-    # o CI seguiria verde com o teste vermelho.
-    for block in re.split(r'\n      - name: ', text):
-        if 'continue-on-error: true' not in block and 'if: false' not in block:
+    referenced.update(REFERENCE.findall(text))
+
+    # Parse estruturado em vez de fatiar texto: um split por `- name:` vaza o
+    # cabeçalho do job seguinte para o último step do job anterior, atribuindo
+    # `continue-on-error` ao teste errado.
+    document = yaml.safe_load(text) or {}
+    for job_name, job in (document.get('jobs') or {}).items():
+        if not isinstance(job, dict):
             continue
-        for name in re.findall(r'scripts/tests/([A-Za-z0-9._/-]+\.(?:sh|php))', block):
-            disabled.append(f'{workflow.name}:{name}')
+        job_disabled = is_disabled(job.get('if'))
+        job_tolerant = job.get('continue-on-error') is True
+        for step in job.get('steps') or []:
+            if not isinstance(step, dict):
+                continue
+            names = REFERENCE.findall(str(step.get('run') or ''))
+            if not names:
+                continue
+            step_disabled = job_disabled or is_disabled(step.get('if'))
+            step_tolerant = job_tolerant or step.get('continue-on-error') is True
+            if not (step_disabled or step_tolerant):
+                continue
+            reason = 'desativado' if step_disabled else 'tolerante a falha'
+            for name in names:
+                unprotected.append(f'{workflow.name}:{job_name}:{name} ({reason})')
 
 missing = sorted(present - referenced)
 if missing:
@@ -46,18 +96,16 @@ if missing:
         + ', '.join(missing)
     )
 
-# Referências a testes inexistentes quebrariam o CI silenciosamente ao renomear.
 dangling = sorted(referenced - present)
 if dangling:
     raise SystemExit(
         'workflows referenciam testes que não existem: ' + ', '.join(dangling)
     )
 
-if disabled:
+if unprotected:
     raise SystemExit(
-        'testes referenciados em steps tolerantes a falha (não protegem o CI): '
-        + ', '.join(sorted(disabled))
+        'testes que não protegem o CI: ' + ', '.join(sorted(unprotected))
     )
 
-print(f'PASS: {len(present)} testes presentes, todos referenciados e nenhum tolerante a falha.')
+print(f'PASS: {len(present)} testes presentes, todos referenciados e efetivamente executados.')
 PY

@@ -186,6 +186,36 @@ HOME="$home" PATH="$stub_bin:$PATH" bash "$rollback_block" "$root" 'backups/qa/r
 [ -d "$root/wp-content/mu-plugins/uonix-local" ] \
   || fail 'rollback removeu módulo fora da allowlist'
 
+# --- Nomes degenerados: rejeitados; nomes legítimos com ponto: aceitos ------
+# TG-4 (revisão independente, rodada 3): a rejeição de `uonix-.` e `uonix-..`
+# (SUG-1) não tinha nenhuma asserção, logo era reversível sem quebrar a suíte.
+# Estes nomes alimentam `rm -rf`, então a rejeição precisa ser verificada — e o
+# oposto também: nomes legítimos com ponto NÃO podem sofrer falso positivo.
+root="$TMP_DIR/root-degenerate"
+home="$TMP_DIR/home-degenerate"
+run=0
+for degenerate in 'uonix-.' 'uonix-..' 'uonix-'; do
+  run=$((run + 1))
+  make_root "$root" uonix-shared
+  rm -rf "$home"
+  mkdir -p "$home"
+  if HOME="$home" bash "$backup_block" "$root" "backups/qa/deg$run" "$degenerate" \
+      > "$TMP_DIR/degenerate.out" 2>&1; then
+    fail "backup aceitou nome degenerado: $degenerate"
+  fi
+  grep -qiE 'inválido|invalido' "$TMP_DIR/degenerate.out" \
+    || fail "nome degenerado '$degenerate' rejeitado sem mensagem clara"
+done
+
+make_root "$root" uonix-a.b uonix-x..y uonix-v1.2.3
+rm -rf "$home"
+mkdir -p "$home"
+HOME="$home" bash "$backup_block" "$root" 'backups/qa/legit' uonix-a.b uonix-x..y uonix-v1.2.3 \
+  > "$TMP_DIR/legit.out" 2>&1 \
+  || fail "nomes legítimos com ponto foram rejeitados: $(cat "$TMP_DIR/legit.out")"
+[ "$(cat "$home/backups/qa/legit/orphan-inventory.txt")" = '' ] \
+  || fail 'nomes legítimos foram classificados como órfãos'
+
 # --- Nome de módulo hostil: sem re-parse pelo shell remoto -----------------
 # SEC-1: `ssh ... bash -s -- a b c` entrega os argumentos concatenados e o shell
 # remoto os re-parseia. Um nome com `;` executaria comando arbitrário.
