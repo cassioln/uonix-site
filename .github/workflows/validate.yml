@@ -117,6 +117,9 @@ jobs:
       - name: Test reusable workflow secret propagation
         run: bash scripts/tests/test-reusable-workflow-secrets.sh
 
+      - name: Test the secret propagation guard itself
+        run: bash scripts/tests/test-reusable-workflow-secrets-guard.sh
+
       - name: Test clone rollback
         run: bash scripts/tests/test-clone-rollback.sh
 

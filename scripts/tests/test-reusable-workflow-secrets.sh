@@ -106,10 +106,21 @@ def load(path: pathlib.Path):
 
 
 def secrets_used_by(path: pathlib.Path):
-    """Nomes de secrets referenciados, e se há referência dinâmica."""
+    """Nomes de secrets referenciados, e se há referência dinâmica.
+
+    Comentários YAML são removidos antes da varredura: um nome citado em
+    comentário (ex.: `# antes usava ${{ secrets.LEGADO }}`) não é uso real e
+    inflaria a exigência sobre o chamador.
+    """
     if not path.is_file():
         return set(), False
-    text = path.read_text(encoding='utf-8')
+    lines = []
+    for raw in path.read_text(encoding='utf-8').splitlines():
+        stripped = raw.lstrip()
+        if stripped.startswith('#'):
+            continue  # comentário de linha inteira
+        lines.append(raw)
+    text = '\n'.join(lines)
     names = set()
     dynamic = False
     for expression in EXPRESSION.findall(text):
