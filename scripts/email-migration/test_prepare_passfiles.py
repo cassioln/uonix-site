@@ -67,6 +67,65 @@ class PreparePassfilesTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "missing mailboxes: contato"):
                 parse_manifest(source)
 
+    def test_rejects_invalid_line_before_marker(self) -> None:
+        """O parser é fail-closed: linha que não é e-mail nem senha aborta.
+
+        Sem esta asserção, trocar o `raise` de prepare_passfiles.py:43-44 por
+        `continue` mantinha a suíte verde — comprovado por falsificação. Um
+        manifest malformado passaria a ser silenciosamente aceito, e passfiles
+        seriam gerados a partir de pares deslocados.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "manifest.txt"
+            source.write_text(
+                "isto nao e um endereco de email\n" + VALID_MANIFEST,
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "unexpected manifest entry"):
+                parse_manifest(source)
+
+    def test_rejects_manifest_without_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "manifest.txt"
+            source.write_text(
+                VALID_MANIFEST.split("emails sao iguais")[0], encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(ValueError, "marker not found"):
+                parse_manifest(source)
+
+    def test_rejects_unexpected_mailbox_local_part(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "manifest.txt"
+            source.write_text(
+                "intruso@uonix.com.br\nintruder-secret\n\n" + VALID_MANIFEST,
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "unexpected mailbox local part"):
+                parse_manifest(source)
+
+    def test_rejects_mailbox_without_password(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "manifest.txt"
+            # Endereço na última linha: não há senha depois dele. O parser pula
+            # linhas em branco à procura da senha, então esgotar o arquivo é o
+            # único caminho para este ramo.
+            source.write_text("site@site.uonix.com.br\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "missing password for mailbox"):
+                parse_manifest(source)
+
+    def test_rejects_empty_password(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "manifest.txt"
+            # Só espaços após o endereço: o strip esvazia e o arquivo termina.
+            source.write_text("site@site.uonix.com.br\n   \n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "password for mailbox"):
+                parse_manifest(source)
+
     def test_rejects_duplicate_mailbox(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "manifest.txt"

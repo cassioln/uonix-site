@@ -60,8 +60,20 @@ def _is_test_file(path: pathlib.Path) -> bool:
 
     Um módulo de produção que convive no mesmo diretório (prepare_passfiles.py)
     não é um teste e não deve ser exigido no CI como se fosse.
+
+    A convenção é `test_*`/`test-*` no início do nome. Sufixos como
+    `foo_test.py` ou `foo.spec.js` escapariam desta checagem, então o guarda
+    também os reconhece — melhor cobrar CI de um arquivo que não é teste (erro
+    visível, resolvido renomeando) do que deixar um teste real fora do CI (erro
+    silencioso, que foi exatamente TG-1/TG-3).
     """
-    return path.name.startswith('test_') or path.name.startswith('test-')
+    stem = path.stem
+    return (
+        path.name.startswith(('test_', 'test-'))
+        or stem.endswith(('_test', '-test'))
+        or '.spec' in path.name
+        or '.test' in path.name
+    )
 
 
 # rglob, não iterdir: um teste em <dir>/<sub>/ escaparia de varredura rasa.
