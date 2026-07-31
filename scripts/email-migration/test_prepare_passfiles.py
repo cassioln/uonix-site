@@ -114,17 +114,61 @@ class PreparePassfilesTest(unittest.TestCase):
             # único caminho para este ramo.
             source.write_text("site@site.uonix.com.br\n", encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "missing password for mailbox"):
+            with self.assertRaisesRegex(ValueError, r"^missing password for mailbox"):
                 parse_manifest(source)
 
-    def test_rejects_empty_password(self) -> None:
+    def test_blank_lines_before_password_are_skipped(self) -> None:
+        """Linhas em branco entre endereço e senha não quebram o parse.
+
+        Este teste substitui um `test_rejects_empty_password` que era falso: ele
+        afirmava cobrir o ramo `empty password for mailbox` mas disparava
+        `missing password`, e o regex frouxo `"password for mailbox"` — que casa
+        os dois — escondia a divergência.
+
+        O ramo `empty password` de prepare_passfiles.py:59-60 é INALCANÇÁVEL: o
+        laço das linhas 52-53 consome toda linha em branco antes da leitura, então
+        `password` só pode ser vazio se o arquivo tiver esgotado — e nesse caso o
+        `raise` de `missing password` já disparou. É código morto defensivo, não
+        um caminho testável. O que dá para verificar é o comportamento real: o
+        salto das linhas em branco.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "manifest.txt"
-            # Só espaços após o endereço: o strip esvazia e o arquivo termina.
-            source.write_text("site@site.uonix.com.br\n   \n", encoding="utf-8")
+            source.write_text(
+                VALID_MANIFEST.replace(
+                    "site@site.uonix.com.br\npilot-secret",
+                    "site@site.uonix.com.br\n\n   \npilot-secret",
+                ),
+                encoding="utf-8",
+            )
 
-            with self.assertRaisesRegex(ValueError, "password for mailbox"):
-                parse_manifest(source)
+            records = parse_manifest(source)
+
+            self.assertEqual(records["site"], "pilot-secret")
+            self.assertEqual(set(records), set(EXPECTED_LOCALS))
+
+    def test_write_passfiles_rejects_unexpected_record_set(self) -> None:
+        """`write_passfiles` valida a própria entrada, não confia no chamador.
+
+        Falsificação mostrou que este ramo (prepare_passfiles.py:73-74) não tinha
+        cobertura: neutralizá-lo mantinha a suíte verde. É a única guarda entre um
+        conjunto de contas errado e a escrita de passfiles no disco — se alguém
+        chamar a função com um dicionário parcial, sem esta validação os arquivos
+        seriam gravados incompletos e o imapsync migraria caixas de menos.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "passfiles"
+
+            with self.assertRaisesRegex(ValueError, "exactly the expected mailboxes"):
+                write_passfiles({"site": "only-one"}, output)
+
+            extra = {local: "secret" for local in EXPECTED_LOCALS}
+            extra["intruso"] = "secret"
+            with self.assertRaisesRegex(ValueError, "exactly the expected mailboxes"):
+                write_passfiles(extra, output)
+
+            # Nada deve ter sido escrito em nenhuma das duas tentativas.
+            self.assertFalse(output.exists())
 
     def test_rejects_duplicate_mailbox(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
