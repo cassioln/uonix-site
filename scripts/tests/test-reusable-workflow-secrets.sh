@@ -73,6 +73,11 @@ SECRET_INDEX_DYNAMIC = re.compile(r'secrets\s*\[(?!\s*[\'"][A-Za-z0-9_]+[\'"]\s*
 # `secrets:` como chave YAML (ex.: `secrets: inherit`) não é uma referência.
 EXPRESSION = re.compile(r'\$\{\{(.*?)\}\}', re.DOTALL)
 
+# GITHUB_TOKEN é provisionado automaticamente pelo Actions em todo job, incluindo
+# reusables locais: não precisa de `inherit` nem de mapeamento, e exigi-lo seria
+# falso positivo que quebraria workflows legítimos.
+AUTOMATIC_SECRETS = frozenset({'GITHUB_TOKEN'})
+
 LOCAL_USES = re.compile(r'^\./\.github/workflows/([A-Za-z0-9._-]+\.ya?ml)$')
 
 
@@ -112,7 +117,7 @@ def secrets_used_by(path: pathlib.Path):
         names.update(SECRET_INDEX_LITERAL.findall(expression))
         if SECRET_INDEX_DYNAMIC.search(expression):
             dynamic = True
-    return names, dynamic
+    return names - AUTOMATIC_SECRETS, dynamic
 
 
 def declared_call_secrets(path: pathlib.Path):
