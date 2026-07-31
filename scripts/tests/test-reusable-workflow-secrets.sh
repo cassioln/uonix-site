@@ -24,9 +24,21 @@
 # de secrets cobre acesso por ponto E por índice, com fail-closed para formas
 # dinâmicas não analisáveis.
 #
+# A rodada 2 REPROVOU a versão PyYAML por PASS falso: quando o chamador usava um
+# bloco `secrets:` mapeado, o guarda cobrava apenas os secrets declarados
+# `required: true` no reusable e descartava o conjunto de uso real. Um secret
+# efetivamente usado, porém declarado `required: false` (ou sem a chave), não
+# mapeado, passava verde e chegaria vazio no Actions — o mesmo defeito do run
+# 30670232135, agora com o guarda aprovando. A cobrança passou a ser a UNIÃO do
+# contrato `required: true` com os secrets realmente referenciados.
+# A mesma rodada mostrou que paths locais equivalentes com travessia
+# (`./.github/workflows/../workflows/x.yml`) escapavam da inspeção sendo aceitos
+# pelo actionlint, então o path é normalizado antes do match.
+#
 # LIMITE CONHECIDO E DELIBERADO: apenas reusables LOCAIS (./.github/workflows/…)
 # são inspecionados. Chamadas cross-repo (org/repo/.github/workflows/x.yml@ref)
 # não são analisáveis sem acesso ao outro repositório e ficam fora do escopo.
+# A grafia sem `./` também não é inspecionada, porque o actionlint a reprova.
 
 set -euo pipefail
 
@@ -38,6 +50,7 @@ python3 -c 'import yaml' \
 
 python3 - "$ROOT_DIR" <<'PY'
 import pathlib
+import posixpath
 import re
 import sys
 
@@ -61,6 +74,22 @@ SECRET_INDEX_DYNAMIC = re.compile(r'secrets\s*\[(?!\s*[\'"][A-Za-z0-9_]+[\'"]\s*
 EXPRESSION = re.compile(r'\$\{\{(.*?)\}\}', re.DOTALL)
 
 LOCAL_USES = re.compile(r'^\./\.github/workflows/([A-Za-z0-9._-]+\.ya?ml)$')
+
+
+def local_reusable_name(uses: str):
+    """Nome do arquivo se `uses` aponta para um reusable LOCAL, senão None.
+
+    Normaliza o path antes de casar: `./.github/workflows/../workflows/x.yml` e
+    `./.github/workflows/./x.yml` são equivalentes a `./.github/workflows/x.yml`
+    e o actionlint os aceita, então precisam ser inspecionados igualmente.
+    """
+    candidate = uses.strip()
+    if not candidate.startswith('./'):
+        # Grafia sem `./` é reprovada pelo actionlint; fora do escopo aqui.
+        return None
+    normalized = posixpath.normpath(candidate)
+    match = LOCAL_USES.match('./' + normalized)
+    return match.group(1) if match else None
 
 
 def load(path: pathlib.Path):
@@ -126,11 +155,11 @@ for workflow in sorted(workflows.glob('*.yml')) + sorted(workflows.glob('*.yaml'
         if not isinstance(uses, str):
             continue
 
-        match = LOCAL_USES.match(uses.strip())
+        match = local_reusable_name(uses)
         if not match:
             continue  # cross-repo: fora do escopo (ver cabeçalho)
 
-        target = workflows / match.group(1)
+        target = workflows / match
         needed, dynamic = secrets_used_by(target)
         if not needed and not dynamic:
             continue  # reusable não usa secrets: nada a repassar
@@ -144,12 +173,13 @@ for workflow in sorted(workflows.glob('*.yml')) + sorted(workflows.glob('*.yaml'
 
         if isinstance(passed, dict):
             declared = declared_call_secrets(target)
-            required = (
-                {name for name, req in declared.items() if req}
-                if declared is not None
-                else needed
-            )
-            missing = sorted(required - set(passed))
+            # UNIÃO deliberada: cobrar `required: true` do contrato E todo secret
+            # efetivamente usado pelo reusable. Cobrar apenas `required: true`
+            # deixava passar o defeito do run 30670232135 — um secret usado de
+            # fato, declarado `required: false` (ou sem a chave), chegava vazio
+            # com o guarda verde.
+            required = {name for name, req in (declared or {}).items() if req}
+            missing = sorted((required | needed) - set(passed))
             if missing:
                 violations.append(
                     f'{location} mapeia secrets mas não passa: {", ".join(missing)}'
@@ -161,7 +191,7 @@ for workflow in sorted(workflows.glob('*.yml')) + sorted(workflows.glob('*.yaml'
             continue
 
         violations.append(
-            f'{location} chama {match.group(1)} (usa secrets: {detail}) sem repassar secrets'
+            f'{location} chama {match} (usa secrets: {detail}) sem repassar secrets'
         )
 
 if violations:
