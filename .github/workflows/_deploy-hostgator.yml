@@ -206,6 +206,20 @@ jobs:
           backup_id="$(date -u +%Y%m%d-%H%M%S)"
           backup_relative="_uonix-deploy-backups/$EXPECTED_UONIX_ENV/$backup_id"
 
+          # T59A — política de convergência com allowlist explícita.
+          # Só os módulos declarados no bundle podem ser removidos do destino. Qualquer
+          # módulo uonix-* fora dessa allowlist é PRESERVADO, e o delta é inventariado e
+          # copiado para o backup antes de qualquer remoção. Motivo concreto: DEV serve
+          # mu-plugins/uonix-local (Mailpit), carregado por uonix-core.php, enquanto os
+          # workflows passam include_local_module=false — a remoção cega de órfãos
+          # apagaria esse módulo silenciosamente.
+          expected_modules=()
+          for module in .deploy/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            expected_modules+=("$(basename "$module")")
+          done
+          printf 'UONIX_DELETE_POLICY_ALLOWLIST=%s\n' "${expected_modules[*]}"
+
           ssh \
             -p "$SSH_PORT" \
             -i "$HOME/.ssh/hostgator_key" \
@@ -213,11 +227,13 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
             "$SSH_USER@$SSH_HOST" \
-            bash -s -- "$TARGET_ROOT" "$backup_relative" <<'REMOTE'
+            bash -s -- "$TARGET_ROOT" "$backup_relative" "${expected_modules[@]}" <<'REMOTE'
           set -euo pipefail
           shopt -s nullglob
           document_root="$1"
           backup_dir="$HOME/$2"
+          shift 2
+          allowlist=("$@")
           managed="$backup_dir/managed"
           mkdir -p "$managed/themes" "$managed/mu-plugins"
 
@@ -232,6 +248,25 @@ jobs:
             cp -a "$module" "$managed/mu-plugins/"
           done
           find "$managed" -type f -print | LC_ALL=C sort > "$backup_dir/files.txt"
+
+          # Inventário do delta: módulos remotos fora da allowlist. Eles serão
+          # preservados, e ficam registrados para auditoria antes de qualquer remoção.
+          : > "$backup_dir/orphan-inventory.txt"
+          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            module_name="$(basename "$module")"
+            in_allowlist=false
+            for expected in "${allowlist[@]}"; do
+              if [ "$module_name" = "$expected" ]; then
+                in_allowlist=true
+                break
+              fi
+            done
+            if [ "$in_allowlist" = false ]; then
+              printf '%s\n' "$module_name" >> "$backup_dir/orphan-inventory.txt"
+            fi
+          done
+          printf 'orphan_inventory=%s\n' "$(wc -l < "$backup_dir/orphan-inventory.txt" | tr -d ' ')"
           REMOTE
 
           printf 'BACKUP_ID=%s\n' "$backup_id" >> "$GITHUB_ENV"
@@ -272,20 +307,30 @@ jobs:
           shopt -s nullglob
           document_root="$1"
           shift
+          # T59A — UONIX_DELETE_POLICY_ALLOWLIST: apenas os módulos declarados no bundle
+          # são convergidos. Módulos uonix-* fora da allowlist são PRESERVADOS em vez de
+          # removidos, alinhando o deploy à garantia de extras remotos verificada por
+          # hash em T56A, T56 e T57. Caso concreto: uonix-local (Mailpit) existe em DEV,
+          # é carregado por uonix-core.php e não entra no bundle
+          # (include_local_module=false) — apagá-lo seria uma perda silenciosa.
+          allowlist=("$@")
+          preserved=0
           for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
             [ -d "$module" ] || continue
             module_name="$(basename "$module")"
-            keep=false
-            for expected in "$@"; do
+            in_allowlist=false
+            for expected in "${allowlist[@]}"; do
               if [ "$module_name" = "$expected" ]; then
-                keep=true
+                in_allowlist=true
                 break
               fi
             done
-            if [ "$keep" = false ]; then
-              rm -rf -- "$module"
+            if [ "$in_allowlist" = false ]; then
+              printf 'preserve_orphan_modules=%s\n' "$module_name"
+              preserved=$((preserved + 1))
             fi
           done
+          printf 'UONIX_PRESERVED_MODULES=%s\n' "$preserved"
           REMOTE
 
           rsync -az -e "$ssh_transport" \
@@ -361,10 +406,14 @@ jobs:
           document_root="$1"
           managed="$HOME/$2/managed"
 
+          # T59A — o rollback restaura apenas o que foi capturado no backup. Como o backup
+          # copia todos os módulos uonix-* presentes antes da publicação, remover e
+          # recolocar é seguro; o que não estava no backup não é tocado.
           rm -rf -- "$document_root/wp-content/themes/kadence-child"
           rm -f -- "$document_root/wp-content/mu-plugins/uonix-core.php"
-          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
-            [ -d "$module" ] && rm -rf -- "$module"
+          for module in "$managed"/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            rm -rf -- "$document_root/wp-content/mu-plugins/$(basename "$module")"
           done
 
           if [ -d "$managed/themes/kadence-child" ]; then

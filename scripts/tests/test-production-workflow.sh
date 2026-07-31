@@ -199,5 +199,50 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
     if marker.exists() and marker.read_text(encoding='utf-8'):
         raise AssertionError('autorização abriu transporte')
 
+# T59A — política de convergência com allowlist explícita (decisão registrada).
+#
+# O publish do reusable é destrutivo por construção: rsync --delete no tema e em cada
+# módulo, mais remoção de módulos uonix-* órfãos no destino. Isso conflita com a
+# preservação de extras remotos que sustentou T56A/T56/T57. A política escolhida é
+# convergência COM allowlist: só caminhos declarados podem ser apagados, o que estiver
+# fora da allowlist é preservado, e o delta a remover é inventariado e copiado para o
+# backup ANTES de qualquer remoção.
+#
+# Caso concreto que motivou a decisão: DEV serve mu-plugins/uonix-local (Mailpit),
+# carregado por uonix-core.php, mas os workflows passam include_local_module=false.
+# A remoção de órfãos apagaria esse módulo silenciosamente.
+require(
+    hostgator,
+    r'UONIX_DELETE_POLICY_ALLOWLIST',
+    'política de allowlist de remoção ausente no reusable',
+)
+require(
+    hostgator,
+    r'preserve_orphan_modules|UONIX_PRESERVED_MODULES',
+    'módulos preservados fora da allowlist não declarados',
+)
+require(
+    hostgator,
+    r'orphan-inventory|orphan_inventory',
+    'inventário do delta de órfãos ausente antes da remoção',
+)
+
+orphan_step = named_step_run(hostgator, 'Publish only managed paths and verify manifest')
+backup_step = named_step_run(hostgator, 'Back up managed remote paths')
+if 'uonix-local' not in hostgator:
+    raise AssertionError('uonix-local não é reconhecido como módulo preservado')
+if hostgator.index('- name: Back up managed remote paths') > hostgator.index(
+    '- name: Publish only managed paths and verify manifest'
+):
+    raise AssertionError('backup deve preceder a publicação destrutiva')
+if 'rm -rf' in orphan_step and 'UONIX_DELETE_POLICY_ALLOWLIST' not in orphan_step:
+    raise AssertionError('remoção de órfãos não é limitada pela allowlist')
+forbid(
+    orphan_step,
+    r'rsync[^\n]*--delete[^\n]*\$TARGET_ROOT/wp-content/?\s',
+    '--delete aplicado na raiz do wp-content',
+)
+del backup_step
+
 print('PASS: produção e clone exigem autorização, allowlist, serialização e smoke fail-closed.')
 PY
