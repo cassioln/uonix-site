@@ -50,6 +50,7 @@ expect() {
   fi
 }
 
+# shellcheck disable=SC2016  # ${{ }} deve ficar literal na fixture YAML
 REUSE_REAL_SECRET='name: R
 on:
   workflow_call:
@@ -80,6 +81,7 @@ jobs:
     secrets:
       OUTRO: x'
 
+# shellcheck disable=SC2016  # ${{ }} deve ficar literal na fixture YAML
 CALLER_MAPS_IT='name: C
 on:
   workflow_dispatch:
@@ -97,6 +99,7 @@ jobs:
     uses: ./.github/workflows/_reuse.yml
     secrets: inherit'
 
+# shellcheck disable=SC2016  # ${{ }} deve ficar literal na fixture YAML
 REUSE_ONLY_GITHUB_TOKEN='name: R
 on:
   workflow_call:
@@ -108,6 +111,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}'
 
+# shellcheck disable=SC2016  # ${{ }} deve ficar literal na fixture YAML
 REUSE_SECRET_IN_COMMENT='name: R
 on:
   workflow_call:
