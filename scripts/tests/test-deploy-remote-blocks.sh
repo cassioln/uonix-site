@@ -94,7 +94,12 @@ root="$TMP_DIR/root-backup"
 make_root "$root" uonix-shared uonix-security uonix-local
 home="$TMP_DIR/home-backup"
 mkdir -p "$home"
-HOME="$home" bash "$backup_block" "$root" 'backups/qa/run1' uonix-shared uonix-security \
+# TG-2 (revisão independente, rodada 2): rodar com umask PERMISSIVO de propósito.
+# O teste extrai o heredoc e o executa herdando o umask do shell chamador; sob um
+# umask restritivo a asserção de permissão passaria mesmo que o bloco perdesse o
+# `umask 077`, medindo o ambiente em vez do código. Com 0022 a proteção só pode
+# vir do próprio bloco remoto.
+HOME="$home" bash -c 'umask 0022; exec bash "$0" "$@"' "$backup_block" "$root" 'backups/qa/run1' uonix-shared uonix-security \
   > "$TMP_DIR/backup.out" 2>&1 || fail "bloco de backup falhou: $(cat "$TMP_DIR/backup.out")"
 
 inventory="$home/backups/qa/run1/orphan-inventory.txt"

@@ -108,6 +108,15 @@ jobs:
       - name: Test clone guards
         run: bash scripts/tests/test-clone-guards.sh
 
+      - name: Test CI covers every test
+        run: bash scripts/tests/test-ci-covers-all-tests.sh
+
+      - name: Test clone rollback
+        run: bash scripts/tests/test-clone-rollback.sh
+
+      - name: Test deploy remote blocks
+        run: bash scripts/tests/test-deploy-remote-blocks.sh
+
       - name: Test clone workflow contract
         run: bash scripts/tests/test-clone-workflow.sh
 

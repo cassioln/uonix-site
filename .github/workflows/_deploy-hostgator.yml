@@ -221,7 +221,7 @@ jobs:
             # diretório chamado `uonix-x;comando` executaria comando arbitrário no
             # destino. Aceita apenas o formato canônico de módulo.
             case "$module_name" in
-              uonix-*[!A-Za-z0-9._-]*|uonix-)
+              uonix-*[!A-Za-z0-9._-]*|uonix-|uonix-.|uonix-..)
                 printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
                 exit 1
                 ;;
@@ -269,7 +269,7 @@ jobs:
           # Revalidar aqui garante que um nome adulterado no transporte não passe.
           for expected in "${allowlist[@]}"; do
             case "$expected" in
-              uonix-*[!A-Za-z0-9._-]*|uonix-|'')
+              uonix-*[!A-Za-z0-9._-]*|uonix-|uonix-.|uonix-..|'')
                 printf 'ERRO: nome de módulo inválido recebido no destino: %s\n' "$expected" >&2
                 exit 1
                 ;;
@@ -333,7 +333,7 @@ jobs:
             module_name="$(basename "$module")"
             # Mesma validação do step de backup: o nome é re-parseado pelo shell remoto.
             case "$module_name" in
-              uonix-*[!A-Za-z0-9._-]*|uonix-)
+              uonix-*[!A-Za-z0-9._-]*|uonix-|uonix-.|uonix-..)
                 printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
                 exit 1
                 ;;
@@ -389,7 +389,7 @@ jobs:
           # Defesa em profundidade contra re-parse de argv pelo shell remoto.
           for expected in "${allowlist[@]}"; do
             case "$expected" in
-              uonix-*[!A-Za-z0-9._-]*|uonix-|'')
+              uonix-*[!A-Za-z0-9._-]*|uonix-|uonix-.|uonix-..|'')
                 printf 'ERRO: nome de módulo inválido recebido no destino: %s\n' "$expected" >&2
                 exit 1
                 ;;
@@ -488,7 +488,7 @@ jobs:
             [ -d "$module" ] || continue
             module_name="$(basename "$module")"
             case "$module_name" in
-              uonix-*[!A-Za-z0-9._-]*|uonix-)
+              uonix-*[!A-Za-z0-9._-]*|uonix-|uonix-.|uonix-..)
                 printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
                 exit 1
                 ;;
@@ -527,7 +527,7 @@ jobs:
           # especialmente crítico: os nomes alimentam `rm -rf`.
           for expected in "${allowlist[@]}"; do
             case "$expected" in
-              uonix-*[!A-Za-z0-9._-]*|uonix-|'')
+              uonix-*[!A-Za-z0-9._-]*|uonix-|uonix-.|uonix-..|'')
                 printf 'ERRO: nome de módulo inválido recebido no rollback: %s\n' "$expected" >&2
                 exit 1
                 ;;
