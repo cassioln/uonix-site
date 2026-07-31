@@ -27,6 +27,7 @@ O contrato canônico é [ambientes.md](ambientes.md). Clone é uma capacidade t�
 - O clone sincroniza somente runtime autorizado, sem incluir cache, logs, backups, staging, arquivos temporários ou PII de currículos.
 - Em `uploads`, ficam fora da migração: `curriculos-recebidos`, `FLUENT_PDF_TEMPLATES`, `gosmtp-attachments` legado, `loginizer-config`, `speedycache-binary`, `wc-logs`, `wp-personal-data-exports`, `wp-staging`, `wpvivid_*`, `wpmc-trash`, `*.log` e arquivos temporários `*~`.
 - Plugins gerenciados por ambiente, como `all-in-one-wp-migration-10GB`, `backuply`, `compressx`, `fluent-smtp`, `fluentform`, `gosmtp`, `gosmtp-pro`, `loginizer`, `loginizer-security`, `speedycache`, `speedycache-pro` e `wpvivid-backuprestore`, não são copiados entre ambientes.
+- `fluent-smtp` é o SMTP suportado nos ambientes remotos. `gosmtp` e `gosmtp-pro` são legados removidos; o clone não copia esses diretórios e remove plugins e opções residuais do destino em execução real.
 - Os diretórios `wp-content/compressx` e `wp-content/compressx-nextgen` são runtime do CompressX: entram no backup do destino e não são sincronizados pelo clone padrão.
 - Tema filho e MU-plugins versionados são entregues pela referência canônica; o clone transfere apenas runtime autorizado.
 
