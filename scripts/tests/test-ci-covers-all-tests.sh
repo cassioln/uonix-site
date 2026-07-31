@@ -26,6 +26,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 python3 - "$ROOT_DIR" <<'PY'
+import fnmatch
 import pathlib
 import re
 import sys
@@ -37,18 +38,42 @@ except ModuleNotFoundError:  # pragma: no cover - PyYAML faz parte do ambiente d
 
 root = pathlib.Path(sys.argv[1])
 workflows = root / '.github/workflows'
-tests_dir = root / 'scripts/tests'
+
+# Todo diretório do repositório que contém testes. Restringir a scripts/tests/
+# deixava scripts/email-migration/test_prepare_passfiles.py fora do radar — 5
+# testes que passavam localmente e que nenhum workflow executava.
+TEST_DIRS = (
+    pathlib.Path('scripts/tests'),
+    pathlib.Path('scripts/email-migration'),
+)
 
 # Todo sufixo executável usado por testes neste repositório. Restringir a .sh/.php
 # tornava o guarda cego a test-pagespeed-check.mjs, que é um teste real e órfão.
 TEST_SUFFIXES = {'.sh', '.php', '.mjs', '.js', '.py'}
-REFERENCE = re.compile(r'scripts/tests/([A-Za-z0-9._/-]+\.(?:sh|php|mjs|js|py))')
+SUFFIX_ALT = 'sh|php|mjs|js|py'
+DIRS_ALT = '|'.join(re.escape(str(d)) for d in TEST_DIRS)
+REFERENCE = re.compile(rf'((?:{DIRS_ALT})/[A-Za-z0-9._/-]+\.(?:{SUFFIX_ALT}))')
 
-# rglob, não iterdir: um teste em scripts/tests/<sub>/ escaparia de varredura rasa.
-present = {
-    str(path.relative_to(tests_dir)) for path in tests_dir.rglob('*')
-    if path.is_file() and path.suffix in TEST_SUFFIXES
-}
+
+def _is_test_file(path: pathlib.Path) -> bool:
+    """Só arquivos cujo nome os declara como teste entram na exigência.
+
+    Um módulo de produção que convive no mesmo diretório (prepare_passfiles.py)
+    não é um teste e não deve ser exigido no CI como se fosse.
+    """
+    return path.name.startswith('test_') or path.name.startswith('test-')
+
+
+# rglob, não iterdir: um teste em <dir>/<sub>/ escaparia de varredura rasa.
+present = set()
+for test_dir in TEST_DIRS:
+    absolute = root / test_dir
+    if not absolute.is_dir():
+        continue
+    present.update(
+        str(path.relative_to(root)) for path in absolute.rglob('*')
+        if path.is_file() and path.suffix in TEST_SUFFIXES and _is_test_file(path)
+    )
 
 
 def is_effectively_enabled(value) -> bool:
@@ -98,6 +123,34 @@ def is_fault_tolerant(value) -> bool:
     return _normalize_condition(str(value)) not in {'false', '0', 'off', 'no', ''}
 
 
+def _covered_by_discovery(command: str, candidate: str) -> bool:
+    """Reconhece cobertura por descoberta automática de testes.
+
+    `unittest discover --start-directory <dir> --pattern 'test_*.py'` executa o
+    arquivo sem citá-lo pelo nome, então uma busca por referência literal o
+    acusaria de órfão. Só conta quando o diretório de descoberta é ancestral do
+    candidato E o padrão casa com o nome do arquivo.
+    """
+    path = pathlib.Path(candidate)
+    for match in DISCOVERY.finditer(command):
+        start = match.group('dir').strip('\'"')
+        pattern = (match.group('pattern') or 'test*.py').strip('\'"')
+        try:
+            path.relative_to(pathlib.Path(start))
+        except ValueError:
+            continue
+        if fnmatch.fnmatch(path.name, pattern):
+            return True
+    return False
+
+
+DISCOVERY = re.compile(
+    r'unittest\s+discover[^\n]*?'
+    r'(?:--start-directory|-s)[=\s]+(?P<dir>[^\s]+)'
+    r'(?:[^\n]*?(?:--pattern|-p)[=\s]+(?P<pattern>[^\s]+))?'
+)
+
+
 referenced: set[str] = set()
 unprotected: list[str] = []
 
@@ -116,8 +169,11 @@ for workflow in sorted(workflows.glob('*.y*ml')):
         for step in job.get('steps') or []:
             if not isinstance(step, dict):
                 continue
-            names = REFERENCE.findall(str(step.get('run') or ''))
+            command = str(step.get('run') or '')
+            names = REFERENCE.findall(command)
             names += REFERENCE.findall(str(step.get('uses') or ''))
+            discovered = [c for c in present if _covered_by_discovery(command, c)]
+            names += discovered
             if not names:
                 continue
             step_enabled = job_enabled and is_effectively_enabled(step.get('if'))
