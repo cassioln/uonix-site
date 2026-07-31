@@ -1,31 +1,47 @@
 #!/usr/bin/env bash
-# Garante que todo workflow que chama um reusable workflow contendo
-# `secrets.` repassa os secrets explicitamente.
+# Garante que todo workflow que chama um reusable workflow contendo secrets
+# repassa esses secrets explicitamente.
 #
 # MOTIVAÇÃO (falha real, 2026-07-31, run 30670232135):
 # deploy-development.yml chamava ./.github/workflows/_deploy-hostgator.yml sem
 # `secrets: inherit`. GitHub Actions NÃO herda secrets em reusable workflows por
-# padrão: sem `secrets: inherit` no chamador (ou um bloco `secrets:` declarado
-# em `workflow_call`), toda referência a `secrets.X` dentro do reusable resolve
-# para string vazia.
+# padrão: sem `secrets: inherit` no chamador (ou um mapeamento explícito em
+# `secrets:`), toda referência a secrets dentro do reusable resolve para string
+# vazia. HOSTGATOR_SSH_PRIVATE_KEY chegou vazio e o step `test -n` abortou.
 #
-# O resultado foi silencioso no CI e só apareceu ao ligar ENABLE_DEPLOY_DEVELOPMENT:
-# HOSTGATOR_SSH_PRIVATE_KEY chegou vazio e o step `test -n "$..."` abortou.
-# O job de deploy ficava `skipped` enquanto o guard era false, então nenhum
-# "CI verde" anterior provou que o caminho de deploy funcionava.
+# O defeito era invisível ao CI: enquanto ENABLE_DEPLOY_* ficava false, o job de
+# deploy era `skipped`, então nenhum "CI verde" exercitou esse caminho.
 #
-# Este guarda transforma esse modo de falha em erro detectável sem precisar
-# ligar guard nenhum.
+# POR QUE PARSING YAML E NÃO REGEX (revisão independente do PR #12):
+# a primeira versão deste guarda casava as linhas com expressão regular e dava
+# PASS falso em três grafias válidas do MESMO defeito, todas aceitas pelo
+# actionlint:
+#   1. uses: "./.github/workflows/x.yml"          (path entre aspas)
+#   2. uses: ./.github/workflows/x.yml  # comentário inline
+#   3. reusable referenciando ${{ secrets['NOME'] }} (acesso por índice)
+# Um guarda que só reconhece a grafia de hoje não previne a regressão de amanhã,
+# por isso a detecção usa PyYAML (já instalado no CI por validate.yml) e a busca
+# de secrets cobre acesso por ponto E por índice, com fail-closed para formas
+# dinâmicas não analisáveis.
+#
+# LIMITE CONHECIDO E DELIBERADO: apenas reusables LOCAIS (./.github/workflows/…)
+# são inspecionados. Chamadas cross-repo (org/repo/.github/workflows/x.yml@ref)
+# não são analisáveis sem acesso ao outro repositório e ficam fora do escopo.
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
+python3 -c 'import yaml' \
+  || { echo 'PyYAML ausente: instalando para auditar o repasse de secrets'; python3 -m pip install --quiet pyyaml; }
+
 python3 - "$ROOT_DIR" <<'PY'
 import pathlib
 import re
 import sys
+
+import yaml
 
 root = pathlib.Path(sys.argv[1])
 workflows = root / '.github' / 'workflows'
@@ -34,95 +50,128 @@ if not workflows.is_dir():
     print('FALHA: .github/workflows não encontrado', file=sys.stderr)
     raise SystemExit(1)
 
-# Um reusable é "sensível a secrets" se referencia secrets.X em uma expressão
-# do Actions (${{ ... secrets.X ... }}). Exigir o delimitador evita casar
-# substrings acidentais como "test-reusable-workflow-secrets.sh".
-SECRET_REF = re.compile(r'\$\{\{[^}]*?secrets\.([A-Za-z0-9_]+)[^}]*?\}\}', re.DOTALL)
-# `uses: ./.github/workflows/<arquivo>.yml` — chamada de reusable local.
-USES_LOCAL = re.compile(r'^(?P<indent>\s*)uses:\s*(?P<path>\./\.github/workflows/[A-Za-z0-9._-]+\.ya?ml)\s*$')
+# Acesso por ponto: ${{ secrets.NOME }}
+SECRET_DOT = re.compile(r'secrets\s*\.\s*([A-Za-z0-9_]+)')
+# Acesso por índice com literal: ${{ secrets['NOME'] }} / secrets["NOME"]
+SECRET_INDEX_LITERAL = re.compile(r'secrets\s*\[\s*[\'"]([A-Za-z0-9_]+)[\'"]\s*\]')
+# Índice dinâmico: ${{ secrets[format(...)] }} / secrets[matrix.x] — não
+# analisável estaticamente, tratado como "usa secrets" (fail-closed).
+SECRET_INDEX_DYNAMIC = re.compile(r'secrets\s*\[(?!\s*[\'"][A-Za-z0-9_]+[\'"]\s*\])')
+# `secrets:` como chave YAML (ex.: `secrets: inherit`) não é uma referência.
+EXPRESSION = re.compile(r'\$\{\{(.*?)\}\}', re.DOTALL)
 
-def secrets_referenced(path: pathlib.Path) -> set[str]:
+LOCAL_USES = re.compile(r'^\./\.github/workflows/([A-Za-z0-9._-]+\.ya?ml)$')
+
+
+def load(path: pathlib.Path):
+    try:
+        return yaml.safe_load(path.read_text(encoding='utf-8'))
+    except yaml.YAMLError as exc:
+        print(f'FALHA: YAML inválido em {path.relative_to(root)}: {exc}', file=sys.stderr)
+        raise SystemExit(1)
+
+
+def secrets_used_by(path: pathlib.Path):
+    """Nomes de secrets referenciados, e se há referência dinâmica."""
     if not path.is_file():
-        return set()
+        return set(), False
     text = path.read_text(encoding='utf-8')
-    # `secrets: inherit` não é referência a um secret específico.
-    return {m.group(1) for m in SECRET_REF.finditer(text)}
+    names = set()
+    dynamic = False
+    for expression in EXPRESSION.findall(text):
+        names.update(SECRET_DOT.findall(expression))
+        names.update(SECRET_INDEX_LITERAL.findall(expression))
+        if SECRET_INDEX_DYNAMIC.search(expression):
+            dynamic = True
+    return names, dynamic
 
 
-def declares_workflow_call_secrets(path: pathlib.Path) -> bool:
-    """True se o reusable declara um bloco `secrets:` dentro de workflow_call."""
+def declared_call_secrets(path: pathlib.Path):
+    """Secrets declarados em on.workflow_call.secrets: (nome -> required)."""
     if not path.is_file():
-        return False
-    lines = path.read_text(encoding='utf-8').splitlines()
-    in_call = False
-    call_indent = 0
-    for raw in lines:
-        stripped = raw.strip()
-        if not stripped or stripped.startswith('#'):
-            continue
-        indent = len(raw) - len(raw.lstrip())
-        if stripped.startswith('workflow_call:'):
-            in_call = True
-            call_indent = indent
-            continue
-        if in_call:
-            # Saiu do bloco workflow_call.
-            if indent <= call_indent:
-                in_call = False
-                continue
-            if stripped.startswith('secrets:'):
-                return True
-    return False
+        return None
+    doc = load(path)
+    if not isinstance(doc, dict):
+        return None
+    # PyYAML converte a chave `on:` em booleano True.
+    triggers = doc.get('on', doc.get(True))
+    if not isinstance(triggers, dict):
+        return None
+    call = triggers.get('workflow_call')
+    if not isinstance(call, dict):
+        return None
+    declared = call.get('secrets')
+    if not isinstance(declared, dict):
+        return None
+    return {
+        name: bool((spec or {}).get('required', False)) if isinstance(spec, dict) else False
+        for name, spec in declared.items()
+    }
 
 
 violations = []
 
-for wf in sorted(workflows.glob('*.yml')) + sorted(workflows.glob('*.yaml')):
-    lines = wf.read_text(encoding='utf-8').splitlines()
-    for index, raw in enumerate(lines):
-        match = USES_LOCAL.match(raw)
-        if not match:
+for workflow in sorted(workflows.glob('*.yml')) + sorted(workflows.glob('*.yaml')):
+    doc = load(workflow)
+    if not isinstance(doc, dict):
+        continue
+    jobs = doc.get('jobs')
+    if not isinstance(jobs, dict):
+        continue
+
+    for job_name, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        uses = job.get('uses')
+        if not isinstance(uses, str):
             continue
 
-        # Não usar lstrip('./'): ele removeria também o ponto de ".github".
-        target_rel = match.group('path')[2:] if match.group('path').startswith('./') else match.group('path')
-        target = root / target_rel
-        needed = secrets_referenced(target)
-        if not needed:
-            continue  # reusable não usa secrets: nada a repassar.
+        match = LOCAL_USES.match(uses.strip())
+        if not match:
+            continue  # cross-repo: fora do escopo (ver cabeçalho)
 
-        if declares_workflow_call_secrets(target):
-            continue  # contrato explícito no reusable; chamador passa por nome.
+        target = workflows / match.group(1)
+        needed, dynamic = secrets_used_by(target)
+        if not needed and not dynamic:
+            continue  # reusable não usa secrets: nada a repassar
 
-        # Procura `secrets:` como irmão de `uses:` dentro do mesmo job.
-        uses_indent = len(match.group('indent'))
-        found_secrets = False
-        for following in lines[index + 1:]:
-            if not following.strip() or following.strip().startswith('#'):
-                continue
-            following_indent = len(following) - len(following.lstrip())
-            if following_indent < uses_indent:
-                break  # saiu do job
-            if following_indent == uses_indent and following.strip().startswith('secrets:'):
-                found_secrets = True
-                break
-            if following_indent == uses_indent and re.match(r'^\s*uses:', following):
-                break  # outra chamada; a nossa não tinha secrets
+        passed = job.get('secrets')
+        location = f'{workflow.relative_to(root)} job "{job_name}"'
+        detail = ', '.join(sorted(needed)) or 'referência dinâmica'
 
-        if not found_secrets:
-            violations.append(
-                f'{wf.relative_to(root)}:{index + 1} chama {target_rel} '
-                f'(usa secrets: {", ".join(sorted(needed))}) sem repassar secrets'
+        if passed == 'inherit':
+            continue
+
+        if isinstance(passed, dict):
+            declared = declared_call_secrets(target)
+            required = (
+                {name for name, req in declared.items() if req}
+                if declared is not None
+                else needed
             )
+            missing = sorted(required - set(passed))
+            if missing:
+                violations.append(
+                    f'{location} mapeia secrets mas não passa: {", ".join(missing)}'
+                )
+            if dynamic:
+                violations.append(
+                    f'{location} usa referência dinâmica a secrets: exige `secrets: inherit`'
+                )
+            continue
+
+        violations.append(
+            f'{location} chama {match.group(1)} (usa secrets: {detail}) sem repassar secrets'
+        )
 
 if violations:
-    print('FALHA: reusable workflow recebendo secrets vazios.', file=sys.stderr)
+    print('FALHA: reusable workflow receberia secrets vazios.', file=sys.stderr)
     print('', file=sys.stderr)
-    for v in violations:
-        print(f'  {v}', file=sys.stderr)
+    for violation in violations:
+        print(f'  {violation}', file=sys.stderr)
     print('', file=sys.stderr)
-    print('Adicione `secrets: inherit` ao lado de `uses:` no chamador,', file=sys.stderr)
-    print('ou declare um bloco `secrets:` em `workflow_call` do reusable.', file=sys.stderr)
+    print('Adicione `secrets: inherit` ao job que faz a chamada, ou mapeie cada', file=sys.stderr)
+    print('secret exigido em um bloco `secrets:` desse mesmo job.', file=sys.stderr)
     raise SystemExit(1)
 
 print('PASS: toda chamada de reusable com secrets repassa credenciais.')
