@@ -33,3 +33,6 @@ local/wp-content/
 # Versionamos apenas o template authorized_keys.example.
 local/ssh/authorized_keys
 .compose_check.txt
+
+# Credenciais locais de migração de e-mail
+/migracao_emails.txt
