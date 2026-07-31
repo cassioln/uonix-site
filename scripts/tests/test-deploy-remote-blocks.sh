@@ -213,7 +213,12 @@ mkdir -p "$home"
 HOME="$home" bash "$backup_block" "$root" 'backups/qa/legit' uonix-a.b uonix-x..y uonix-v1.2.3 \
   > "$TMP_DIR/legit.out" 2>&1 \
   || fail "nomes legítimos com ponto foram rejeitados: $(cat "$TMP_DIR/legit.out")"
-[ "$(cat "$home/backups/qa/legit/orphan-inventory.txt")" = '' ] \
+legit_inventory="$home/backups/qa/legit/orphan-inventory.txt"
+# VAC-1/TG-7: `[ "$(cat X)" = '' ]` PASSA quando X não existe — `set -e` não aborta
+# dentro de `$(...)` em `[ ]`. Sem este `-f` a asserção era vacuamente verdadeira.
+[ -f "$legit_inventory" ] \
+  || fail 'inventário não foi gerado para nomes legítimos (asserção seria vacuosa)'
+[ "$(cat "$legit_inventory")" = '' ] \
   || fail 'nomes legítimos foram classificados como órfãos'
 
 # --- Nome de módulo hostil: sem re-parse pelo shell remoto -----------------

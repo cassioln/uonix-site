@@ -12,6 +12,15 @@
 #   2. workflow referenciando teste inexistente (renomeio sem atualizar o CI);
 #   3. teste referenciado dentro de um step desativado ou tolerante a falha;
 #   4. teste em subdiretório de scripts/tests/, que uma varredura rasa não veria.
+#
+# Convenção deliberada (FP-1): a cobertura exigida é DIRETA — todo teste tem seu
+# próprio step no workflow. Cobertura transitiva (um teste invocando outro, ou um
+# wrapper/make/npm) NÃO conta, de propósito: um teste que só roda como efeito
+# colateral de outro pode ser silenciosamente desligado sem que ninguém perceba,
+# e o relatório de falha aponta para o teste errado. Hoje nenhum teste depende de
+# invocação transitiva; as menções cruzadas em scripts/tests/ são comentários de
+# referência. Se algum dia um helper legítimo precisar existir, dê a ele um nome
+# que não case com o padrão de teste (ex.: `lib-*.sh`) em vez de afrouxar o guarda.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -42,21 +51,51 @@ present = {
 }
 
 
-def is_disabled(value) -> bool:
-    """Um step vale como desativado quando sua condição é constantemente falsa.
+def is_effectively_enabled(value) -> bool:
+    """Só uma condição RECONHECIDAMENTE verdadeira mantém o step protegido.
 
-    Cobre `if: false`, `if: ${{ false }}` e variações de espaçamento/caixa. Uma
-    comparação de substring literal deixava passar `if: ${{ false }}`.
+    Allowlist, não denylist: `if: false || false` e `if: ${{ 1 == 2 }}` desativam
+    um step sem casar com nenhuma forma literal de "false". Como não podemos
+    avaliar a linguagem de expressão do GitHub Actions aqui, qualquer condição
+    que não seja comprovadamente sempre-verdadeira é tratada como suspeita, e o
+    guarda exige que ela seja declarada em CONDICOES_ACEITAS.
+    """
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value is True
+    return _normalize_condition(str(value)) in CONDICOES_ACEITAS
+
+
+def _normalize_condition(text: str) -> str:
+    text = text.strip()
+    inner = re.fullmatch(r'\$\{\{(.*)\}\}', text)
+    if inner:
+        text = inner.group(1).strip()
+    return ' '.join(text.lower().split())
+
+
+# Condições sob as quais um teste ainda conta como executado pelo CI. Adicionar
+# aqui é uma decisão consciente: cada entrada é uma condição que se sabe verdadeira
+# nas execuções que o gate exige.
+CONDICOES_ACEITAS = {
+    'true',
+    'success()',
+    'always()',
+}
+
+
+def is_fault_tolerant(value) -> bool:
+    """Tolerante a falha é tudo que não for explicitamente falso.
+
+    `continue-on-error: ${{ true }}` e `continue-on-error: 'true'` escapam de uma
+    checagem `is True`, mas o GitHub Actions os honra.
     """
     if value is None:
         return False
     if isinstance(value, bool):
-        return value is False
-    text = str(value).strip()
-    inner = re.fullmatch(r'\$\{\{(.*)\}\}', text)
-    if inner:
-        text = inner.group(1).strip()
-    return text.lower() in {'false', '0', 'off', 'no'}
+        return value is True
+    return _normalize_condition(str(value)) not in {'false', '0', 'off', 'no', ''}
 
 
 referenced: set[str] = set()
@@ -64,7 +103,6 @@ unprotected: list[str] = []
 
 for workflow in sorted(workflows.glob('*.y*ml')):
     text = workflow.read_text(encoding='utf-8')
-    referenced.update(REFERENCE.findall(text))
 
     # Parse estruturado em vez de fatiar texto: um split por `- name:` vaza o
     # cabeçalho do job seguinte para o último step do job anterior, atribuindo
@@ -73,19 +111,24 @@ for workflow in sorted(workflows.glob('*.y*ml')):
     for job_name, job in (document.get('jobs') or {}).items():
         if not isinstance(job, dict):
             continue
-        job_disabled = is_disabled(job.get('if'))
-        job_tolerant = job.get('continue-on-error') is True
+        job_enabled = is_effectively_enabled(job.get('if'))
+        job_tolerant = is_fault_tolerant(job.get('continue-on-error'))
         for step in job.get('steps') or []:
             if not isinstance(step, dict):
                 continue
             names = REFERENCE.findall(str(step.get('run') or ''))
+            names += REFERENCE.findall(str(step.get('uses') or ''))
             if not names:
                 continue
-            step_disabled = job_disabled or is_disabled(step.get('if'))
-            step_tolerant = job_tolerant or step.get('continue-on-error') is True
-            if not (step_disabled or step_tolerant):
+            step_enabled = job_enabled and is_effectively_enabled(step.get('if'))
+            step_tolerant = job_tolerant or is_fault_tolerant(step.get('continue-on-error'))
+            if step_enabled and not step_tolerant:
+                # TG-6: só um step que o YAML parseado realmente executa conta como
+                # cobertura. Derivar `referenced` do texto bruto fazia um step
+                # COMENTADO satisfazer o guarda.
+                referenced.update(names)
                 continue
-            reason = 'desativado' if step_disabled else 'tolerante a falha'
+            reason = 'tolerante a falha' if step_tolerant else 'condição não reconhecida como verdadeira'
             for name in names:
                 unprotected.append(f'{workflow.name}:{job_name}:{name} ({reason})')
 

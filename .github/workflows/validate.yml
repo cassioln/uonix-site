@@ -109,7 +109,10 @@ jobs:
         run: bash scripts/tests/test-clone-guards.sh
 
       - name: Test CI covers every test
-        run: bash scripts/tests/test-ci-covers-all-tests.sh
+        run: |
+          python3 -c 'import yaml' \
+            || { echo 'PyYAML ausente: instalando para auditar a cobertura de testes'; python3 -m pip install --quiet pyyaml; }
+          bash scripts/tests/test-ci-covers-all-tests.sh
 
       - name: Test clone rollback
         run: bash scripts/tests/test-clone-rollback.sh
