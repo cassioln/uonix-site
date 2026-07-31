@@ -167,5 +167,8 @@ jobs:
       - name: Test PageSpeed check script
         run: node --test scripts/tests/test-pagespeed-check.mjs
 
+      - name: Test email migration passfile tooling
+        run: python3 -m unittest discover --start-directory scripts/email-migration --pattern 'test_*.py' --verbose
+
       - name: Parse local Compose configuration
         run: podman-compose -p uonix-local -f local/compose.yml config
