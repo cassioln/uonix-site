@@ -210,15 +210,37 @@ jobs:
           # Só os módulos declarados no bundle podem ser removidos do destino. Qualquer
           # módulo uonix-* fora dessa allowlist é PRESERVADO, e o delta é inventariado e
           # copiado para o backup antes de qualquer remoção. Motivo concreto: DEV serve
-          # mu-plugins/uonix-local (Mailpit), carregado por uonix-core.php, enquanto os
-          # workflows passam include_local_module=false — a remoção cega de órfãos
-          # apagaria esse módulo silenciosamente.
+          # mu-plugins/uonix-local (Mailpit), que não entra no bundle porque os workflows
+          # passam include_local_module=false — a remoção cega de órfãos o apagaria.
           expected_modules=()
           for module in .deploy/mu-plugins/uonix-*; do
             [ -d "$module" ] || continue
-            expected_modules+=("$(basename "$module")")
+            module_name="$(basename "$module")"
+            # O nome viaja por `ssh ... bash -s -- ...`, cujos argumentos são
+            # concatenados e re-parseados pelo shell REMOTO. Sem esta validação, um
+            # diretório chamado `uonix-x;comando` executaria comando arbitrário no
+            # destino. Aceita apenas o formato canônico de módulo.
+            case "$module_name" in
+              uonix-*[!A-Za-z0-9._-]*|uonix-)
+                printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
+                exit 1
+                ;;
+              uonix-*) ;;
+              *)
+                printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
+                exit 1
+                ;;
+            esac
+            expected_modules+=("$module_name")
           done
-          printf 'UONIX_DELETE_POLICY_ALLOWLIST=%s\n' "${expected_modules[*]}"
+          # Allowlist vazia significa bundle sem módulos, ou seja, bundle corrompido.
+          # Prosseguir trataria TODOS os módulos remotos como órfãos. Falha fechada.
+          if [ "${#expected_modules[@]}" -eq 0 ]; then
+            printf 'ERRO: allowlist de módulos vazia; bundle inválido, nada foi alterado no destino.\n' >&2
+            exit 1
+          fi
+          printf 'UONIX_DELETE_POLICY_ALLOWLIST=%s\n' "${#expected_modules[@]}"
+          printf 'allowlist_module=%s\n' "${expected_modules[@]}"
 
           ssh \
             -p "$SSH_PORT" \
@@ -230,12 +252,37 @@ jobs:
             bash -s -- "$TARGET_ROOT" "$backup_relative" "${expected_modules[@]}" <<'REMOTE'
           set -euo pipefail
           shopt -s nullglob
+          # O destino é hospedagem compartilhada: o backup contém cópia integral do
+          # código gerenciado e o inventário revela a topologia de módulos do ambiente.
+          # Nada disso deve nascer legível para outros usuários do host.
+          umask 077
           document_root="$1"
           backup_dir="$HOME/$2"
           shift 2
           allowlist=("$@")
+          if [ "${#allowlist[@]}" -eq 0 ]; then
+            printf 'ERRO: allowlist vazia recebida no destino; backup abortado sem alterar nada.\n' >&2
+            exit 1
+          fi
+          # Defesa em profundidade: o runner já valida os nomes antes de enviá-los, mas
+          # `ssh ... bash -s -- a b c` concatena os argumentos e este shell os re-parseia.
+          # Revalidar aqui garante que um nome adulterado no transporte não passe.
+          for expected in "${allowlist[@]}"; do
+            case "$expected" in
+              uonix-*[!A-Za-z0-9._-]*|uonix-|'')
+                printf 'ERRO: nome de módulo inválido recebido no destino: %s\n' "$expected" >&2
+                exit 1
+                ;;
+              uonix-*) ;;
+              *)
+                printf 'ERRO: nome de módulo inválido recebido no destino: %s\n' "$expected" >&2
+                exit 1
+                ;;
+            esac
+          done
           managed="$backup_dir/managed"
           mkdir -p "$managed/themes" "$managed/mu-plugins"
+          chmod 700 "$backup_dir" "$managed"
 
           if [ -e "$document_root/wp-content/themes/kadence-child" ]; then
             cp -a "$document_root/wp-content/themes/kadence-child" "$managed/themes/"
@@ -278,6 +325,31 @@ jobs:
           remote="$SSH_USER@$SSH_HOST"
           ssh_transport="ssh -p $SSH_PORT -i $HOME/.ssh/hostgator_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/hostgator_known_hosts"
 
+          # Valida a allowlist inteira ANTES de qualquer transferência: um nome inválido
+          # não deve chegar ao destino nem parcialmente.
+          expected_modules=()
+          for module in .deploy/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            module_name="$(basename "$module")"
+            # Mesma validação do step de backup: o nome é re-parseado pelo shell remoto.
+            case "$module_name" in
+              uonix-*[!A-Za-z0-9._-]*|uonix-)
+                printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
+                exit 1
+                ;;
+              uonix-*) ;;
+              *)
+                printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
+                exit 1
+                ;;
+            esac
+            expected_modules+=("$module_name")
+          done
+          if [ "${#expected_modules[@]}" -eq 0 ]; then
+            printf 'ERRO: allowlist de módulos vazia; bundle inválido, nada foi publicado.\n' >&2
+            exit 1
+          fi
+
           rsync -az --delete -e "$ssh_transport" \
             .deploy/theme/ \
             "$remote:$TARGET_ROOT/wp-content/themes/kadence-child/"
@@ -285,13 +357,9 @@ jobs:
             .deploy/mu-plugins/uonix-core.php \
             "$remote:$TARGET_ROOT/wp-content/mu-plugins/uonix-core.php"
 
-          expected_modules=()
-          for module in .deploy/mu-plugins/uonix-*; do
-            [ -d "$module" ] || continue
-            module_name="$(basename "$module")"
-            expected_modules+=("$module_name")
+          for module_name in "${expected_modules[@]}"; do
             rsync -az --delete -e "$ssh_transport" \
-              "$module/" \
+              ".deploy/mu-plugins/$module_name/" \
               "$remote:$TARGET_ROOT/wp-content/mu-plugins/$module_name/"
           done
 
@@ -314,6 +382,24 @@ jobs:
           # é carregado por uonix-core.php e não entra no bundle
           # (include_local_module=false) — apagá-lo seria uma perda silenciosa.
           allowlist=("$@")
+          if [ "${#allowlist[@]}" -eq 0 ]; then
+            printf 'ERRO: allowlist vazia recebida no destino; nada foi removido nem preservado.\n' >&2
+            exit 1
+          fi
+          # Defesa em profundidade contra re-parse de argv pelo shell remoto.
+          for expected in "${allowlist[@]}"; do
+            case "$expected" in
+              uonix-*[!A-Za-z0-9._-]*|uonix-|'')
+                printf 'ERRO: nome de módulo inválido recebido no destino: %s\n' "$expected" >&2
+                exit 1
+                ;;
+              uonix-*) ;;
+              *)
+                printf 'ERRO: nome de módulo inválido recebido no destino: %s\n' "$expected" >&2
+                exit 1
+                ;;
+            esac
+          done
           preserved=0
           for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
             [ -d "$module" ] || continue
@@ -393,6 +479,32 @@ jobs:
             exit 0
           fi
 
+          # Cada step do workflow roda em um shell próprio, então a allowlist precisa ser
+          # recomputada aqui a partir do bundle — a mesma fonte de verdade usada pelo
+          # backup e pela publicação. Sem isso a reversão não saberia quais módulos este
+          # deploy publicou e deixaria módulos novos no destino (correção LOG-1).
+          expected_modules=()
+          for module in .deploy/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            module_name="$(basename "$module")"
+            case "$module_name" in
+              uonix-*[!A-Za-z0-9._-]*|uonix-)
+                printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
+                exit 1
+                ;;
+              uonix-*) ;;
+              *)
+                printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
+                exit 1
+                ;;
+            esac
+            expected_modules+=("$module_name")
+          done
+          if [ "${#expected_modules[@]}" -eq 0 ]; then
+            printf 'ERRO: allowlist de módulos vazia; rollback abortado sem alterar nada.\n' >&2
+            exit 1
+          fi
+
           ssh \
             -p "$SSH_PORT" \
             -i "$HOME/.ssh/hostgator_key" \
@@ -400,20 +512,46 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/hostgator_known_hosts" \
             "$SSH_USER@$SSH_HOST" \
-            bash -s -- "$TARGET_ROOT" "$BACKUP_RELATIVE" <<'REMOTE'
+            bash -s -- "$TARGET_ROOT" "$BACKUP_RELATIVE" "${expected_modules[@]}" <<'REMOTE'
           set -euo pipefail
           shopt -s nullglob
           document_root="$1"
           managed="$HOME/$2/managed"
+          shift 2
+          allowlist=("$@")
+          if [ "${#allowlist[@]}" -eq 0 ]; then
+            printf 'ERRO: allowlist vazia recebida no rollback; nada foi alterado.\n' >&2
+            exit 1
+          fi
+          # Defesa em profundidade contra re-parse de argv pelo shell remoto. Aqui é
+          # especialmente crítico: os nomes alimentam `rm -rf`.
+          for expected in "${allowlist[@]}"; do
+            case "$expected" in
+              uonix-*[!A-Za-z0-9._-]*|uonix-|'')
+                printf 'ERRO: nome de módulo inválido recebido no rollback: %s\n' "$expected" >&2
+                exit 1
+                ;;
+              uonix-*) ;;
+              *)
+                printf 'ERRO: nome de módulo inválido recebido no rollback: %s\n' "$expected" >&2
+                exit 1
+                ;;
+            esac
+          done
 
-          # T59A — o rollback restaura apenas o que foi capturado no backup. Como o backup
-          # copia todos os módulos uonix-* presentes antes da publicação, remover e
-          # recolocar é seguro; o que não estava no backup não é tocado.
+          # T59A + correção LOG-1: a reversão precisa cobrir a UNIÃO de (a) o que existia
+          # antes e foi salvo no backup e (b) o que a allowlist deste deploy publicou.
+          # Iterar apenas sobre o backup deixaria no destino um módulo NOVO criado por
+          # este deploy — reversão incompleta, estado híbrido. Iterar apenas sobre o
+          # destino apagaria órfãos preservados. Por isso a união, e nada além dela.
           rm -rf -- "$document_root/wp-content/themes/kadence-child"
           rm -f -- "$document_root/wp-content/mu-plugins/uonix-core.php"
           for module in "$managed"/mu-plugins/uonix-*; do
             [ -d "$module" ] || continue
             rm -rf -- "$document_root/wp-content/mu-plugins/$(basename "$module")"
+          done
+          for module_name in "${allowlist[@]}"; do
+            rm -rf -- "$document_root/wp-content/mu-plugins/$module_name"
           done
 
           if [ -d "$managed/themes/kadence-child" ]; then

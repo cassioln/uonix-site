@@ -229,14 +229,44 @@ require(
 
 orphan_step = named_step_run(hostgator, 'Publish only managed paths and verify manifest')
 backup_step = named_step_run(hostgator, 'Back up managed remote paths')
+rollback_step = named_step_run(hostgator, 'Roll back managed code after failure')
 if 'uonix-local' not in hostgator:
     raise AssertionError('uonix-local não é reconhecido como módulo preservado')
 if hostgator.index('- name: Back up managed remote paths') > hostgator.index(
     '- name: Publish only managed paths and verify manifest'
 ):
     raise AssertionError('backup deve preceder a publicação destrutiva')
-if 'rm -rf' in orphan_step and 'UONIX_DELETE_POLICY_ALLOWLIST' not in orphan_step:
-    raise AssertionError('remoção de órfãos não é limitada pela allowlist')
+
+
+def strip_comments(document):
+    """Descarta comentários: uma guarda satisfeita por comentário não protege nada."""
+    return '\n'.join(
+        line for line in document.splitlines()
+        if not line.lstrip().startswith('#')
+    )
+
+
+# GAP-1 (revisão independente do PR #5): a asserção anterior era satisfeita pela mera
+# presença de UONIX_DELETE_POLICY_ALLOWLIST em um COMENTÁRIO, então reintroduzir
+# `rm -rf` de órfãos mantinha o teste verde. Agora o código executável é avaliado.
+orphan_code = strip_comments(orphan_step)
+if 'rm -rf' in orphan_code:
+    raise AssertionError(
+        'step de publicação voltou a remover caminhos; órfãos devem ser preservados'
+    )
+for step_name, step_code in (
+    ('backup', strip_comments(backup_step)),
+    ('publicação', orphan_code),
+    ('rollback', strip_comments(rollback_step)),
+):
+    if '${#allowlist[@]}" -eq 0' not in step_code and '${#expected_modules[@]}" -eq 0' not in step_code:
+        raise AssertionError(f'step de {step_name} sem gate fail-closed para allowlist vazia')
+    if 'uonix-*[!A-Za-z0-9._-]*' not in step_code:
+        raise AssertionError(f'step de {step_name} sem validação de nome de módulo')
+if 'umask 077' not in strip_comments(backup_step):
+    raise AssertionError('heredoc de backup sem umask restritivo')
+if 'for module_name in "${allowlist[@]}"' not in strip_comments(rollback_step):
+    raise AssertionError('rollback não reverte os módulos publicados por este deploy')
 forbid(
     orphan_step,
     r'rsync[^\n]*--delete[^\n]*\$TARGET_ROOT/wp-content/?\s',
