@@ -36,3 +36,14 @@ local/ssh/authorized_keys
 
 # Credenciais locais de migração de e-mail
 /migracao_emails.txt
+# Passfiles gerados por scripts/email-migration/prepare_passfiles.py (modo 600).
+# O script é versionado; os segredos que ele materializa nunca são.
+scripts/email-migration/passfiles/
+*.pass
+
+# Artefatos Python
+__pycache__/
+*.pyc
+
+# Planos de sessão do agente (contexto local de trabalho)
+.hermes/plans/
