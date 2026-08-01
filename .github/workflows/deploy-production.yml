@@ -339,11 +339,22 @@ jobs:
             find "$speedycache" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
           fi
 
+          # Rótulo antes de cada assertiva: sem isto o step só reporta "exit 1" e a
+          # causa fica invisível no log, exigindo SSH para descobrir qual reprovou.
+          # Nenhum valor de secret é impresso — apenas o nome da verificação.
+          check() { printf 'smoke: %s\n' "$1"; }
+
+          check 'wp cache flush'
           "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" cache flush
+          check 'wp core is-installed'
           "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" core is-installed
+          check 'UONIX_ENV = production'
           test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'echo defined("UONIX_ENV") ? UONIX_ENV : "";')" = production
+          check 'option home = URL canônica'
           test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get home)" = "$target_url"
+          check 'option siteurl = URL canônica'
           test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get siteurl)" = "$target_url"
+          check 'política de indexação (UONIX_ALLOW_INDEXING, blog_public)'
           "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval '
           if (
               ! defined( "UONIX_ALLOW_INDEXING" )
@@ -355,6 +366,7 @@ jobs:
               exit( 1 );
           }
           '
+          check 'coerência de uonix_analytics_configuration'
           "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval '
           if ( ! function_exists( "uonix_analytics_configuration" ) ) {
               exit( 1 );
@@ -374,6 +386,7 @@ jobs:
           }
           '
           REMOTE
+          printf 'smoke: %s\n' 'X-Robots-Tag noindex/nofollow/noarchive'
           headers="$(mktemp)"
           trap 'rm -f "$headers"' EXIT
           effective_url="$(curl --fail --silent --show-error --location --max-time 30 \
@@ -473,6 +486,13 @@ jobs:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
         run: |
           set -euo pipefail
+          # Sem lock adquirido não há nada a liberar: sair 0 evita um segundo step
+          # vermelho quando o erro real está em outro lugar (ex.: preflight falhou).
+          # Quando o lock EXISTE, a falha de liberação continua sendo reportada.
+          if [ "${DEPLOY_LOCK_ACQUIRED:-false}" != true ]; then
+            echo 'Lock de produção não foi adquirido nesta execução; nada a liberar.'
+            exit 0
+          fi
           lock_path="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
           sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \

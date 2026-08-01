@@ -120,6 +120,12 @@ jobs:
       - name: Test the secret propagation guard itself
         run: bash scripts/tests/test-reusable-workflow-secrets-guard.sh
 
+      - name: Test mu-plugin loader resilience
+        run: bash scripts/tests/test-mu-loader-resilience.sh
+
+      - name: Test clone path-bound option protection
+        run: bash scripts/tests/test-clone-path-bound-options.sh
+
       - name: Test clone rollback
         run: bash scripts/tests/test-clone-rollback.sh
 
