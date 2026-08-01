@@ -275,7 +275,81 @@ inteiros.
 
 Ambos ficam fora do document root. Dumps de banco em `~/uonix-copyfix/`.
 
-## 15. Limites permanentes
+## 15. Armadilhas de hook do WordPress
+
+Duas descobertas que custaram horas de diagnóstico e que reaparecem em qualquer
+mu-plugin novo.
+
+### `do_action` sem argumentos entrega string vazia, não `null`
+
+`wp-includes/plugin.php`, função `do_action`:
+
+```php
+if ( empty( $arg ) ) {
+    $arg[] = '';
+}
+```
+
+Como `accepted_args` vale **1 por padrão** no `add_action()`, o core chama o
+callback com um argumento: `''`. Um callback que use o default como sinal de
+controle é silenciosamente quebrado:
+
+```php
+// ERRADO — o default null nunca vale no despacho real
+function render( $config = null ) {
+    $config = null === $config ? resolver() : $config;   // recebe '', não null
+    if ( ! is_array( $config ) ) return;                 // aborta em silêncio
+}
+add_action( 'wp_head', 'render', 1 );
+
+// CERTO — accepted_args=0 preserva o default
+add_action( 'wp_head', 'render', 1, 0 );
+```
+
+Foi a causa do GTM e da AdOpt desaparecerem de `site.uonix.com.br`: sem erro em
+log, com `php -l` limpo, hook registrado e a função funcionando quando chamada
+diretamente. Guardado por `scripts/tests/test-hook-dispatch-arguments.php`.
+
+Verificação rápida da semântica, no ambiente local:
+
+```bash
+wp eval 'add_action("t", function($a = null){ var_export($a); }, 10);   do_action("t");'  # ''
+wp eval 'add_action("t", function($a = null){ var_export($a); }, 10, 0); do_action("t");' # NULL
+```
+
+### Ao reproduzir um bug de hook, use o callback real
+
+Investigando esse mesmo defeito no ambiente local, um teste registrou um wrapper:
+
+```php
+add_action( 'wp_head', function () use ( $cfg ) { render( $cfg ); }, 1 );
+```
+
+O wrapper **ignora** o argumento entregue pelo core e passa a configuração
+explicitamente — então emitia normalmente, levando à conclusão errada de que o
+código estava correto e a causa era ambiental. O wrapper contornava justamente o
+caminho onde o bug vivia.
+
+Regra: o callback registrado no teste tem de ser o **mesmo** que roda em produção
+(função nomeada), nunca um wrapper.
+
+## 16. O padrão que se repetiu quatro vezes
+
+Quatro defeitos desta migração tinham a mesma assinatura: **o teste validava um
+lado do contrato sem exercitar o consumidor real**. Todos passavam com CI verde.
+
+| Defeito | O que o teste fazia | O que faltava |
+| --- | --- | --- |
+| secrets não herdados em reusable workflows | regex sobre o YAML do chamador | conferir se o reusable exige os secrets |
+| `downloaded_font_files` fora das opções protegidas | 14 testes de clone | nenhum cobria opção com caminho de disco |
+| frase do painel de clone divergente | cada lado validava a própria frase | comparar painel contra workflow |
+| `do_action` entregando string vazia | `add_action` substituído por stub que só registra | despachar o hook de verdade |
+
+Ao escrever um teste, pergunte: *ele exercita o consumidor real, ou só o meu lado
+do contrato?* Se a resposta for a segunda, o teste vai passar enquanto o sistema
+falha.
+
+## 17. Limites permanentes
 
 - Não desabilitar SSH por automação de painel: gate humano.
 - Não usar FTP para deploy.
