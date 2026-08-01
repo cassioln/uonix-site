@@ -11,7 +11,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 define( 'UONIX_MU_PATH', trailingslashit( WPMU_PLUGIN_DIR ) );
 define( 'UONIX_MU_URL', trailingslashit( WPMU_PLUGIN_URL ) );
 
-require_once UONIX_MU_PATH . 'uonix-shared/environment.php';
+// A resolução de ambiente vive em uonix-shared/environment.php. Um require nu aqui
+// derrubaria o site inteiro (E_COMPILE_ERROR em toda requisição, inclusive wp-admin)
+// caso o arquivo ainda não tenha chegado ao servidor — situação real durante um
+// deploy, que publica este loader antes dos módulos. require ausente não é
+// capturável por try/catch, então a checagem tem de vir antes.
+if ( is_readable( UONIX_MU_PATH . 'uonix-shared/environment.php' ) ) {
+	require_once UONIX_MU_PATH . 'uonix-shared/environment.php';
+} else {
+	error_log( 'UONIX MU: uonix-shared/environment.php ausente; usando detecção de ambiente degradada (fail-closed em production).' );
+}
 
 if ( ! function_exists( 'uonix_mu_detect_environment' ) ) {
 	/**
@@ -27,6 +36,13 @@ if ( ! function_exists( 'uonix_mu_detect_environment' ) ) {
 
 		if ( empty( $host ) && ! empty( $_SERVER['HTTP_HOST'] ) ) {
 			$host = sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) );
+		}
+
+		if ( ! function_exists( 'uonix_resolve_environment' ) ) {
+			// environment.php ausente: assume o ambiente mais restritivo, para que a
+			// política de indexação e o bloqueio de e-mail não sejam afrouxados por
+			// um arquivo faltando.
+			return 'production';
 		}
 
 		return uonix_resolve_environment(
