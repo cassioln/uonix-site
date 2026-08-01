@@ -123,6 +123,9 @@ jobs:
       - name: Test mu-plugin loader resilience
         run: bash scripts/tests/test-mu-loader-resilience.sh
 
+      - name: Test deploy mu-plugin publish order
+        run: bash scripts/tests/test-deploy-mu-plugin-order.sh
+
       - name: Test clone path-bound option protection
         run: bash scripts/tests/test-clone-path-bound-options.sh
 
