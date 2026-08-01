@@ -310,6 +310,25 @@ Foi a causa do GTM e da AdOpt desaparecerem de `site.uonix.com.br`: sem erro em
 log, com `php -l` limpo, hook registrado e a função funcionando quando chamada
 diretamente. Guardado por `scripts/tests/test-hook-dispatch-arguments.php`.
 
+**A regra que separa bug real de falso positivo:** esse bloco existe **somente em
+`do_action()`**. O `apply_filters( $hook_name, $value, ...$args )` faz
+`array_unshift( $args, $value )` e nunca injeta string vazia. Logo a classe atinge
+**apenas ações**, nunca filtros.
+
+Auditoria de 2026-08-01: 167 registros de hook (108 `add_action` + 59 `add_filter`)
+em 74 arquivos. Apenas 4 callbacks declaram parâmetro com default — os 2 do
+analytics (eram o bug, corrigidos) e os 2 de
+`mu-plugins/uonix-security/06-environment-indexing.php:97-98`. Estes dois usam o
+default `null` como sinal de controle, o mesmo antipadrão, mas são **imunes por
+serem filtros**. Verificado por execução: `apply_filters('pre_option_blog_public',
+false)` devolve `"0"` e `apply_filters('wp_robots', array())` devolve
+`{"noindex":true,"nofollow":true,"noarchive":true}`.
+
+Ressalva de manutenção: aqueles callbacks só estão seguros *enquanto continuarem
+registrados como filtros*. Se forem reaproveitados num `add_action`, o defeito
+volta. Em callback novo, prefira não usar parâmetro opcional como sinal de
+controle — resolva a dependência dentro do corpo da função.
+
 Verificação rápida da semântica, no ambiente local:
 
 ```bash
