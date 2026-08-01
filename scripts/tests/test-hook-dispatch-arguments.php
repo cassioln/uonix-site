@@ -243,6 +243,69 @@ foreach ( $hooks_sem_argumentos as $hook ) {
 	}
 }
 
+// Varredura estrutural do projeto inteiro: nenhum callback registrado em
+// add_action() pode declarar parâmetro opcional sem accepted_args=0.
+//
+// MOTIVAÇÃO (auditoria de 167 hooks, 2026-08-01): os callbacks de
+// uonix-security/06-environment-indexing.php usam o default null como sinal de
+// controle — o MESMO antipadrão do 38 — e hoje são imunes apenas porque estão
+// registrados em add_filter(), e apply_filters() nunca injeta string vazia. Se
+// algum dia forem reaproveitados num add_action(), o defeito reaparece
+// silenciosamente. Esta varredura transforma essa ressalva em falha de CI.
+$acoes_com_default = array();
+
+foreach ( glob( __DIR__ . '/../../mu-plugins/uonix-*/*.php' ) as $arquivo ) {
+	$fonte = file_get_contents( $arquivo );
+
+	// Captura add_action( 'hook', 'callback_nomeado' ) sem accepted_args=0.
+	// Aceita aspas simples OU duplas nos dois primeiros argumentos: o WordPress
+	// não impõe estilo e um arquivo com aspas duplas escaparia da varredura.
+	if ( ! preg_match_all(
+		'/add_action\(\s*[\'"]([^\'"]+)[\'"]\s*,\s*[\'"]([a-z0-9_]+)[\'"]\s*(?:,\s*([0-9]+)\s*)?(?:,\s*([0-9]+)\s*)?\)/i',
+		$fonte,
+		$registros,
+		PREG_SET_ORDER
+	) ) {
+		continue;
+	}
+
+	foreach ( $registros as $registro ) {
+		$callback      = $registro[2];
+		$accepted_args = isset( $registro[4] ) && '' !== $registro[4] ? (int) $registro[4] : 1;
+
+		if ( 0 === $accepted_args ) {
+			continue; // já protegido
+		}
+
+		// A função declara parâmetro com default?
+		if ( ! preg_match(
+			'/function\s+' . preg_quote( $callback, '/' ) . '\s*\(([^)]*)\)/i',
+			$fonte,
+			$assinatura
+		) ) {
+			continue; // definida em outro arquivo; coberto pelo despacho acima
+		}
+
+		if ( false === strpos( $assinatura[1], '=' ) ) {
+			continue; // sem parâmetro opcional: seguro
+		}
+
+		$acoes_com_default[] = sprintf(
+			'%s: %s() em add_action(%s) com accepted_args=%d e parâmetro opcional',
+			basename( $arquivo ),
+			$callback,
+			$registro[1],
+			$accepted_args
+		);
+	}
+}
+
+uonix_hook_assert(
+	array() === $acoes_com_default,
+	"nenhum add_action() registra callback com parâmetro opcional sem accepted_args=0\n         "
+		. implode( "\n         ", $acoes_com_default )
+);
+
 if ( 0 !== $failures ) {
 	fwrite( STDERR, sprintf( "\n%d assercao(oes) falharam.\n", $failures ) );
 	exit( 1 );
