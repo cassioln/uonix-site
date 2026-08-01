@@ -64,6 +64,23 @@ if ( ! function_exists( 'uonix_analytics_configuration' ) ) {
     }
 }
 
+if ( ! function_exists( 'uonix_analytics_configuration_is_complete' ) ) {
+    /**
+     * Valida o contrato minimo da config antes de emitir qualquer tag.
+     *
+     * Fail-closed: exige array com as duas chaves preenchidas. Um array vazio
+     * ou parcial NAO habilita injecao parcial.
+     *
+     * @param mixed $configuration Config candidata.
+     * @return bool
+     */
+    function uonix_analytics_configuration_is_complete( $configuration ) {
+        return is_array( $configuration )
+            && ! empty( $configuration['gtm_container_id'] )
+            && ! empty( $configuration['adopt_website_id'] );
+    }
+}
+
 if ( ! function_exists( 'uonix_analytics_admin_notice' ) ) {
     /**
      * Avisa sobre configuração incompleta sem exibir qualquer identificador.
@@ -86,9 +103,11 @@ add_action( 'admin_notices', 'uonix_analytics_admin_notice' );
 // 1. Inserção no Cabeçalho (<head>) - Prioridade Máxima
 if ( ! function_exists( 'uonix_render_analytics_head' ) ) {
 function uonix_render_analytics_head( $configuration = null ) {
+    // Registrado com accepted_args=0, entao do_action() nao passa argumento algum
+    // e o default null vale -- a auto-resolucao da config ocorre normalmente.
     $configuration = null === $configuration ? uonix_analytics_configuration() : $configuration;
 
-    if ( is_admin() || ! is_array( $configuration ) ) return;
+    if ( is_admin() || ! uonix_analytics_configuration_is_complete( $configuration ) ) return;
 
     $gtm_container_id = $configuration['gtm_container_id'];
     $adopt_website_id = $configuration['adopt_website_id'];
@@ -423,14 +442,15 @@ function uonix_render_analytics_head( $configuration = null ) {
     <?php
 }
 }
-add_action( 'wp_head', 'uonix_render_analytics_head', 1 );
+add_action( 'wp_head', 'uonix_render_analytics_head', 1, 0 );
 
 // 2. Inserção logo após a abertura do <body> (GTM Noscript + Root controlado)
 if ( ! function_exists( 'uonix_render_analytics_body' ) ) {
 function uonix_render_analytics_body( $configuration = null ) {
+    // idem: accepted_args=0 preserva o default null.
     $configuration = null === $configuration ? uonix_analytics_configuration() : $configuration;
 
-    if ( is_admin() || ! is_array( $configuration ) ) return;
+    if ( is_admin() || ! uonix_analytics_configuration_is_complete( $configuration ) ) return;
 
     $gtm_container_id = $configuration['gtm_container_id'];
     ?>
@@ -520,6 +540,6 @@ function uonix_render_analytics_body( $configuration = null ) {
     <?php
 }
 }
-add_action( 'wp_body_open', 'uonix_render_analytics_body' );
+add_action( 'wp_body_open', 'uonix_render_analytics_body', 10, 0 );
 
 
