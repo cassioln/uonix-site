@@ -353,15 +353,23 @@ jobs:
           rsync -az --delete -e "$ssh_transport" \
             .deploy/theme/ \
             "$remote:$TARGET_ROOT/wp-content/themes/kadence-child/"
-          rsync -az -e "$ssh_transport" \
-            .deploy/mu-plugins/uonix-core.php \
-            "$remote:$TARGET_ROOT/wp-content/mu-plugins/uonix-core.php"
 
+          # ORDEM IMPORTA: os módulos vão ANTES do loader.
+          # uonix-core.php requer uonix-shared/environment.php. Publicar o loader
+          # primeiro abriria uma janela de segundos em que o core novo já está no
+          # disco e a dependência ainda não — e mu-plugins carregam em toda
+          # requisição. O loader tolera a ausência (is_readable + fallback), mas
+          # publicar na ordem correta fecha a janela em vez de apenas sobreviver a
+          # ela. Não inverta sem reler scripts/tests/test-mu-loader-resilience.sh.
           for module_name in "${expected_modules[@]}"; do
             rsync -az --delete -e "$ssh_transport" \
               ".deploy/mu-plugins/$module_name/" \
               "$remote:$TARGET_ROOT/wp-content/mu-plugins/$module_name/"
           done
+
+          rsync -az -e "$ssh_transport" \
+            .deploy/mu-plugins/uonix-core.php \
+            "$remote:$TARGET_ROOT/wp-content/mu-plugins/uonix-core.php"
 
           ssh \
             -p "$SSH_PORT" \
@@ -438,11 +446,23 @@ jobs:
             case "$relative_path" in
               theme/*) target="$document_root/wp-content/themes/kadence-child/${relative_path#theme/}" ;;
               mu-plugins/*) target="$document_root/wp-content/mu-plugins/${relative_path#mu-plugins/}" ;;
-              *) exit 1 ;;
+              *)
+                printf 'ERRO: path não gerenciado no manifest: %s\n' "$relative_path" >&2
+                exit 1
+                ;;
             esac
-            test -f "$target"
+            # Sem estas mensagens, uma divergência falha com exit 1 mudo e não se
+            # sabe QUAL arquivo divergiu. Só o caminho é impresso, nunca conteúdo.
+            if [ ! -f "$target" ]; then
+              printf 'ERRO: arquivo do manifest não chegou ao destino: %s\n' "$relative_path" >&2
+              exit 1
+            fi
             actual="$(sha256sum "$target" | cut -d ' ' -f 1)"
-            test "$actual" = "$checksum"
+            if [ "$actual" != "$checksum" ]; then
+              printf 'ERRO: checksum divergente em %s (esperado %s, encontrado %s)\n' \
+                "$relative_path" "$checksum" "$actual" >&2
+              exit 1
+            fi
           done < "$manifest"
           REMOTE
 

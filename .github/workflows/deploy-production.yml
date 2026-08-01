@@ -230,11 +230,13 @@ jobs:
             .deploy/theme/ \
             "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/themes/kadence-child/"
 
-          rsync -az \
-            -e "$ssh_transport" \
-            .deploy/mu-plugins/uonix-core.php \
-            "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/mu-plugins/uonix-core.php"
-
+          # ORDEM IMPORTA: os módulos vão ANTES do loader.
+          # uonix-core.php requer uonix-shared/environment.php. Publicar o loader
+          # primeiro abriria uma janela de segundos em que o core novo já está no
+          # disco e a dependência ainda não — e mu-plugins carregam em toda
+          # requisição. O loader tolera a ausência (is_readable + fallback), mas
+          # publicar na ordem correta fecha a janela em vez de apenas sobreviver a
+          # ela. Não inverta sem reler scripts/tests/test-mu-loader-resilience.sh.
           expected_modules=()
           for module in .deploy/mu-plugins/uonix-*; do
             [ -d "$module" ] || continue
@@ -245,6 +247,11 @@ jobs:
               "$module/" \
               "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/mu-plugins/$module_name/"
           done
+
+          rsync -az \
+            -e "$ssh_transport" \
+            .deploy/mu-plugins/uonix-core.php \
+            "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/mu-plugins/uonix-core.php"
 
           sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
@@ -308,9 +315,19 @@ jobs:
                 ;;
             esac
 
-            test -f "$target"
+            # Sem estas mensagens, uma divergência de manifest falha com exit 1 mudo
+            # e não se sabe QUAL arquivo divergiu — só o caminho é impresso, nunca
+            # conteúdo. Os hashes são de arquivos versionados, não segredos.
+            if [ ! -f "$target" ]; then
+              printf 'ERRO: arquivo do manifest não chegou ao destino: %s\n' "$relative_path" >&2
+              exit 1
+            fi
             actual="$(sha256sum "$target" | cut -d ' ' -f 1)"
-            test "$actual" = "$checksum"
+            if [ "$actual" != "$checksum" ]; then
+              printf 'ERRO: checksum divergente em %s (esperado %s, encontrado %s)\n' \
+                "$relative_path" "$checksum" "$actual" >&2
+              exit 1
+            fi
           done < "$manifest"
           REMOTE
 
@@ -447,18 +464,33 @@ jobs:
           if [ -d "$speedycache" ]; then
             find "$speedycache" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
           fi
+          # As assertivas abaixo espelham as do smoke. Um rollback que valide MENOS
+          # pode declarar sucesso num estado que o smoke reprovaria — e o operador
+          # confiaria num rollback incompleto.
+          rollback_check() { printf 'rollback: %s\n' "$1"; }
+
+          rollback_check 'wp cache flush'
           "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" cache flush
+          rollback_check 'wp core is-installed'
           "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" core is-installed
+          rollback_check 'UONIX_ENV = production'
+          test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'echo defined("UONIX_ENV") ? UONIX_ENV : "";')" = production
+          rollback_check 'option home = URL canônica'
           test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get home)" = "$target_url"
+          rollback_check 'option siteurl = URL canônica'
           test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get siteurl)" = "$target_url"
-          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'if (!defined("UONIX_ALLOW_INDEXING") || false !== UONIX_ALLOW_INDEXING || !function_exists("uonix_environment_allows_indexing") || uonix_environment_allows_indexing()) { exit(1); }'
+          rollback_check 'política de indexação (UONIX_ALLOW_INDEXING, blog_public)'
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'if (!defined("UONIX_ALLOW_INDEXING") || false !== UONIX_ALLOW_INDEXING || !function_exists("uonix_environment_allows_indexing") || uonix_environment_allows_indexing() || "0" !== (string) get_option("blog_public")) { exit(1); }'
           REMOTE
+          printf 'rollback: %s\n' 'X-Robots-Tag noindex/nofollow/noarchive'
           headers="$(mktemp)"
           trap 'rm -f "$headers"' EXIT
           effective_url="$(curl --fail --silent --show-error --location --max-time 30 \
             --dump-header "$headers" --output /dev/null --write-out '%{url_effective}' "$TARGET_URL/")"
           [ "$effective_url" = "$TARGET_URL/" ]
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noindex'
+          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*nofollow'
+          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noarchive'
           echo "Rollback validado a partir do backup $backup_id."
 
       - name: Retain five code backups
