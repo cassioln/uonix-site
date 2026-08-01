@@ -45,6 +45,9 @@ jobs:
       - name: Test analytics policy
         run: php scripts/tests/test-analytics-policy.php
 
+      - name: Test hook dispatch arguments
+        run: php scripts/tests/test-hook-dispatch-arguments.php
+
       - name: Test blog archive without WooCommerce
         run: php scripts/tests/test-blog-archive-optional-woocommerce.php
 
