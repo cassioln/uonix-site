@@ -131,6 +131,20 @@ jobs:
     steps:
       - run: echo nada'
 
+# `#` dentro de `run: |` é comentário de SHELL, mas o Actions interpola ${{ }}
+# antes de o shell rodar: o secret É usado e precisa ser cobrado.
+# shellcheck disable=SC2016  # ${{ }} deve ficar literal na fixture YAML
+REUSE_SECRET_IN_RUN_BLOCK='name: R
+on:
+  workflow_call:
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          # usa ${{ secrets.SEGREDO_REAL }} dentro do bloco
+          echo feito'
+
 echo 'Testando o guarda de repasse de secrets:'
 
 # 1. Secret real usado, chamador sem bloco secrets: deve ACUSAR.
@@ -172,9 +186,15 @@ jobs:
     uses: ./.github/workflows/../workflows/_reuse.yml'
 expect 'travessia de path -> acusa' 1
 
+# 9. Secret em linha com `#` DENTRO de `run: |`: deve ACUSAR.
+#    O Actions interpola ${{ }} antes do shell, então o uso é real. Este caso
+#    fixa a distinção contra o PASS falso que a filtragem de comentários criou.
+build_case "$REUSE_SECRET_IN_RUN_BLOCK" "$CALLER_NO_SECRETS"
+expect 'secret em comentario shell dentro de run -> acusa' 1
+
 if [ "$failures" -ne 0 ]; then
   printf 'FALHA: %s caso(s) do guarda com comportamento inesperado.\n' "$failures" >&2
   exit 1
 fi
 
-echo 'PASS: 8 casos do guarda de repasse de secrets com comportamento correto.'
+echo 'PASS: 9 casos do guarda de repasse de secrets com comportamento correto.'

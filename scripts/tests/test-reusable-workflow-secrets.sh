@@ -108,19 +108,43 @@ def load(path: pathlib.Path):
 def secrets_used_by(path: pathlib.Path):
     """Nomes de secrets referenciados, e se há referência dinâmica.
 
-    Comentários YAML são removidos antes da varredura: um nome citado em
-    comentário (ex.: `# antes usava ${{ secrets.LEGADO }}`) não é uso real e
-    inflaria a exigência sobre o chamador.
+    Comentários YAML de linha inteira são ignorados: um nome citado em comentário
+    (ex.: `# antes usava ${{ secrets.LEGADO }}`) não é uso real e inflaria a
+    exigência sobre o chamador.
+
+    CUIDADO: só linhas cujo `#` está no nível do YAML contam como comentário.
+    Dentro de um bloco `run: |`, `#` é comentário de SHELL, mas o Actions
+    interpola `${{ }}` ANTES de o shell rodar — o secret é usado de fato e
+    precisa ser cobrado. Por isso a filtragem para nos blocos escalares.
     """
     if not path.is_file():
         return set(), False
-    lines = []
-    for raw in path.read_text(encoding='utf-8').splitlines():
-        stripped = raw.lstrip()
+
+    lines = path.read_text(encoding='utf-8').splitlines()
+    kept = []
+    block_indent = None  # indentação do conteúdo de um bloco escalar (`|` / `>`)
+
+    for raw in lines:
+        stripped = raw.strip()
+        indent = len(raw) - len(raw.lstrip())
+
+        if block_indent is not None:
+            if stripped and indent < block_indent:
+                block_indent = None  # bloco terminou
+            else:
+                kept.append(raw)  # dentro do bloco: nada é comentário YAML
+                continue
+
         if stripped.startswith('#'):
-            continue  # comentário de linha inteira
-        lines.append(raw)
-    text = '\n'.join(lines)
+            continue  # comentário YAML de linha inteira
+
+        kept.append(raw)
+
+        # Abre bloco escalar? (`run: |`, `script: >`, com ou sem indicadores)
+        if re.search(r':\s*[|>][+-]?\d*\s*$', raw):
+            block_indent = indent + 1
+
+    text = '\n'.join(kept)
     names = set()
     dynamic = False
     for expression in EXPRESSION.findall(text):
