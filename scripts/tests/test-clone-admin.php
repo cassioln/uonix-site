@@ -116,6 +116,10 @@ $_POST = array(
 $result = uox_clone_get_result_from_post();
 assert_same( 'uox_clone_same_env', $result->get_error_code(), 'source==target bloqueado' );
 
+// Clone PARA produção em modo execute é recusado pelo painel, independentemente da
+// frase digitada: o workflow exige o SHA do commit na confirmação
+// (clone-environment.yml) e o painel não o conhece. Sem esta recusa, o painel
+// dispararia um clone destinado a falhar em validate-request.
 $_POST = array(
 	'uox_clone_action'       => 'clone',
 	'uox_clone_source'       => 'qa',
@@ -124,7 +128,34 @@ $_POST = array(
 	'uox_clone_confirmation' => 'ERRADO',
 );
 $result = uox_clone_get_result_from_post();
-assert_same( 'uox_clone_missing_production_confirmation', $result->get_error_code(), 'produção sem frase bloqueada' );
+assert_same( 'uox_clone_production_requires_manual_dispatch', $result->get_error_code(), 'produção com frase errada recusada' );
+
+// Nem mesmo a frase que o painel considerava válida libera a operação: a frase sem
+// SHA seria rejeitada pelo workflow, então o painel não deve prosseguir.
+$_POST = array(
+	'uox_clone_action'       => 'clone',
+	'uox_clone_source'       => 'qa',
+	'uox_clone_target'       => 'prod',
+	'uox_clone_mode'         => 'execute',
+	'uox_clone_confirmation' => uox_clone_required_confirmation( 'qa', 'prod' ),
+);
+$result = uox_clone_get_result_from_post();
+assert_same( 'uox_clone_production_requires_manual_dispatch', $result->get_error_code(), 'produção com frase sem SHA também recusada' );
+
+// Dry-run para produção continua permitido: não escreve nada e o workflow aceita
+// confirmação vazia nesse ramo.
+$_POST = array(
+	'uox_clone_action' => 'clone',
+	'uox_clone_source' => 'qa',
+	'uox_clone_target' => 'prod',
+	'uox_clone_mode'   => 'dry-run',
+);
+$result = uox_clone_get_result_from_post();
+assert_same(
+	false,
+	is_wp_error( $result ) && 'uox_clone_production_requires_manual_dispatch' === $result->get_error_code(),
+	'dry-run para produção não é recusado pela guarda de dispatch manual'
+);
 
 if ( 0 !== $failures ) {
 	exit( 1 );
