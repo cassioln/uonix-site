@@ -126,6 +126,9 @@ jobs:
       - name: Test clone path-bound option protection
         run: bash scripts/tests/test-clone-path-bound-options.sh
 
+      - name: Test clone panel contract
+        run: bash scripts/tests/test-clone-panel-contract.sh
+
       - name: Test clone rollback
         run: bash scripts/tests/test-clone-rollback.sh
 

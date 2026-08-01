@@ -173,6 +173,19 @@ function uox_clone_get_result_from_post() {
 		return new WP_Error( 'uox_clone_same_env', 'Origem e destino não podem ser iguais.' );
 	}
 
+	// Clone PARA produção não é operação de painel. O workflow exige a frase
+	// "CLONAR <ORIGEM> PARA PROD @ <sha>" (clone-environment.yml), amarrando a
+	// autorização a um commit específico — mesmo hardening do deploy de produção.
+	// O painel não conhece o sha do commit que o workflow usará, então dispararia
+	// um clone destinado a falhar em validate-request. Melhor recusar aqui, com
+	// orientação, do que gastar uma janela SSH num dispatch inválido.
+	if ( 'prod' === $target && 'execute' === $mode ) {
+		return new WP_Error(
+			'uox_clone_production_requires_manual_dispatch',
+			'Clone para produção não é executado pelo painel: a autorização precisa citar o SHA do commit. Use Actions > Clone environment > Run workflow e informe a confirmação "CLONAR ' . strtoupper( $source ) . ' PARA PROD @ <sha>". O painel atende os demais pares e o modo dry-run.'
+		);
+	}
+
 	$required_confirmation = uox_clone_required_confirmation( $source, $target );
 	if ( 'prod' === $target && 'execute' === $mode && $required_confirmation !== $confirmation ) {
 		return new WP_Error(
