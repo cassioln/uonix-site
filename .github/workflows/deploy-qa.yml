@@ -18,6 +18,10 @@ jobs:
     needs: validate
     if: ${{ vars.ENABLE_DEPLOY_QA == 'true' }}
     uses: ./.github/workflows/_deploy-hostgator.yml
+    # Reusable workflows não herdam secrets automaticamente: sem esta linha,
+    # secrets.HOSTGATOR_* resolvem para string vazia dentro do reusable e o
+    # deploy falha ao montar o SSH (run 30670232135).
+    secrets: inherit
     with:
       environment_name: qa-hostgator
       target_root: ${{ vars.HOSTGATOR_QA_ROOT }}
