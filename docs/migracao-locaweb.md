@@ -454,7 +454,113 @@ Ao escrever um teste, pergunte: *ele exercita o consumidor real, ou só o meu la
 do contrato?* Se a resposta for a segunda, o teste vai passar enquanto o sistema
 falha.
 
-## 17. Limites permanentes
+## 17. Migração de e-mail e cutover de domínio
+
+Ordem definida por Cassio, e ela **não** é negociável: os e-mails migram **antes**
+da troca de domínio.
+
+### As três fases
+
+```
+1. hoje          e-mails @uonix.com.br        na hospedagem ANTIGA
+                 site novo                    em site.uonix.com.br (Locaweb)
+
+2. migração      copiar caixas @uonix.com.br  ->  @site.uonix.com.br
+                 (IMAP -> IMAP, mesma plataforma Locaweb, servidores distintos)
+
+3. cutover       site.uonix.com.br            ->  uonix.com.br
+                 e-mails voltam a ser @uonix.com.br, já na hospedagem NOVA
+```
+
+O ponto que costuma confundir: `@site.uonix.com.br` é **endereço de trânsito**, não
+o destino final. Depois do cutover, as caixas migradas passam a responder no domínio
+original — mas na hospedagem nova.
+
+### Topologia verificada (2026-08-03)
+
+| | origem (antiga) | destino (nova) |
+| --- | --- | --- |
+| domínio | `uonix.com.br` | `site.uonix.com.br` |
+| IP do site | `186.202.135.240` | `179.188.55.94` |
+| IMAP | `imap.uonix.com.br` → `191.252.112.195` | `imap.site.uonix.com.br` → `191.252.112.194` |
+| MX | `mx.b/core/a/jk.locaweb.com.br` | os mesmos |
+| SPF | `v=spf1 include:_spf.locaweb.com.br -all` | idêntico |
+
+**São servidores de e-mail diferentes** (`.195` contra `.194`), ambos com certificado
+`*.email-ssl.com.br`. Ou seja: mesma plataforma Locaweb, instâncias distintas — a
+cópia IMAP→IMAP é necessária, não há atalho de "mesma caixa".
+
+Como o SPF e os MX já são idênticos nos dois lados, a troca de domínio não exige
+mudança de SPF. Isso reduz o risco de o e-mail parar por falha de autenticação —
+mas confirme DKIM separadamente, que é por domínio.
+
+### Como executar
+
+Use a skill `email-migration` (imapsync), que já tem referência específica da
+Locaweb em `references/locaweb-email-ssl.md`. Regras que valem aqui:
+
+- `host1` é sempre `imap.uonix.com.br` (origem) e `host2` é `imap.site.uonix.com.br`;
+- passfiles separados por lado, modo `600`, nunca senha em linha de comando;
+- pré-flight obrigatório: `--justlogin`, `--justfoldersizes`, `--automap --justfolders --dry`;
+- **jamais** `--delete1`, e `--delete2` só depois do gate de espelho estrito;
+- manter a hospedagem antiga acessível até o catch-up final.
+
+Ordem operacional: primeira carga com a origem ainda recebendo → validar → trocar
+MX/domínio → catch-up incremental → última rodada antes de desativar a antiga.
+
+### Pendência descoberta: o remetente do site aponta para domínio de teste
+
+Verificado em produção:
+
+```
+admin_email = site@uonix.ksio.dev      <- domínio de TESTE
+fluent-smtp = active
+```
+
+O WordPress em `site.uonix.com.br` envia com remetente `@uonix.ksio.dev`, que é o
+QA no HostGator. Isso precisa mudar no cutover, senão o site continuará enviando
+e-mail transacional com identidade de ambiente de teste — e o SPF de `ksio.dev` não
+cobre o servidor da Locaweb, o que tende a cair em spam.
+
+Inclua na checklist de cutover: `admin_email`, remetente do `fluent-smtp` e qualquer
+`from` fixo em formulários (FluentForms) e no WooCommerce.
+
+### As contas @uonix.ksio.dev não são as reais
+
+O inventário abaixo é do **QA no HostGator**, obtido com `uapi Email list_pops`:
+
+```
+administrativo@ atendimento@ contato@ fernando@ marketing@ site@   (todas @uonix.ksio.dev)
+```
+
+São contas de ambiente de teste. As caixas a migrar são as `@uonix.com.br` da
+hospedagem antiga, cujo inventário sai do painel da Locaweb — não do cPanel.
+
+### Acesso ao cPanel sem token de API
+
+Descoberto em 2026-08-03: a conta `uonix` no HostGator tem `uapi` e `cpapi2` no
+`PATH`, executando a API do cPanel como o próprio usuário, sem token:
+
+```bash
+uapi --output=json Email list_pops
+uapi --output=json DomainInfo list_domains
+```
+
+Isso torna dispensável guardar token de API do cPanel. **Vale só para o HostGator
+(QA/DEV)** — a Locaweb não usa cPanel, tem painel próprio, e é onde estão o site
+novo e as caixas de e-mail.
+
+Estrutura da conta `uonix` no HostGator, confirmada por `DomainInfo`:
+
+```
+domínio principal: uonix.ksio.dev        (QA)
+subdomínio:        test.uonix.ksio.dev   (DEV)
+```
+
+QA e DEV compartilham o mesmo cPanel, o que explica os dois `.htaccess` sob o mesmo
+home.
+
+## 18. Limites permanentes
 
 - Não desabilitar SSH por automação de painel: gate humano.
 - Não usar FTP para deploy.
