@@ -215,6 +215,58 @@ curl -sI https://site.uonix.com.br/ | grep -i x-robots-tag
 # esperado: x-robots-tag: noindex, nofollow, noarchive
 ```
 
+> **Verifique a URL limpa, nunca só com `?query`.** Um plugin de cache de página
+> serve HTML estático antes de o PHP executar, então o header emitido pelo
+> mu-plugin desaparece exatamente na URL que os buscadores visitam. Em
+> 2026-08-03 o SpeedyCache produziu esse efeito em produção: com `?query` o
+> header saía, sem query não. Regra de verificação: sempre medir a URL sem
+> query e com `-A Googlebot`.
+
+Como o mu-plugin depende do PHP executar, a política é sustentada por três
+camadas independentes — mantenha as três até o cutover:
+
+1. `X-Robots-Tag` via PHP (`06-environment-indexing.php`) — cai sob cache de página;
+2. `<meta name="robots">` no HTML — sobrevive ao cache, porque está no HTML gerado;
+3. `X-Robots-Tag` no `.htaccess` (bloco `# BEGIN UonixNoIndex`, no topo do arquivo)
+   — vale para respostas que não passam pelo PHP e para tipos não-HTML (PDF, imagem).
+
+O bloco do `.htaccess` é manual: nem o deploy nem o clone gerenciam esse arquivo.
+Aplicar com `add-noindex-htaccess.sh` (idempotente) e remover somente no cutover.
+
+### Existem TRÊS camadas de cache, não uma
+
+Descoberto em 2026-08-03, depois de aplicar o bloco em QA e o header não aparecer:
+
+| Camada | Onde | Como invalidar |
+| --- | --- | --- |
+| SpeedyCache | `wp-content/cache/speedycache` | `wp cache flush` + remover arquivos |
+| Cloudflare (borda) | fora do servidor | purga na conta, ou esperar expirar |
+| navegador/CDN cliente | — | `?query` para bypass |
+
+Todos os hosts do projeto passam por Cloudflare: `ksio.dev`, `uonix.ksio.dev`,
+`test.uonix.ksio.dev` resolvem para `172.67.209.181` / `104.21.45.49`, com origem
+real em `108.179.252.137`. **Limpar o cache do servidor não invalida a borda.**
+
+Sintoma típico: a correção funciona na origem e continua ausente na URL pública.
+
+```bash
+# o .htaccess funciona? (mede a ORIGEM, ignorando Cloudflare)
+curl -skI --resolve "uonix.ksio.dev:443:108.179.252.137" https://uonix.ksio.dev/ \
+  | grep -i x-robots-tag
+
+# a borda está servindo cópia velha?
+curl -sI https://uonix.ksio.dev/ | grep -iE 'cf-cache-status|^age|cache-control'
+# cf-cache-status: HIT + age alto => objeto quente na borda
+```
+
+Atenção ao `cdn-cache-control: max-age=1296000` (15 dias) presente nas respostas:
+sem purga, uma correção pode demorar muito para aparecer. Não há credencial da
+Cloudflare no projeto hoje — nem no Keychain, nem em secrets do repositório —
+então a purga é manual, pelo painel.
+
+Consequência para o pipeline: o smoke pode reprovar por cache de borda sem que
+haja defeito de código. Antes de investigar o código, meça a origem.
+
 Emitido por `mu-plugins/uonix-security/06-environment-indexing.php`, condicionado a
 `UONIX_ALLOW_INDEXING === true && UONIX_ENV === 'production'` — fail-closed: sem
 liberação explícita, aplica `noindex, nofollow, noarchive` e força `blog_public=0`.
@@ -274,6 +326,40 @@ inteiros.
 | `_uonix-manual-backups/<stamp>/` | criado manualmente antes de intervenção |
 
 Ambos ficam fora do document root. Dumps de banco em `~/uonix-copyfix/`.
+
+## 14a. Lock de ambiente órfão
+
+O deploy cria `<docroot>/.uonix-operation.lock` no início e o libera no fim. O step
+de liberação só remove o lock cujo `owner` bate com o próprio `RUN_ID`
+(`_deploy-hostgator.yml`). Consequência: **se o step de liberação falhar, o lock
+fica preso permanentemente** e todo deploy futuro para naquele ambiente com
+
+```
+mkdir: cannot create directory '<docroot>/.uonix-operation.lock': File exists
+Environment is already locked
+```
+
+Isso aconteceu em DEV entre 2026-08-01 e 2026-08-03 e foi diagnosticado
+erradamente como bloqueio de rede — o log do step 7 é a única evidência que
+distingue os dois casos. Não há expiração automática nem comando de liberação.
+
+Antes de remover um lock, confirme que ele é realmente órfão:
+
+```bash
+# 1. quem é o dono
+cat <docroot>/.uonix-operation.lock/owner        # ex.: 30675201531-1
+
+# 2. aquele run terminou?
+gh run view <id-antes-do-hifen> --json status,conclusion
+
+# 3. nenhum run ativo agora?
+gh run list --limit 5 --json databaseId,status
+
+# 4. remover só se o owner bater
+```
+
+Não apague às cegas: se o dono for um run em andamento, você libera o ambiente
+para dois deploys simultâneos.
 
 ## 15. Armadilhas de hook do WordPress
 
