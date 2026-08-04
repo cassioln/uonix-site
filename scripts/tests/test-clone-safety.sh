@@ -124,6 +124,22 @@ fr1_test_users_snapshot() (
     fr1_users_wp() {
       local argument
       local output_file=''
+      # O snapshot passou a preferir mysqldump direto (wp db export --tables
+      # shella out e falha na Locaweb), então o mock precisa responder a
+      # `config get`. Sem isso ele devolvia 92 e o dump nunca era gerado.
+      case " $* " in
+        *' config get '*)
+          for argument in "$@"; do
+            case "$argument" in
+              DB_NAME) printf 'synthetic_db\n'; return 0 ;;
+              DB_USER) printf 'synthetic_user\n'; return 0 ;;
+              DB_HOST) printf 'synthetic_host\n'; return 0 ;;
+              DB_PASSWORD) printf 'synthetic_password\n'; return 0 ;;
+            esac
+          done
+          return 93
+          ;;
+      esac
       case " $* " in
         *' db prefix '*) printf 'wpis_\n'; return 0 ;;
         *' db export '*)
@@ -137,6 +153,16 @@ fr1_test_users_snapshot() (
           ;;
       esac
       return 92
+    }
+    # mysqldump sintético: o snapshot o prefere ao wp-cli, então sem ele o teste
+    # exercitaria apenas o fallback e nunca o caminho usado em produção.
+    # shellcheck disable=SC2329
+    mysqldump() {
+      case " $* " in
+        *' --help '*) printf -- '--single-transaction\n'; return 0 ;;
+      esac
+      [ "$FR1_USERS_PRODUCER" = empty ] || printf 'INSERT INTO users VALUES (1);\n'
+      return 0
     }
     remote_run() (
       # The sourced script's xargs call does not invoke this eval-scoped mock.
@@ -206,10 +232,34 @@ fr1_test_users_restore_variant() (
     # Invoked indirectly through the command returned by wp_cli_shell.
     # shellcheck disable=SC2329
     fr1_users_restore_wp() {
+      # O restore passou a resolver o cliente `mysql` (wp db import shella out e
+      # falha na Locaweb), então o mock precisa responder a `config get`.
+      local argument
+      case " $* " in
+        *' config get '*)
+          for argument in "$@"; do
+            case "$argument" in
+              DB_NAME) printf 'synthetic_db\n'; return 0 ;;
+              DB_USER) printf 'synthetic_user\n'; return 0 ;;
+              DB_HOST) printf 'synthetic_host\n'; return 0 ;;
+              DB_PASSWORD) printf 'synthetic_password\n'; return 0 ;;
+            esac
+          done
+          return 93
+          ;;
+      esac
       case " $* " in
         *' db import '*) printf 'import\n' >> "$import_log"; return 0 ;;
       esac
       return 94
+    }
+    # Cliente `mysql` sintético: sem ele o restore cairia no fallback e o caminho
+    # real nunca seria exercitado.
+    # shellcheck disable=SC2329
+    mysql() {
+      printf 'import\n' >> "$import_log"
+      cat >/dev/null
+      return 0
     }
     remote_run() (
       # Evaluated remote shell snippets invoke this test-local mock indirectly.
@@ -646,6 +696,22 @@ while [ "$#" -gt 0 ]; do
     *) break ;;
   esac
 done
+
+# O import remoto passou a resolver o cliente `mysql` em vez de chamar
+# `wp db import`, que shella out e falha na Locaweb. Por isso o mock precisa
+# responder também a `config get`, usado para obter as credenciais sem imprimir
+# a senha em argv.
+if [ "${1:-}" = config ] && [ "${2:-}" = get ]; then
+  case "${3:-}" in
+    DB_NAME) printf 'synthetic_db\n' ;;
+    DB_USER) printf 'synthetic_user\n' ;;
+    DB_HOST) printf 'synthetic_host\n' ;;
+    DB_PASSWORD) printf 'synthetic_password\n' ;;
+    *) exit 93 ;;
+  esac
+  exit 0
+fi
+
 [ "${1:-}" = db ] || exit 90
 
 case "${2:-}" in
@@ -668,6 +734,22 @@ case "${2:-}" in
 esac
 MOCK
 chmod 700 "$RESTORE_REMOTE_WP"
+
+# Cliente `mysql` sintético no PATH: o import remoto o prefere ao wp-cli, então
+# sem ele o teste exercitaria apenas o fallback e nunca o caminho real.
+RESTORE_FAKE_BIN="$restore_options_root/bin"
+mkdir -p "$RESTORE_FAKE_BIN"
+cat > "$RESTORE_FAKE_BIN/mysql" <<'MOCK'
+#!/usr/bin/env bash
+set -u
+: "${RESTORE_REMOTE_DB_LOG:?}"
+printf 'import\n' >> "$RESTORE_REMOTE_DB_LOG"
+cat >/dev/null
+exit "${RESTORE_IMPORT_STATUS:-0}"
+MOCK
+chmod 700 "$RESTORE_FAKE_BIN/mysql"
+PATH="$RESTORE_FAKE_BIN:$PATH"
+export PATH
 
 record_restore_failure() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -980,12 +1062,17 @@ case "$RESTORE_REMOTE_SCRIPT" in
   *'db query "$delete_sql" >/dev/null || exit $?'*) ;;
   *) record_restore_failure 'restore_options remoto não propaga explicitamente falha do DELETE' ;;
 esac
-# The assertion matches literal remote-shell variables, not local expansions.
+# A assertiva casa variáveis do shell remoto, não expansões locais.
+# O import agora resolve o cliente `mysql` em vez de chamar `wp db import`, que
+# shella out e falha na Locaweb; o que importa é que a falha continue propagada
+# explicitamente com `|| exit $?`.
 # shellcheck disable=SC2016
 case "$RESTORE_REMOTE_SCRIPT" in
-  *'db import "$options_sql" >/dev/null || exit $?'*) ;;
+  *'"$options_sql"'*' || exit $?'*) ;;
   *) record_restore_failure 'restore_options remoto não propaga explicitamente falha do import' ;;
 esac
+printf '%s' "$RESTORE_REMOTE_SCRIPT" | grep -q 'mysql_bin' \
+  || record_restore_failure 'restore_options remoto não resolve o cliente mysql (wp db import falha na Locaweb)'
 
 # Boundary real pós-mutation: corrupção após a conclusão do snapshot deve
 # preservar o status da validação, fazer rollback uma vez e não alcançar nenhum
