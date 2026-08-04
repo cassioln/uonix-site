@@ -117,6 +117,9 @@ jobs:
       - name: Test SSH connection reuse
         run: bash scripts/tests/test-ssh-connection-reuse.sh
 
+      - name: Test Turnstile API unavailable
+        run: bash scripts/tests/test-turnstile-api-unavailable.sh
+
       - name: Test clone guards
         run: bash scripts/tests/test-clone-guards.sh
 
