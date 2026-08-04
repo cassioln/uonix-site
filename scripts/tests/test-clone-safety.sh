@@ -2133,7 +2133,12 @@ wp_path() {
   return 88
 }
 wp_cli_shell() { printf 'rollback-wp-cli\n' >> "$c3r9_boundary_log"; printf 'wp\n'; }
-remote_run() { printf 'rollback-transport\n' >> "$c3r9_boundary_log"; }
+# Invocado indiretamente pelo rollback do script sourceado, se ele chegar lá — o
+# ponto do teste é justamente que NÃO deve chegar. O rollback usa o caminho com
+# retry (remote_run_idempotent) porque restaurar de um backup validado é
+# idempotente.
+# shellcheck disable=SC2329
+remote_run_idempotent() { printf 'rollback-transport\n' >> "$c3r9_boundary_log"; }
 
 SOURCE=qa
 TARGET=dev
