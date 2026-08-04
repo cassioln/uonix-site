@@ -217,11 +217,37 @@ printf '%s' "$output" | grep -q 'tabelas' || fail 'contagem insuficiente não fo
 
 # --- Caso 5: fallback para wp db export quando não há mysqldump ---------------
 # Prova que o mecanismo é escolhido por CAPACIDADE, não por nome de ambiente.
+#
+# Remover só o mock NÃO basta: o runner do CI tem um mysqldump real em /usr/bin,
+# então `command -v mysqldump` continuaria encontrando-o e o fallback nunca seria
+# exercitado (era exatamente a diferença entre passar no macOS e falhar no CI).
+# Montamos um PATH espelhando os binários reais, exceto mysqldump.
+nodump_bin="$TMP_DIR/nodump-bin"
+mkdir -p "$nodump_bin"
+for real_dir in /bin /usr/bin; do
+  [ -d "$real_dir" ] || continue
+  for real_binary in "$real_dir"/*; do
+    [ -x "$real_binary" ] || continue
+    name="${real_binary##*/}"
+    [ "$name" = mysqldump ] && continue
+    [ -e "$nodump_bin/$name" ] || ln -s "$real_binary" "$nodump_bin/$name" 2>/dev/null || true
+  done
+done
 mv "$TMP_DIR/bin/mysqldump" "$TMP_DIR/mysqldump.disabled"
+
+original_path="$PATH"
+PATH="$TMP_DIR/bin:$nodump_bin"
+export PATH
+command -v mysqldump >/dev/null 2>&1 \
+  && fail 'não foi possível simular a ausência de mysqldump'
+
 if ! output="$(MOCK_WP_DB_EXPORT_OK=1 MOCK_DUMP_TABLES=0 UONIX_DB_BACKUP_MIN_TABLES=0 run_backup qa)"; then
   fail "fallback para wp db export reprovou: $output"
 fi
 printf '%s' "$output" | grep -q 'mechanism=wp' || fail 'fallback não usou wp db export'
+
+PATH="$original_path"
+export PATH
 mv "$TMP_DIR/mysqldump.disabled" "$TMP_DIR/bin/mysqldump"
 
 # --- Caso 6: argumentos inseguros são recusados antes de qualquer conexão -----
