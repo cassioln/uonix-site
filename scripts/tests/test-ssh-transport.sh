@@ -269,6 +269,25 @@ printf '%s' "$qa_log" | grep -q 'ControlMaster=auto' || fail 'QA abre conexões 
 printf '%s' "$qa_log" | grep -q 'ControlPersist=120' || fail 'QA não mantém o socket entre etapas'
 printf '%s' "$qa_log" | grep -Fq "ControlPath=$CONTROL_DIR/uonix-%C" || fail 'QA sem ControlPath curto e hashado'
 printf '%s' "$qa_log" | grep -q 'accept-new' && fail 'QA ainda aceita host key nova'
+printf '%s' "$qa_log" | grep -q 'ServerAliveInterval=15' \
+  || fail 'QA sem keepalive: master pendurado travaria até timeout do kernel'
+printf '%s' "$qa_log" | grep -q 'ConnectTimeout=30' || fail 'QA sem ConnectTimeout'
+
+# O master multiplexado precisa poder ser encerrado. Na Locaweb a sessão é
+# autenticada por SENHA: um socket vivo deixaria qualquer processo do mesmo
+# usuário reusar a sessão sem credencial durante o ControlPersist.
+type uonix_transport_close_master >/dev/null 2>&1 \
+  || fail 'não há como encerrar o master multiplexado'
+: > "$MOCK_TRANSPORT_LOG"
+uonix_transport_close_master prod || fail 'encerrar master retornou falha'
+close_log="$(cat "$MOCK_TRANSPORT_LOG")"
+printf '%s' "$close_log" | grep -q '<-O> <exit>' \
+  || fail 'encerramento do master não usou -O exit'
+
+# Limpeza nunca pode derrubar o chamador: um master já encerrado é sucesso.
+: > "$MOCK_TRANSPORT_LOG"
+MOCK_SSH_MODE=fail uonix_transport_close_master prod \
+  || fail 'encerramento do master propagou falha de limpeza'
 
 : > "$MOCK_TRANSPORT_LOG"
 : > "$MOCK_TRANSPORT_COUNT"
