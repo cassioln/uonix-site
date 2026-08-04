@@ -1804,7 +1804,16 @@ test -s $(printf '%q' "$files_file")
 gzip -t $(printf '%q' "$dump_file")
 tar -tzf $(printf '%q' "$files_file") >/dev/null
 staging=\"\$(mktemp -d $(printf '%q' "$wp_content")/.uonix-rollback.XXXXXX)\"
-trap 'rm -rf -- \"\$staging\"' EXIT
+# O trap remove SOMENTE o que ainda nao foi promovido. Um rm -rf cego no staging
+# destruiria o item original guardado como .replaced-item: com set -e, um mv
+# falho aborta o script, o trap roda e o original vai embora junto — perda de
+# dados, nao estado misto. Antes de limpar, devolve o que estiver guardado.
+trap 'for replaced in \"\$staging\"/.replaced-*; do
+  test -e \"\$replaced\" || continue
+  original=\"\${replaced##*/.replaced-}\"
+  test -e $(printf '%q' "$wp_content")/\"\$original\" || mv -- \"\$replaced\" $(printf '%q' "$wp_content")/\"\$original\" || true
+done
+rm -rf -- \"\$staging\"' EXIT
 # Extrai antes de tocar em qualquer coisa: com set -e um archive corrompido
 # aborta aqui, com o destino intacto e o banco ainda nao mexido. Restaurar o
 # banco e falhar nos arquivos deixaria schema novo com arquivos antigos.

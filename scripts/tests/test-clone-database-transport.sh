@@ -205,11 +205,20 @@ assert_rollback_order() {
   local path_label="$1"
   local path_body="$2"
   local import_pattern="$3"
-  local extract_offset import_offset swap_offset
+  local flow_body extract_offset import_offset swap_offset
 
-  extract_offset="$(offset_of "$path_body" 'tar -xzf')"
-  import_offset="$(offset_of "$path_body" "$import_pattern")"
-  swap_offset="$(offset_of "$path_body" 'mv -- ')"
+  # O trap é removido da análise: ele contém um `mv` de RECUPERAÇÃO que roda no
+  # fim, mas aparece no topo do texto e seria lido como a troca de arquivos,
+  # invertendo a leitura da ordem.
+  flow_body="$(printf '%s' "$path_body" | awk '
+    /^trap / { in_trap = 1 }
+    !in_trap { print }
+    in_trap && /EXIT$/ { in_trap = 0 }
+  ')"
+
+  extract_offset="$(offset_of "$flow_body" 'tar -xzf')"
+  import_offset="$(offset_of "$flow_body" "$import_pattern")"
+  swap_offset="$(offset_of "$flow_body" 'mv -- ')"
 
   [ -n "$extract_offset" ] && [ -n "$import_offset" ] && [ -n "$swap_offset" ] \
     || fail "rollback ${path_label}: extração, import ou troca não localizados"
@@ -265,9 +274,19 @@ for rollback_path_label in remoto local; do
 done
 
 # Metade 2: o caminho local devolve explicitamente o original se a troca falhar.
-# O remoto não precisa: roda sob `set -e`, então aborta antes de prosseguir, e o
-# trap EXIT limpa o staging com o original ainda dentro.
 printf '%s' "$rollback_local" | grep -qE 'mv -- .*\.replaced-.*(LOCAL_WP_CONTENT)' \
   || fail 'rollback local não devolve o item original quando a troca falha'
+
+# No caminho REMOTO a devolução tem de estar no TRAP, não apenas no fluxo normal.
+# Achado por revisão adversarial e confirmado empiricamente: o snippet roda sob
+# `set -e`, então um `mv` falho aborta na hora e só o trap ainda executa. Um
+# `rm -rf` cego no staging levava embora o original guardado como .replaced-*,
+# convertendo estado misto em PERDA DE DADOS.
+remote_trap="$(printf '%s' "$rollback_remote" | awk "/^trap /,/EXIT\$/")"
+[ -n "$remote_trap" ] || fail 'trap de limpeza do rollback remoto não encontrado'
+printf '%s' "$remote_trap" | grep -q 'replaced-' \
+  || fail 'trap do rollback remoto apaga o staging sem devolver o item guardado (perda de dados)'
+printf '%s' "$remote_trap" | grep -q 'mv -- ' \
+  || fail 'trap do rollback remoto não restaura o item guardado antes de limpar'
 
 printf 'PASS: o clone não depende de wp db export/import em nenhum caminho remoto.\n'
