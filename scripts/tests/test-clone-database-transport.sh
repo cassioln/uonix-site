@@ -176,4 +176,67 @@ for forbidden_flag in --flush-logs --master-data --flush-privileges; do
     && fail "clone usa ${forbidden_flag}, que exige RELOAD e falha neste host"
 done
 
+# A ORDEM do rollback importa: banco antes dos arquivos. Restaurar arquivos sobre
+# um schema divergente passa num smoke de arquivos e mente sobre o conteúdo — o
+# pior resultado possível, porque parece sucesso.
+#
+# Cada caminho é analisado no SEU PRÓPRIO trecho. Buscar padrões no corpo inteiro
+# de rollback_target não funciona: `tar -xzf` aparece nos dois caminhos, então um
+# `tail -1` casava a linha do caminho local ao avaliar o remoto, e a inversão do
+# remoto passava sem ser vista.
+rollback_body="$(awk '/^rollback_target\(\) \{/,/^}$/' "$CLONE")"
+[ -n "$rollback_body" ] || fail 'rollback_target não encontrado'
+
+# O `else` separa o trecho remoto (antes) do local (depois).
+rollback_remote="$(printf '%s' "$rollback_body" | awk '/^  else$/ {exit} {print}')"
+rollback_local="$(printf '%s' "$rollback_body" | awk 'found {print} /^  else$/ {found = 1}')"
+[ -n "$rollback_remote" ] && [ -n "$rollback_local" ] \
+  || fail 'não foi possível separar os caminhos remoto e local do rollback'
+
+offset_of() {
+  printf '%s' "$1" | grep -n "$2" | head -1 | cut -d: -f1
+}
+
+# São TRÊS etapas, nesta ordem: extrair para staging, restaurar o banco, trocar os
+# arquivos. Extrair primeiro faz um archive corrompido abortar com o destino
+# intacto e o banco ainda não mexido. Restaurar o banco antes da TROCA impede que
+# os arquivos cheguem sobre um schema divergente.
+assert_rollback_order() {
+  local path_label="$1"
+  local path_body="$2"
+  local import_pattern="$3"
+  local extract_offset import_offset swap_offset
+
+  extract_offset="$(offset_of "$path_body" 'tar -xzf')"
+  import_offset="$(offset_of "$path_body" "$import_pattern")"
+  swap_offset="$(offset_of "$path_body" 'mv -- ')"
+
+  [ -n "$extract_offset" ] && [ -n "$import_offset" ] && [ -n "$swap_offset" ] \
+    || fail "rollback ${path_label}: extração, import ou troca não localizados"
+  [ "$extract_offset" -lt "$import_offset" ] \
+    || fail "rollback ${path_label} restaura o banco antes de extrair (archive corrompido deixaria schema novo com arquivos antigos)"
+  [ "$import_offset" -lt "$swap_offset" ] \
+    || fail "rollback ${path_label} troca os arquivos antes de restaurar o banco"
+}
+
+assert_rollback_order remoto "$rollback_remote" 'gzip -dc'
+assert_rollback_order local "$rollback_local" 'local_db_import'
+
+# E nenhum dos dois caminhos pode apagar antes de ter o substituto pronto: uma
+# queda no meio deixava o destino sem arquivos E sem segunda chance. Em ambos, o
+# `rm -rf` tem de vir depois de o staging existir.
+for rollback_path_label in remoto local; do
+  case "$rollback_path_label" in
+    remoto) path_body="$rollback_remote" ;;
+    local)  path_body="$rollback_local" ;;
+  esac
+  staging_offset="$(printf '%s' "$path_body" | grep -n 'mktemp -d' | head -1 | cut -d: -f1)"
+  remove_offset="$(printf '%s' "$path_body" | grep -n 'rm -rf -- ' | head -1 | cut -d: -f1)"
+  [ -n "$staging_offset" ] \
+    || fail "rollback ${rollback_path_label} não cria staging (apagaria antes de extrair)"
+  if [ -n "$remove_offset" ] && [ "$remove_offset" -lt "$staging_offset" ]; then
+    fail "rollback ${rollback_path_label} apaga antes de preparar o staging"
+  fi
+done
+
 printf 'PASS: o clone não depende de wp db export/import em nenhum caminho remoto.\n'

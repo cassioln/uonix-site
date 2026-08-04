@@ -1805,14 +1805,17 @@ gzip -t $(printf '%q' "$dump_file")
 tar -tzf $(printf '%q' "$files_file") >/dev/null
 staging=\"\$(mktemp -d $(printf '%q' "$wp_content")/.uonix-rollback.XXXXXX)\"
 trap 'rm -rf -- \"\$staging\"' EXIT
+# Extrai antes de tocar em qualquer coisa: com set -e um archive corrompido
+# aborta aqui, com o destino intacto e o banco ainda nao mexido. Restaurar o
+# banco e falhar nos arquivos deixaria schema novo com arquivos antigos.
 tar -xzf $(printf '%q' "$files_file") -C \"\$staging\"
+gzip -dc $(printf '%q' "$dump_file") | { $(remote_db_import_stdin_command "$wp_cli" "$wp_root"); }
 for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
   if [ -e \"\$staging/\$item\" ]; then
     rm -rf -- $(printf '%q' "$wp_content")/\"\$item\"
     mv -- \"\$staging/\$item\" $(printf '%q' "$wp_content")/\"\$item\"
   fi
 done
-gzip -dc $(printf '%q' "$dump_file") | { $(remote_db_import_stdin_command "$wp_cli" "$wp_root"); }
 $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
   else
     [ -n "$LOCAL_WP_CONTENT" ] && [ "$LOCAL_WP_CONTENT" != / ] || return 1
@@ -1820,11 +1823,50 @@ $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
     [ -s "$files_file" ] || return 1
     gzip -t "$dump_file" || return 1
     tar -tzf "$files_file" >/dev/null || return 1
+    # Extrai PRIMEIRO para o staging, sem tocar em nada do destino. Se o archive
+    # estiver corrompido, o rollback aborta com o destino ainda intacto e o banco
+    # não é mexido — restaurar o banco e falhar nos arquivos deixaria o destino
+    # com schema novo e arquivos antigos, um estado que nenhum smoke detecta.
+    local rollback_staging rollback_status
+    rollback_staging="$(mktemp -d "${LOCAL_WP_CONTENT:?}/.uonix-rollback.XXXXXX")" || return $?
+    # Preserva o status ORIGINAL de cada passo em vez de achatar para 1: o
+    # relatório de falha do rollback informa esse código, e trocá-lo esconde a
+    # causa real de quem for investigar.
+    #
+    # O status é capturado com `|| rollback_status=$?`, não dentro de
+    # `if ! cmd; then rollback_status=$?`: nessa forma o `!` já normalizou $? para
+    # 0 e o rollback devolvia sucesso mesmo tendo falhado.
+    rollback_status=0
+    tar -xzf "$files_file" -C "$rollback_staging" || rollback_status=$?
+    if [ "$rollback_status" -ne 0 ]; then
+      rm -rf -- "$rollback_staging"
+      return "$rollback_status"
+    fi
+
+    # Com os arquivos já garantidos em staging, o banco vem antes da troca:
+    # restaurar arquivos sobre um schema divergente passa num smoke de arquivos e
+    # mente sobre o conteúdo.
+    gzip -dc "$dump_file" | local_db_import || rollback_status=$?
+    if [ "$rollback_status" -ne 0 ]; then
+      rm -rf -- "$rollback_staging"
+      return "$rollback_status"
+    fi
+
     for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
-      rm -rf -- "${LOCAL_WP_CONTENT:?}/${item}" || return $?
+      if [ -e "$rollback_staging/$item" ]; then
+        rm -rf -- "${LOCAL_WP_CONTENT:?}/${item}" || rollback_status=$?
+        if [ "$rollback_status" -ne 0 ]; then
+          rm -rf -- "$rollback_staging"
+          return "$rollback_status"
+        fi
+        mv -- "$rollback_staging/$item" "${LOCAL_WP_CONTENT:?}/${item}" || rollback_status=$?
+        if [ "$rollback_status" -ne 0 ]; then
+          rm -rf -- "$rollback_staging"
+          return "$rollback_status"
+        fi
+      fi
     done
-    tar -xzf "$files_file" -C "$LOCAL_WP_CONTENT" || return $?
-    gzip -dc "$dump_file" | local_db_import || return $?
+    rm -rf -- "$rollback_staging"
     local_wp cache flush || true
   fi
 }
