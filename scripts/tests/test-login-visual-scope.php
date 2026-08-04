@@ -30,16 +30,33 @@ $source = file_get_contents( $module );
  * Só o CSS realmente entregue ao navegador é auditado. O bloco de `admin_head`
  * começa com `return;` e é código morto; incluí-lo geraria falha em CSS que
  * nunca é impresso, e mascararia o defeito real com ruído.
+ *
+ * O fim do trecho ativo é o bloco morto quando ele existe. Se alguém remover
+ * esse código morto — limpeza legítima — o CSS ativo passa a ir até o fim do
+ * arquivo, em vez de o teste abortar sem defeito algum. A revisão independente
+ * apontou que a versão anterior tratava a remoção do bloco morto como erro.
  */
 $login_css_start = strpos( $source, "add_action('login_enqueue_scripts'" );
-$dead_block_start = strpos( $source, "add_action('admin_head'" );
 
-if ( false === $login_css_start || false === $dead_block_start || $dead_block_start <= $login_css_start ) {
-	fwrite( STDERR, "FAIL: não foi possível delimitar o CSS ativo do login.\n" );
+if ( false === $login_css_start ) {
+	fwrite( STDERR, "FAIL: bloco de CSS do login (login_enqueue_scripts) não foi encontrado.\n" );
 	exit( 1 );
 }
 
-$active_css = substr( $source, $login_css_start, $dead_block_start - $login_css_start );
+$dead_block_start = strpos( $source, "add_action('admin_head'", $login_css_start );
+$active_css_end   = ( false === $dead_block_start ) ? strlen( $source ) : $dead_block_start;
+
+$active_css = substr( $source, $login_css_start, $active_css_end - $login_css_start );
+
+/*
+ * Comentários de código são removidos antes da auditoria. A prosa que EXPLICA o
+ * defeito histórico cita o seletor errado por escrito, e o padrão a contava como
+ * se fosse CSS ativo — o teste reprovava por causa da própria documentação. Foi o
+ * que a revisão independente apontou: a versão anterior só passava porque a
+ * menção estava entre acentos graves, e removê-los reprovava sem defeito.
+ */
+$active_css = preg_replace( '#/\*.*?\*/#s', '', $active_css );
+$active_css = preg_replace( '#^\s*//.*$#m', '', $active_css );
 
 $failures = 0;
 
@@ -56,14 +73,25 @@ function uonix_visual_assert( $condition, $message ) {
 }
 
 /*
- * 1. Nenhum seletor de logo pode casar com qualquer <h1> da tela.
- *    Detecta `.login h1`, `body.login h1` e a variante interim-login.
+ * 1. Nenhum seletor pode alcançar um <h1> genérico da tela de login.
  *
- * O `\.?` é obrigatório: sem ele o padrão exigia um separador imediatamente
- * antes de "login" e não casava com `.login h1` — o seletor exato do defeito.
- * A falsificação acusou essa cegueira, então a expressão foi corrigida.
+ * O core emite três <h1> distintos em wp-login.php (WP 7.0):
+ *   linha 217  <h1 class="screen-reader-text">    fora de #login
+ *   linha 222  <h1 role="presentation" class="wp-login-logo">  filho direto de #login
+ *   linha 690  <h1 class="admin-email__heading">  dentro do formulário
+ *
+ * Só o segundo deve receber o estilo de logo. A regra: um <h1> alcançado por
+ * DESCENDÊNCIA (espaço) a partir de qualquer seletor que mencione `login` é
+ * regressão, porque também casa com os outros dois. Filho direto (`>`) é
+ * seguro, e `h1` qualificado por classe/id (`h1.admin-email__heading`) é
+ * intencional.
+ *
+ * A versão anterior deste padrão exigia a substring `login` imediatamente antes
+ * do `h1` e só pegava a grafia histórica exata. A revisão independente provou
+ * por mutação que `.login #login h1`, `body.login div#login h1` e `#login h1`
+ * passavam verde recolocando o defeito. Agora a detecção é estrutural.
  */
-$broad_selectors = preg_match_all( '/(?:^|[\s,{}])(?:body)?\.?login(?:\.interim-login)?\s+h1(?![\w-])/mi', $active_css );
+$broad_selectors = preg_match_all( '/(?:^|[\s,{}])[^{},;]*\blogin\b[^{},;]*?(?<![>\s])\s+h1(?![\w-])(?![.#\[])/mi', $active_css );
 
 uonix_visual_assert(
 	0 === $broad_selectors,
