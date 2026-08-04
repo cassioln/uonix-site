@@ -1812,7 +1812,11 @@ tar -xzf $(printf '%q' "$files_file") -C \"\$staging\"
 gzip -dc $(printf '%q' "$dump_file") | { $(remote_db_import_stdin_command "$wp_cli" "$wp_root"); }
 for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
   if [ -e \"\$staging/\$item\" ]; then
-    rm -rf -- $(printf '%q' "$wp_content")/\"\$item\"
+    # Guarda o atual dentro do staging em vez de apagar: se o mv seguinte falhar,
+    # o original ainda existe. Apagar antes deixava metade dos itens ausente.
+    if [ -e $(printf '%q' "$wp_content")/\"\$item\" ]; then
+      mv -- $(printf '%q' "$wp_content")/\"\$item\" \"\$staging/.replaced-\$item\"
+    fi
     mv -- \"\$staging/\$item\" $(printf '%q' "$wp_content")/\"\$item\"
   fi
 done
@@ -1854,13 +1858,24 @@ $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
 
     for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
       if [ -e "$rollback_staging/$item" ]; then
-        rm -rf -- "${LOCAL_WP_CONTENT:?}/${item}" || rollback_status=$?
-        if [ "$rollback_status" -ne 0 ]; then
-          rm -rf -- "$rollback_staging"
-          return "$rollback_status"
+        # Move o atual para dentro do staging em vez de apagá-lo: se o `mv`
+        # seguinte falhar, o item original ainda existe e é devolvido ao lugar.
+        # Apagar primeiro deixava o destino com metade dos itens restaurados e a
+        # outra metade AUSENTE — pior que não ter tentado, porque o site fica
+        # quebrado de um jeito que o backup não explica.
+        if [ -e "${LOCAL_WP_CONTENT:?}/${item}" ]; then
+          mv -- "${LOCAL_WP_CONTENT:?}/${item}" "$rollback_staging/.replaced-${item}" || rollback_status=$?
+          if [ "$rollback_status" -ne 0 ]; then
+            rm -rf -- "$rollback_staging"
+            return "$rollback_status"
+          fi
         fi
         mv -- "$rollback_staging/$item" "${LOCAL_WP_CONTENT:?}/${item}" || rollback_status=$?
         if [ "$rollback_status" -ne 0 ]; then
+          # Devolve o original antes de desistir, para não deixar o item ausente.
+          if [ -e "$rollback_staging/.replaced-${item}" ]; then
+            mv -- "$rollback_staging/.replaced-${item}" "${LOCAL_WP_CONTENT:?}/${item}" || true
+          fi
           rm -rf -- "$rollback_staging"
           return "$rollback_status"
         fi

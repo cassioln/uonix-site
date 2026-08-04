@@ -239,4 +239,35 @@ for rollback_path_label in remoto local; do
   fi
 done
 
+# Trocar item por item não basta: se o `mv` de restauração falhar no meio, o item
+# não pode desaparecer. Apagar o atual antes de mover o novo deixava o destino com
+# metade dos itens restaurados e a outra metade AUSENTE — pior que não ter
+# tentado, porque o site quebra de um jeito que o backup não explica.
+#
+# O mecanismo tem DUAS metades e ambas são exigidas: guardar o atual dentro do
+# staging, e devolvê-lo se a troca falhar. Verificar só a presença da string
+# `.replaced-` é fraco: o caminho local tem três ocorrências, então remover uma
+# passava. Cada metade é assertada separadamente.
+for rollback_path_label in remoto local; do
+  case "$rollback_path_label" in
+    remoto) path_body="$rollback_remote" ;;
+    local)  path_body="$rollback_local" ;;
+  esac
+
+  # Metade 1: o atual vai PARA o staging (destino do mv contém .replaced-).
+  printf '%s' "$path_body" | grep -qE 'mv -- .*(wp_content|LOCAL_WP_CONTENT).*\.replaced-' \
+    || fail "rollback ${rollback_path_label} não guarda o item atual antes de trocar (falha no meio deixaria o item ausente)"
+
+  # E em nenhum caso pode apagar o item de destino: só o staging é removido.
+  if printf '%s' "$path_body" | grep -E 'rm -rf -- ' | grep -qvE 'staging'; then
+    fail "rollback ${rollback_path_label} apaga o item de destino em vez de guardá-lo"
+  fi
+done
+
+# Metade 2: o caminho local devolve explicitamente o original se a troca falhar.
+# O remoto não precisa: roda sob `set -e`, então aborta antes de prosseguir, e o
+# trap EXIT limpa o staging com o original ainda dentro.
+printf '%s' "$rollback_local" | grep -qE 'mv -- .*\.replaced-.*(LOCAL_WP_CONTENT)' \
+  || fail 'rollback local não devolve o item original quando a troca falha'
+
 printf 'PASS: o clone não depende de wp db export/import em nenhum caminho remoto.\n'
