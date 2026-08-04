@@ -65,10 +65,6 @@ if ( ! function_exists( 'uonix_login_turnstile_validate' ) ) {
 	function uonix_login_turnstile_validate( $user, $username, $password ) {
 		global $pagenow;
 
-		if ( is_wp_error( $user ) ) {
-			return $user;
-		}
-
 		$request_method = isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( (string) $_SERVER['REQUEST_METHOD'] ) : '';
 
 		// Só o formulário nativo exibe o widget. Não bloquear REST, XML-RPC,
@@ -81,6 +77,20 @@ if ( ! function_exists( 'uonix_login_turnstile_validate' ) ) {
 			return $user;
 		}
 
+		/*
+		 * O desafio é exigido em TODA tentativa pelo formulário nativo, inclusive
+		 * quando $user já é WP_Error por senha errada.
+		 *
+		 * Havia aqui um early-return em is_wp_error( $user ). Com o filtro em 30,
+		 * depois de o core resolver a credencial, esse atalho fazia o desafio ser
+		 * ignorado em toda tentativa de senha INCORRETA — ou seja, exatamente nas
+		 * requisições de um ataque de força bruta. O Turnstile só seria cobrado de
+		 * quem já acertou a senha, o que inverte o propósito.
+		 *
+		 * Consequência de remover o atalho: um bot sem token é barrado no desafio
+		 * antes de descobrir se a senha estava certa, e não recebe a mensagem de
+		 * erro do core — que é também um sinal a menos para enumeração de usuário.
+		 */
 		$validation = uonix_turnstile_validate_request( 'wp_login' );
 
 		if ( is_wp_error( $validation ) ) {

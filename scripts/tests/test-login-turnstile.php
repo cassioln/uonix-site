@@ -311,12 +311,53 @@ uonix_login_assert(
 	'Cloudflare inacessível não impede login legítimo na cadeia real'
 );
 
-/* Erros anteriores de outro filtro são preservados. */
+/*
+ * SENHA ERRADA sem token também tem de ser barrada pelo desafio.
+ *
+ * Este é o caso de força bruta: o atacante erra a senha por definição. Um
+ * early-return em is_wp_error( $user ) fazia o desafio ser pulado justamente
+ * nessas requisições, cobrando Turnstile só de quem já acertou a credencial —
+ * o inverso do propósito. Achado da revisão independente do PR #48.
+ */
 uonix_login_reset_runtime();
+$GLOBALS['uonix_turnstile_validation'] = new WP_Error( 'uonix_turnstile_empty', 'sem token' );
+$wrong_password_error = new WP_Error( 'incorrect_password', 'senha errada' );
+$brute = uonix_login_apply_authenticate_chain( 'cassio', 'senha-errada', $wrong_password_error );
+
+uonix_login_assert(
+	is_wp_error( $brute ) && 'uonix_login_turnstile' === $brute->get_error_code(),
+	'senha errada sem desafio é barrada pelo Turnstile, não pelo erro do core'
+);
+uonix_login_assert(
+	array( 'wp_login' ) === $GLOBALS['uonix_turnstile_validate_calls'],
+	'tentativa de força bruta é submetida ao desafio'
+);
+
+/*
+ * Erro anterior de outro filtro NÃO isenta do desafio no formulário nativo.
+ *
+ * Antes o módulo devolvia o erro anterior sem validar. Isso é uma isenção
+ * controlada por terceiro: bastaria qualquer plugin registrado antes da
+ * prioridade 30 devolver WP_Error para desligar o Turnstile — e é o que o core
+ * já faz naturalmente com senha errada.
+ *
+ * O desafio continua sendo exigido; o que se perde é apenas a mensagem original,
+ * substituída pela do desafio. Aceitável: sem token válido a tentativa é
+ * inválida de qualquer modo, e revelar menos sobre a causa reduz enumeração.
+ */
+uonix_login_reset_runtime();
+$GLOBALS['uonix_turnstile_validation'] = new WP_Error( 'uonix_turnstile_empty', 'sem token' );
 $previous_error = new WP_Error( 'other_plugin', 'erro anterior' );
 $result = call_user_func( $auth_hook['callback'], $previous_error, 'cassio', 'senha' );
-uonix_login_assert( $previous_error === $result, 'erro anterior na cadeia de autenticação é preservado' );
-uonix_login_assert( array() === $GLOBALS['uonix_turnstile_validate_calls'], 'erro anterior não dispara chamada externa adicional' );
+uonix_login_assert(
+	is_wp_error( $result ) && 'uonix_login_turnstile' === $result->get_error_code(),
+	'erro de terceiro não serve como isenção do desafio'
+);
+
+/* Com o desafio resolvido, o erro do outro filtro é preservado. */
+uonix_login_reset_runtime();
+$result = call_user_func( $auth_hook['callback'], $previous_error, 'cassio', 'senha' );
+uonix_login_assert( $previous_error === $result, 'desafio válido preserva o erro anterior da cadeia' );
 
 if ( 0 !== $failures ) {
 	exit( 1 );
