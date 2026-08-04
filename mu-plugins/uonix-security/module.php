@@ -12,6 +12,7 @@ uonix_mu_require_files(
 	array(
 		'05-xmlrpc-pingback.php',
 		'06-environment-indexing.php',
+		'07-rest-user-enumeration.php',
 	),
 	'uonix-security'
 );
