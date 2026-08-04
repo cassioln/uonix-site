@@ -187,6 +187,26 @@ $result = call_user_func( $auth_hook['callback'], null, 'cassio', 'senha' );
 uonix_login_assert( null === $result, 'Turnstile desabilitado mantém fail-open deliberado' );
 uonix_login_assert( array() === $GLOBALS['uonix_turnstile_validate_calls'], 'fail-open não chama validador incompleto' );
 
+/*
+ * Indisponibilidade da Cloudflare NÃO pode trancar o administrador.
+ * `uonix_turnstile_validate_request` devolve WP_Error tanto para token recusado
+ * quanto para falha de transporte (timeout, egress bloqueado, Cloudflare fora).
+ * Tratar os dois igual transformaria uma queda de terceiro em perda total de
+ * acesso ao wp-admin, sem via de recuperação pelo navegador.
+ */
+uonix_login_reset_runtime();
+$GLOBALS['uonix_turnstile_validation'] = new WP_Error( 'uonix_turnstile_request_failed', 'sem rede' );
+$result = call_user_func( $auth_hook['callback'], null, 'cassio', 'senha' );
+uonix_login_assert( null === $result, 'falha de transporte até a Cloudflare mantém o login acessível' );
+
+/* Recusas reais do desafio continuam bloqueando. */
+foreach ( array( 'uonix_turnstile_empty', 'uonix_turnstile_failed', 'uonix_turnstile_action_mismatch' ) as $blocking_code ) {
+	uonix_login_reset_runtime();
+	$GLOBALS['uonix_turnstile_validation'] = new WP_Error( $blocking_code, 'recusado' );
+	$result = call_user_func( $auth_hook['callback'], null, 'cassio', 'senha' );
+	uonix_login_assert( is_wp_error( $result ), sprintf( 'recusa real do desafio (%s) bloqueia o login', $blocking_code ) );
+}
+
 /* Erros anteriores de outro filtro são preservados. */
 uonix_login_reset_runtime();
 $previous_error = new WP_Error( 'other_plugin', 'erro anterior' );

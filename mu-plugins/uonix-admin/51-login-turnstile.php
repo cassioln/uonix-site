@@ -84,6 +84,15 @@ if ( ! function_exists( 'uonix_login_turnstile_validate' ) ) {
 		$validation = uonix_turnstile_validate_request( 'wp_login' );
 
 		if ( is_wp_error( $validation ) ) {
+			// Falha de transporte não é recusa do desafio. Cloudflare fora do ar,
+			// egress bloqueado ou timeout trancariam todos os administradores fora
+			// do wp-admin, sem via de recuperação pelo navegador. Mesma razão do
+			// fail-open por chave ausente: perder o desafio é melhor que perder o
+			// acesso. Recusas reais do desafio continuam bloqueando.
+			if ( 'uonix_turnstile_request_failed' === $validation->get_error_code() ) {
+				return $user;
+			}
+
 			return new WP_Error(
 				'uonix_login_turnstile',
 				__( '<strong>Erro:</strong> falha na verificação de segurança. Recarregue a página e tente novamente.', 'uonix' )
