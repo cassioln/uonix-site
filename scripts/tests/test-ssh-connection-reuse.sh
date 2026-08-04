@@ -62,7 +62,16 @@ for relative in TARGETS:
     )
 
     # Quantas vezes o job efetivamente contata o host remoto.
-    remote_calls = len(re.findall(r'^\s*(?:ssh|rsync)(?:\s|\\)', all_run, re.M))
+    #
+    # O prefixo é opcional: em deploy-production.yml as chamadas são
+    # `sshpass -e ssh ...`, então uma regex ancorada em ssh/rsync no início da
+    # linha contava 4 em vez de 11. O guarda ainda disparava (4 > 2), mas o
+    # limiar de "rajada" ficava frágil: bastaria alguém reduzir os passos para o
+    # guarda deixar de exigir multiplexação num workflow que continua abrindo
+    # dez conexões. Achado da revisão independente do PR #45.
+    remote_calls = len(
+        re.findall(r'^\s*(?:sshpass\s+[^\n]*?)?(?:ssh|rsync)(?:\s|\\)', all_run, re.M)
+    )
 
     if remote_calls <= 2:
         # Um ou dois contatos não caracterizam rajada; multiplexar é opcional.
