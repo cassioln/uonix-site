@@ -51,6 +51,9 @@ jobs:
       - name: Test login Turnstile contract
         run: php scripts/tests/test-login-turnstile.php
 
+      - name: Test login visual scope
+        run: php scripts/tests/test-login-visual-scope.php
+
       - name: Test blog archive without WooCommerce
         run: php scripts/tests/test-blog-archive-optional-woocommerce.php
 
