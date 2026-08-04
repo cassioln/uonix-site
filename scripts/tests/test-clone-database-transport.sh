@@ -118,6 +118,46 @@ for db_helper in \
     || fail "${db_helper} invoca cliente de banco sem MYSQL_PWD (senha iria para o argv)"
 done
 
+# Invocar o cliente não basta: o helper precisa mesmo LER ou ESCREVER o arquivo.
+# Um redirecionamento para /dev/null passaria em qualquer teste que só conte
+# chamadas, e o clone reportaria sucesso sem restaurar nem salvar nada. Duas
+# mutações escaparam exatamente assim antes desta checagem existir.
+assert_moves_data() {
+  local db_helper="$1"
+  local expected_redirection="$2"
+  local body
+
+  body="$(awk -v fn="^${db_helper}\\\\(\\\\) \\\\{" '
+    $0 ~ fn { inside = 1 }
+    inside { print }
+    inside && /^}$/ { exit }
+  ' "$CLONE")"
+
+  printf '%s' "$body" | grep -qF "$expected_redirection" \
+    || fail "${db_helper} não move dados: falta ${expected_redirection}"
+
+  # O destino do dump/import não pode ser /dev/null. Só a linha que carrega o
+  # redirecionamento esperado é inspecionada: os fallbacks legitimamente enviam
+  # a saída informativa do wp-cli para /dev/null, e olhar o helper inteiro
+  # produzia falso positivo.
+  # `if` em vez de `&& fail`: sob `set -e`, grep sem match mataria a função sem
+  # imprimir o motivo.
+  if printf '%s' "$body" | grep -F "$expected_redirection" | grep -qE '(<|>) ?/dev/null'; then
+    fail "${db_helper} aponta o dado para /dev/null"
+  fi
+}
+
+# Os padrões abaixo são literais: casam o TEXTO do script, não expandem nada.
+# shellcheck disable=SC2016
+{
+  # O dump completo grava no destino nomeado, não em lugar nenhum.
+  assert_moves_data remote_db_dump_snippet '> $(printf'
+  # O dump de tabelas idem, via expressão parametrizada.
+  assert_moves_data remote_db_dump_tables_snippet '> ${sql_file_expression}'
+  # O import de arquivo tem de alimentar o cliente pelo stdin.
+  assert_moves_data remote_db_import_file_snippet '< ${sql_file_expression}'
+}
+
 # Credenciais são lidas do wp-config pelo próprio WordPress: nenhum segredo novo
 # entra no repositório ou nas Variables.
 grep -q 'config get DB_PASSWORD' "$CLONE" \

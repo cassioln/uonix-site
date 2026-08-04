@@ -124,6 +124,22 @@ fr1_test_users_snapshot() (
     fr1_users_wp() {
       local argument
       local output_file=''
+      # O snapshot passou a preferir mysqldump direto (wp db export --tables
+      # shella out e falha na Locaweb), então o mock precisa responder a
+      # `config get`. Sem isso ele devolvia 92 e o dump nunca era gerado.
+      case " $* " in
+        *' config get '*)
+          for argument in "$@"; do
+            case "$argument" in
+              DB_NAME) printf 'synthetic_db\n'; return 0 ;;
+              DB_USER) printf 'synthetic_user\n'; return 0 ;;
+              DB_HOST) printf 'synthetic_host\n'; return 0 ;;
+              DB_PASSWORD) printf 'synthetic_password\n'; return 0 ;;
+            esac
+          done
+          return 93
+          ;;
+      esac
       case " $* " in
         *' db prefix '*) printf 'wpis_\n'; return 0 ;;
         *' db export '*)
@@ -137,6 +153,16 @@ fr1_test_users_snapshot() (
           ;;
       esac
       return 92
+    }
+    # mysqldump sintético: o snapshot o prefere ao wp-cli, então sem ele o teste
+    # exercitaria apenas o fallback e nunca o caminho usado em produção.
+    # shellcheck disable=SC2329
+    mysqldump() {
+      case " $* " in
+        *' --help '*) printf -- '--single-transaction\n'; return 0 ;;
+      esac
+      [ "$FR1_USERS_PRODUCER" = empty ] || printf 'INSERT INTO users VALUES (1);\n'
+      return 0
     }
     remote_run() (
       # The sourced script's xargs call does not invoke this eval-scoped mock.
@@ -206,10 +232,34 @@ fr1_test_users_restore_variant() (
     # Invoked indirectly through the command returned by wp_cli_shell.
     # shellcheck disable=SC2329
     fr1_users_restore_wp() {
+      # O restore passou a resolver o cliente `mysql` (wp db import shella out e
+      # falha na Locaweb), então o mock precisa responder a `config get`.
+      local argument
+      case " $* " in
+        *' config get '*)
+          for argument in "$@"; do
+            case "$argument" in
+              DB_NAME) printf 'synthetic_db\n'; return 0 ;;
+              DB_USER) printf 'synthetic_user\n'; return 0 ;;
+              DB_HOST) printf 'synthetic_host\n'; return 0 ;;
+              DB_PASSWORD) printf 'synthetic_password\n'; return 0 ;;
+            esac
+          done
+          return 93
+          ;;
+      esac
       case " $* " in
         *' db import '*) printf 'import\n' >> "$import_log"; return 0 ;;
       esac
       return 94
+    }
+    # Cliente `mysql` sintético: sem ele o restore cairia no fallback e o caminho
+    # real nunca seria exercitado.
+    # shellcheck disable=SC2329
+    mysql() {
+      printf 'import\n' >> "$import_log"
+      cat >/dev/null
+      return 0
     }
     remote_run() (
       # Evaluated remote shell snippets invoke this test-local mock indirectly.
