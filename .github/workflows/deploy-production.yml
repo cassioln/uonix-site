@@ -232,6 +232,35 @@ jobs:
           printf 'BACKUP_DIR=%s\n' "$backup_dir" >> "$GITHUB_ENV"
           printf 'Backup de código criado: %s\n' "$backup_id"
 
+      # O passo acima salva apenas CÓDIGO. Sem o dump abaixo, um rollback
+      # restauraria arquivos sobre um schema não restaurado — e a mutação de
+      # banco mais provável aqui é o search-replace do cutover de domínio.
+      #
+      # Falha fechado de propósito: sem dump íntegro, nada é publicado.
+      # Não usa `wp db export`: a Locaweb desabilita proc_open de forma
+      # compilada, então o script escolhe mysqldump por capacidade do host.
+      - name: Back up the production database
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+          LOCAWEB_SSH_PASSWORD_FILE: ${{ runner.temp }}/locaweb-ssh-password
+          LOCAWEB_SSH_KNOWN_HOSTS_FILE: ${{ env.HOME }}/.ssh/locaweb_known_hosts
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$SSHPASS" > "$LOCAWEB_SSH_PASSWORD_FILE"
+          chmod 600 "$LOCAWEB_SSH_PASSWORD_FILE"
+          trap 'rm -f "$LOCAWEB_SSH_PASSWORD_FILE"' EXIT
+
+          scripts/backup-remote-database.sh \
+            --environment=production \
+            --output-dir="$BACKUP_DIR" \
+            --backup-id="$BACKUP_ID" | tee "$RUNNER_TEMP/db-backup.out"
+
+          db_backup_file="$(sed -n 's/^DB_BACKUP_FILE=//p' "$RUNNER_TEMP/db-backup.out")"
+          test -n "$db_backup_file"
+          printf 'DB_BACKUP_FILE=%s\n' "$db_backup_file" >> "$GITHUB_ENV"
+          printf 'Backup de banco criado: %s\n' "${db_backup_file##*/}"
+
       - name: Publish only managed paths and verify manifest
         env:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
@@ -457,6 +486,37 @@ jobs:
           wp_bin="$4"
           target_url="$5"
           managed="$backup_dir/managed"
+
+          # O banco vem PRIMEIRO: restaurar arquivos sobre um schema divergente
+          # produz um estado que passa no smoke de arquivos e mente sobre o
+          # conteúdo. Se houver dump neste backup, ele é obrigatório — um dump
+          # presente mas inválido aborta o rollback em vez de ser ignorado.
+          db_dump="$(find "$backup_dir" -maxdepth 1 -name 'db-*.sql.gz' -print | LC_ALL=C sort | tail -1)"
+          if [ -n "$db_dump" ]; then
+            printf 'rollback: restaurando banco a partir de %s\n' "${db_dump##*/}"
+            if ! gzip -t "$db_dump" 2>/dev/null; then
+              printf 'dump de banco corrompido; rollback abortado antes de escrever\n' >&2
+              exit 1
+            fi
+            if command -v mysql >/dev/null 2>&1; then
+              credentials="$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval \
+                'echo DB_NAME . "\t" . DB_USER . "\t" . DB_HOST;')"
+              db_name="$(printf '%s' "$credentials" | cut -f1)"
+              db_user="$(printf '%s' "$credentials" | cut -f2)"
+              db_host="$(printf '%s' "$credentials" | cut -f3)"
+              if ! MYSQL_PWD="$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'echo DB_PASSWORD;')" \
+                  gzip -dc "$db_dump" | mysql --default-character-set=utf8mb4 \
+                    -h "$db_host" -u "$db_user" "$db_name"; then
+                printf 'restauração do banco falhou; rollback incompleto\n' >&2
+                exit 1
+              fi
+            else
+              printf 'cliente mysql ausente; não é possível restaurar o banco\n' >&2
+              exit 1
+            fi
+          else
+            printf 'rollback: nenhum dump de banco neste backup (somente código)\n'
+          fi
 
           rm -rf -- "$document_root/wp-content/themes/kadence-child"
           rm -f -- "$document_root/wp-content/mu-plugins/uonix-core.php"
