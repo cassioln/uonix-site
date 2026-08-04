@@ -1,0 +1,221 @@
+<?php
+/**
+ * Testa o contrato do Turnstile na tela nativa de login do WordPress.
+ *
+ * O módulo compartilhado 34-turnstile-custom-forms.php já sabe renderizar e
+ * validar o desafio. Este teste garante que o login:
+ *
+ * - realmente carrega o módulo dedicado;
+ * - renderiza o widget com a action `wp_login`;
+ * - valida antes da senha (prioridade 5 no filtro authenticate);
+ * - bloqueia POST de wp-login.php quando o desafio falha;
+ * - libera o fluxo quando o desafio passa;
+ * - não intercepta GET, REST/CLI nem formulários de autenticação externos;
+ * - mantém fail-open quando o Turnstile está desabilitado no ambiente.
+ */
+
+define( 'ABSPATH', __DIR__ );
+
+$module_file = dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/51-login-turnstile.php';
+$admin_module_file = dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/module.php';
+
+if ( ! is_file( $module_file ) ) {
+	fwrite( STDERR, "FAIL: módulo 51-login-turnstile.php ainda não existe.\n" );
+	exit( 1 );
+}
+
+$GLOBALS['uonix_login_hooks'] = array();
+$GLOBALS['uonix_turnstile_enabled'] = true;
+$GLOBALS['uonix_turnstile_validation'] = true;
+$GLOBALS['uonix_turnstile_render_calls'] = array();
+$GLOBALS['uonix_turnstile_validate_calls'] = array();
+
+class WP_Error {
+	private $code;
+	private $message;
+
+	public function __construct( $code = '', $message = '' ) {
+		$this->code = $code;
+		$this->message = $message;
+	}
+
+	public function get_error_code() {
+		return $this->code;
+	}
+
+	public function get_error_message() {
+		return $this->message;
+	}
+}
+
+class WP_User {}
+
+function is_wp_error( $value ) {
+	return $value instanceof WP_Error;
+}
+
+function __( $text, $domain = 'default' ) {
+	return $text;
+}
+
+function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
+	$GLOBALS['uonix_login_hooks'][ $hook ][] = array(
+		'callback'      => $callback,
+		'priority'      => (int) $priority,
+		'accepted_args' => (int) $accepted_args,
+	);
+}
+
+function add_filter( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
+	add_action( $hook, $callback, $priority, $accepted_args );
+}
+
+function uonix_turnstile_is_enabled() {
+	return (bool) $GLOBALS['uonix_turnstile_enabled'];
+}
+
+function uonix_turnstile_render_widget( $action, $options = array() ) {
+	$GLOBALS['uonix_turnstile_render_calls'][] = array( $action, $options );
+
+	return sprintf(
+		'<div class="uonix-turnstile-widget" data-action="%s"></div>',
+		htmlspecialchars( $action, ENT_QUOTES, 'UTF-8' )
+	);
+}
+
+function uonix_turnstile_validate_request( $expected_action = '' ) {
+	$GLOBALS['uonix_turnstile_validate_calls'][] = $expected_action;
+
+	return $GLOBALS['uonix_turnstile_validation'];
+}
+
+require_once $module_file;
+
+$failures = 0;
+
+function uonix_login_assert( $condition, $message ) {
+	global $failures;
+
+	if ( ! $condition ) {
+		++$failures;
+		fwrite( STDERR, sprintf( "FAIL: %s\n", $message ) );
+		return;
+	}
+
+	printf( "ok   %s\n", $message );
+}
+
+function uonix_login_hook( $name ) {
+	return $GLOBALS['uonix_login_hooks'][ $name ][0] ?? null;
+}
+
+function uonix_login_reset_runtime() {
+	$GLOBALS['uonix_turnstile_enabled'] = true;
+	$GLOBALS['uonix_turnstile_validation'] = true;
+	$GLOBALS['uonix_turnstile_render_calls'] = array();
+	$GLOBALS['uonix_turnstile_validate_calls'] = array();
+	$GLOBALS['pagenow'] = 'wp-login.php';
+	$_SERVER['REQUEST_METHOD'] = 'POST';
+}
+
+/* O loader precisa incluir o módulo, ou todo o resto do teste seria órfão. */
+$admin_module_source = file_get_contents( $admin_module_file );
+uonix_login_assert(
+	false !== strpos( $admin_module_source, "'51-login-turnstile.php'" ),
+	'uonix-admin/module.php carrega o módulo de Turnstile do login'
+);
+
+/* Registro dos hooks: prioridade 5 impede testar a senha antes do desafio. */
+$render_hook = uonix_login_hook( 'login_form' );
+$auth_hook = uonix_login_hook( 'authenticate' );
+
+uonix_login_assert( null !== $render_hook, 'login_form registra o renderizador do Turnstile' );
+uonix_login_assert( null !== $auth_hook, 'authenticate registra o validador do Turnstile' );
+uonix_login_assert( 5 === ( $auth_hook['priority'] ?? null ), 'Turnstile valida antes da senha (prioridade 5)' );
+uonix_login_assert( 3 === ( $auth_hook['accepted_args'] ?? null ), 'authenticate aceita user, username e password' );
+uonix_login_assert( ! isset( $GLOBALS['uonix_login_hooks']['register_form'] ), 'registro de usuário não exibe desafio sem validação correspondente' );
+uonix_login_assert( ! isset( $GLOBALS['uonix_login_hooks']['lostpassword_form'] ), 'recuperação de senha não exibe desafio sem validação correspondente' );
+
+/* Renderização ativa: widget compartilhado e action correta. */
+uonix_login_reset_runtime();
+ob_start();
+call_user_func( $render_hook['callback'] );
+$login_html = ob_get_clean();
+
+uonix_login_assert( false !== strpos( $login_html, 'uonix-login-turnstile' ), 'login imprime wrapper próprio do desafio' );
+uonix_login_assert( false !== strpos( $login_html, 'data-action="wp_login"' ), 'login usa a action wp_login' );
+uonix_login_assert( 'wp_login' === ( $GLOBALS['uonix_turnstile_render_calls'][0][0] ?? null ), 'renderizador compartilhado recebe action wp_login' );
+
+/* Fail-open quando o Turnstile está desabilitado no ambiente. */
+uonix_login_reset_runtime();
+$GLOBALS['uonix_turnstile_enabled'] = false;
+ob_start();
+call_user_func( $render_hook['callback'] );
+$disabled_html = ob_get_clean();
+uonix_login_assert( '' === $disabled_html, 'ambiente sem Turnstile configurado não imprime widget quebrado' );
+
+/* POST do wp-login: falha do desafio bloqueia antes da autenticação. */
+uonix_login_reset_runtime();
+$GLOBALS['uonix_turnstile_validation'] = new WP_Error( 'uonix_turnstile_empty', 'sem token' );
+$result = call_user_func( $auth_hook['callback'], null, 'cassio', 'senha-incorreta' );
+uonix_login_assert( is_wp_error( $result ), 'POST sem desafio válido é bloqueado' );
+uonix_login_assert( 'uonix_login_turnstile' === $result->get_error_code(), 'erro de login não expõe detalhes internos da Cloudflare' );
+uonix_login_assert( array( 'wp_login' ) === $GLOBALS['uonix_turnstile_validate_calls'], 'validação exige a action wp_login' );
+
+/* Desafio válido libera o core para verificar usuário e senha. */
+uonix_login_reset_runtime();
+$result = call_user_func( $auth_hook['callback'], null, 'cassio', 'senha' );
+uonix_login_assert( null === $result, 'desafio válido preserva o fluxo normal de autenticação' );
+uonix_login_assert( array( 'wp_login' ) === $GLOBALS['uonix_turnstile_validate_calls'], 'desafio válido também é verificado server-side' );
+
+/* Não bloquear fluxos que não exibem o widget. */
+uonix_login_reset_runtime();
+$GLOBALS['pagenow'] = 'index.php';
+$result = call_user_func( $auth_hook['callback'], null, 'cassio', 'senha' );
+uonix_login_assert( null === $result, 'formulário externo ao wp-login não é interceptado' );
+uonix_login_assert( array() === $GLOBALS['uonix_turnstile_validate_calls'], 'formulário externo não chama a Cloudflare' );
+
+uonix_login_reset_runtime();
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$result = call_user_func( $auth_hook['callback'], null, 'cassio', 'senha' );
+uonix_login_assert( null === $result, 'GET do wp-login não é bloqueado' );
+uonix_login_assert( array() === $GLOBALS['uonix_turnstile_validate_calls'], 'GET não chama a Cloudflare' );
+
+uonix_login_reset_runtime();
+$GLOBALS['uonix_turnstile_enabled'] = false;
+$result = call_user_func( $auth_hook['callback'], null, 'cassio', 'senha' );
+uonix_login_assert( null === $result, 'Turnstile desabilitado mantém fail-open deliberado' );
+uonix_login_assert( array() === $GLOBALS['uonix_turnstile_validate_calls'], 'fail-open não chama validador incompleto' );
+
+/*
+ * Indisponibilidade da Cloudflare NÃO pode trancar o administrador.
+ * `uonix_turnstile_validate_request` devolve WP_Error tanto para token recusado
+ * quanto para falha de transporte (timeout, egress bloqueado, Cloudflare fora).
+ * Tratar os dois igual transformaria uma queda de terceiro em perda total de
+ * acesso ao wp-admin, sem via de recuperação pelo navegador.
+ */
+uonix_login_reset_runtime();
+$GLOBALS['uonix_turnstile_validation'] = new WP_Error( 'uonix_turnstile_request_failed', 'sem rede' );
+$result = call_user_func( $auth_hook['callback'], null, 'cassio', 'senha' );
+uonix_login_assert( null === $result, 'falha de transporte até a Cloudflare mantém o login acessível' );
+
+/* Recusas reais do desafio continuam bloqueando. */
+foreach ( array( 'uonix_turnstile_empty', 'uonix_turnstile_failed', 'uonix_turnstile_action_mismatch' ) as $blocking_code ) {
+	uonix_login_reset_runtime();
+	$GLOBALS['uonix_turnstile_validation'] = new WP_Error( $blocking_code, 'recusado' );
+	$result = call_user_func( $auth_hook['callback'], null, 'cassio', 'senha' );
+	uonix_login_assert( is_wp_error( $result ), sprintf( 'recusa real do desafio (%s) bloqueia o login', $blocking_code ) );
+}
+
+/* Erros anteriores de outro filtro são preservados. */
+uonix_login_reset_runtime();
+$previous_error = new WP_Error( 'other_plugin', 'erro anterior' );
+$result = call_user_func( $auth_hook['callback'], $previous_error, 'cassio', 'senha' );
+uonix_login_assert( $previous_error === $result, 'erro anterior na cadeia de autenticação é preservado' );
+uonix_login_assert( array() === $GLOBALS['uonix_turnstile_validate_calls'], 'erro anterior não dispara chamada externa adicional' );
+
+if ( 0 !== $failures ) {
+	exit( 1 );
+}
+
+printf( "PASS: Turnstile protege o formulário nativo de login antes da senha.\n" );
