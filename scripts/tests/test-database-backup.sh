@@ -173,6 +173,20 @@ grep -q -- '--single-transaction' "$MOCK_DUMP_LOG" \
 grep -q -- '--no-tablespaces' "$MOCK_DUMP_LOG" \
   || fail 'dump sem --no-tablespaces (exigiria privilégio PROCESS)'
 
+# Medido no host: sem estas o dump perde stored procedures, triggers e eventos
+# agendados (restauração silenciosamente incompleta), ou passa a bufferizar
+# tabelas inteiras em memória em vez de transmitir linha a linha.
+for required_flag in --routines --triggers --events --quick; do
+  grep -q -- "$required_flag" "$MOCK_DUMP_LOG" \
+    || fail "dump sem $required_flag"
+done
+
+# O usuário do banco NÃO tem RELOAD (erro 1227). Estas flags quebrariam o deploy.
+for forbidden_flag in --flush-logs --master-data --flush-privileges; do
+  grep -q -- "$forbidden_flag" "$MOCK_DUMP_LOG" \
+    && fail "dump usa $forbidden_flag, que exige RELOAD e falha neste host"
+done
+
 # --- Caso 2: dump falha -> nada é publicado ------------------------------------
 if output="$(MOCK_DUMP_MODE=fail run_backup prod)"; then
   fail 'dump falho retornou sucesso'
@@ -319,5 +333,11 @@ printf '%s' "$rollback_body" | grep -q 'rollback abortado antes de escrever' \
 # shellcheck disable=SC2016
 grep -q 'output-dir="\$BACKUP_DIR"' "$workflow" \
   || fail 'dump não é gravado dentro do diretório de backup coberto pela retenção'
+
+# A retenção precisa ser generosa o suficiente para valer a pena: medido no host,
+# cada dump comprimido ocupa ~1,3 MB, então 30 backups somam ~39 MB contra 737 GB
+# livres. Reter cinco descartaria histórico sem economizar nada.
+grep -q 'tail -n +31' "$workflow" \
+  || fail 'retenção não mantém 30 backups'
 
 printf 'PASS: backup de banco valida integridade, falha fechado, precede a publicação e o rollback o restaura.\n'
