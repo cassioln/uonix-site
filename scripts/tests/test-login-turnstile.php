@@ -160,6 +160,31 @@ function uonix_login_apply_authenticate_chain( $username, $password, $resolved_u
 		},
 	);
 
+	/*
+	 * Elos POSTERIORES à nossa prioridade 30, para provar que o WP_Error do
+	 * Turnstile sobrevive até o fim da cadeia — e não apenas até o elo seguinte.
+	 *
+	 * A revisão independente do PR #48 apontou que modelar só a prioridade 20
+	 * prova fidelidade parcial: o teste não demonstrava sobrevivência até o
+	 * último filtro. Ambos foram conferidos no core e no site real de DEV, onde a
+	 * instrumentação mostrou loginizer em 10001/10002.
+	 */
+	$chain[] = array(
+		'priority' => 99,
+		'callback' => function ( $user ) {
+			// wp_authenticate_spam_check: só age sobre WP_User; preserva WP_Error.
+			return $user;
+		},
+	);
+
+	$chain[] = array(
+		'priority' => 10001,
+		'callback' => function ( $user, $u, $p ) {
+			// loginizer_wp_authenticate: repassa o resultado anterior.
+			return $user;
+		},
+	);
+
 	usort(
 		$chain,
 		static function ( $a, $b ) {
