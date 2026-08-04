@@ -176,4 +176,117 @@ for forbidden_flag in --flush-logs --master-data --flush-privileges; do
     && fail "clone usa ${forbidden_flag}, que exige RELOAD e falha neste host"
 done
 
+# A ORDEM do rollback importa: banco antes dos arquivos. Restaurar arquivos sobre
+# um schema divergente passa num smoke de arquivos e mente sobre o conteúdo — o
+# pior resultado possível, porque parece sucesso.
+#
+# Cada caminho é analisado no SEU PRÓPRIO trecho. Buscar padrões no corpo inteiro
+# de rollback_target não funciona: `tar -xzf` aparece nos dois caminhos, então um
+# `tail -1` casava a linha do caminho local ao avaliar o remoto, e a inversão do
+# remoto passava sem ser vista.
+rollback_body="$(awk '/^rollback_target\(\) \{/,/^}$/' "$CLONE")"
+[ -n "$rollback_body" ] || fail 'rollback_target não encontrado'
+
+# O `else` separa o trecho remoto (antes) do local (depois).
+rollback_remote="$(printf '%s' "$rollback_body" | awk '/^  else$/ {exit} {print}')"
+rollback_local="$(printf '%s' "$rollback_body" | awk 'found {print} /^  else$/ {found = 1}')"
+[ -n "$rollback_remote" ] && [ -n "$rollback_local" ] \
+  || fail 'não foi possível separar os caminhos remoto e local do rollback'
+
+offset_of() {
+  printf '%s' "$1" | grep -n "$2" | head -1 | cut -d: -f1
+}
+
+# São TRÊS etapas, nesta ordem: extrair para staging, restaurar o banco, trocar os
+# arquivos. Extrair primeiro faz um archive corrompido abortar com o destino
+# intacto e o banco ainda não mexido. Restaurar o banco antes da TROCA impede que
+# os arquivos cheguem sobre um schema divergente.
+assert_rollback_order() {
+  local path_label="$1"
+  local path_body="$2"
+  local import_pattern="$3"
+  local flow_body extract_offset import_offset swap_offset
+
+  # O trap é removido da análise: ele contém um `mv` de RECUPERAÇÃO que roda no
+  # fim, mas aparece no topo do texto e seria lido como a troca de arquivos,
+  # invertendo a leitura da ordem.
+  flow_body="$(printf '%s' "$path_body" | awk '
+    /^trap / { in_trap = 1 }
+    !in_trap { print }
+    in_trap && /EXIT$/ { in_trap = 0 }
+  ')"
+
+  extract_offset="$(offset_of "$flow_body" 'tar -xzf')"
+  import_offset="$(offset_of "$flow_body" "$import_pattern")"
+  swap_offset="$(offset_of "$flow_body" 'mv -- ')"
+
+  [ -n "$extract_offset" ] && [ -n "$import_offset" ] && [ -n "$swap_offset" ] \
+    || fail "rollback ${path_label}: extração, import ou troca não localizados"
+  [ "$extract_offset" -lt "$import_offset" ] \
+    || fail "rollback ${path_label} restaura o banco antes de extrair (archive corrompido deixaria schema novo com arquivos antigos)"
+  [ "$import_offset" -lt "$swap_offset" ] \
+    || fail "rollback ${path_label} troca os arquivos antes de restaurar o banco"
+}
+
+assert_rollback_order remoto "$rollback_remote" 'gzip -dc'
+assert_rollback_order local "$rollback_local" 'local_db_import'
+
+# E nenhum dos dois caminhos pode apagar antes de ter o substituto pronto: uma
+# queda no meio deixava o destino sem arquivos E sem segunda chance. Em ambos, o
+# `rm -rf` tem de vir depois de o staging existir.
+for rollback_path_label in remoto local; do
+  case "$rollback_path_label" in
+    remoto) path_body="$rollback_remote" ;;
+    local)  path_body="$rollback_local" ;;
+  esac
+  staging_offset="$(printf '%s' "$path_body" | grep -n 'mktemp -d' | head -1 | cut -d: -f1)"
+  remove_offset="$(printf '%s' "$path_body" | grep -n 'rm -rf -- ' | head -1 | cut -d: -f1)"
+  [ -n "$staging_offset" ] \
+    || fail "rollback ${rollback_path_label} não cria staging (apagaria antes de extrair)"
+  if [ -n "$remove_offset" ] && [ "$remove_offset" -lt "$staging_offset" ]; then
+    fail "rollback ${rollback_path_label} apaga antes de preparar o staging"
+  fi
+done
+
+# Trocar item por item não basta: se o `mv` de restauração falhar no meio, o item
+# não pode desaparecer. Apagar o atual antes de mover o novo deixava o destino com
+# metade dos itens restaurados e a outra metade AUSENTE — pior que não ter
+# tentado, porque o site quebra de um jeito que o backup não explica.
+#
+# O mecanismo tem DUAS metades e ambas são exigidas: guardar o atual dentro do
+# staging, e devolvê-lo se a troca falhar. Verificar só a presença da string
+# `.replaced-` é fraco: o caminho local tem três ocorrências, então remover uma
+# passava. Cada metade é assertada separadamente.
+for rollback_path_label in remoto local; do
+  case "$rollback_path_label" in
+    remoto) path_body="$rollback_remote" ;;
+    local)  path_body="$rollback_local" ;;
+  esac
+
+  # Metade 1: o atual vai PARA o staging (destino do mv contém .replaced-).
+  printf '%s' "$path_body" | grep -qE 'mv -- .*(wp_content|LOCAL_WP_CONTENT).*\.replaced-' \
+    || fail "rollback ${rollback_path_label} não guarda o item atual antes de trocar (falha no meio deixaria o item ausente)"
+
+  # E em nenhum caso pode apagar o item de destino: só o staging é removido.
+  if printf '%s' "$path_body" | grep -E 'rm -rf -- ' | grep -qvE 'staging'; then
+    fail "rollback ${rollback_path_label} apaga o item de destino em vez de guardá-lo"
+  fi
+done
+
+# Metade 2: o caminho local devolve explicitamente o original se a troca falhar.
+printf '%s' "$rollback_local" | grep -qE 'mv -- .*\.replaced-.*(LOCAL_WP_CONTENT)' \
+  || fail 'rollback local não devolve o item original quando a troca falha'
+
+# No caminho REMOTO a devolução tem de estar no TRAP, não apenas no fluxo normal.
+# Achado por revisão adversarial e confirmado empiricamente: o snippet roda sob
+# `set -e`, então um `mv` falho aborta na hora e só o trap ainda executa. Um
+# `rm -rf` cego no staging levava embora o original guardado como .replaced-*,
+# convertendo estado misto em PERDA DE DADOS.
+remote_trap="$(printf '%s' "$rollback_remote" | awk "/^trap /,/EXIT\$/")"
+[ -n "$remote_trap" ] || fail 'trap de limpeza do rollback remoto não encontrado'
+printf '%s' "$remote_trap" | grep -q 'replaced-' \
+  || fail 'trap do rollback remoto apaga o staging sem devolver o item guardado (perda de dados)'
+printf '%s' "$remote_trap" | grep -q 'mv -- ' \
+  || fail 'trap do rollback remoto não restaura o item guardado antes de limpar'
+
 printf 'PASS: o clone não depende de wp db export/import em nenhum caminho remoto.\n'
