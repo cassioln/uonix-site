@@ -148,6 +148,31 @@ jobs:
           printf '%s\n' "$HOSTGATOR_SSH_PRIVATE_KEY" > "$HOME/.ssh/hostgator_key"
           printf '%s\n' "$HOSTGATOR_SSH_KNOWN_HOSTS" > "$HOME/.ssh/hostgator_known_hosts"
           chmod 600 "$HOME/.ssh/hostgator_key" "$HOME/.ssh/hostgator_known_hosts"
+          # O job abre 14 conexões SSH/rsync em sequência rápida. O firewall do
+          # HostGator (cPHulk/CSF) trata essa rajada de um mesmo IP como abuso e
+          # passa a recusar a porta 22 no meio do deploy: o preflight passa e um
+          # passo posterior morre com "Connection refused", deixando lock órfão.
+          # Runs 30872950365, 30873957795, 30874352281 e 30874827363 falharam
+          # assim, cada vez num passo diferente conforme o IP do runner era
+          # barrado mais cedo.
+          #
+          # A multiplexação faz a primeira conexão abrir um socket de controle e
+          # todas as seguintes o reutilizarem, sem novo handshake TCP nem nova
+          # autenticação. O host passa a ver UMA conexão em vez de 14.
+          #
+          # ControlPersist=120: o socket sobrevive entre steps do job (cada step
+          # é um shell novo, mas o mesmo runner e o mesmo $HOME).
+          # %C é hash de host/porta/usuário: evita estourar o limite de caminho
+          # do socket UNIX, que quebraria a multiplexação em silêncio.
+          cat > "$HOME/.ssh/config" <<SSHCONFIG
+          Host $SSH_HOST
+            ControlMaster auto
+            ControlPath $HOME/.ssh/cm-%C
+            ControlPersist 120
+            ServerAliveInterval 30
+            ServerAliveCountMax 4
+          SSHCONFIG
+          chmod 600 "$HOME/.ssh/config"
 
       - name: Preflight SSH before any remote write
         run: |

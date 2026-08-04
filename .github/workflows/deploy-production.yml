@@ -107,6 +107,21 @@ jobs:
           mkdir -p "$HOME/.ssh"
           printf '%s\n' "$LOCAWEB_SSH_KNOWN_HOSTS" > "$HOME/.ssh/locaweb_known_hosts"
           chmod 600 "$HOME/.ssh/locaweb_known_hosts"
+          # Mesma razão do reusable do HostGator: o job contata o host várias
+          # vezes em sequência e um firewall pode tratar a rajada como abuso,
+          # recusando a porta no meio do deploy e deixando lock órfão. Aqui o
+          # risco é maior, porque é produção. A multiplexação faz o host ver uma
+          # única conexão. %C encurta o socket e evita estourar o limite do
+          # caminho UNIX, que desligaria a multiplexação em silêncio.
+          cat > "$HOME/.ssh/config" <<SSHCONFIG
+          Host $LOCAWEB_SSH_HOST
+            ControlMaster auto
+            ControlPath $HOME/.ssh/cm-%C
+            ControlPersist 120
+            ServerAliveInterval 30
+            ServerAliveCountMax 4
+          SSHCONFIG
+          chmod 600 "$HOME/.ssh/config"
 
       - name: Preflight SSH window before any remote write
         env:
