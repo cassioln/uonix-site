@@ -568,7 +568,14 @@ remote_db_dump_to_stdout() {
   # artefato é transmitido ao runner em vez de gravado no host remoto.
   # Mesma razão do helper acima: `wp db export` shella out e a Locaweb bloqueia
   # proc_open de forma compilada, então o clone com produção na origem falhava.
-  printf '%s' "db_name=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)\"; \
+  # `set -o pipefail` e OBRIGATORIO aqui: este comando vai CRU para o ssh, sem
+  # `bash -s`, e o shell remoto nao herda o pipefail do script local. Sem ele,
+  # "mysqldump | gzip -c" devolve o exit do gzip (0) mesmo quando o mysqldump
+  # aborta no meio, e um dump TRUNCADO passa por `[ -s ]` e `gzip -t` — que
+  # validam o envelope gzip, nao o SQL dentro. Comprovado: dump cortado com
+  # exit 0 e ambas as validacoes aprovando.
+  printf '%s' "set -o pipefail; \
+db_name=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)\"; \
 db_user=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)\"; \
 db_host=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\"; \
 dump_bin=\"\$(command -v mysqldump || command -v mariadb-dump || true)\"; \
@@ -648,7 +655,12 @@ remote_db_import_stdin_command() {
 
   # Comando de import que consome SQL do STDIN, usado quando o dump é
   # transmitido do runner. `wp db import -` shella out e falha na Locaweb.
-  printf '%s' "mysql_bin=\"\$(command -v mysql || command -v mariadb || true)\"; \
+  # Mesmo motivo do dump por stdout: comando cru, shell remoto sem pipefail.
+  # Aqui o pipeline e "gzip -dc arquivo | mysql", montado pelo CHAMADOR; sem
+  # pipefail um gzip corrompido devolvia o exit do mysql e DEV ficava
+  # meio-importado sem disparar rollback.
+  printf '%s' "set -o pipefail; \
+mysql_bin=\"\$(command -v mysql || command -v mariadb || true)\"; \
 if [ -n \"\$mysql_bin\" ]; then \
 MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" \"\$mysql_bin\" \
 --host=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\" \
@@ -1634,6 +1646,57 @@ sync_runtime_files() {
   done
 }
 
+database_identity() {
+  local env="$1"
+  local wp_root wp_cli
+
+  if is_remote_env "$env"; then
+    wp_root="$(wp_path "$env")" || return $?
+    wp_cli="$(wp_cli_shell "$env")" || return $?
+    remote_run "$env" "set -uo pipefail
+printf '%s|%s\n' \
+  \"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\" \
+  \"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)\"" || return $?
+  else
+    printf '%s|%s\n' \
+      "$(local_wp config get DB_HOST)" \
+      "$(local_wp config get DB_NAME)" || return $?
+  fi
+}
+
+assert_distinct_databases() {
+  local source_env="$1"
+  local target_env="$2"
+  local source_identity target_identity
+
+  # O nome do ambiente não prova que o banco é outro. Se origem e destino
+  # apontarem para o MESMO host e schema — o que é plausível na HostGator, onde
+  # QA e DEV dividem conta e servidor — o clone exporta e reimporta sobre si
+  # mesmo: o conteúdo do destino é destruído e o backup passa a ser a única
+  # cópia existente. A comparação acontece no preflight, antes de qualquer
+  # escrita, para que a execução aborte com o destino intacto.
+  source_identity="$(database_identity "$source_env")" || {
+    uonix_env_error "não foi possível ler a identidade do banco de ${source_env}"
+    return 1
+  }
+  target_identity="$(database_identity "$target_env")" || {
+    uonix_env_error "não foi possível ler a identidade do banco de ${target_env}"
+    return 1
+  }
+
+  [ -n "${source_identity#|}" ] && [ -n "${target_identity#|}" ] || {
+    uonix_env_error 'identidade de banco vazia; abortando por precaução'
+    return 1
+  }
+
+  if [ "$source_identity" = "$target_identity" ]; then
+    uonix_env_error "origem (${source_env}) e destino (${target_env}) usam o MESMO banco (${source_identity}); o clone destruiria os dados"
+    return 1
+  fi
+
+  log "Bancos distintos confirmados: ${source_env} e ${target_env}."
+}
+
 preflight_env() {
   local env="$1"
   local wp_root
@@ -1704,6 +1767,8 @@ dry_run_clone() {
 
   preflight_env "$SOURCE" || return $?
   preflight_env "$TARGET" || return $?
+
+  assert_distinct_databases "$SOURCE" "$TARGET" || return $?
 
   log "Diretórios que seriam sincronizados em wp-content: ${dirs[*]}"
   log "Opções preservadas no destino: plugins gerenciados, active_plugins, cron, SMTP/captcha/Turnstile/CompressX/admin_email."
@@ -2216,6 +2281,11 @@ execute_clone_mutation() {
 
   log "Clone solicitado: ${SOURCE} -> ${TARGET}"
   log "Substituir usuários: ${REPLACE_USERS}"
+
+  # Antes de qualquer escrita — inclusive antes do backup, que gravaria no host:
+  # se origem e destino compartilham banco, o clone se sobrescreve. O nome do
+  # ambiente não prova nada; a identidade real do banco, sim.
+  assert_distinct_databases "$SOURCE" "$TARGET" || return $?
 
   prepare_target_backup "$TARGET" "$TARGET_BACKUP_DIR" || return $?
   snapshot_users "$TARGET" "$TARGET_BACKUP_DIR" || return $?
