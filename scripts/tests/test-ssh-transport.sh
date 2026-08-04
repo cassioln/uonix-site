@@ -292,6 +292,62 @@ fi
 UONIX_SSH_CONTROL_DIR="$short_control_dir"
 export UONIX_SSH_CONTROL_DIR
 
+# O diretório de sockets fica em /tmp, previsível e gravável por qualquer
+# usuário. Falhar ali aborta TODO o transporte, inclusive o rollback de um clone
+# já em mutação, então a causa precisa aparecer — não o erro cru do mkdir.
+hostile_parent="$CONTROL_DIR-hostile"
+mkdir -p "$hostile_parent"
+chmod 555 "$hostile_parent"
+UONIX_SSH_CONTROL_DIR="$hostile_parent/sub"
+export UONIX_SSH_CONTROL_DIR
+control_dir_error="$(uonix_transport_build_ssh_command qa 2>&1 >/dev/null)" && \
+  fail 'diretório de sockets não-criável foi aceito'
+printf '%s' "$control_dir_error" | grep -q 'diretório de sockets SSH' \
+  || fail 'falha no diretório de sockets não explicou a causa'
+chmod 755 "$hostile_parent"
+rm -rf "$hostile_parent"
+
+symlinked_control="$CONTROL_DIR-symlink"
+symlink_victim="$CONTROL_DIR-symlink-target"
+rm -rf "$symlinked_control" "$symlink_victim"
+# O alvo é nosso e tem o modo correto, então só a checagem de symlink pode
+# reprovar este caso: sem ela, o transporte aceitaria um socket redirecionado.
+mkdir -m 700 "$symlink_victim"
+ln -s "$symlink_victim" "$symlinked_control"
+UONIX_SSH_CONTROL_DIR="$symlinked_control"
+export UONIX_SSH_CONTROL_DIR
+symlink_error="$(uonix_transport_build_ssh_command qa 2>&1 >/dev/null)" && \
+  fail 'diretório de sockets apontando para symlink foi aceito'
+printf '%s' "$symlink_error" | grep -q 'symlink' \
+  || fail 'symlink no diretório de sockets não foi identificado'
+rm -f "$symlinked_control"
+rm -rf "$symlink_victim"
+
+# Um diretório existente, real (não symlink), gravável e de OUTRO dono isola a
+# checagem de propriedade. O caminho varia por plataforma: /private/tmp no
+# macOS, /var/tmp no Linux. Se nenhum servir, a checagem é pulada em vez de
+# passar por engano.
+foreign_control=''
+for candidate in /private/tmp /var/tmp /dev/shm; do
+  if [ -d "$candidate" ] && [ ! -L "$candidate" ] && [ ! -O "$candidate" ] && [ -w "$candidate" ]; then
+    foreign_control="$candidate"
+    break
+  fi
+done
+if [ -n "$foreign_control" ]; then
+  UONIX_SSH_CONTROL_DIR="$foreign_control"
+  export UONIX_SSH_CONTROL_DIR
+  owner_error="$(uonix_transport_build_ssh_command qa 2>&1 >/dev/null)" && \
+    fail 'diretório de sockets de outro usuário foi aceito'
+  printf '%s' "$owner_error" | grep -q 'outro usuário' \
+    || fail 'dono divergente do diretório de sockets não foi identificado'
+else
+  printf 'AVISO: nenhum diretório de outro dono disponível; checagem de posse não exercitada.\n' >&2
+fi
+
+UONIX_SSH_CONTROL_DIR="$short_control_dir"
+export UONIX_SSH_CONTROL_DIR
+
 : > "$MOCK_TRANSPORT_LOG"
 uonix_exec local -- wp option get home >/dev/null
 local_log="$(cat "$MOCK_TRANSPORT_LOG")"
