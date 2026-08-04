@@ -267,8 +267,19 @@ for rollback_path_label in remoto local; do
   printf '%s' "$path_body" | grep -qE 'mv -- .*(wp_content|LOCAL_WP_CONTENT).*\.replaced-' \
     || fail "rollback ${rollback_path_label} não guarda o item atual antes de trocar (falha no meio deixaria o item ausente)"
 
-  # E em nenhum caso pode apagar o item de destino: só o staging é removido.
-  if printf '%s' "$path_body" | grep -E 'rm -rf -- ' | grep -qvE 'staging'; then
+  # E em nenhum caso pode apagar o item de destino no FLUXO de troca. O `rm -rf`
+  # do trap e do desfazimento é legítimo: ele remove o item recém-colocado para
+  # devolver o original, o oposto de perder dados. Só o fluxo principal é
+  # inspecionado, com o trap e a função de desfazimento removidos.
+  flow_only="$(printf '%s' "$path_body" | awk '
+    /^trap / { in_trap = 1 }
+    /rollback_undo_swaps\(\) \{/ { in_undo = 1 }
+    /^for undo in / { in_undo = 1 }
+    !in_trap && !in_undo { print }
+    in_trap && /EXIT$/ { in_trap = 0 }
+    in_undo && /^      \}$|^done$/ { in_undo = 0 }
+  ')"
+  if printf '%s' "$flow_only" | grep -E 'rm -rf -- ' | grep -qvE 'staging'; then
     fail "rollback ${rollback_path_label} apaga o item de destino em vez de guardá-lo"
   fi
 done
@@ -305,5 +316,34 @@ for streaming_helper in remote_db_dump_to_stdout remote_db_import_stdin_command;
   printf '%s' "$helper_body" | grep -v '^[[:space:]]*#' | grep -q 'set -o pipefail' \
     || fail "${streaming_helper} não fixa pipefail no comando: falha do mysqldump/gzip seria mascarada e um dump truncado passaria como válido"
 done
+
+# A troca precisa ser TODO-OU-NADA nos DOIS caminhos. Abortar no meio deixava o
+# destino com arquivos de DUAS gerações sobre um banco já restaurado — estado que
+# nenhum smoke detecta, porque cada arquivo isolado parece íntegro. Comprovado:
+# falha no 3º item deixou uploads/plugins do backup e languages mutado.
+#
+# Exigir só a DEFINIÇÃO de rollback_undo_swaps é fraco: remover a CHAMADA no
+# tratamento de erro passava, porque a definição continuava no texto. Cada saída
+# de erro do laço de troca precisa desfazer antes de retornar.
+printf '%s' "$rollback_local" | grep -q 'rollback_undo_swaps()' \
+  || fail 'rollback local não define o desfazimento de trocas'
+
+swap_loop="$(printf '%s' "$rollback_local" | awk '
+  /for item in uploads plugins languages/ { inside = 1 }
+  inside { print }
+  inside && /^    done$/ { exit }
+')"
+[ -n "$swap_loop" ] || fail 'laço de troca do rollback local não localizado'
+
+# Padrões literais: casam o TEXTO do script, não expandem nada aqui.
+# shellcheck disable=SC2016
+returns_no_laco="$(printf '%s' "$swap_loop" | grep -c 'return "\$rollback_status"')"
+undos_no_laco="$(printf '%s' "$swap_loop" | grep -c 'rollback_undo_swaps$')"
+[ "$returns_no_laco" -gt 0 ] || fail 'laço de troca não propaga falha'
+[ "$undos_no_laco" -ge "$returns_no_laco" ] \
+  || fail "rollback local retorna erro sem desfazer as trocas já feitas (${returns_no_laco} saídas de erro, ${undos_no_laco} desfazimentos) — destino ficaria com duas gerações de arquivos"
+
+printf '%s' "$rollback_remote" | grep -q 'for undo in' \
+  || fail 'rollback remoto não desfaz as trocas já feitas quando uma falha (destino ficaria com duas gerações de arquivos)'
 
 printf 'PASS: o clone não depende de wp db export/import em nenhum caminho remoto.\n'
