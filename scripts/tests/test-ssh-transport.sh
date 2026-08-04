@@ -314,17 +314,26 @@ export UONIX_SSH_CONTROL_DIR
 # O diretório de sockets fica em /tmp, previsível e gravável por qualquer
 # usuário. Falhar ali aborta TODO o transporte, inclusive o rollback de um clone
 # já em mutação, então a causa precisa aparecer — não o erro cru do mkdir.
-hostile_parent="$CONTROL_DIR-hostile"
-mkdir -p "$hostile_parent"
-chmod 555 "$hostile_parent"
-UONIX_SSH_CONTROL_DIR="$hostile_parent/sub"
-export UONIX_SSH_CONTROL_DIR
-control_dir_error="$(uonix_transport_build_ssh_command qa 2>&1 >/dev/null)" && \
-  fail 'diretório de sockets não-criável foi aceito'
-printf '%s' "$control_dir_error" | grep -q 'diretório de sockets SSH' \
-  || fail 'falha no diretório de sockets não explicou a causa'
-chmod 755 "$hostile_parent"
-rm -rf "$hostile_parent"
+#
+# Sob root o cenário não existe: root escreve em diretório 0555, então `mkdir`
+# tem sucesso e não há falha para diagnosticar. Rodar como root é o caso do CI em
+# container; ali este caso é pulado em vez de reprovar por uma condição
+# impossível de reproduzir.
+if [ "$(id -u)" -eq 0 ]; then
+  printf 'SKIP: diretório de sockets não-criável não se aplica a root.\n'
+else
+  hostile_parent="$CONTROL_DIR-hostile"
+  mkdir -p "$hostile_parent"
+  chmod 555 "$hostile_parent"
+  UONIX_SSH_CONTROL_DIR="$hostile_parent/sub"
+  export UONIX_SSH_CONTROL_DIR
+  control_dir_error="$(uonix_transport_build_ssh_command qa 2>&1 >/dev/null)" && \
+    fail 'diretório de sockets não-criável foi aceito'
+  printf '%s' "$control_dir_error" | grep -q 'diretório de sockets SSH' \
+    || fail 'falha no diretório de sockets não explicou a causa'
+  chmod 755 "$hostile_parent"
+  rm -rf "$hostile_parent"
+fi
 
 symlinked_control="$CONTROL_DIR-symlink"
 symlink_victim="$CONTROL_DIR-symlink-target"
