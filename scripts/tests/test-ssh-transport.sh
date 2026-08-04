@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LIBRARY="${ROOT_DIR}/scripts/lib/ssh-transport.sh"
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
+CONTROL_DIR="/tmp/uonix-ssh-transport-test-$$"
+trap 'rm -rf "$TMP_DIR" "$CONTROL_DIR"' EXIT HUP INT TERM
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -100,6 +101,7 @@ export LOCAWEB_SSH_KNOWN_HOSTS_FILE="$TMP_DIR/known-hosts"
 export UONIX_TRANSPORT_RETRY_DELAY=0
 export UONIX_TRANSPORT_MAX_ATTEMPTS=5
 export UONIX_LOCAL_APP_CONTAINER='uonix-local-app'
+export UONIX_SSH_CONTROL_DIR="$CONTROL_DIR"
 
 export LOCAWEB_SSH_HOST='ftp.site.uonix.com.br'
 export LOCAWEB_SSH_PORT='22'
@@ -263,6 +265,9 @@ qa_log="$(cat "$MOCK_TRANSPORT_LOG")"
 printf '%s' "$qa_log" | grep -q 'StrictHostKeyChecking=yes' || fail 'QA sem host key estrita'
 printf '%s' "$qa_log" | grep -q "UserKnownHostsFile=$TMP_DIR/known-hosts" || fail 'QA sem known_hosts fixado'
 printf '%s' "$qa_log" | grep -q "<$TMP_DIR/key>" || fail 'QA sem chave dedicada'
+printf '%s' "$qa_log" | grep -q 'ControlMaster=auto' || fail 'QA abre conexões independentes'
+printf '%s' "$qa_log" | grep -q 'ControlPersist=120' || fail 'QA não mantém o socket entre etapas'
+printf '%s' "$qa_log" | grep -Fq "ControlPath=$CONTROL_DIR/uonix-%C" || fail 'QA sem ControlPath curto e hashado'
 printf '%s' "$qa_log" | grep -q 'accept-new' && fail 'QA ainda aceita host key nova'
 
 : > "$MOCK_TRANSPORT_LOG"
@@ -271,9 +276,21 @@ MOCK_SSH_MODE=success uonix_exec prod -- printf production >/dev/null
 production_log="$(cat "$MOCK_TRANSPORT_LOG")"
 printf '%s' "$production_log" | grep -q 'sshpass <-e>' || fail 'produção não usou sshpass -e'
 printf '%s' "$production_log" | grep -q 'StrictHostKeyChecking=yes' || fail 'produção sem host key estrita'
+printf '%s' "$production_log" | grep -q 'ControlMaster=auto' || fail 'produção abre conexões independentes'
+printf '%s' "$production_log" | grep -q 'ControlPersist=120' || fail 'produção não mantém o socket entre etapas'
+printf '%s' "$production_log" | grep -Fq "ControlPath=$CONTROL_DIR/uonix-%C" || fail 'produção sem ControlPath curto e hashado'
 if printf '%s' "$production_log" | grep -q 'correct-password-not-for-logs'; then
   fail 'senha apareceu na linha de comando/log'
 fi
+
+short_control_dir="$UONIX_SSH_CONTROL_DIR"
+UONIX_SSH_CONTROL_DIR="$TMP_DIR/$(printf 'x%.0s' {1..90})"
+export UONIX_SSH_CONTROL_DIR
+if uonix_transport_build_ssh_command qa >/dev/null 2>&1; then
+  fail 'ControlPath longo foi aceito e falharia silenciosamente no OpenSSH real'
+fi
+UONIX_SSH_CONTROL_DIR="$short_control_dir"
+export UONIX_SSH_CONTROL_DIR
 
 : > "$MOCK_TRANSPORT_LOG"
 uonix_exec local -- wp option get home >/dev/null
