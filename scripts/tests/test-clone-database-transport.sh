@@ -289,4 +289,21 @@ printf '%s' "$remote_trap" | grep -q 'replaced-' \
 printf '%s' "$remote_trap" | grep -q 'mv -- ' \
   || fail 'trap do rollback remoto não restaura o item guardado antes de limpar'
 
+# Os dois helpers de STREAMING vão como comando CRU para o ssh, sem `bash -s`, e
+# o shell remoto não herda o pipefail do script local. Sem a diretiva explícita,
+# "mysqldump | gzip -c" devolve o exit do gzip (0) mesmo quando o mysqldump aborta
+# no meio: um dump TRUNCADO passa por `[ -s ]` e `gzip -t`, que validam o envelope
+# gzip e não o SQL dentro. Comprovado empiricamente antes desta assertiva existir.
+for streaming_helper in remote_db_dump_to_stdout remote_db_import_stdin_command; do
+  helper_body="$(awk -v fn="^${streaming_helper}\\\\(\\\\) \\\\{" '
+    $0 ~ fn { inside = 1 } inside { print } inside && /^}$/ { exit }' "$CLONE")"
+  [ -n "$helper_body" ] || fail "${streaming_helper} não encontrado"
+
+  # Só a linha do COMANDO conta. Um comentário explicando o pipefail casa o mesmo
+  # padrão e faria a assertiva passar com a diretiva removida do comando — foi
+  # exatamente isso que deixou uma mutação escapar antes desta correção.
+  printf '%s' "$helper_body" | grep -v '^[[:space:]]*#' | grep -q 'set -o pipefail' \
+    || fail "${streaming_helper} não fixa pipefail no comando: falha do mysqldump/gzip seria mascarada e um dump truncado passaria como válido"
+done
+
 printf 'PASS: o clone não depende de wp db export/import em nenhum caminho remoto.\n'

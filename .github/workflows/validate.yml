@@ -132,6 +132,9 @@ jobs:
       - name: Test clone database transport
         run: bash scripts/tests/test-clone-database-transport.sh
 
+      - name: Test clone distinct databases
+        run: bash scripts/tests/test-clone-distinct-databases.sh
+
       - name: Test CI covers every test
         run: |
           python3 -c 'import yaml' \
