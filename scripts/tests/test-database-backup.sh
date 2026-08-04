@@ -340,4 +340,23 @@ grep -q 'output-dir="\$BACKUP_DIR"' "$workflow" \
 grep -q 'tail -n +31' "$workflow" \
   || fail 'retenção não mantém 30 backups'
 
+# --- Caso 10: nenhuma etapa pode resolver $HOME por ${{ }} -------------------
+# O contexto `env` do Actions NÃO conhece HOME: `${{ env.HOME }}` resolve para
+# string vazia e produz caminhos como "/.ssh/locaweb_known_hosts". Isso derrubou
+# um deploy real no passo de backup, com "known_hosts Locaweb ausente ou vazio",
+# e é silencioso — o YAML é válido e o lint não reclama.
+for candidate_workflow in "$ROOT_DIR"/.github/workflows/*.yml; do
+  if grep -q 'env\.HOME' "$candidate_workflow"; then
+    fail "$(basename "$candidate_workflow") usa \${{ env.HOME }}, que resolve vazio; expanda \$HOME no shell"
+  fi
+done
+
+# E o caminho do known_hosts precisa mesmo chegar ao script de backup, senão o
+# transporte reprova por credencial ausente antes de tentar qualquer conexão.
+backup_step="$(sed -n '/- name: Back up the production database/,/- name: Publish only managed paths/p' "$workflow")"
+printf '%s' "$backup_step" | grep -q 'LOCAWEB_SSH_KNOWN_HOSTS_FILE' \
+  || fail 'passo de backup não define LOCAWEB_SSH_KNOWN_HOSTS_FILE'
+printf '%s' "$backup_step" | grep -q 'LOCAWEB_SSH_PASSWORD_FILE' \
+  || fail 'passo de backup não define LOCAWEB_SSH_PASSWORD_FILE'
+
 printf 'PASS: backup de banco valida integridade, falha fechado, precede a publicação e o rollback o restaura.\n'
