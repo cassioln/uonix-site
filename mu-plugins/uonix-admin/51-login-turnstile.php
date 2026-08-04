@@ -105,5 +105,17 @@ if ( ! function_exists( 'uonix_login_turnstile_validate' ) ) {
 
 add_action( 'login_form', 'uonix_login_turnstile_render' );
 
-// Prioridade 5: valida o desafio antes de o core verificar a senha (prioridade 20).
-add_filter( 'authenticate', 'uonix_login_turnstile_validate', 5, 3 );
+/*
+ * Prioridade 30: DEPOIS de wp_authenticate_username_password (20).
+ *
+ * O core não faz curto-circuito com WP_Error — ele só devolve cedo quando recebe
+ * um WP_User. Validando antes (prioridade 5), o nosso WP_Error era descartado e,
+ * com credencial correta, o login entrava SEM desafio. Comprovado em DEV com
+ * instrumentação: prio 6 tinha uonix_login_turnstile, prio 10002 já tinha
+ * invalid_email.
+ *
+ * Rodando em 30 o usuário já foi resolvido, então o nosso erro é o último a
+ * valer e o bloqueio é real. A senha é verificada primeiro, o que não é
+ * problema: o Turnstile mitiga automação, não substitui limite de tentativas.
+ */
+add_filter( 'authenticate', 'uonix_login_turnstile_validate', 30, 3 );
