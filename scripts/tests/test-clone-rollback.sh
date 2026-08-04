@@ -101,9 +101,34 @@ fr1_test_corrupt_backup_before_mutation() (
     FR1_BACKUP_PATH="$backup_path"
     wp_path() { printf '%s\n' "$case_root/wp"; }
     wp_cli_shell() { printf 'fr1_mock_wp\n'; }
-    fr1_mock_wp() { printf 'SQL fixture\n'; }
+    # O backup remoto passou a preferir mysqldump direto (wp db export shella out
+    # e falha na Locaweb), então o mock precisa responder a `config get` além de
+    # emitir SQL. Sem isso o dump sai vazio e o teste reprova por fixture, não
+    # por comportamento.
+    fr1_mock_wp() {
+      local argument
+      for argument in "$@"; do
+        case "$argument" in
+          DB_NAME) printf 'fixture_db\n'; return 0 ;;
+          DB_USER) printf 'fixture_user\n'; return 0 ;;
+          DB_HOST) printf 'fixture_host\n'; return 0 ;;
+          DB_PASSWORD) printf 'fixture_password\n'; return 0 ;;
+        esac
+      done
+      printf 'SQL fixture\n'
+    }
+    # mysqldump sintético: sem ele o snippet cairia no fallback e o caminho real
+    # nunca seria exercitado.
+    # shellcheck disable=SC2329
+    mysqldump() {
+      case " $* " in
+        *' --help '*) printf -- '--single-transaction\n' ;;
+        *) printf 'SQL fixture\n' ;;
+      esac
+    }
     is_remote_env() { return 0; }
     remote_run() ( find() { return 0; }; eval "$2" )
+    remote_run_idempotent() ( find() { return 0; }; eval "$2" )
     mkdir -p "$case_root/wp/wp-content/uploads"
     printf 'fixture\n' > "$case_root/wp/wp-content/uploads/file.txt"
   fi

@@ -525,6 +525,138 @@ remote_wp_content_dir() {
   printf '%s/wp-content\n' "$wp_root"
 }
 
+remote_db_dump_snippet() {
+  local wp_cli="$1"
+  local wp_root="$2"
+  local target_gz="$3"
+
+  # `wp db export` shella out via Process::run e a Locaweb desabilita proc_open
+  # de forma COMPILADA — `-d disable_functions=` não vence isso. Ou seja: qualquer
+  # clone com produção na origem OU no destino ficava sem backup utilizável,
+  # justamente o artefato de que o rollback depende.
+  #
+  # O padrão aqui é o mesmo que snapshot_options já usa: ler credenciais por
+  # `wp config get` e chamar o cliente direto, com MYSQL_PWD para manter a senha
+  # fora de argv. Preferimos mysqldump/mariadb-dump e só caímos em `wp db export`
+  # onde o cliente não existe — capacidade do host, não nome do ambiente.
+  cat <<SNIPPET
+db_name="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)"
+db_user="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)"
+db_host="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)"
+dump_bin="\$(command -v mysqldump || command -v mariadb-dump || true)"
+if [ -n "\$dump_bin" ]; then
+  dump_flags='--single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'
+  # Cliente 8.0 contra servidor 5.7 avisa sobre column statistics em todo dump:
+  # inofensivo, mas polui o log e parece falha. A flag só existe no cliente 8.0+.
+  if "\$dump_bin" --help 2>/dev/null | grep -q -- '--column-statistics'; then
+    dump_flags="\$dump_flags --column-statistics=0"
+  fi
+  MYSQL_PWD="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)" \\
+    "\$dump_bin" \$dump_flags \\
+    --host="\$db_host" --user="\$db_user" "\$db_name" | gzip -c > $(printf '%q' "$target_gz")
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db export - | gzip -c > $(printf '%q' "$target_gz")
+fi
+SNIPPET
+}
+
+remote_db_dump_to_stdout() {
+  local wp_cli="$1"
+  local wp_root="$2"
+
+  # Variante que emite o dump comprimido em STDOUT, para o caso em que o
+  # artefato é transmitido ao runner em vez de gravado no host remoto.
+  # Mesma razão do helper acima: `wp db export` shella out e a Locaweb bloqueia
+  # proc_open de forma compilada, então o clone com produção na origem falhava.
+  printf '%s' "db_name=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)\"; \
+db_user=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)\"; \
+db_host=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\"; \
+dump_bin=\"\$(command -v mysqldump || command -v mariadb-dump || true)\"; \
+if [ -n \"\$dump_bin\" ]; then \
+dump_flags='--single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'; \
+if \"\$dump_bin\" --help 2>/dev/null | grep -q -- '--column-statistics'; then dump_flags=\"\$dump_flags --column-statistics=0\"; fi; \
+MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" \"\$dump_bin\" \$dump_flags --host=\"\$db_host\" --user=\"\$db_user\" \"\$db_name\" | gzip -c; \
+else $wp_cli --path=$(printf '%q' "$wp_root") db export - | gzip -c; fi"
+}
+
+remote_db_client_snippet() {
+  local wp_cli="$1"
+  local wp_root="$2"
+
+  # Resolve o cliente `mysql` e as credenciais numa forma reutilizável.
+  # `wp db import` também shella out, então importar precisa do mesmo tratamento
+  # que exportar: em produção o wp-cli não consegue invocar o cliente.
+  cat <<SNIPPET
+db_name="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)"
+db_user="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)"
+db_host="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)"
+mysql_bin="\$(command -v mysql || command -v mariadb || true)"
+dump_bin="\$(command -v mysqldump || command -v mariadb-dump || true)"
+SNIPPET
+}
+
+remote_db_import_file_snippet() {
+  local wp_cli="$1"
+  local wp_root="$2"
+  local sql_file_expression="$3"
+
+  cat <<SNIPPET
+$(remote_db_client_snippet "$wp_cli" "$wp_root")
+if [ -n "\$mysql_bin" ]; then
+  MYSQL_PWD="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)" \\
+    "\$mysql_bin" --host="\$db_host" --user="\$db_user" \\
+    --default-character-set=utf8mb4 "\$db_name" < ${sql_file_expression}
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db import ${sql_file_expression} >/dev/null
+fi
+SNIPPET
+}
+
+remote_db_dump_tables_snippet() {
+  local wp_cli="$1"
+  local wp_root="$2"
+  local tables_expression="$3"
+  local sql_file_expression="$4"
+  local tables_csv_expression="$5"
+
+  # Dump de tabelas específicas (snapshot de usuários do destino). Mesmo motivo
+  # dos outros helpers: `wp db export --tables` shella out e falha na Locaweb.
+  #
+  # As tabelas vêm em duas formas porque os dois caminhos exigem sintaxes
+  # diferentes: mysqldump recebe argumentos separados, `wp db export --tables`
+  # recebe uma lista separada por vírgula. Passar a forma errada ao fallback
+  # descartaria silenciosamente todas as tabelas além da primeira.
+  cat <<SNIPPET
+$(remote_db_client_snippet "$wp_cli" "$wp_root")
+if [ -n "\$dump_bin" ]; then
+  dump_flags='--single-transaction --quick --no-tablespaces --default-character-set=utf8mb4'
+  if "\$dump_bin" --help 2>/dev/null | grep -q -- '--column-statistics'; then
+    dump_flags="\$dump_flags --column-statistics=0"
+  fi
+  MYSQL_PWD="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)" \\
+    "\$dump_bin" \$dump_flags \\
+    --host="\$db_host" --user="\$db_user" "\$db_name" ${tables_expression} > ${sql_file_expression}
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db export ${sql_file_expression} --tables=${tables_csv_expression} >/dev/null
+fi
+SNIPPET
+}
+
+remote_db_import_stdin_command() {
+  local wp_cli="$1"
+  local wp_root="$2"
+
+  # Comando de import que consome SQL do STDIN, usado quando o dump é
+  # transmitido do runner. `wp db import -` shella out e falha na Locaweb.
+  printf '%s' "mysql_bin=\"\$(command -v mysql || command -v mariadb || true)\"; \
+if [ -n \"\$mysql_bin\" ]; then \
+MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" \"\$mysql_bin\" \
+--host=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\" \
+--user=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)\" \
+--default-character-set=utf8mb4 \"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)\"; \
+else $wp_cli --path=$(printf '%q' "$wp_root") db import -; fi"
+}
+
 prepare_target_backup() {
   local env="$1"
   local dir="$2"
@@ -551,7 +683,7 @@ prepare_target_backup() {
 umask 077
 mkdir -p $(printf '%q' "$dir")
 chmod 700 $(printf '%q' "$dir")
-$wp_cli --path=$(printf '%q' "$wp_root") db export - | gzip -c > $(printf '%q' "${dir}/db-${env}-${STAMP}.sql.gz")
+$(remote_db_dump_snippet "$wp_cli" "$wp_root" "${dir}/db-${env}-${STAMP}.sql.gz")
 cd $(printf '%q' "$wp_content")
 set --
 for item in $(shell_join "${backup_items[@]}"); do
@@ -622,6 +754,20 @@ snapshot_users() {
     wp_root="$(wp_path "$env")" || return $?
     wp_cli="$(wp_cli_shell "$env")" || return $?
 
+    # Montadas fora do heredoc de propósito: estas referências pertencem ao shell
+    # REMOTO, e mantê-las em variáveis evita que o ShellCheck as leia como
+    # expansões locais perdidas (SC2016) num trecho onde a diretiva de disable
+    # cairia dentro da string enviada ao host.
+    local remote_users_tables remote_users_tables_csv remote_users_sql
+    # As aspas simples são deliberadas: prefix e users_sql são resolvidos pelo
+    # shell REMOTO, não aqui.
+    # shellcheck disable=SC2016
+    remote_users_tables='"${prefix}users" "${prefix}usermeta"'
+    # shellcheck disable=SC2016
+    remote_users_tables_csv='"${prefix}users,${prefix}usermeta"'
+    # shellcheck disable=SC2016
+    remote_users_sql='"$users_sql"'
+
     remote_run "$env" "set -uo pipefail
 umask 077
 users_dir=$(printf '%q' "$dir")
@@ -633,7 +779,7 @@ chmod 700 \"\$users_dir\" || exit \$?
 : > \"\$users_sha256\" || exit \$?
 chmod 600 \"\$users_sql\" \"\$users_sha256\" || exit \$?
 prefix=\"\$($wp_cli --path=$(printf '%q' "$wp_root") db prefix)\" || exit \$?
-$wp_cli --path=$(printf '%q' "$wp_root") db export \"\$users_sql\" --tables=\"\${prefix}users,\${prefix}usermeta\" >/dev/null || exit \$?
+$(remote_db_dump_tables_snippet "$wp_cli" "$wp_root" "$remote_users_tables" "$remote_users_sql" "$remote_users_tables_csv") || exit \$?
 test -s \"\$users_sql\" || exit \$?
 (
   cd \"\$users_dir\" || exit \$?
@@ -742,7 +888,7 @@ export_source_db() {
     wp_cli="$(wp_cli_shell "$env")" || return $?
     remote_stream_to_file \
       "$env" \
-      "$wp_cli --path=$(printf '%q' "$wp_root") db export - | gzip -c" \
+      "$(remote_db_dump_to_stdout "$wp_cli" "$wp_root")" \
       "$dump_file" || return $?
   else
     local_db_dump | gzip -c >"$dump_file" || return $?
@@ -765,7 +911,7 @@ import_db_to_target() {
     remote_import_gzip_dump \
       "$env" \
       "$dump_file" \
-      "$wp_cli --path=$(printf '%q' "$wp_root") db import -"
+      "$(remote_db_import_stdin_command "$wp_cli" "$wp_root")"
   else
     gzip -dc "$dump_file" | local_db_import
   fi
@@ -806,6 +952,11 @@ restore_users() {
     wp_root="$(wp_path "$env")" || return $?
     wp_cli="$(wp_cli_shell "$env")" || return $?
 
+    # Referência ao arquivo no shell REMOTO, montada fora do heredoc para não
+    # ser lida como expansão local perdida.
+    # shellcheck disable=SC2016
+    local remote_users_sql_ref='"$users_sql"'
+
     remote_run "$env" "set -uo pipefail
 users_dir=$(printf '%q' "$dir")
 users_sql=$(printf '%q' "${dir}/users.sql")
@@ -821,7 +972,7 @@ users_sha256=$(printf '%q' "${dir}/users.sha256")
   set -o pipefail
   sha256sum users.sql | cmp -s - users.sha256
 ) || exit \$?
-$wp_cli --path=$(printf '%q' "$wp_root") db import \"\$users_sql\" || exit \$?" || return $?
+$(remote_db_import_file_snippet "$wp_cli" "$wp_root" "$remote_users_sql_ref") || exit \$?" || return $?
   else
     validate_users_snapshot "$dir" || return $?
     local_db_import <"${dir}/users.sql" || return $?
@@ -857,6 +1008,10 @@ restore_options() {
     wp_root="$(wp_path "$env")" || return $?
     wp_cli="$(wp_cli_shell "$env")" || return $?
 
+    # Referência ao arquivo no shell REMOTO, montada fora do heredoc.
+    # shellcheck disable=SC2016
+    local remote_options_sql_ref='"$options_sql"'
+
     remote_run "$env" "set -euo pipefail
 options_sql=$(printf '%q' "${dir}/options.sql")
 options_sha256=$(printf '%q' "${dir}/options.sha256")
@@ -871,7 +1026,7 @@ prefix=\"\$($wp_cli --path=$(printf '%q' "$wp_root") db prefix)\" || exit \$?
 delete_sql=\"DELETE FROM \${prefix}options WHERE ${where}\"
 $wp_cli --path=$(printf '%q' "$wp_root") db query \"\$delete_sql\" >/dev/null || exit \$?
 if [ -s \"\$options_sql\" ]; then
-  $wp_cli --path=$(printf '%q' "$wp_root") db import \"\$options_sql\" >/dev/null || exit \$?
+  $(remote_db_import_file_snippet "$wp_cli" "$wp_root" "$remote_options_sql_ref") || exit \$?
 fi" || return $?
   else
     local prefix
@@ -1657,7 +1812,7 @@ for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
     mv -- \"\$staging/\$item\" $(printf '%q' "$wp_content")/\"\$item\"
   fi
 done
-gzip -dc $(printf '%q' "$dump_file") | $wp_cli --path=$(printf '%q' "$wp_root") db import -
+gzip -dc $(printf '%q' "$dump_file") | { $(remote_db_import_stdin_command "$wp_cli" "$wp_root"); }
 $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
   else
     [ -n "$LOCAL_WP_CONTENT" ] && [ "$LOCAL_WP_CONTENT" != / ] || return 1
