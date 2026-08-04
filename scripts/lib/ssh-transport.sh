@@ -115,9 +115,29 @@ uonix_transport_build_ssh_command() {
   # %C mantém o socket curto e único por host/porta/usuário. No Actions usamos
   # RUNNER_TEMP para que dry-run e execute, que são etapas do mesmo job,
   # compartilhem o master. No Mac usamos /tmp em vez do TMPDIR longo do macOS.
+  #
+  # O diretório default fica em /tmp, que é previsível e gravável por qualquer
+  # usuário. Se sobrar um diretório de outro dono ou com modo divergente, o
+  # mkdir/chmod falha — e falhar aqui aborta TODO o transporte, inclusive o
+  # rollback de um clone já em mutação. Por isso cada falha é reportada com a
+  # causa, em vez de sair silenciosamente com o erro cru do mkdir.
   control_dir="${UONIX_SSH_CONTROL_DIR:-${RUNNER_TEMP:-/tmp/uonix-ssh-${UID:-0}}}"
-  mkdir -p "$control_dir" || return
-  chmod 700 "$control_dir" || return
+  if ! mkdir -p "$control_dir" 2>/dev/null; then
+    uonix_transport_error "não foi possível criar o diretório de sockets SSH: ${control_dir}"
+    return 1
+  fi
+  if [ -L "$control_dir" ]; then
+    uonix_transport_error "diretório de sockets SSH é um symlink: ${control_dir}"
+    return 1
+  fi
+  if [ ! -O "$control_dir" ]; then
+    uonix_transport_error "diretório de sockets SSH pertence a outro usuário: ${control_dir}"
+    return 1
+  fi
+  if ! chmod 700 "$control_dir" 2>/dev/null; then
+    uonix_transport_error "não foi possível restringir o diretório de sockets SSH: ${control_dir}"
+    return 1
+  fi
   control_path="${control_dir%/}/uonix-%C"
   # OpenSSH expande %C para 40 hexadecimais; sockets Unix têm limite próximo de
   # 104 bytes em várias plataformas. Falhar cedo é melhor que ignorar o config.
