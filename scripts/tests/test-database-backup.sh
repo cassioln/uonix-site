@@ -145,8 +145,20 @@ gzip -t "$dump" 2>/dev/null || fail 'artefato publicado não é gzip válido'
 printf '%s' "$output" | grep -q 'mechanism=mysqldump' || fail 'mecanismo mysqldump não foi reportado'
 printf '%s' "$output" | grep -q 'tables=158' || fail 'contagem de tabelas não foi reportada'
 printf '%s' "$output" | grep -q "DB_BACKUP_FILE=$dump" || fail 'caminho do backup não foi exportado'
-[ "$(stat -f '%Lp' "$dump" 2>/dev/null || stat -c '%a' "$dump")" = 600 ] \
-  || fail 'artefato de backup não está 0600'
+# Modo do arquivo de forma portável. Cuidado: `stat -f` existe nos DOIS mundos
+# com significados diferentes — no BSD/macOS é formato, no GNU/Linux é informação
+# do filesystem e retorna 0. Um `stat -f ... || stat -c ...` portanto NUNCA cai no
+# fallback no Linux e devolve um valor que não é o modo. Decidimos pelo SO.
+file_mode() {
+  if stat -c '%a' /dev/null >/dev/null 2>&1; then
+    stat -c '%a' "$1"
+  else
+    stat -f '%Lp' "$1"
+  fi
+}
+
+[ "$(file_mode "$dump")" = 600 ] \
+  || fail "artefato de backup não está 0600 (modo: $(file_mode "$dump"))"
 
 # A senha do banco não pode aparecer em NENHUM log: nem em argv do mysqldump,
 # nem na saída do script. Ela deve trafegar apenas por MYSQL_PWD.
