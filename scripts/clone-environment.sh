@@ -1632,17 +1632,31 @@ rollback_target() {
     wp_root="$(wp_path "$env")" || return $?
     wp_content="${wp_root}/wp-content"
     wp_cli="$(wp_cli_shell "$env")" || return $?
-    remote_run "$env" "set -euo pipefail
+    # Rollback usa o caminho COM retry, ao contrário do resto da mutação: ele
+    # restaura a partir de um backup já validado, então repetir converge para o
+    # mesmo estado — é idempotente por construção. E uma única tentativa aqui
+    # falharia exatamente no cenário que motivou a multiplexação: rede instável.
+    # Sem retry, o destino ficaria com banco da origem e arquivos parciais.
+    #
+    # A extração vai para um diretório temporário e só então substitui os itens,
+    # em vez de apagar antes de extrair. Uma queda no meio deixava o destino sem
+    # arquivos E sem segunda chance.
+    remote_run_idempotent "$env" "set -euo pipefail
 test -n $(printf '%q' "$wp_content")
 test $(printf '%q' "$wp_content") != /
 test -s $(printf '%q' "$dump_file")
 test -s $(printf '%q' "$files_file")
 gzip -t $(printf '%q' "$dump_file")
 tar -tzf $(printf '%q' "$files_file") >/dev/null
+staging=\"\$(mktemp -d $(printf '%q' "$wp_content")/.uonix-rollback.XXXXXX)\"
+trap 'rm -rf -- \"\$staging\"' EXIT
+tar -xzf $(printf '%q' "$files_file") -C \"\$staging\"
 for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
-  rm -rf -- $(printf '%q' "$wp_content")/\"\$item\"
+  if [ -e \"\$staging/\$item\" ]; then
+    rm -rf -- $(printf '%q' "$wp_content")/\"\$item\"
+    mv -- \"\$staging/\$item\" $(printf '%q' "$wp_content")/\"\$item\"
+  fi
 done
-tar -xzf $(printf '%q' "$files_file") -C $(printf '%q' "$wp_content")
 gzip -dc $(printf '%q' "$dump_file") | $wp_cli --path=$(printf '%q' "$wp_root") db import -
 $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
   else
@@ -2063,6 +2077,7 @@ clone_on_signal() {
 clone_cleanup() {
   local status="$1"
   local release_status=0
+  local cleanup_environment
 
   trap - EXIT
   if [ "$CLONE_LOCK_HELD" = 1 ]; then
@@ -2074,6 +2089,16 @@ clone_cleanup() {
     fi
   fi
   rm -rf "${CLONE_TMP_DIR:-}"
+
+  # Fecha os masters SSH desta execução. Na Locaweb (senha) um socket vivo
+  # permitiria a qualquer processo do mesmo usuário reusar a sessão autenticada
+  # durante os 120s de ControlPersist. É limpeza: nunca altera o status de saída.
+  for cleanup_environment in "$SOURCE" "$TARGET"; do
+    [ -n "$cleanup_environment" ] || continue
+    is_remote_env "$cleanup_environment" || continue
+    uonix_transport_close_master "$cleanup_environment" || true
+  done
+
   if [ "$status" -eq 0 ] && [ "$release_status" -ne 0 ]; then
     exit "$release_status"
   fi
