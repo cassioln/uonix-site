@@ -568,13 +568,17 @@ jobs:
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noarchive'
           echo "Rollback validado a partir do backup $backup_id."
 
-      - name: Retain five code backups
+      - name: Retain thirty code and database backups
         if: ${{ success() }}
         continue-on-error: true
         env:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
         run: |
           set -euo pipefail
+          # Trinta, não cinco: medido no host, cada dump comprimido ocupa ~1,3 MB,
+          # então 30 backups somam ~39 MB — irrelevante frente aos 738 GB livres.
+          # Reter só cinco descartaria histórico útil sem economizar nada.
+          # O dump mora dentro do diretório do backup, então esta poda já o cobre.
           # Variables in this command expand on the remote host.
           # shellcheck disable=SC2016
           sshpass -e ssh \
@@ -585,7 +589,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
-            'backup_root=/home/storage/f/34/12/siteuonix1/_uonix-deploy-backups; if [ -d "$backup_root" ]; then find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print | LC_ALL=C sort -r | tail -n +6 | while IFS= read -r old_backup; do rm -rf -- "$old_backup"; done; fi'
+            'backup_root=/home/storage/f/34/12/siteuonix1/_uonix-deploy-backups; if [ -d "$backup_root" ]; then find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print | LC_ALL=C sort -r | tail -n +31 | while IFS= read -r old_backup; do rm -rf -- "$old_backup"; done; fi'
 
       - name: Release exclusive production lock
         if: ${{ always() }}

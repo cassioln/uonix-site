@@ -129,13 +129,32 @@ fi
 
 case "$mechanism" in
   mysqldump)
-    # --single-transaction dump consistente sem travar um site em uso;
-    # --quick transmite linha a linha em vez de bufferizar a tabela toda;
-    # --no-tablespaces evita exigir PROCESS, privilégio que contas
-    # compartilhadas normalmente não têm.
+    # Flags escolhidas a partir de medição no host, não por hábito:
+    #   --single-transaction  consistência sem travar site em uso. Seguro aqui:
+    #                         as 158 tabelas são InnoDB, zero MyISAM.
+    #   --quick               streaming linha a linha em vez de bufferizar tabela.
+    #   --no-tablespaces      evita exigir PROCESS, que a conta não tem.
+    #   --routines/--triggers/--events  sem eles o dump perde stored procedures,
+    #                         triggers e eventos agendados — a restauração fica
+    #                         silenciosamente incompleta.
+    #   --default-character-set=utf8mb4  preserva acentos e emoji.
+    #
+    # JAMAIS --flush-logs, --master-data ou --flush-privileges: exigem RELOAD,
+    # que o usuário não possui (erro 1227, rc=2), e quebrariam o deploy.
+    dump_flags='--single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'
+
+    # Cliente 8.0 contra servidor 5.7 emite "column statistics not supported by
+    # the server" em TODO dump. É inofensivo, mas polui o log do deploy e pode
+    # ser lido como falha. A flag que silencia isso só existe no cliente 8.0+ e
+    # não existe no MariaDB, então é detectada em vez de assumida — caso
+    # contrário o backup quebraria em hosts com cliente diferente.
+    if mysqldump --help 2>/dev/null | grep -q -- '--column-statistics'; then
+      dump_flags="$dump_flags --column-statistics=0"
+    fi
+
+    # shellcheck disable=SC2086
     if ! MYSQL_PWD="$($wp_cli --path="$document_root" eval 'echo DB_PASSWORD;')" \
-        mysqldump --single-transaction --quick --no-tablespaces \
-          --default-character-set=utf8mb4 \
+        mysqldump $dump_flags \
           -h "$db_host" -u "$db_user" "$db_name" 2>"${partial}.err" \
         | gzip > "$partial"; then
       printf 'mysqldump falhou\n' >&2
