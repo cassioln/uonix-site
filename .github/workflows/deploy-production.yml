@@ -243,13 +243,20 @@ jobs:
         env:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
           LOCAWEB_SSH_PASSWORD_FILE: ${{ runner.temp }}/locaweb-ssh-password
-          LOCAWEB_SSH_KNOWN_HOSTS_FILE: ${{ env.HOME }}/.ssh/locaweb_known_hosts
         run: |
           set -euo pipefail
           umask 077
           printf '%s' "$SSHPASS" > "$LOCAWEB_SSH_PASSWORD_FILE"
           chmod 600 "$LOCAWEB_SSH_PASSWORD_FILE"
           trap 'rm -f "$LOCAWEB_SSH_PASSWORD_FILE"' EXIT
+
+          # $HOME precisa ser expandido pelo SHELL, não por uma expressão de
+          # template do Actions: o contexto `env` não conhece HOME e resolveria
+          # para string vazia, gerando o caminho "/.ssh/locaweb_known_hosts" e
+          # abortando o backup com "known_hosts Locaweb ausente ou vazio".
+          # Todas as outras etapas deste workflow já usam "$HOME" — esta segue o
+          # mesmo padrão.
+          export LOCAWEB_SSH_KNOWN_HOSTS_FILE="$HOME/.ssh/locaweb_known_hosts"
 
           scripts/backup-remote-database.sh \
             --environment=production \
