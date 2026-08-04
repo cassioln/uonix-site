@@ -1873,7 +1873,15 @@ staging=\"\$(mktemp -d $(printf '%q' "$wp_content")/.uonix-rollback.XXXXXX)\"
 # destruiria o item original guardado como .replaced-item: com set -e, um mv
 # falho aborta o script, o trap roda e o original vai embora junto — perda de
 # dados, nao estado misto. Antes de limpar, devolve o que estiver guardado.
-trap 'for replaced in \"\$staging\"/.replaced-*; do
+# Definido ANTES do trap: sob set -u, um trap que le \$swapped antes da primeira
+# atribuicao aborta e deixa o staging orfao dentro de wp-content.
+swapped=''
+trap 'for undo in \$swapped; do
+  test -e \"\$staging/.replaced-\$undo\" || continue
+  rm -rf -- $(printf '%q' "$wp_content")/\"\$undo\" 2>/dev/null || true
+  mv -- \"\$staging/.replaced-\$undo\" $(printf '%q' "$wp_content")/\"\$undo\" 2>/dev/null || true
+done
+for replaced in \"\$staging\"/.replaced-*; do
   test -e \"\$replaced\" || continue
   original=\"\${replaced##*/.replaced-}\"
   test -e $(printf '%q' "$wp_content")/\"\$original\" || mv -- \"\$replaced\" $(printf '%q' "$wp_content")/\"\$original\" || true
@@ -1884,16 +1892,22 @@ rm -rf -- \"\$staging\"' EXIT
 # banco e falhar nos arquivos deixaria schema novo com arquivos antigos.
 tar -xzf $(printf '%q' "$files_file") -C \"\$staging\"
 gzip -dc $(printf '%q' "$dump_file") | { $(remote_db_import_stdin_command "$wp_cli" "$wp_root"); }
+# A troca e TODO-OU-NADA. Abortar no meio deixaria o destino com arquivos de duas
+# geracoes sobre um banco ja restaurado, e nenhum smoke detecta isso porque cada
+# arquivo isolado parece integro. Sob set -e qualquer falha cai no trap, que
+# devolve os originais guardados e desfaz as trocas ja feitas.
+swapped=''
 for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
   if [ -e \"\$staging/\$item\" ]; then
-    # Guarda o atual dentro do staging em vez de apagar: se o mv seguinte falhar,
-    # o original ainda existe. Apagar antes deixava metade dos itens ausente.
     if [ -e $(printf '%q' "$wp_content")/\"\$item\" ]; then
       mv -- $(printf '%q' "$wp_content")/\"\$item\" \"\$staging/.replaced-\$item\"
     fi
     mv -- \"\$staging/\$item\" $(printf '%q' "$wp_content")/\"\$item\"
+    swapped=\"\$item \$swapped\"
   fi
 done
+# Chegou ao fim: as trocas viraram definitivas e nao devem ser desfeitas.
+swapped=''
 $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
   else
     [ -n "$LOCAL_WP_CONTENT" ] && [ "$LOCAL_WP_CONTENT" != / ] || return 1
@@ -1930,29 +1944,49 @@ $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
       return "$rollback_status"
     fi
 
+    # A troca precisa ser TODO-OU-NADA. Trocar item por item e abortar no meio
+    # deixa o destino com arquivos de DUAS gerações (alguns do backup, outros da
+    # tentativa que falhou) sobre um banco já restaurado — estado que nenhum
+    # smoke detecta, porque cada arquivo isolado parece íntegro.
+    # Comprovado: falha no 3º item deixou uploads/plugins do backup e languages
+    # mutado, com status 42 e nenhum aviso sobre a mistura.
+    # Lista de itens já trocados, como string separada por espaço: arrays vazios
+    # sob `set -u` são um campo minado no bash 3.2 do macOS, e a lista aqui é de
+    # nomes fixos sem espaço.
+    local rollback_swapped=''
+    rollback_undo_swaps() {
+      local swapped
+      for swapped in $rollback_swapped; do
+        [ -e "$rollback_staging/.replaced-${swapped}" ] || continue
+        rm -rf -- "${LOCAL_WP_CONTENT:?}/${swapped}" 2>/dev/null || :
+        mv -- "$rollback_staging/.replaced-${swapped}" "${LOCAL_WP_CONTENT:?}/${swapped}" 2>/dev/null || :
+      done
+    }
+
     for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
       if [ -e "$rollback_staging/$item" ]; then
         # Move o atual para dentro do staging em vez de apagá-lo: se o `mv`
         # seguinte falhar, o item original ainda existe e é devolvido ao lugar.
-        # Apagar primeiro deixava o destino com metade dos itens restaurados e a
-        # outra metade AUSENTE — pior que não ter tentado, porque o site fica
-        # quebrado de um jeito que o backup não explica.
         if [ -e "${LOCAL_WP_CONTENT:?}/${item}" ]; then
           mv -- "${LOCAL_WP_CONTENT:?}/${item}" "$rollback_staging/.replaced-${item}" || rollback_status=$?
           if [ "$rollback_status" -ne 0 ]; then
+            rollback_undo_swaps
             rm -rf -- "$rollback_staging"
             return "$rollback_status"
           fi
         fi
         mv -- "$rollback_staging/$item" "${LOCAL_WP_CONTENT:?}/${item}" || rollback_status=$?
         if [ "$rollback_status" -ne 0 ]; then
-          # Devolve o original antes de desistir, para não deixar o item ausente.
+          # Devolve o original deste item e desfaz os anteriores, para não
+          # deixar o destino com duas gerações de arquivos.
           if [ -e "$rollback_staging/.replaced-${item}" ]; then
             mv -- "$rollback_staging/.replaced-${item}" "${LOCAL_WP_CONTENT:?}/${item}" || true
           fi
+          rollback_undo_swaps
           rm -rf -- "$rollback_staging"
           return "$rollback_status"
         fi
+        rollback_swapped="${item} ${rollback_swapped}"
       fi
     done
     rm -rf -- "$rollback_staging"
