@@ -22,6 +22,11 @@ export HOSTGATOR_DEV_ROOT='/synthetic/dev'
 export UONIX_CLONE_LIBRARY_ONLY=1
 # shellcheck source=../clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 
 # FR1.A — artefatos não vazios porém corruptos devem falhar antes da primeira
 # mutação. Os casos focados podem ser executados isoladamente por
@@ -38,6 +43,11 @@ fr1_test_corrupt_backup_before_mutation() (
 
   # shellcheck source=../clone-environment.sh
   source "$CLONE_SCRIPT"
+  # Guarda de bancos distintos consulta o banco real; no fixture retornaria
+  # vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+  # test-clone-database-transport.sh.
+  # shellcheck disable=SC2329
+  assert_distinct_databases() { :; }
   mkdir -p "$case_root/wp-content/uploads" "$case_root/runtime"
   printf 'fixture\n' > "$case_root/wp-content/uploads/file.txt"
   : > "$steps_log"
@@ -160,6 +170,11 @@ fr1_test_corrupt_export() (
 
   # shellcheck source=../clone-environment.sh
   source "$CLONE_SCRIPT"
+  # Guarda de bancos distintos consulta o banco real; no fixture retornaria
+  # vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+  # test-clone-database-transport.sh.
+  # shellcheck disable=SC2329
+  assert_distinct_databases() { :; }
   mkdir -p "$case_root"
   log() { :; }
 
@@ -290,6 +305,11 @@ unset -f chmod
 # archive de arquivos ausente deve preservar os dados e não tocar o banco.
 # shellcheck source=../clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 missing_archive_root="$TMP_DIR/missing-archive"
 missing_archive_backup="$missing_archive_root/backup"
 missing_archive_db_log="$missing_archive_root/db.log"
@@ -320,6 +340,11 @@ fi
 # com a causa primária e aciona exatamente um rollback, sem passos posteriores.
 # shellcheck source=../clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 post_import_root="$TMP_DIR/post-import"
 post_import_log="$post_import_root/steps.log"
 mkdir -p "$post_import_root/runtime"
@@ -388,6 +413,11 @@ if SIGNAL_LOG="$signal_log" SIGNAL_BACKUP="$signal_backup" CLONE_SCRIPT="$CLONE_
     set -u
     export UONIX_CLONE_LIBRARY_ONLY=1
     source "$CLONE_SCRIPT"
+    # Guarda de bancos distintos consulta o banco real; no fixture retornaria
+    # vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+    # test-clone-database-transport.sh.
+    # shellcheck disable=SC2329
+    assert_distinct_databases() { :; }
     TARGET="dev"
     TARGET_BACKUP_DIR="$SIGNAL_BACKUP"
     MUTATION_STARTED="1"
@@ -415,6 +445,11 @@ fi
 # reporta o status do rollback, preserva o backup e não avança para o banco.
 # shellcheck source=../clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 rollback_failure_root="$TMP_DIR/rollback-failure"
 rollback_failure_backup="$rollback_failure_root/backup"
 rollback_failure_archive_source="$rollback_failure_root/archive-source"
