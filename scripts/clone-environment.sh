@@ -1804,15 +1804,31 @@ test -s $(printf '%q' "$files_file")
 gzip -t $(printf '%q' "$dump_file")
 tar -tzf $(printf '%q' "$files_file") >/dev/null
 staging=\"\$(mktemp -d $(printf '%q' "$wp_content")/.uonix-rollback.XXXXXX)\"
-trap 'rm -rf -- \"\$staging\"' EXIT
+# O trap remove SOMENTE o que ainda nao foi promovido. Um rm -rf cego no staging
+# destruiria o item original guardado como .replaced-item: com set -e, um mv
+# falho aborta o script, o trap roda e o original vai embora junto — perda de
+# dados, nao estado misto. Antes de limpar, devolve o que estiver guardado.
+trap 'for replaced in \"\$staging\"/.replaced-*; do
+  test -e \"\$replaced\" || continue
+  original=\"\${replaced##*/.replaced-}\"
+  test -e $(printf '%q' "$wp_content")/\"\$original\" || mv -- \"\$replaced\" $(printf '%q' "$wp_content")/\"\$original\" || true
+done
+rm -rf -- \"\$staging\"' EXIT
+# Extrai antes de tocar em qualquer coisa: com set -e um archive corrompido
+# aborta aqui, com o destino intacto e o banco ainda nao mexido. Restaurar o
+# banco e falhar nos arquivos deixaria schema novo com arquivos antigos.
 tar -xzf $(printf '%q' "$files_file") -C \"\$staging\"
+gzip -dc $(printf '%q' "$dump_file") | { $(remote_db_import_stdin_command "$wp_cli" "$wp_root"); }
 for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
   if [ -e \"\$staging/\$item\" ]; then
-    rm -rf -- $(printf '%q' "$wp_content")/\"\$item\"
+    # Guarda o atual dentro do staging em vez de apagar: se o mv seguinte falhar,
+    # o original ainda existe. Apagar antes deixava metade dos itens ausente.
+    if [ -e $(printf '%q' "$wp_content")/\"\$item\" ]; then
+      mv -- $(printf '%q' "$wp_content")/\"\$item\" \"\$staging/.replaced-\$item\"
+    fi
     mv -- \"\$staging/\$item\" $(printf '%q' "$wp_content")/\"\$item\"
   fi
 done
-gzip -dc $(printf '%q' "$dump_file") | { $(remote_db_import_stdin_command "$wp_cli" "$wp_root"); }
 $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
   else
     [ -n "$LOCAL_WP_CONTENT" ] && [ "$LOCAL_WP_CONTENT" != / ] || return 1
@@ -1820,11 +1836,61 @@ $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
     [ -s "$files_file" ] || return 1
     gzip -t "$dump_file" || return 1
     tar -tzf "$files_file" >/dev/null || return 1
+    # Extrai PRIMEIRO para o staging, sem tocar em nada do destino. Se o archive
+    # estiver corrompido, o rollback aborta com o destino ainda intacto e o banco
+    # não é mexido — restaurar o banco e falhar nos arquivos deixaria o destino
+    # com schema novo e arquivos antigos, um estado que nenhum smoke detecta.
+    local rollback_staging rollback_status
+    rollback_staging="$(mktemp -d "${LOCAL_WP_CONTENT:?}/.uonix-rollback.XXXXXX")" || return $?
+    # Preserva o status ORIGINAL de cada passo em vez de achatar para 1: o
+    # relatório de falha do rollback informa esse código, e trocá-lo esconde a
+    # causa real de quem for investigar.
+    #
+    # O status é capturado com `|| rollback_status=$?`, não dentro de
+    # `if ! cmd; then rollback_status=$?`: nessa forma o `!` já normalizou $? para
+    # 0 e o rollback devolvia sucesso mesmo tendo falhado.
+    rollback_status=0
+    tar -xzf "$files_file" -C "$rollback_staging" || rollback_status=$?
+    if [ "$rollback_status" -ne 0 ]; then
+      rm -rf -- "$rollback_staging"
+      return "$rollback_status"
+    fi
+
+    # Com os arquivos já garantidos em staging, o banco vem antes da troca:
+    # restaurar arquivos sobre um schema divergente passa num smoke de arquivos e
+    # mente sobre o conteúdo.
+    gzip -dc "$dump_file" | local_db_import || rollback_status=$?
+    if [ "$rollback_status" -ne 0 ]; then
+      rm -rf -- "$rollback_staging"
+      return "$rollback_status"
+    fi
+
     for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
-      rm -rf -- "${LOCAL_WP_CONTENT:?}/${item}" || return $?
+      if [ -e "$rollback_staging/$item" ]; then
+        # Move o atual para dentro do staging em vez de apagá-lo: se o `mv`
+        # seguinte falhar, o item original ainda existe e é devolvido ao lugar.
+        # Apagar primeiro deixava o destino com metade dos itens restaurados e a
+        # outra metade AUSENTE — pior que não ter tentado, porque o site fica
+        # quebrado de um jeito que o backup não explica.
+        if [ -e "${LOCAL_WP_CONTENT:?}/${item}" ]; then
+          mv -- "${LOCAL_WP_CONTENT:?}/${item}" "$rollback_staging/.replaced-${item}" || rollback_status=$?
+          if [ "$rollback_status" -ne 0 ]; then
+            rm -rf -- "$rollback_staging"
+            return "$rollback_status"
+          fi
+        fi
+        mv -- "$rollback_staging/$item" "${LOCAL_WP_CONTENT:?}/${item}" || rollback_status=$?
+        if [ "$rollback_status" -ne 0 ]; then
+          # Devolve o original antes de desistir, para não deixar o item ausente.
+          if [ -e "$rollback_staging/.replaced-${item}" ]; then
+            mv -- "$rollback_staging/.replaced-${item}" "${LOCAL_WP_CONTENT:?}/${item}" || true
+          fi
+          rm -rf -- "$rollback_staging"
+          return "$rollback_status"
+        fi
+      fi
     done
-    tar -xzf "$files_file" -C "$LOCAL_WP_CONTENT" || return $?
-    gzip -dc "$dump_file" | local_db_import || return $?
+    rm -rf -- "$rollback_staging"
     local_wp cache flush || true
   fi
 }
