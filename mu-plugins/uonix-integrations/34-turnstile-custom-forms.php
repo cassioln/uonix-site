@@ -225,12 +225,45 @@ if ( ! function_exists( 'uonix_turnstile_enqueue_assets' ) ) {
 		return apiPromise;
 	}
 
+	function releasePendingSubmit(root, reason) {
+		var form = root && root.tagName === 'FORM' ? root : (root && root.closest ? root.closest('form') : null);
+
+		if (!form || form.dataset.uonixTurnstilePendingSubmit !== '1') {
+			return;
+		}
+
+		form.dataset.uonixTurnstilePendingSubmit = '';
+		form.dataset.uonixTurnstileUnavailable = '1';
+
+		if (window.console && window.console.warn) {
+			window.console.warn('UONIX Turnstile: desafio indisponivel (' + reason + '); envio liberado sem token.');
+		}
+
+		if (typeof form.requestSubmit === 'function') {
+			form.requestSubmit();
+		} else {
+			form.submit();
+		}
+	}
+
 	function prepare(root) {
 		return loadApi()
 			.then(function() {
 				renderAll(root || document);
 			})
-			.catch(function() {});
+			.catch(function(error) {
+				// Antes havia um catch VAZIO aqui. Quando o api.js da Cloudflare
+				// nao carrega -- adblock, firewall corporativo, DNS filtrado --
+				// o preventDefault do listener de submit ja impediu o envio e o
+				// erro era engolido em silencio: o botao parecia morto, sem
+				// nenhuma mensagem. Perda de lead nos formularios do site.
+				//
+				// Liberar o envio e a escolha correta para formulario publico: a
+				// validacao server-side continua obrigatoria e recusa o request
+				// sem token, entao nao se abre brecha. O que se evita e o
+				// usuario legitimo travado sem explicacao.
+				releasePendingSubmit(root, error && error.type ? error.type : 'api indisponivel');
+			});
 	}
 
 	function formHasToken(form) {
