@@ -117,6 +117,9 @@ jobs:
       - name: Test SSH transport
         run: bash scripts/tests/test-ssh-transport.sh
 
+      - name: Test database backup contract
+        run: bash scripts/tests/test-database-backup.sh
+
       - name: Test SSH connection reuse
         run: bash scripts/tests/test-ssh-connection-reuse.sh
 
