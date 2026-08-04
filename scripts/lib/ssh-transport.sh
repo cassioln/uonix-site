@@ -164,6 +164,9 @@ uonix_transport_build_ssh_command() {
         -o ControlMaster=auto
         -o ControlPersist=120
         -o "ControlPath=$control_path"
+        -o ServerAliveInterval=15
+        -o ServerAliveCountMax=4
+        -o ConnectTimeout=30
       )
       ;;
     locaweb-password)
@@ -184,6 +187,9 @@ uonix_transport_build_ssh_command() {
         -o ControlMaster=auto
         -o ControlPersist=120
         -o "ControlPath=$control_path"
+        -o ServerAliveInterval=15
+        -o ServerAliveCountMax=4
+        -o ConnectTimeout=30
       )
       ;;
     local-podman)
@@ -211,6 +217,20 @@ uonix_transport_ssh_once() {
 
   uonix_transport_build_ssh_command "$environment" || return
   uonix_transport_execute_built_ssh "$UONIX_TRANSPORT_REMOTE" "$remote_command"
+}
+
+uonix_transport_close_master() {
+  local environment="$1"
+
+  # Encerra o master multiplexado do ambiente. Importa mais na Locaweb: lá a
+  # sessão é autenticada por SENHA, e um socket vivo permite a qualquer processo
+  # do mesmo usuário reusar a sessão sem apresentar credencial. Fechar ao fim da
+  # operação reduz a janela de 120s (ControlPersist) para ~zero.
+  #
+  # Nunca falha o chamador: é limpeza, e um master já encerrado é sucesso.
+  uonix_transport_build_ssh_command "$environment" >/dev/null 2>&1 || return 0
+  uonix_transport_execute_built_ssh -O exit "$UONIX_TRANSPORT_REMOTE" >/dev/null 2>&1 || true
+  return 0
 }
 
 uonix_transport_validate_retry_config() {
