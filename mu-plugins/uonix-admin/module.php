@@ -19,6 +19,7 @@ uonix_mu_require_files(
 		'46-admin-limpeza-conteudo.php',
 		'47-admin-curriculos-recebidos.php',
 		'48-admin-clone-ambientes.php',
+		'51-login-turnstile.php',
 	),
 	'uonix-admin'
 );
