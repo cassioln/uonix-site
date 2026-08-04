@@ -37,6 +37,11 @@ export UONIX_CLONE_LIBRARY_ONLY=1
 
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 
 # This regex intentionally matches the literal PHP variable in the module.
 # shellcheck disable=SC2016
