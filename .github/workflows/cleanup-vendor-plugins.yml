@@ -9,8 +9,9 @@ name: Cleanup Vendor Plugins
 #
 # O loginizer sai por decisão registrada de Cassio (2026-08-05): o Turnstile no
 # wp-login.php passa a ser a única proteção de login. O bloco `# BEGIN Loginizer`
-# do .htaccess NÃO é tocado — ele contém o rewrite da URL de admin `/painel`,
-# medido vivo nos três ambientes. Removê-lo derrubaria o acesso ao painel.
+# do .htaccess contém o rewrite da URL de admin `/painel`: as DIRETIVAS nunca são
+# tocadas. Depois da remoção, somente os dois comentários enganosos são renomeados
+# para `UonixAdminPath`, com prova byte a byte antes de substituir o arquivo.
 
 on:
   workflow_dispatch:
@@ -334,6 +335,7 @@ jobs:
             --host="$(wp config get DB_HOST)" \
             --user="$(wp config get DB_USER)" \
             --single-transaction --quick --skip-lock-tables \
+            --no-tablespaces --routines --triggers --events \
             --default-character-set=utf8mb4 \
             "$(wp config get DB_NAME)" | gzip -c > "$dump"
 
@@ -444,6 +446,104 @@ jobs:
           wp plugin list --format=csv --fields=name | tail -n +2 | wc -l
 
           [ "$failures" -eq 0 ]
+          REMOTE
+
+      - name: Rename misleading /painel markers without changing directives
+        if: ${{ inputs.mode == 'execute' }}
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"; php_bin="$2"
+          htaccess="$document_root/.htaccess"
+          old_begin='# BEGIN Loginizer'
+          old_end='# END Loginizer'
+          new_begin='# BEGIN UonixAdminPath (NAO REMOVER: serve a URL de admin /painel)'
+          new_end='# END UonixAdminPath'
+
+          test -s "$htaccess"
+          # `grep -Fx` não casaria o marcador num arquivo CRLF (o \r final faz
+          # parte da linha). A contagem canônica é feita pelo PHP, que faz rtrim
+          # do \r; aqui só exigimos que o marcador exista de alguma forma.
+          [ "$(grep -Fc "$old_begin" "$htaccess")" -ge 1 ]
+          [ "$(grep -Fc "$old_end" "$htaccess")" -ge 1 ]
+
+          tmp="${htaccess}.uonix-marker.$$"
+          before="${tmp}.before"
+          after="${tmp}.after"
+          trap 'rm -f "$tmp" "$before" "$after"' EXIT
+
+          # Terminadores medidos ANTES: o .htaccess real é LF e não termina em
+          # newline. Converter CRLF<->LF faria o Apache reinterpretar o arquivo.
+          cr_antes="$(tr -dc '\r' < "$htaccess" | wc -c | tr -d ' ')"
+          printf 'CR_ANTES=%s\n' "$cr_antes"
+
+          # A cópia preserva dono, grupo e modo. O original só é substituído
+          # depois de todas as provas abaixo passarem.
+          cp -p "$htaccess" "$tmp"
+          # Comparação por LINHA, com rtrim do \r: casar o marcador com "\n"
+          # colado falharia quando o bloco fosse a última linha de um arquivo sem
+          # terminador final. Preserva o terminador original de cada linha.
+          "$php_bin" -d disable_functions= -r '
+            $path = $argv[1];
+            $map  = [ $argv[2] => $argv[3], $argv[4] => $argv[5] ];
+            $data = file_get_contents($path);
+            if ($data === false) { exit(20); }
+            $lines = explode("\n", $data);
+            $hits  = [];
+            foreach ($lines as $i => $line) {
+              $bare = rtrim($line, "\r");
+              if (isset($map[$bare])) {
+                $hits[$bare] = ($hits[$bare] ?? 0) + 1;
+                $eol = strlen($line) > strlen($bare) ? "\r" : "";
+                $lines[$i] = $map[$bare] . $eol;
+              }
+            }
+            foreach ($map as $old => $new) {
+              if (($hits[$old] ?? 0) !== 1) { exit(21); }
+            }
+            $count = count($hits);
+            if ($count !== 2) { exit(22); }
+            $out = implode("\n", $lines);
+            if (file_put_contents($path, $out) !== strlen($out)) { exit(23); }
+          ' "$tmp" "$old_begin" "$new_begin" "$old_end" "$new_end"
+
+          # Remove somente os dois comentários de cada lado e compara o resto.
+          # O `tr -d '\r'` é aplicado apenas na EXTRAÇÃO para a comparação, para
+          # que -Fvx case o marcador também em arquivos CRLF. O arquivo real
+          # mantém seus terminadores — provado pela contagem de CR abaixo.
+          tr -d '\r' < "$htaccess" | grep -Fvx -e "$old_begin" -e "$old_end" > "$before"
+          tr -d '\r' < "$tmp" | grep -Fvx -e "$new_begin" -e "$new_end" > "$after"
+          cmp -s "$before" "$after" || {
+            echo 'Diretivas do /painel mudariam; abortando antes de substituir .htaccess.' >&2
+            exit 1
+          }
+          # Também sem -Fx, pelo mesmo motivo do CRLF acima.
+          [ "$(grep -Fc "$new_begin" "$tmp")" -ge 1 ]
+          [ "$(grep -Fc "$new_end" "$tmp")" -ge 1 ]
+          ! grep -Fq "$old_begin" "$tmp"
+          ! grep -Fq "$old_end" "$tmp"
+          # Terminadores idênticos: nenhuma conversão CRLF<->LF escapou.
+          cr_depois="$(tr -dc '\r' < "$tmp" | wc -c | tr -d ' ')"
+          [ "$cr_antes" = "$cr_depois" ] || {
+            echo "Terminadores de linha mudariam ($cr_antes -> $cr_depois); abortando." >&2
+            exit 1
+          }
+
+          mv -f "$tmp" "$htaccess"
+          rm -f "$before" "$after"
+          trap - EXIT
+          echo 'UONIX_ADMIN_PATH_MARKERS_RENAMED'
           REMOTE
 
       - name: Validate the site after removal
