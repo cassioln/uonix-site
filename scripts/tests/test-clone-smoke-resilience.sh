@@ -81,10 +81,13 @@ case "$result" in
 esac
 
 # 3) WAF que NUNCA libera precisa reprovar: tolerar sempre esconderia queda real.
-result="$(run_smoke '406 406 406 406 406 406')"
+#    Fixar CALLS exatamente em max_attempts é essencial: sem isso, elevar
+#    max_attempts para 100 deixaria o smoke pendurado e o teste seguiria verde.
+result="$(run_smoke '406 406 406 406 406 406 406 406')"
 case "$result" in
   EXIT=0*) fail "bloqueio permanente de WAF foi aceito: ${result}" ;;
-  EXIT=*\ CALLS=1) fail "bloqueio permanente não tentou novamente: ${result}" ;;
+  'EXIT=1 CALLS=6'|'EXIT=ABORT CALLS=6') ;;
+  *) fail "bloqueio permanente deveria reprovar com exatamente 6 chamadas; obtive: ${result}" ;;
 esac
 
 # 4) Erro de servidor real também é retentado, mas reprova se persistir.
@@ -166,12 +169,28 @@ attempts_declared="$(printf '%s\n' "$smoke_body" | sed -n 's/^[[:space:]]*local 
 printf '%s\n' "$smoke_body" | grep -qi 'AVISO' \
   || fail 'sucesso após retry não emite aviso; degradação passaria silenciosa'
 
-# 8) O tratamento tolerante precisa estar no CÓDIGO, não só no comportamento do
-#    mock: exige retry real e classificação explícita de status transitório.
-body="$(awk '$0 == "validate_http_endpoint() {" { inside = 1 } inside { print } inside && /^}$/ { exit }' "$CLONE_SCRIPT")"
+# 10) Redirecionamento é resposta saudável: home costuma redirecionar. Sem este
+#     caso, remover 3xx dos aprovados passaria despercebido.
+result="$(run_smoke '301')"
+case "$result" in
+  'EXIT=0 CALLS=1') ;;
+  *) fail "3xx deveria ser aceito de imediato; obtive: ${result}" ;;
+esac
+
+# 11) 403 é outra resposta comum do Mod_Security no mesmo incidente. Precisa ser
+#     retentada como indisponibilidade, não reprovar de primeira.
+result="$(run_smoke '403 200')"
+case "$result" in
+  'EXIT=0 CALLS=2') ;;
+  *) fail "403 do WAF deveria ser retentado; obtive: ${result}" ;;
+esac
+
+# 12) O tratamento tolerante precisa estar no CÓDIGO, não em prosa: as asserções
+#     textuais ignoram comentários, senão passariam só pela explicação do topo.
+body="$(printf '%s\n' "$smoke_body" | grep -v '^[[:space:]]*#')"
 printf '%s\n' "$body" | grep -qE 'sleep' \
   || fail 'validate_http_endpoint não espera entre tentativas'
-printf '%s\n' "$body" | grep -qE '40[69]' \
+printf '%s\n' "$body" | grep -qE '^[[:space:]]*[0-9|]*40[69]' \
   || fail 'validate_http_endpoint não classifica os bloqueios 406/409 do WAF'
 
 printf 'PASS: smoke tolera bloqueio transitório de WAF e ainda reprova falha real.\n'

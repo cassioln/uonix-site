@@ -2185,7 +2185,7 @@ validate_http_endpoint() {
           die "$label respondeu HTTP $status"
           return 1
           ;;
-        408|409|425|429|406|500|502|503|504)
+        408|409|425|429|403|406|500|502|503|504)
           last_reason="HTTP $status"
           ;;
         *)
