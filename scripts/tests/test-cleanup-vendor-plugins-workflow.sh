@@ -355,9 +355,44 @@ has "$backup_block" 'BACKUP_VALIDO' \
 # acrescentado ao fluxo somente quando o produtor sai com status zero.
 # Exige as DUAS pontas: quem grava o marcador e quem o compara. Só mencionar o
 # nome num comentário, ou gravá-lo sem comparar, não vale.
+#
+# Os dois caminhos em stream foram REFUTADOS pelo host:
+# - run 31046533827: marcador como segundo membro gzip não apareceu;
+# - run 31050726743: marcador no mesmo pipeline também não apareceu.
+# A prova deixa de depender do comportamento de pipe/gzip do host: o produtor
+# grava um SQL físico, o marcador é anexado a ESSE arquivo depois de rc=0, e só
+# então um único gzip é criado. O temporário precisa ser limpo até em falha.
 # shellcheck disable=SC2016
-has_lit "$backup_block" "printf -- '-- UONIX_DUMP_COMPLETO\\n' | gzip -c >> \"\$dump\"" \
-  || fail 'dump não recebe o marcador de conclusão próprio acrescentado ao fluxo'
+has_lit "$backup_block" 'sql_tmp="$backup_dir/db.sql.partial"' \
+  || fail 'backup não usa arquivo SQL temporário físico para atestar conclusão'
+# shellcheck disable=SC2016
+has_lit "$backup_block" 'trap '\''rm -f -- "$sql_tmp"'\'' EXIT' \
+  || fail 'arquivo SQL temporário pode sobreviver a falha e vazar dados'
+# shellcheck disable=SC2016
+has_lit "$backup_block" '"$(wp config get DB_NAME)" > "$sql_tmp"' \
+  || fail 'mysqldump não grava diretamente no arquivo SQL temporário'
+# Garante linha autônoma mesmo se o cliente terminar sem newline.
+# shellcheck disable=SC2016
+has_lit "$backup_block" "printf -- '\\n-- UONIX_DUMP_COMPLETO\\n' >> \"\$sql_tmp\"" \
+  || fail 'marcador não é anexado como linha autônoma ao SQL físico'
+# shellcheck disable=SC2016
+has_lit "$backup_block" 'gzip -c "$sql_tmp" > "$dump"' \
+  || fail 'gzip não é gerado em um único membro a partir do SQL atestado'
+# Rejeita as duas implementações já refutadas em produção.
+# shellcheck disable=SC2016
+if has_lit "$backup_block" 'gzip -c >> "$dump"' \
+  || has_lit "$backup_block" '; } | gzip -c > "$dump"'; then
+  fail 'backup reutiliza stream gzip refutado pelo host; precisa comprimir SQL físico'
+fi
+# Ordem concreta: produtor -> marcador -> gzip. Uma menção decorativa não basta.
+# shellcheck disable=SC2016
+producer_line="$(grep -nF '"$(wp config get DB_NAME)" > "$sql_tmp"' <<<"$backup_block" | head -1 | cut -d: -f1)"
+marker_line="$(grep -nF "printf -- '\\n-- UONIX_DUMP_COMPLETO\\n' >> \"\$sql_tmp\"" <<<"$backup_block" | head -1 | cut -d: -f1)"
+# shellcheck disable=SC2016
+gzip_line="$(grep -nF 'gzip -c "$sql_tmp" > "$dump"' <<<"$backup_block" | head -1 | cut -d: -f1)"
+[ -n "$producer_line" ] && [ -n "$marker_line" ] && [ -n "$gzip_line" ] \
+  && [ "$producer_line" -lt "$marker_line" ] && [ "$marker_line" -lt "$gzip_line" ] \
+  || fail 'ordem do atestado físico não é produtor -> marcador -> gzip'
 # shellcheck disable=SC2016
 has_lit "$backup_block" '[ "$last" != '"'"'-- UONIX_DUMP_COMPLETO'"'"' ]' \
   || fail 'prova não compara a última linha com o marcador próprio'
@@ -366,11 +401,12 @@ if has "$backup_block" 'Dump completed'; then
   # shellcheck disable=SC2016
   fail 'prova volta a depender do footer `-- Dump completed`, que este host não emite'
 fi
-# O marcador só vale se for acrescentado APÓS o produtor terminar bem. Sob
-# pipefail, `dump | gzip` propaga a falha; o marcador vem num segundo append.
-# shellcheck disable=SC2016
-has_lit "$backup_block" 'set -o pipefail' \
-  || fail 'produtor do dump não roda sob pipefail; falha do mysqldump passaria como sucesso'
+# O marcador só vale se o script remoto abortar imediatamente quando o produtor
+# retornar rc != 0; sem `-e`, o append poderia rodar depois de um dump parcial.
+remote_backup="$(awk "/<<'REMOTE'/,/^          REMOTE$/" <<<"$backup_block")"
+[ -n "$remote_backup" ] || fail 'não encontrei o script remoto do backup'
+has_lit "$remote_backup" 'set -euo pipefail' \
+  || fail 'backup remoto não usa set -euo pipefail; marcador poderia seguir falha do produtor'
 has_lit "$backup_block" "tail -n 1" \
   || fail 'prova não exige o marcador como última linha não vazia'
 # Mínimo de tabelas: gzip íntegro + marcador ainda passariam num dump que perdeu
@@ -385,6 +421,39 @@ tabelas_min="$(sed -n 's/.*"\$tabelas" -ge \([0-9]\{1,\}\).*/\1/p' <<<"$backup_b
   || fail 'não encontrei o piso de tabelas do gate de cobertura'
 [ "$tabelas_min" -ge 100 ] \
   || fail "piso de tabelas é $tabelas_min; baixo demais para produção (158 tabelas)"
+# --no-defaults é OBRIGATÓRIO e precisa vir ANTES das outras opções. Auditoria
+# provou em MariaDB 10.11 real que um `~/.my.cnf` com `[mysqldump] no-data` (ou
+# `where=1=0`) faz o produtor sair rc=0 com ZERO dados: marcador presente e 160
+# linhas CREATE TABLE. Em hospedagem compartilhada o painel cria esse arquivo, o
+# que dispensa invasor. Restaurar esse backup entregaria um site vazio.
+has_lit "$backup_block" '--no-defaults' \
+  || fail 'produtor sem --no-defaults; ~/.my.cnf poderia injetar no-data e zerar os dados'
+nodefaults_line="$(grep -nF -- '--no-defaults' <<<"$backup_block" | head -1 | cut -d: -f1)"
+firstopt_line="$(grep -nF -- '--single-transaction' <<<"$backup_block" | head -1 | cut -d: -f1)"
+[ -n "$nodefaults_line" ] && [ -n "$firstopt_line" ] && [ "$nodefaults_line" -lt "$firstopt_line" ] \
+  || fail '--no-defaults não precede as demais opções do produtor'
+# Cobertura por CREATE TABLE é falsificável: auditoria provou que o corpo de uma
+# ROUTINE é emitido verbatim por --routines, e um corpo com linhas literais
+# `CREATE TABLE ...` fez um dump de 1 tabela contar 121. A prova precisa medir
+# VOLUME DE DADOS, não só estrutura.
+has_lit "$backup_block" "grep -c '^INSERT INTO'" \
+  || fail 'prova não conta INSERT; dump só-estrutura (no-data) passaria'
+# shellcheck disable=SC2016
+inserts_min="$(sed -n 's/.*"\$inserts" -ge \([0-9]\{1,\}\).*/\1/p' <<<"$backup_block" | head -1)"
+[ -n "$inserts_min" ] \
+  || fail 'não encontrei o piso de INSERT do gate de volume'
+[ "$inserts_min" -ge 20 ] \
+  || fail "piso de INSERT é $inserts_min; baixo demais para provar que há dados"
+# Bytes descomprimidos: o ataque no-data produziu 2861 bytes. Um piso de bytes
+# reprova estrutura-sem-dados mesmo se a contagem de INSERT for burlada.
+has_lit "$backup_block" 'bytes_sql=' \
+  || fail 'prova não mede o tamanho descomprimido do dump'
+# shellcheck disable=SC2016
+bytes_min="$(sed -n 's/.*"\$bytes_sql" -ge \([0-9]\{1,\}\).*/\1/p' <<<"$backup_block" | head -1)"
+[ -n "$bytes_min" ] \
+  || fail 'não encontrei o piso de bytes do gate de volume'
+[ "$bytes_min" -ge 100000 ] \
+  || fail "piso de bytes é $bytes_min; baixo demais (ataque no-data gerou 2861)"
 # Guard anti-vazamento AMPLO: a auditoria provou que proibir só `printf "$last"`
 # deixa passar echo, ${last}, here-string e linha de continuação. A regra passa a
 # ser por CONTEXTO: comparar $last é legítimo; imprimi-lo não. Só ${#last} pode
@@ -417,6 +486,143 @@ valid_line="$(grep -n 'BACKUP_VALIDO' <<<"$backup_block" | head -1 | cut -d: -f1
 [ -n "$valid_line" ] || fail 'não encontrei a validação do dump'
 [ "$backup_dir_line" -gt "$valid_line" ] \
   || fail "BACKUP_DIR é publicado (linha $backup_dir_line) antes da validação do dump (linha $valid_line)"
+
+# ---------------------------------------------------------------------------
+# SEMÂNTICA DE SHELL, não presença de string.
+#
+# Auditoria de robustez aplicou 36 mutações no step de backup e 22 SOBREVIVERAM:
+# todas as asserções acima verificam se um texto existe no bloco — inclusive em
+# comentários — e nenhuma verificava status de saída, redirecionamento ou alvo.
+# Exemplos que passavam: `exit 1` -> `exit 0`, `gzip -t "$dump" || true`,
+# `tail -n 1` -> `head -n 1` mantendo `# tail -n 1` num comentário, `: > "$dump"`
+# depois das provas, e `[ ... ] && false` neutralizando a comparação.
+#
+# O bloco abaixo analisa o step SEM comentários e afirma comportamento.
+# shellcheck disable=SC2001
+backup_code="$(sed 's/[[:space:]]*#.*$//' <<<"$backup_block" | grep -v '^[[:space:]]*$')"
+
+# 1. Todo diagnóstico BACKUP_INVALIDO precisa abortar de fato.
+if grep -qE 'exit[[:space:]]+0' <<<"$backup_code"; then
+  fail 'step de backup contém exit 0; um gate que "reprova" e segue é enfeite de log'
+fi
+invalidos="$(grep -c 'BACKUP_INVALIDO' <<<"$backup_code" || true)"
+exits="$(grep -cE '^[[:space:]]*exit[[:space:]]+1[[:space:]]*$' <<<"$backup_code" || true)"
+[ "$invalidos" -ge 3 ] \
+  || fail "apenas $invalidos diagnósticos BACKUP_INVALIDO; provas de marcador, volume e tabelas são obrigatórias"
+[ "$exits" -ge "$invalidos" ] \
+  || fail "há $invalidos BACKUP_INVALIDO mas só $exits 'exit 1'; algum gate não aborta"
+
+# 2. Provas de envelope não podem ser neutralizadas por `|| true`.
+# shellcheck disable=SC2016
+for prova in 'test -s "$dump"' 'gzip -t "$dump"'; do
+  linha="$(grep -F "$prova" <<<"$backup_code" | head -1)"
+  [ -n "$linha" ] || fail "prova ausente no step de backup: $prova"
+  case "$linha" in
+    *'|| true'*|*'|| :'*|*'||true'*)
+      fail "prova neutralizada por || true: $prova" ;;
+  esac
+done
+
+# 3. A comparação do marcador não pode ser anulada mantendo o texto exigido.
+# shellcheck disable=SC2016
+cmp_line="$(grep -F '[ "$last" != ' <<<"$backup_code" | head -1)"
+[ -n "$cmp_line" ] || fail 'não encontrei a comparação do marcador no código do backup'
+case "$cmp_line" in
+  *'&& false'*|*'|| true'*|*'&& :'*)
+    fail 'comparação do marcador foi neutralizada (&& false / || true)' ;;
+esac
+
+# 4. A última linha precisa vir de tail, no CÓDIGO — não de um comentário.
+# shellcheck disable=SC2016
+last_assign="$(grep -F 'last="$(gzip -dc' <<<"$backup_code" | head -1)"
+[ -n "$last_assign" ] || fail 'não encontrei a extração da última linha do dump'
+case "$last_assign" in
+  *'tail -n 1'*) : ;;
+  *) fail 'extração do marcador não usa tail -n 1 no código (head -n 1 nunca reprovaria)' ;;
+esac
+case "$last_assign" in
+  *"tr -d '\\r'"*) : ;;
+  *) fail 'extração do marcador não normaliza CRLF no código' ;;
+esac
+case "$last_assign" in
+  *"grep -v '^[[:space:]]*\$'"*) : ;;
+  *) fail 'extração do marcador não filtra linhas vazias no código' ;;
+esac
+
+# 5. Contagens precisam ser ancoradas e não podem ter default fabricado.
+for par in "tabelas:^CREATE TABLE" "inserts:^INSERT INTO"; do
+  var="${par%%:*}"; pat="${par#*:}"
+  linha="$(grep -F "${var}=\"\$(gzip -dc" <<<"$backup_code" | head -1)"
+  [ -n "$linha" ] || fail "não encontrei a contagem de $var"
+  case "$linha" in
+    *"grep -c '${pat}'"*) : ;;
+    *) fail "contagem de $var não está ancorada em '${pat}'" ;;
+  esac
+  case "$linha" in
+    *'|| echo'*|*'|| printf'*)
+      fail "contagem de $var tem default fabricado; um erro viraria número aprovado" ;;
+  esac
+done
+
+# 6. O produtor não pode receber opções que esvaziem o dump.
+if grep -qE -- '--where|--no-data|--skip-triggers|--ignore-table' <<<"$backup_code"; then
+  fail 'produtor recebe opção que reduz o conteúdo do dump (--where/--no-data/...)'
+fi
+
+# 7. Depois de validado, o dump não pode ser truncado nem escrito fora do
+#    diretório publicado.
+# shellcheck disable=SC2016
+if grep -qE '^[[:space:]]*:[[:space:]]*>[[:space:]]*"\$dump"' <<<"$backup_code"; then
+  fail 'dump é truncado depois das provas; BACKUP_DIR apontaria para diretório vazio'
+fi
+dump_assign="$(grep -F 'dump="' <<<"$backup_code" | head -1)"
+# shellcheck disable=SC2016
+case "$dump_assign" in
+  *'"$backup_dir/'*) : ;;
+  *) fail 'dump não é gravado dentro de $backup_dir; o backup publicado não conteria o dump' ;;
+esac
+
+# 8. O step de backup NÃO pode escrever no .htaccess: só o step de rename mexe
+#    nele, e o bloco do /painel vive lá. A linha `- name:` do próprio step cita
+#    ".htaccess" e não é código, então é descartada.
+while IFS= read -r linha; do
+  case "$linha" in
+    *'- name:'*) continue ;;
+  esac
+  case "$linha" in
+    *'.htaccess'*)
+      case "$linha" in
+        *'cp -p'*|*'test -s'*|*'chmod'*|*htaccess.bak*) : ;;
+        *) fail 'step de backup manipula .htaccess além de copiá-lo; risco de derrubar /painel' ;;
+      esac
+      ;;
+  esac
+done <<<"$backup_code"
+
+# 9. Permissões e consistência do dump em host compartilhado. O htaccess.bak
+#    precisa ser copiado E verificado: um .htaccess.bak vazio some com a prova
+#    de rollback do /painel.
+for exigido in 'umask 077' 'chmod 700' 'chmod 600' '--single-transaction'; do
+  has_lit "$backup_code" "$exigido" \
+    || fail "step de backup perdeu $exigido (permissão ou consistência do dump)"
+done
+# shellcheck disable=SC2016
+has_lit "$backup_code" 'cp -p "$document_root/.htaccess" "$backup_dir/htaccess.bak"' \
+  || fail 'step de backup não copia o .htaccess preservando metadados'
+# shellcheck disable=SC2016
+has_lit "$backup_code" 'test -s "$backup_dir/htaccess.bak"' \
+  || fail 'step de backup não verifica o htaccess.bak; backup vazio passaria'
+
+# 10. O backup só roda em execute: em dry-run não pode haver escrita remota.
+backup_if="$(awk '/name: Back up .htaccess/,/run: \|/' <<<"$code" | grep -F 'if:' | head -1)"
+[ -n "$backup_if" ] || fail 'step de backup sem condição if'
+case "$backup_if" in
+  *"inputs.mode == 'execute'"*) : ;;
+  *) fail 'condição do step de backup mudou; poderia rodar em dry-run' ;;
+esac
+if grep -qE "mode != 'execute'|always\(\)" <<<"$backup_if"; then
+  fail 'condição do step de backup aceita modos não-execute'
+fi
 
 # O check do Turnstile precisa usar o CONTRATO REAL do módulo. A primeira versão
 # testava uma constante UONIX_TURNSTILE_ENABLED que NÃO existe no repositório, e o

@@ -47,3 +47,9 @@ __pycache__/
 
 # Planos de sessão do agente (contexto local de trabalho)
 .hermes/plans/
+
+# Worktrees git criados para trabalho isolado (git worktree add .worktrees/...).
+# São checkouts locais, nunca conteúdo do repositório: versioná-los aninharia
+# uma cópia da árvore dentro dela mesma. Remover com `git worktree remove`,
+# não com `rm -rf` — o registro em .git/worktrees/ precisa sair junto.
+.worktrees/
