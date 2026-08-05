@@ -328,28 +328,58 @@ jobs:
           test -s "$backup_dir/htaccess.bak"
 
           # `wp db export` NÃO funciona aqui: a Locaweb desabilita proc_open de
-          # forma compilada. mysqldump direto é o único caminho confiável.
+          # forma compilada. O dump direto é o único caminho confiável.
+          #
+          # O produtor é DETECTADO, não assumido: o preflight aceita mysqldump ou
+          # mariadb-dump, e chamar `mysqldump` fixo faria um host só-MariaDB falhar
+          # depois de já ter adquirido o lock.
+          if command -v mysqldump >/dev/null 2>&1; then
+            dump_bin="$(command -v mysqldump)"
+          elif command -v mariadb-dump >/dev/null 2>&1; then
+            dump_bin="$(command -v mariadb-dump)"
+          else
+            echo 'BACKUP_INVALIDO: nenhum produtor de dump disponível no host' >&2
+            exit 1
+          fi
+          printf 'dump_bin=%s\n' "${dump_bin##*/}"
+
           dump="$backup_dir/db.sql.gz"
           set -o pipefail
-          MYSQL_PWD="$(wp config get DB_PASSWORD)" mysqldump \
+          # O footer `-- Dump completed` do cliente NÃO é confiável neste host: dois
+          # runs reais terminaram com status zero sem emiti-lo, inclusive já com
+          # --comments --dump-date. A prova de conclusão passa a ser um marcador
+          # NOSSO, acrescentado ao fluxo somente quando o produtor sai bem — sob
+          # pipefail, qualquer falha do dump aborta antes deste append.
+          MYSQL_PWD="$(wp config get DB_PASSWORD)" "$dump_bin" \
             --host="$(wp config get DB_HOST)" \
             --user="$(wp config get DB_USER)" \
             --single-transaction --quick --skip-lock-tables \
             --no-tablespaces --routines --triggers --events \
+            --comments --dump-date \
             --default-character-set=utf8mb4 \
             "$(wp config get DB_NAME)" | gzip -c > "$dump"
+          printf -- '-- UONIX_DUMP_COMPLETO\n' | gzip -c >> "$dump"
 
-          # gzip -t valida o ENVELOPE, não o conteúdo: um mysqldump interrompido
-          # produz gzip íntegro. Exigir o marcador final como última linha não
-          # vazia é o que prova dump completo. Filtra vazias antes do tail e
+          # gzip -t valida o ENVELOPE, não o conteúdo: um dump interrompido produz
+          # gzip íntegro. Exigir o nosso marcador como última linha não vazia é o
+          # que prova que o produtor chegou ao fim. Filtra vazias antes do tail e
           # normaliza CRLF — janela fixa reprovaria dump legítimo.
           test -s "$dump"
           gzip -t "$dump"
           last="$(gzip -dc "$dump" | tr -d '\r' | grep -v '^[[:space:]]*$' | tail -n 1)"
-          case "$last" in
-            '-- Dump completed'|'-- Dump completed on '*) echo 'BACKUP_VALIDO' ;;
-            *) echo 'BACKUP_INVALIDO: dump sem marcador final' >&2; exit 1 ;;
-          esac
+          if [ "$last" != '-- UONIX_DUMP_COMPLETO' ]; then
+            printf 'BACKUP_INVALIDO: dump sem marcador de conclusão (bytes=%s)\n' "${#last}" >&2
+            exit 1
+          fi
+          # Marcador presente ainda não é cobertura: um dump que perdeu tabelas no
+          # meio pode terminar bem. Conta as tabelas realmente presentes.
+          tabelas="$(gzip -dc "$dump" | grep -c '^CREATE TABLE' || true)"
+          printf 'tabelas=%s\n' "$tabelas"
+          [ "$tabelas" -ge 100 ] || {
+            printf 'BACKUP_INVALIDO: apenas %s tabelas no dump (esperado >= 100)\n' "$tabelas" >&2
+            exit 1
+          }
+          echo 'BACKUP_VALIDO'
           chmod 600 "$dump" "$backup_dir/htaccess.bak"
           ls -la "$backup_dir"
           REMOTE
