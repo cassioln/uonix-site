@@ -48,16 +48,18 @@ def idx(fragment):
             return i
     die(f'step ausente: {fragment}')
 
-# ORDEM CRÍTICA: preflight -> lock -> backup -> prova de uso -> remoção -> validação.
+# ORDEM CRÍTICA: preflight -> lock -> backup -> prova de uso -> remoção ->
+# renomear APENAS comentários do /painel -> validação.
 i_pre    = idx('Preflight SSH')
 i_lock   = idx('Acquire exclusive lock')
 i_backup = idx('Back up')
 i_usage  = idx('zero content usage')
 i_remove = idx('Remove vendor plugins')
+i_rename = idx('Rename misleading /painel markers')
 i_valid  = idx('Validate the site after removal')
 i_rel    = idx('Release exclusive lock')
 
-if not (i_pre < i_lock < i_backup < i_usage < i_remove < i_valid):
+if not (i_pre < i_lock < i_backup < i_usage < i_remove < i_rename < i_valid):
     die(f'ordem dos steps não é fail-closed: {names}')
 if i_rel < i_remove:
     die('lock é liberado antes da remoção')
@@ -103,6 +105,11 @@ has_word() {
 has_i() {
   grep -qi -e "$2" <<<"$1"
 }
+# Literal, sem interpretar regex: código PHP com `[$var]`, `??` e `!==` casaria
+# como classe de caracteres em BRE e daria falso negativo silencioso.
+has_lit() {  # has_lit <texto> <string-literal>
+  grep -qF -e "$2" <<<"$1"
+}
 count_of() {
   grep -c -e "$2" <<<"$1" || true
 }
@@ -122,9 +129,92 @@ has "$prod_branch" 'UONIX_REQUEST_CONFIRMATION' \
 has "$code" 'refs/heads/master' \
   || fail 'workflow não exige master'
 
-# --- O bloco que serve /painel jamais pode ser removido -------------------
-if has_re "$code" 'sed .*BEGIN Loginizer|rm .*htaccess|BEGIN Loginizer.*d;'; then
-  fail 'workflow tenta editar/remover o bloco do .htaccess que serve /painel'
+# --- O bloco que serve /painel só pode ter os MARCADORES renomeados --------
+# As diretivas precisam ficar byte-idênticas. O step deve trabalhar numa cópia
+# temporária, remover dos dois lados somente os comentários esperados, comparar
+# o restante e só então trocar o arquivo original.
+rename_block="$(awk '/name: Rename misleading \/painel markers/,/name: Validate the site after removal/' <<<"$code")"
+[ -n "$rename_block" ] || fail 'não encontrei o step de renomear os marcadores de /painel'
+has "$rename_block" '# BEGIN Loginizer' \
+  || fail 'renomeação não exige o marcador BEGIN antigo exato'
+has "$rename_block" '# END Loginizer' \
+  || fail 'renomeação não exige o marcador END antigo exato'
+has_lit "$rename_block" '# BEGIN UonixAdminPath (NAO REMOVER: serve a URL de admin /painel)' \
+  || fail 'renomeação não grava o marcador BEGIN autoexplicativo'
+has "$rename_block" '# END UonixAdminPath' \
+  || fail 'renomeação não grava o marcador END novo'
+# Os `$...` abaixo são o TEXTO que precisa existir no script remoto; não devem
+# expandir enquanto este teste roda.
+# shellcheck disable=SC2016
+has_lit "$rename_block" 'cp -p "$htaccess" "$tmp"' \
+  || fail 'renomeação não trabalha numa cópia que preserva metadados'
+# shellcheck disable=SC2016
+has_lit "$rename_block" 'grep -Fc "$old_begin"' \
+  || fail 'renomeação não exige exatamente um marcador BEGIN antigo'
+# shellcheck disable=SC2016
+has_lit "$rename_block" 'grep -Fc "$old_end"' \
+  || fail 'renomeação não exige exatamente um marcador END antigo'
+# shellcheck disable=SC2016
+has_lit "$rename_block" 'grep -Fc "$new_begin"' \
+  || fail 'renomeação não prova exatamente um marcador BEGIN novo'
+# shellcheck disable=SC2016
+has_lit "$rename_block" '! grep -Fq "$old_begin"' \
+  || fail 'renomeação não prova que o marcador BEGIN antigo sumiu da cópia'
+# shellcheck disable=SC2016
+has_lit "$rename_block" '($hits[$old] ?? 0) !== 1' \
+  || fail 'substituição PHP não exige ocorrência única de cada marcador'
+# shellcheck disable=SC2016
+has_lit "$rename_block" '$count !== 2' \
+  || fail 'substituição PHP não confirma que trocou exatamente os dois marcadores'
+# As DUAS extrações (original e cópia) precisam de -Fvx. Trocar só uma por
+# `grep -v` desancorado descartaria linhas legítimas e o cmp compararia lixo.
+[ "$(count_of "$rename_block" 'grep -Fvx')" -ge 2 ] \
+  || fail 'comparação usa grep desancorado; descartaria linhas legítimas do .htaccess'
+# O .htaccess vivo só pode ser ESCRITO pelo mv final. Edição in-place ou
+# redirecionamento sobre ele burla a prova byte a byte inteira.
+# shellcheck disable=SC2016
+if has_re "$rename_block" 'sed -i.*htaccess|tee .*\$htaccess|> *"\$htaccess"|>> *"\$htaccess"'; then
+  fail 'renomeação escreve direto no .htaccess vivo em vez de trocar a cópia validada'
+fi
+# ORDEM REAL, não só presença: copiar -> comparar -> trocar. Um `mv` antes do
+# `cmp` trocaria o arquivo e só depois verificaria — exatamente o inverso.
+# shellcheck disable=SC2016
+rename_cp_line="$(grep -n 'cp -p "\$htaccess"' <<<"$rename_block" | head -1 | cut -d: -f1)"
+rename_cmp_line="$(grep -n 'cmp -s' <<<"$rename_block" | head -1 | cut -d: -f1)"
+rename_mv_line="$(grep -n 'mv -f' <<<"$rename_block" | head -1 | cut -d: -f1)"
+[ -n "$rename_cp_line" ] && [ -n "$rename_cmp_line" ] && [ -n "$rename_mv_line" ] \
+  || fail 'não localizei cp/cmp/mv no step de renomeação'
+[ "$rename_cp_line" -lt "$rename_cmp_line" ] \
+  || fail "cópia (linha $rename_cp_line) não precede a comparação (linha $rename_cmp_line)"
+[ "$rename_cmp_line" -lt "$rename_mv_line" ] \
+  || fail "comparação (linha $rename_cmp_line) não precede a troca (linha $rename_mv_line)"
+# O step precisa mesmo executar a renomeação: reduzi-lo a echos mantendo as
+# strings satisfaria qualquer asserção puramente textual.
+has "$rename_block" 'file_put_contents' \
+  || fail 'step de renomeação não escreve a cópia; seria apenas eco de texto'
+# Medido no host: o .htaccess real NÃO termina em newline. Casar o marcador com
+# "\n" colado quebraria se o bloco fosse a última linha. A comparação precisa ser
+# por LINHA, tolerando \r e ausência de terminador final.
+# shellcheck disable=SC2016
+has_lit "$rename_block" 'rtrim($line, "\r")' \
+  || fail 'substituição não compara linha a linha tolerando CR e ausência de newline final'
+# Se os terminadores mudarem, o Apache pode reinterpretar o arquivo. Exige as
+# duas medições E a comparação entre elas: só o printf do CR_ANTES passaria sem
+# nunca comparar nada.
+has "$rename_block" 'CR_ANTES' \
+  || fail 'renomeação não mede os terminadores antes da troca'
+# shellcheck disable=SC2016
+has_lit "$rename_block" 'cr_depois="$(tr -dc' \
+  || fail 'renomeação não mede os terminadores depois da troca'
+# shellcheck disable=SC2016
+has_lit "$rename_block" '[ "$cr_antes" = "$cr_depois" ]' \
+  || fail 'renomeação não compara os terminadores antes/depois; conversão CRLF passaria'
+has "$rename_block" 'cmp -s' \
+  || fail 'renomeação não prova que as diretivas ficaram byte-idênticas'
+has "$rename_block" 'mv -f' \
+  || fail 'renomeação não troca o arquivo apenas após validar a cópia temporária'
+if has_re "$rename_block" 'BEGIN Loginizer.*d;|END Loginizer.*d;|rm .*htaccess'; then
+  fail 'workflow tenta apagar o bloco que serve /painel'
 fi
 # A validação do /painel tem de estar no step de validação pós-remoção, não
 # apenas mencionada num comentário em qualquer lugar do arquivo.
@@ -155,11 +245,17 @@ has_re "$backup_block" 'cp -p .*htaccess.*htaccess\.bak' \
   || fail 'step de backup não copia o .htaccess'
 has "$backup_block" 'mysqldump' \
   || fail 'step de backup não gera dump do banco'
+has "$backup_block" '--no-tablespaces' \
+  || fail 'mysqldump não usa --no-tablespaces; usuário compartilhado sem PROCESS aborta o dump'
+for dump_flag in --routines --triggers --events; do
+  has "$backup_block" "$dump_flag" \
+    || fail "mysqldump omite $dump_flag; backup não cobre o schema completo"
+done
 
 # --- Uma única sessão SSH para o lote ------------------------------------
 has "$body" 'ControlMaster auto' \
   || fail 'sem multiplexação SSH; a rajada faz o host recusar a porta'
-remove_block="$(awk '/name: Remove vendor plugins/,/name: Validate the site/' <<<"$body")"
+remove_block="$(awk '/name: Remove vendor plugins/,/name: Rename misleading \/painel markers/' <<<"$body")"
 [ "$(count_of "$remove_block" 'sshpass -e ssh')" -eq 1 ] \
   || fail 'remoção usa mais de uma sessão SSH; deve ser um laço remoto único'
 has "$remove_block" 'for p in' \
