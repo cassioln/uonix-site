@@ -355,9 +355,20 @@ has "$backup_block" 'BACKUP_VALIDO' \
 # acrescentado ao fluxo somente quando o produtor sai com status zero.
 # Exige as DUAS pontas: quem grava o marcador e quem o compara. Só mencionar o
 # nome num comentário, ou gravá-lo sem comparar, não vale.
+#
+# O append como SEGUNDO membro gzip foi REFUTADO pelo host (run 31046533827): o
+# marcador não apareceu na leitura e a última linha continuou sendo a do dump.
+# O marcador precisa entrar no MESMO stream, antes do gzip, e somente quando o
+# produtor sai bem — daí o `&&`, que sob pipefail propaga a falha do produtor.
 # shellcheck disable=SC2016
-has_lit "$backup_block" "printf -- '-- UONIX_DUMP_COMPLETO\\n' | gzip -c >> \"\$dump\"" \
-  || fail 'dump não recebe o marcador de conclusão próprio acrescentado ao fluxo'
+if has_lit "$backup_block" 'gzip -c >> "$dump"'; then
+  fail 'marcador vai como segundo membro gzip; o host não o enxerga na leitura'
+fi
+has_lit "$backup_block" "&& printf -- '-- UONIX_DUMP_COMPLETO" \
+  || fail 'marcador não é gerado no mesmo stream condicionado ao sucesso do produtor'
+# shellcheck disable=SC2016
+has_lit "$backup_block" '; } | gzip -c > "$dump"' \
+  || fail 'dump não é gerado como membro gzip único; volta a depender de multi-membro'
 # shellcheck disable=SC2016
 has_lit "$backup_block" '[ "$last" != '"'"'-- UONIX_DUMP_COMPLETO'"'"' ]' \
   || fail 'prova não compara a última linha com o marcador próprio'
