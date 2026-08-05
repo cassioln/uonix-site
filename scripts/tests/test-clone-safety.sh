@@ -188,7 +188,8 @@ fr1_test_users_snapshot() (
         fi
       }
       # Evaluated remote shell snippets invoke this test-local mock indirectly.
-      # shellcheck disable=SC2329
+      # The evaluated snippets call it through a pipe, with no positional args.
+      # shellcheck disable=SC2120,SC2329
       sha256sum() { shasum -a 256 "$@"; }
       eval "$2"
     )
@@ -288,7 +289,8 @@ fr1_test_users_restore_variant() (
         fi
       }
       # Evaluated remote shell snippets invoke this test-local mock indirectly.
-      # shellcheck disable=SC2329
+      # The evaluated snippets call it through a pipe, with no positional args.
+      # shellcheck disable=SC2120,SC2329
       sha256sum() { shasum -a 256 "$@"; }
       eval "$2"
     )
@@ -1672,7 +1674,8 @@ for remote_preflight_marker in \
   'command -v tar >/dev/null || exit $?' \
   'command -v sha256sum >/dev/null || exit $?' \
   'command -v cmp >/dev/null || exit $?' \
-  '(command -v mysql >/dev/null || command -v mariadb >/dev/null) || exit $?'; do
+  '(command -v mysql >/dev/null || command -v mariadb >/dev/null) || exit $?' \
+  '(command -v mysqldump >/dev/null || command -v mariadb-dump >/dev/null) || exit $?'; do
   case "$PREFLIGHT_REMOTE_SCRIPT" in
     *"$remote_preflight_marker"*) ;;
     *) fail "preflight remoto não propaga dependência obrigatória: ${remote_preflight_marker}" ;;
@@ -2827,7 +2830,15 @@ env_title() { printf 'Synthetic %s\n' "$1"; }
 wp_exec() {
   local operation
   case "$2" in
-    search-replace) operation='search-replace' ;;
+    # Os dois passes de search-replace são distinguidos pela forma do padrão: o
+    # escapado tem contrabarras. Rotular ambos como 'search-replace' esconderia a
+    # perda de um deles, e é justamente um dos dois que cobre blocos Gutenberg.
+    search-replace)
+      case "$3" in
+        *'\/'*) operation='search-replace-escaped' ;;
+        *) operation='search-replace' ;;
+      esac
+      ;;
     option) operation="option-${4:-unknown}" ;;
     *) operation='unexpected' ;;
   esac
@@ -2837,10 +2848,11 @@ wp_exec() {
 }
 
 for c3r10_identity_case in \
-  'search-replace:73:search-replace:' \
-  'option-home:74:search-replace:option-home:' \
-  'option-siteurl:75:search-replace:option-home:option-siteurl:' \
-  'option-blogname:76:search-replace:option-home:option-siteurl:option-blogname:'; do
+  'search-replace-escaped:72:search-replace-escaped:' \
+  'search-replace:73:search-replace-escaped:search-replace:' \
+  'option-home:74:search-replace-escaped:search-replace:option-home:' \
+  'option-siteurl:75:search-replace-escaped:search-replace:option-home:option-siteurl:' \
+  'option-blogname:76:search-replace-escaped:search-replace:option-home:option-siteurl:option-blogname:'; do
   C3R10_IDENTITY_FAIL_OPERATION="${c3r10_identity_case%%:*}"
   c3r10_identity_remainder="${c3r10_identity_case#*:}"
   C3R10_IDENTITY_FAIL_STATUS="${c3r10_identity_remainder%%:*}"
@@ -2894,7 +2906,13 @@ C3R10_IDENTITY_FAIL_STATUS=75
 wp_exec() {
   local operation
   case "$2" in
-    search-replace) operation='search-replace' ;;
+    # Mesma distinção do bloco anterior: o passe escapado carrega contrabarras.
+    search-replace)
+      case "$3" in
+        *'\/'*) operation='search-replace-escaped' ;;
+        *) operation='search-replace' ;;
+      esac
+      ;;
     option) operation="option-${4:-unknown}" ;;
     *) operation='unexpected' ;;
   esac
@@ -2922,7 +2940,7 @@ fi
 [ "$(awk '$0 == "rollback" { count++ } END { print count + 0 }' "$c3r10_identity_boundary_log")" -eq 1 ] || \
   record_c3r10_identity_failure 'falha de identidade não acionou exatamente um rollback'
 [ "$(awk '/^wp:/ { printf "%s:", $0 }' "$c3r10_identity_boundary_log")" = \
-  'wp:search-replace:wp:option-home:wp:option-siteurl:' ] || \
+  'wp:search-replace-escaped:wp:search-replace:wp:option-home:wp:option-siteurl:' ] || \
   record_c3r10_identity_failure 'boundary executou wp_exec posterior à falha intermediária'
 case "$(<"$c3r10_identity_boundary_log")" in
   *restore-after-failure*|*authors-after-failure*|*sync-after-failure*|*smtp-after-failure*|*cache-after-failure*|*validation-after-failure*|*compressx-after-failure*|*summary-after-failure*|*'Clone concluído:'*)
