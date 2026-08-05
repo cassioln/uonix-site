@@ -692,9 +692,14 @@ assert_dump_content_complete() {
   # O marcador deve ser a ÚLTIMA linha não vazia. Procurá-lo em qualquer lugar
   # dá falso positivo quando há truncamento/lixo anexado depois do footer. A
   # leitura é em fluxo e usa memória constante; não materializa o SQL em disco.
+  #
+  # Filtrar as linhas vazias ANTES do tail: uma janela fixa (`tail -n 5`) era
+  # suposição sobre quantas linhas em branco o dump termina, e empurrava o
+  # marcador para fora em dump legítimo — falso negativo aborta clone bom.
+  # O `tr -d '\r'` normaliza CRLF, senão o \r residual reprovaria dump válido.
   last_nonempty="$(
     gzip -dc "$dump_gz" 2>/dev/null \
-      | tail -n 5 \
+      | tr -d '\r' \
       | grep -v '^[[:space:]]*$' \
       | tail -n 1
   )" || {
@@ -714,15 +719,21 @@ assert_dump_content_complete() {
 remote_dump_content_check_snippet() {
   local dump_gz="$1"
   local quoted_dump
+  local marker
 
   quoted_dump="$(printf '%q' "$dump_gz")" || return $?
+  # O marcador vem do MESMO helper do caminho local. Hard-codear a string aqui
+  # faria os dois lados divergirem em silêncio se ela mudasse, com o teste ainda
+  # verde porque nada ligava snippet e helper.
+  marker="$(dump_completion_marker)" || return $?
   # Produz shell auto-contido para o host remoto. Não depende das funções deste
-  # script: o transporte envia o texto cru via SSH.
+  # script: o transporte envia o texto cru via SSH. A negação é dupla — falha com
+  # pipefail (exit 1) e sem pipefail (valor vazio cai no `*)` do case).
   printf '%s\n' \
     "test -s ${quoted_dump} || exit 1" \
     "gzip -t ${quoted_dump} 2>/dev/null || exit 1" \
-    "last_nonempty=\$(gzip -dc ${quoted_dump} 2>/dev/null | tail -n 5 | grep -v '^[[:space:]]*$' | tail -n 1) || exit 1" \
-    "case \"\$last_nonempty\" in '-- Dump completed'|'-- Dump completed on '*) ;; *) exit 1 ;; esac"
+    "last_nonempty=\$(gzip -dc ${quoted_dump} 2>/dev/null | tr -d '\\r' | grep -v '^[[:space:]]*\$' | tail -n 1) || exit 1" \
+    "case \"\$last_nonempty\" in $(printf '%q' "$marker")|$(printf '%q' "${marker} on ")*) ;; *) exit 1 ;; esac"
 }
 
 prepare_target_backup() {
