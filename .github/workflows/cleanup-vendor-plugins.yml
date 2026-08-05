@@ -348,17 +348,21 @@ jobs:
           # O footer `-- Dump completed` do cliente NÃO é confiável neste host: dois
           # runs reais terminaram com status zero sem emiti-lo, inclusive já com
           # --comments --dump-date. A prova de conclusão passa a ser um marcador
-          # NOSSO, acrescentado ao fluxo somente quando o produtor sai bem — sob
-          # pipefail, qualquer falha do dump aborta antes deste append.
-          MYSQL_PWD="$(wp config get DB_PASSWORD)" "$dump_bin" \
+          # NOSSO, emitido no MESMO stream logo após o produtor terminar bem.
+          #
+          # NÃO usar um segundo `gzip -c >>`: o run 31046533827 provou que este host
+          # não enxerga o segundo membro gzip na leitura, e a última linha continuou
+          # sendo a do dump. O `&&` garante que o marcador só é emitido quando o
+          # produtor sai com status zero; sob pipefail, a falha aborta o step.
+          { MYSQL_PWD="$(wp config get DB_PASSWORD)" "$dump_bin" \
             --host="$(wp config get DB_HOST)" \
             --user="$(wp config get DB_USER)" \
             --single-transaction --quick --skip-lock-tables \
             --no-tablespaces --routines --triggers --events \
             --comments --dump-date \
             --default-character-set=utf8mb4 \
-            "$(wp config get DB_NAME)" | gzip -c > "$dump"
-          printf -- '-- UONIX_DUMP_COMPLETO\n' | gzip -c >> "$dump"
+            "$(wp config get DB_NAME)" \
+            && printf -- '-- UONIX_DUMP_COMPLETO\n'; } | gzip -c > "$dump"
 
           # gzip -t valida o ENVELOPE, não o conteúdo: um dump interrompido produz
           # gzip íntegro. Exigir o nosso marcador como última linha não vazia é o
