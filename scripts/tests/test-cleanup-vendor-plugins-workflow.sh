@@ -83,94 +83,115 @@ PY
 body="$(cat "$WF")"
 # Corpo SEM comentários: asserção textual sobre prosa é sem dentes — o comentário
 # que explica um gate faz o grep passar mesmo com o gate removido do código.
-code="$(printf '%s\n' "$body" | grep -v '^[[:space:]]*#')"
+code="$(grep -v '^[[:space:]]*#' <<<"$body")"
+
+# `printf ... | grep -q` é uma armadilha: grep -q sai no PRIMEIRO match e o printf
+# morre com SIGPIPE. Sob `set -o pipefail` (ou o `bash -e` do runner) isso reprova
+# um teste correto de forma intermitente — dependente de timing e do tamanho do
+# buffer. Passou no macOS e no meu container, e falhou no runner do GitHub com
+# "printf: write error: Broken pipe".
+# Os helpers abaixo usam here-string: sem pipe, sem SIGPIPE, mesmo veredito.
+has() {  # has <texto> <padrao-basico>
+  grep -q -e "$2" <<<"$1"
+}
+has_re() {  # has_re <texto> <padrao-estendido>
+  grep -qE -e "$2" <<<"$1"
+}
+has_word() {
+  grep -qw -e "$2" <<<"$1"
+}
+has_i() {
+  grep -qi -e "$2" <<<"$1"
+}
+count_of() {
+  grep -c -e "$2" <<<"$1" || true
+}
 
 # --- Gates de autorização de produção -------------------------------------
 # Precisam estar dentro do ramo de produção, não em qualquer lugar do arquivo.
-prod_branch="$(printf '%s\n' "$code" \
-  | awk '/= execute \] && \[ "\$UONIX_REQUEST_ENVIRONMENT" = prod \]/,/^          else$/')"
+prod_branch="$(awk '/= execute \] && \[ "\$UONIX_REQUEST_ENVIRONMENT" = prod \]/,/^          else$/' <<<"$code")"
 [ -n "$prod_branch" ] || fail 'não encontrei o ramo de autorização de produção'
-printf '%s\n' "$prod_branch" | grep -qE 'ENABLE_CLEANUP_PRODUCTION" = true' \
+has_re "$prod_branch" 'ENABLE_CLEANUP_PRODUCTION" = true' \
   || fail 'produção não exige o guard ENABLE_CLEANUP_PRODUCTION ligado'
-printf '%s\n' "$prod_branch" | grep -q 'LIMPAR PLUGINS EM PROD @' \
+has "$prod_branch" 'LIMPAR PLUGINS EM PROD @' \
   || fail 'produção não exige a frase de confirmação'
-printf '%s\n' "$prod_branch" | grep -q 'UONIX_REQUEST_SHA' \
+has "$prod_branch" 'UONIX_REQUEST_SHA' \
   || fail 'confirmação de produção não é atrelada ao SHA'
-printf '%s\n' "$prod_branch" | grep -q 'UONIX_REQUEST_CONFIRMATION' \
+has "$prod_branch" 'UONIX_REQUEST_CONFIRMATION' \
   || fail 'a frase informada não é comparada com a esperada'
-printf '%s\n' "$code" | grep -q "refs/heads/master" \
+has "$code" 'refs/heads/master' \
   || fail 'workflow não exige master'
 
 # --- O bloco que serve /painel jamais pode ser removido -------------------
-if printf '%s\n' "$code" | grep -qE 'sed .*BEGIN Loginizer|rm .*htaccess|BEGIN Loginizer.*d;'; then
+if has_re "$code" 'sed .*BEGIN Loginizer|rm .*htaccess|BEGIN Loginizer.*d;'; then
   fail 'workflow tenta editar/remover o bloco do .htaccess que serve /painel'
 fi
 # A validação do /painel tem de estar no step de validação pós-remoção, não
 # apenas mencionada num comentário em qualquer lugar do arquivo.
-validate_block="$(printf '%s\n' "$code" | awk '/name: Validate the site after removal/,/name: Release exclusive lock/')"
+validate_block="$(awk '/name: Validate the site after removal/,/name: Release exclusive lock/' <<<"$code")"
 [ -n "$validate_block" ] || fail 'não encontrei o step de validação pós-remoção'
-printf '%s\n' "$validate_block" | grep -q "probe painel '/painel'" \
+has "$validate_block" "probe painel '/painel'" \
   || fail 'validação pós-remoção não prova que /painel continua respondendo'
-printf '%s\n' "$validate_block" | grep -q "probe login '/wp-login.php'" \
+has "$validate_block" "probe login '/wp-login.php'" \
   || fail 'validação pós-remoção não prova que o login continua respondendo'
 
 # --- Integridade do backup ------------------------------------------------
-printf '%s' "$body" | grep -q 'mysqldump' \
+has "$body" 'mysqldump' \
   || fail 'backup não usa mysqldump (wp db export não funciona na Locaweb)'
-printf '%s' "$body" | grep -q -- '-- Dump completed' \
+has "$body" '-- Dump completed' \
   || fail 'backup não exige o marcador final de conclusão'
-printf '%s' "$body" | grep -q "tr -d '\\\\r'" \
+has "$body" "tr -d '\\\\r'" \
   || fail 'validação do dump não normaliza CRLF'
-if printf '%s' "$body" | grep -qE 'tail -n [2-9] \|'; then
+if has_re "$body" 'tail -n [2-9] \|'; then
   fail 'validação do dump usa janela fixa de linhas'
 fi
-printf '%s' "$body" | grep -q 'htaccess.bak' \
+has "$body" 'htaccess.bak' \
   || fail '.htaccess não é copiado antes da escrita'
 # Ancorado no STEP de backup: sem isso, a menção em outro lugar bastaria e a
 # remoção da cópia real passaria despercebida.
-backup_block="$(printf '%s\n' "$code" | awk '/name: Back up .htaccess and the database/,/name: Prove zero content usage/')"
+backup_block="$(awk '/name: Back up .htaccess and the database/,/name: Prove zero content usage/' <<<"$code")"
 [ -n "$backup_block" ] || fail 'não encontrei o step de backup'
-printf '%s\n' "$backup_block" | grep -q 'cp -p .*htaccess.*htaccess\.bak' \
+has_re "$backup_block" 'cp -p .*htaccess.*htaccess\.bak' \
   || fail 'step de backup não copia o .htaccess'
-printf '%s\n' "$backup_block" | grep -q 'mysqldump' \
+has "$backup_block" 'mysqldump' \
   || fail 'step de backup não gera dump do banco'
 
 # --- Uma única sessão SSH para o lote ------------------------------------
-printf '%s' "$body" | grep -q 'ControlMaster auto' \
+has "$body" 'ControlMaster auto' \
   || fail 'sem multiplexação SSH; a rajada faz o host recusar a porta'
-remove_block="$(printf '%s' "$body" | awk '/name: Remove vendor plugins/,/name: Validate the site/')"
-[ "$(printf '%s' "$remove_block" | grep -c 'sshpass -e ssh')" -eq 1 ] \
+remove_block="$(awk '/name: Remove vendor plugins/,/name: Validate the site/' <<<"$body")"
+[ "$(count_of "$remove_block" 'sshpass -e ssh')" -eq 1 ] \
   || fail 'remoção usa mais de uma sessão SSH; deve ser um laço remoto único'
-printf '%s' "$remove_block" | grep -q 'for p in' \
+has "$remove_block" 'for p in' \
   || fail 'remoção não usa laço no shell remoto'
 
 # --- loginizer sai; Turnstile precisa continuar --------------------------
 # Ancorado no LAÇO de remoção: exige o nome na lista real de plugins, não numa
 # menção qualquer. Foi decisão explícita de Cassio (Turnstile fica como único gate).
-remove_loop="$(printf '%s\n' "$remove_block" | awk '/for p in/,/done/')"
+remove_loop="$(awk '/for p in/,/done/' <<<"$remove_block")"
 [ -n "$remove_loop" ] || fail 'não encontrei o laço de remoção'
-printf '%s\n' "$remove_loop" | grep -qw 'loginizer' \
+has_word "$remove_loop" 'loginizer' \
   || fail 'loginizer não está na lista de remoção (decisão de Cassio)'
-printf '%s\n' "$remove_loop" | grep -qw 'socialfeeds' \
+has_word "$remove_loop" 'socialfeeds' \
   || fail 'socialfeeds não está na lista de remoção'
-printf '%s\n' "$validate_block" | grep -qi 'turnstile' \
+has_i "$validate_block" 'turnstile' \
   || fail 'validação pós-remoção não prova que o Turnstile permanece no login'
 
 # --- Desativar antes de apagar limpa os blocos do plugin ----------------
-printf '%s' "$remove_block" | grep -q 'plugin deactivate' \
+has "$remove_block" 'plugin deactivate' \
   || fail 'remoção não desativa antes de apagar'
 
 # --- wp-cli remoto na forma que a Locaweb aceita ------------------------
-printf '%s' "$body" | grep -q -- '-d disable_functions=' \
+has "$body" '-d disable_functions=' \
   || fail 'wp-cli remoto não relaxa disable_functions'
 # Ignora comentários: um `grep 'wp db query'` solto casa a PROSA que explica por
 # que não se usa db query, e o teste reprovaria o código correto.
-if printf '%s' "$body" | grep -v '^[[:space:]]*#' | grep -q 'wp db query'; then
+if has "$code" 'wp db query'; then
   fail 'usa wp db query, que falha na Locaweb (proc_open desabilitado)'
 fi
 
 # --- QA/DEV ficam fora deste caminho ------------------------------------
-printf '%s' "$body" | grep -q 'Reject non-production environments' \
+has "$body" 'Reject non-production environments' \
   || fail 'workflow não rejeita QA/DEV explicitamente'
 
 printf 'PASS: gates do workflow de limpeza são fail-closed e preservam /painel.\n'
