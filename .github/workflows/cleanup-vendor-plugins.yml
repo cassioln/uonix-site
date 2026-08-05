@@ -76,6 +76,12 @@ jobs:
           case "$UONIX_REQUEST_MODE" in dry-run|execute) ;; *) exit 1 ;; esac
 
           environment_name='clone-operations'
+          if [ "$UONIX_REQUEST_ENVIRONMENT" = prod ]; then
+            # QUALQUER toque em produção — inclusive dry-run, que só lê — passa
+            # pelo environment com gate de aprovação. Deixar o dry-run fora seria
+            # o único caminho capaz de abrir SSH em produção sem revisor.
+            environment_name='production-locaweb'
+          fi
           if [ "$UONIX_REQUEST_MODE" = execute ] && [ "$UONIX_REQUEST_ENVIRONMENT" = prod ]; then
             # Produção exige guard ligado E frase com o SHA: o guard sozinho não
             # protege contra disparo acidental, e a frase sozinha não protege
@@ -83,7 +89,6 @@ jobs:
             [ "$UONIX_ENABLE_CLEANUP_PRODUCTION" = true ]
             expected="LIMPAR PLUGINS EM PROD @ ${UONIX_REQUEST_SHA}"
             [ "$UONIX_REQUEST_CONFIRMATION" = "$expected" ]
-            environment_name='production-locaweb'
           else
             [ -z "$UONIX_REQUEST_CONFIRMATION" ]
           fi
@@ -241,7 +246,12 @@ jobs:
         run: |
           set -euo pipefail
           lock_path="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
-          sshpass -e ssh \
+          # O remoto IMPRIME um marcador quando o lock fica de fato criado. Sem
+          # isso havia assimetria: se o mkdir+owner completassem no host mas o
+          # ssh retornasse ≠0 (queda de rede no fechamento), o runner marcaria
+          # CLEANUP_LOCK_ACQUIRED=false, o release sairia limpo e o diretório
+          # ficaria órfão — travando a próxima execução sem explicação.
+          out="$(sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
             -o PubkeyAuthentication=no \
@@ -249,7 +259,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
-            bash -s -- "$lock_path" "$CLEANUP_RUN_ID" <<'REMOTE'
+            bash -s -- "$lock_path" "$CLEANUP_RUN_ID" <<'REMOTE' || true
           set -euo pipefail
           umask 077
           lock_path="$1"; run_id="$2"
@@ -262,8 +272,18 @@ jobs:
             rmdir -- "$lock_path" 2>/dev/null || true
             exit 1
           fi
+          printf 'UONIX_LOCK_ACQUIRED\n'
           REMOTE
-          printf 'CLEANUP_LOCK_ACQUIRED=true\n' >> "$GITHUB_ENV"
+          )"
+          printf '%s\n' "$out"
+          # Marca como adquirido se o HOST confirmou, independente do status do
+          # transporte. Assim o release sempre tenta limpar o que existe.
+          if printf '%s\n' "$out" | grep -q 'UONIX_LOCK_ACQUIRED'; then
+            printf 'CLEANUP_LOCK_ACQUIRED=true\n' >> "$GITHUB_ENV"
+          else
+            echo 'Não foi possível adquirir o lock exclusivo; nada foi alterado.' >&2
+            exit 1
+          fi
 
       - name: Back up .htaccess and the database before any write
         if: ${{ inputs.mode == 'execute' }}
@@ -272,7 +292,8 @@ jobs:
         run: |
           set -euo pipefail
           backup_dir="$LOCAWEB_ACCOUNT_ROOT/_uonix-cleanup-backups/$CLEANUP_RUN_ID"
-          printf 'BACKUP_DIR=%s\n' "$backup_dir" >> "$GITHUB_ENV"
+          # BACKUP_DIR só é publicado DEPOIS de o dump ser validado: anunciar antes
+          # faria o summary apontar um diretório cujo dump reprovou.
           sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
@@ -317,6 +338,8 @@ jobs:
           chmod 600 "$dump" "$backup_dir/htaccess.bak"
           ls -la "$backup_dir"
           REMOTE
+          # Só agora o diretório é publicado: o dump passou pelas três provas.
+          printf 'BACKUP_DIR=%s\n' "$backup_dir" >> "$GITHUB_ENV"
 
       - name: Prove zero content usage before deleting
         if: ${{ inputs.mode == 'execute' }}
@@ -485,12 +508,28 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
             bash -s -- "$lock_path" "$CLEANUP_RUN_ID" <<'REMOTE'
-          set -euo pipefail
+          set -uo pipefail
           lock_path="$1"; run_id="$2"
-          test -f "$lock_path/owner"
-          test "$(cat "$lock_path/owner")" = "$run_id"
-          rm -f -- "$lock_path/owner"
+          # Não usa `set -e` com test: se o `owner` desaparecer, abortar aqui
+          # deixaria o DIRETÓRIO órfão travando a próxima execução. Remove o que
+          # é nosso, avisa no que for anômalo, e só falha se o diretório
+          # pertencer a outra execução — aí apagar seria pior.
+          if [ ! -d "$lock_path" ]; then
+            echo 'Lock já não existe no host; nada a liberar.'
+            exit 0
+          fi
+          if [ -f "$lock_path/owner" ]; then
+            owner="$(cat "$lock_path/owner" 2>/dev/null || printf '')"
+            if [ "$owner" != "$run_id" ]; then
+              echo "AVISO: lock pertence a outra execução ($owner); não vou removê-lo." >&2
+              exit 1
+            fi
+            rm -f -- "$lock_path/owner"
+          else
+            echo 'AVISO: lock sem arquivo owner; removendo diretório órfão.' >&2
+          fi
           rmdir -- "$lock_path"
+          echo 'Lock liberado.'
           REMOTE
 
       - name: Publish sanitized summary

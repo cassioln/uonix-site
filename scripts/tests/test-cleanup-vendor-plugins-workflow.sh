@@ -191,7 +191,63 @@ if has "$code" 'wp db query'; then
 fi
 
 # --- QA/DEV ficam fora deste caminho ------------------------------------
-has "$body" 'Reject non-production environments' \
+has "$code" 'Reject non-production environments' \
   || fail 'workflow não rejeita QA/DEV explicitamente'
+
+# --- Correções vindas da auditoria adversarial ---------------------------
+# Qualquer toque em prod, inclusive dry-run (que só lê), passa pelo environment
+# com gate de aprovação — senão o dry-run seria o único caminho a abrir SSH em
+# produção sem revisor.
+authorize_block="$(awk '/environment_name=.clone-operations./,/printf .environment_name/' <<<"$code")"
+[ -n "$authorize_block" ] || fail 'não encontrei a resolução do environment'
+has "$authorize_block" "UONIX_REQUEST_ENVIRONMENT\" = prod" \
+  || fail 'environment de produção não é escolhido por ambiente'
+has "$authorize_block" "environment_name='production-locaweb'" \
+  || fail 'prod não resolve para o environment com aprovação'
+# A linha que resolve production-locaweb tem de estar FORA do ramo que exige a
+# frase, senão o dry-run volta a escapar do gate.
+if has_re "$authorize_block" "= execute \\].*\n.*production-locaweb"; then
+  fail 'production-locaweb só é aplicado no modo execute'
+fi
+
+# O lock é confirmado pelo HOST, não pelo status do transporte: mkdir+owner podem
+# completar e o ssh ainda retornar ≠0, deixando diretório órfão.
+lock_block="$(awk '/name: Acquire exclusive lock/,/name: Back up/' <<<"$code")"
+[ -n "$lock_block" ] || fail 'não encontrei o step de aquisição do lock'
+# Duas metades do contrato: o REMOTO imprime o marcador e o RUNNER decide por ele.
+# Exigir só a menção deixaria passar a remoção do printf remoto.
+[ "$(count_of "$lock_block" 'UONIX_LOCK_ACQUIRED')" -ge 2 ] \
+  || fail 'lock não é confirmado pelo host e verificado pelo runner'
+has "$lock_block" "grep -q 'UONIX_LOCK_ACQUIRED'" \
+  || fail 'runner não verifica o marcador impresso pelo host'
+has "$lock_block" "printf 'UONIX_LOCK_ACQUIRED" \
+  || fail 'host não imprime o marcador de lock adquirido'
+
+# O release não pode abortar deixando diretório órfão quando o owner falta.
+release_block="$(awk '/name: Release exclusive lock/,/name: Publish sanitized summary/' <<<"$code")"
+[ -n "$release_block" ] || fail 'não encontrei o step de release'
+has "$release_block" 'removendo diretório órfão' \
+  || fail 'release não trata lock sem owner; deixaria diretório órfão'
+# O `set -e` do RUNNER é correto e deve ficar. O que não pode ter `-e` é o script
+# REMOTO: lá um `test` falho abortaria antes do rmdir, deixando o diretório.
+remote_release="$(awk "/bash -s -- .\\\$lock_path/,/^          REMOTE\$/" <<<"$release_block")"
+[ -n "$remote_release" ] || fail 'não encontrei o script remoto do release'
+if has "$remote_release" 'set -euo pipefail'; then
+  fail 'script remoto do release usa set -e; um test falho deixaria o lock órfão'
+fi
+has "$remote_release" 'set -uo pipefail' \
+  || fail 'script remoto do release não define set -uo pipefail'
+
+# BACKUP_DIR só é publicado depois de o dump passar pelas provas. Regex multilinha
+# não funciona em grep linha-a-linha, então comparo as POSIÇÕES das duas linhas.
+has "$backup_block" 'BACKUP_VALIDO' \
+  || fail 'step de backup não valida o dump'
+backup_dir_line="$(grep -n 'BACKUP_DIR=%s' <<<"$backup_block" | head -1 | cut -d: -f1)"
+valid_line="$(grep -n 'BACKUP_VALIDO' <<<"$backup_block" | head -1 | cut -d: -f1)"
+[ -n "$backup_dir_line" ] \
+  || fail 'step de backup não publica BACKUP_DIR; o summary não saberia onde está o backup'
+[ -n "$valid_line" ] || fail 'não encontrei a validação do dump'
+[ "$backup_dir_line" -gt "$valid_line" ] \
+  || fail "BACKUP_DIR é publicado (linha $backup_dir_line) antes da validação do dump (linha $valid_line)"
 
 printf 'PASS: gates do workflow de limpeza são fail-closed e preservam /painel.\n'
