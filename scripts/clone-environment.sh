@@ -2146,21 +2146,70 @@ validate_http_endpoint() {
   local url="$2"
   local status
   local curl_status
+  local attempt=1
+  local max_attempts=6
+  local delay=5
+  local last_reason=''
 
-  if status="$(curl -L -sS -o /dev/null -w '%{http_code}' --max-time 30 "$url")"; then
-    :
-  else
-    curl_status=$?
-    die "$label falhou no curl (exit $curl_status)"
-    return 1
-  fi
-  case "$status" in
-    2??|3??) return 0 ;;
-    *)
-      die "$label respondeu HTTP $status"
+  # O smoke roda logo após o cache flush e depois de rsync + dezenas de chamadas
+  # wp-cli pelo mesmo IP. O Mod_Security do HostGator responde 406/409 a esse
+  # padrão automatizado em wp-login.php mesmo com o site saudável — foi o que
+  # abortou um clone qa->dev já concluído e disparou rollback desnecessário.
+  #
+  # A janela precisa cobrir a DECADÊNCIA MEDIDA do bloqueio: reproduzindo o deny
+  # por rajada, ele persistiu em t+75s e só liberou perto de t+180s. Por isso são
+  # 6 tentativas com espera 5+10+20+40+60 = 135s, mais o tempo das requisições.
+  # Com 5 tentativas (75s de espera) o clone ainda morreria dentro do bloqueio.
+  #
+  # Indisponibilidade transitória é RETENTADA, não fatal. O que não é tolerado:
+  # erro que persiste em todas as tentativas, e veredito de conteúdo (como 404),
+  # que reprova de imediato porque tentar de novo não muda o diagnóstico.
+  #
+  # O User-Agent é próprio para que essas requisições sejam localizáveis no
+  # modsec_audit.log do cPanel e possam receber exceção. Ele NÃO evita o bloqueio
+  # (medido: UA de navegador também é barrado; o gatilho é frequência).
+  while :; do
+    if status="$(curl -L -sS -o /dev/null -w '%{http_code}' \
+      -A 'uonix-clone-smoke/1.0' --max-time 30 "$url")"; then
+      case "$status" in
+        2??|3??)
+          if [ "$attempt" -gt 1 ]; then
+            # Sucesso só após retry não pode ser silencioso: seria mascarar
+            # degradação real da borda.
+            log "AVISO: ${label} só respondeu de forma saudável na tentativa ${attempt} (último erro: ${last_reason})."
+          fi
+          return 0
+          ;;
+        404|410)
+          # Página ausente é falha de clone, não de disponibilidade.
+          die "$label respondeu HTTP $status"
+          return 1
+          ;;
+        408|409|425|429|403|406|500|502|503|504)
+          last_reason="HTTP $status"
+          ;;
+        *)
+          die "$label respondeu HTTP $status"
+          return 1
+          ;;
+      esac
+    else
+      curl_status=$?
+      last_reason="curl exit $curl_status"
+    fi
+
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      die "$label não respondeu de forma saudável em ${max_attempts} tentativas (${last_reason})"
       return 1
-      ;;
-  esac
+    fi
+    log "${label}: ${last_reason}; nova tentativa em ${delay}s (${attempt}/${max_attempts})."
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    if [ "$delay" -lt 60 ]; then
+      delay=$((delay * 2))
+      [ "$delay" -le 60 ] || delay=60
+    fi
+  done
 }
 
 validate_local_mailpit() {
