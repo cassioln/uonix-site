@@ -141,6 +141,9 @@ jobs:
       - name: Test clone URL replacement
         run: bash scripts/tests/test-clone-url-replacement.sh
 
+      - name: Test clone smoke resilience
+        run: bash scripts/tests/test-clone-smoke-resilience.sh
+
       - name: Test CI covers every test
         run: |
           python3 -c 'import yaml' \
