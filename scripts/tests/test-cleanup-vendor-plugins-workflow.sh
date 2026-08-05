@@ -487,6 +487,143 @@ valid_line="$(grep -n 'BACKUP_VALIDO' <<<"$backup_block" | head -1 | cut -d: -f1
 [ "$backup_dir_line" -gt "$valid_line" ] \
   || fail "BACKUP_DIR é publicado (linha $backup_dir_line) antes da validação do dump (linha $valid_line)"
 
+# ---------------------------------------------------------------------------
+# SEMÂNTICA DE SHELL, não presença de string.
+#
+# Auditoria de robustez aplicou 36 mutações no step de backup e 22 SOBREVIVERAM:
+# todas as asserções acima verificam se um texto existe no bloco — inclusive em
+# comentários — e nenhuma verificava status de saída, redirecionamento ou alvo.
+# Exemplos que passavam: `exit 1` -> `exit 0`, `gzip -t "$dump" || true`,
+# `tail -n 1` -> `head -n 1` mantendo `# tail -n 1` num comentário, `: > "$dump"`
+# depois das provas, e `[ ... ] && false` neutralizando a comparação.
+#
+# O bloco abaixo analisa o step SEM comentários e afirma comportamento.
+# shellcheck disable=SC2001
+backup_code="$(sed 's/[[:space:]]*#.*$//' <<<"$backup_block" | grep -v '^[[:space:]]*$')"
+
+# 1. Todo diagnóstico BACKUP_INVALIDO precisa abortar de fato.
+if grep -qE 'exit[[:space:]]+0' <<<"$backup_code"; then
+  fail 'step de backup contém exit 0; um gate que "reprova" e segue é enfeite de log'
+fi
+invalidos="$(grep -c 'BACKUP_INVALIDO' <<<"$backup_code" || true)"
+exits="$(grep -cE '^[[:space:]]*exit[[:space:]]+1[[:space:]]*$' <<<"$backup_code" || true)"
+[ "$invalidos" -ge 3 ] \
+  || fail "apenas $invalidos diagnósticos BACKUP_INVALIDO; provas de marcador, volume e tabelas são obrigatórias"
+[ "$exits" -ge "$invalidos" ] \
+  || fail "há $invalidos BACKUP_INVALIDO mas só $exits 'exit 1'; algum gate não aborta"
+
+# 2. Provas de envelope não podem ser neutralizadas por `|| true`.
+# shellcheck disable=SC2016
+for prova in 'test -s "$dump"' 'gzip -t "$dump"'; do
+  linha="$(grep -F "$prova" <<<"$backup_code" | head -1)"
+  [ -n "$linha" ] || fail "prova ausente no step de backup: $prova"
+  case "$linha" in
+    *'|| true'*|*'|| :'*|*'||true'*)
+      fail "prova neutralizada por || true: $prova" ;;
+  esac
+done
+
+# 3. A comparação do marcador não pode ser anulada mantendo o texto exigido.
+# shellcheck disable=SC2016
+cmp_line="$(grep -F '[ "$last" != ' <<<"$backup_code" | head -1)"
+[ -n "$cmp_line" ] || fail 'não encontrei a comparação do marcador no código do backup'
+case "$cmp_line" in
+  *'&& false'*|*'|| true'*|*'&& :'*)
+    fail 'comparação do marcador foi neutralizada (&& false / || true)' ;;
+esac
+
+# 4. A última linha precisa vir de tail, no CÓDIGO — não de um comentário.
+# shellcheck disable=SC2016
+last_assign="$(grep -F 'last="$(gzip -dc' <<<"$backup_code" | head -1)"
+[ -n "$last_assign" ] || fail 'não encontrei a extração da última linha do dump'
+case "$last_assign" in
+  *'tail -n 1'*) : ;;
+  *) fail 'extração do marcador não usa tail -n 1 no código (head -n 1 nunca reprovaria)' ;;
+esac
+case "$last_assign" in
+  *"tr -d '\\r'"*) : ;;
+  *) fail 'extração do marcador não normaliza CRLF no código' ;;
+esac
+case "$last_assign" in
+  *"grep -v '^[[:space:]]*\$'"*) : ;;
+  *) fail 'extração do marcador não filtra linhas vazias no código' ;;
+esac
+
+# 5. Contagens precisam ser ancoradas e não podem ter default fabricado.
+for par in "tabelas:^CREATE TABLE" "inserts:^INSERT INTO"; do
+  var="${par%%:*}"; pat="${par#*:}"
+  linha="$(grep -F "${var}=\"\$(gzip -dc" <<<"$backup_code" | head -1)"
+  [ -n "$linha" ] || fail "não encontrei a contagem de $var"
+  case "$linha" in
+    *"grep -c '${pat}'"*) : ;;
+    *) fail "contagem de $var não está ancorada em '${pat}'" ;;
+  esac
+  case "$linha" in
+    *'|| echo'*|*'|| printf'*)
+      fail "contagem de $var tem default fabricado; um erro viraria número aprovado" ;;
+  esac
+done
+
+# 6. O produtor não pode receber opções que esvaziem o dump.
+if grep -qE -- '--where|--no-data|--skip-triggers|--ignore-table' <<<"$backup_code"; then
+  fail 'produtor recebe opção que reduz o conteúdo do dump (--where/--no-data/...)'
+fi
+
+# 7. Depois de validado, o dump não pode ser truncado nem escrito fora do
+#    diretório publicado.
+# shellcheck disable=SC2016
+if grep -qE '^[[:space:]]*:[[:space:]]*>[[:space:]]*"\$dump"' <<<"$backup_code"; then
+  fail 'dump é truncado depois das provas; BACKUP_DIR apontaria para diretório vazio'
+fi
+dump_assign="$(grep -F 'dump="' <<<"$backup_code" | head -1)"
+# shellcheck disable=SC2016
+case "$dump_assign" in
+  *'"$backup_dir/'*) : ;;
+  *) fail 'dump não é gravado dentro de $backup_dir; o backup publicado não conteria o dump' ;;
+esac
+
+# 8. O step de backup NÃO pode escrever no .htaccess: só o step de rename mexe
+#    nele, e o bloco do /painel vive lá. A linha `- name:` do próprio step cita
+#    ".htaccess" e não é código, então é descartada.
+while IFS= read -r linha; do
+  case "$linha" in
+    *'- name:'*) continue ;;
+  esac
+  case "$linha" in
+    *'.htaccess'*)
+      case "$linha" in
+        *'cp -p'*|*'test -s'*|*'chmod'*|*htaccess.bak*) : ;;
+        *) fail 'step de backup manipula .htaccess além de copiá-lo; risco de derrubar /painel' ;;
+      esac
+      ;;
+  esac
+done <<<"$backup_code"
+
+# 9. Permissões e consistência do dump em host compartilhado. O htaccess.bak
+#    precisa ser copiado E verificado: um .htaccess.bak vazio some com a prova
+#    de rollback do /painel.
+for exigido in 'umask 077' 'chmod 700' 'chmod 600' '--single-transaction'; do
+  has_lit "$backup_code" "$exigido" \
+    || fail "step de backup perdeu $exigido (permissão ou consistência do dump)"
+done
+# shellcheck disable=SC2016
+has_lit "$backup_code" 'cp -p "$document_root/.htaccess" "$backup_dir/htaccess.bak"' \
+  || fail 'step de backup não copia o .htaccess preservando metadados'
+# shellcheck disable=SC2016
+has_lit "$backup_code" 'test -s "$backup_dir/htaccess.bak"' \
+  || fail 'step de backup não verifica o htaccess.bak; backup vazio passaria'
+
+# 10. O backup só roda em execute: em dry-run não pode haver escrita remota.
+backup_if="$(awk '/name: Back up .htaccess/,/run: \|/' <<<"$code" | grep -F 'if:' | head -1)"
+[ -n "$backup_if" ] || fail 'step de backup sem condição if'
+case "$backup_if" in
+  *"inputs.mode == 'execute'"*) : ;;
+  *) fail 'condição do step de backup mudou; poderia rodar em dry-run' ;;
+esac
+if grep -qE "mode != 'execute'|always\(\)" <<<"$backup_if"; then
+  fail 'condição do step de backup aceita modos não-execute'
+fi
+
 # O check do Turnstile precisa usar o CONTRATO REAL do módulo. A primeira versão
 # testava uma constante UONIX_TURNSTILE_ENABLED que NÃO existe no repositório, e o
 # dry-run em produção devolveu "TURNSTILE_INDEFINIDO" — falso alarme sobre um site
