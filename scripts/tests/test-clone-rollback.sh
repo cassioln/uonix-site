@@ -72,7 +72,7 @@ fr1_test_corrupt_backup_before_mutation() (
   log() { :; }
   backup_dir() { printf '%s\n' "$FR1_BACKUP_PATH"; }
   resolve_backup_root() { printf '%s\n' "$FR1_BACKUP_ROOT"; }
-  local_db_dump() { printf 'SQL fixture\n'; }
+  local_db_dump() { printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n'; }
   gzip() {
     if [ "${1:-}" = '-c' ] && [ "$FR1_CORRUPT_KIND" = db ]; then
       cat >/dev/null
@@ -125,7 +125,7 @@ fr1_test_corrupt_backup_before_mutation() (
           DB_PASSWORD) printf 'fixture_password\n'; return 0 ;;
         esac
       done
-      printf 'SQL fixture\n'
+      printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n'
     }
     # mysqldump sintético: sem ele o snippet cairia no fallback e o caminho real
     # nunca seria exercitado.
@@ -133,7 +133,7 @@ fr1_test_corrupt_backup_before_mutation() (
     mysqldump() {
       case " $* " in
         *' --help '*) printf -- '--single-transaction\n' ;;
-        *) printf 'SQL fixture\n' ;;
+        *) printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n' ;;
       esac
     }
     is_remote_env() { return 0; }
@@ -180,7 +180,7 @@ fr1_test_corrupt_export() (
 
   if [ "$location" = local ]; then
     is_remote_env() { return 1; }
-    local_db_dump() { printf 'SQL fixture\n'; }
+    local_db_dump() { printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n'; }
     gzip() {
       if [ "${1:-}" = '-c' ]; then
         cat >/dev/null
@@ -262,7 +262,7 @@ ROLLBACK_RUNNING='0'
 CLONE_FAILURE_STATUS='0'
 
 log() { :; }
-local_db_dump() { printf 'SQL fixture\n'; }
+local_db_dump() { printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n'; }
 chmod() {
   if [ "${1:-}" = 600 ]; then
     return 42
@@ -315,7 +315,7 @@ missing_archive_backup="$missing_archive_root/backup"
 missing_archive_db_log="$missing_archive_root/db.log"
 mkdir -p "$missing_archive_backup" "$missing_archive_root/wp-content/uploads"
 printf 'sentinel\n' > "$missing_archive_root/wp-content/uploads/sentinel.txt"
-printf 'database fixture\n' | gzip -c > "$missing_archive_backup/db-local-${STAMP}.sql.gz"
+printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n' | gzip -c > "$missing_archive_backup/db-local-${STAMP}.sql.gz"
 : > "$missing_archive_db_log"
 
 LOCAL_WP_CONTENT="$missing_archive_root/wp-content"
@@ -463,7 +463,7 @@ mkdir -p \
   "$rollback_failure_root/runtime"
 printf 'backup payload\n' > "$rollback_failure_archive_source/uploads/backup.txt"
 printf 'current target\n' > "$rollback_failure_wp_content/uploads/current.txt"
-printf 'database backup\n' | gzip -c > "$rollback_failure_backup/db-local-${STAMP}.sql.gz"
+printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n' | gzip -c > "$rollback_failure_backup/db-local-${STAMP}.sql.gz"
 command tar -czf "$rollback_failure_backup/files-local-${STAMP}.tar.gz" \
   -C "$rollback_failure_archive_source" uploads
 : > "$rollback_failure_log"

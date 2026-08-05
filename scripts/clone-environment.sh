@@ -669,6 +669,62 @@ MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\
 else $wp_cli --path=$(printf '%q' "$wp_root") db import -; fi"
 }
 
+dump_completion_marker() {
+  # Prefixo exato emitido por mysqldump e mariadb-dump. Com --skip-dump-date a
+  # linha termina aqui; sem a flag, continua com " on AAAA-MM-DD ...".
+  printf '%s' '-- Dump completed'
+}
+
+assert_dump_content_complete() {
+  local dump_gz="$1"
+  local label="${2:-dump}"
+  local last_nonempty
+
+  [ -s "$dump_gz" ] || {
+    uonix_env_error "${label}: arquivo vazio"
+    return 1
+  }
+  gzip -t "$dump_gz" 2>/dev/null || {
+    uonix_env_error "${label}: envelope gzip corrompido"
+    return 1
+  }
+
+  # O marcador deve ser a ÚLTIMA linha não vazia. Procurá-lo em qualquer lugar
+  # dá falso positivo quando há truncamento/lixo anexado depois do footer. A
+  # leitura é em fluxo e usa memória constante; não materializa o SQL em disco.
+  last_nonempty="$(
+    gzip -dc "$dump_gz" 2>/dev/null \
+      | tail -n 5 \
+      | grep -v '^[[:space:]]*$' \
+      | tail -n 1
+  )" || {
+    uonix_env_error "${label}: conteúdo SQL ilegível ou vazio"
+    return 1
+  }
+
+  case "$last_nonempty" in
+    "$(dump_completion_marker)"|"$(dump_completion_marker) on "*) ;;
+    *)
+      uonix_env_error "${label}: dump sem marcador final de conclusão (interrompido no meio)"
+      return 1
+      ;;
+  esac
+}
+
+remote_dump_content_check_snippet() {
+  local dump_gz="$1"
+  local quoted_dump
+
+  quoted_dump="$(printf '%q' "$dump_gz")" || return $?
+  # Produz shell auto-contido para o host remoto. Não depende das funções deste
+  # script: o transporte envia o texto cru via SSH.
+  printf '%s\n' \
+    "test -s ${quoted_dump} || exit 1" \
+    "gzip -t ${quoted_dump} 2>/dev/null || exit 1" \
+    "last_nonempty=\$(gzip -dc ${quoted_dump} 2>/dev/null | tail -n 5 | grep -v '^[[:space:]]*$' | tail -n 1) || exit 1" \
+    "case \"\$last_nonempty\" in '-- Dump completed'|'-- Dump completed on '*) ;; *) exit 1 ;; esac"
+}
+
 prepare_target_backup() {
   local env="$1"
   local dir="$2"
@@ -707,9 +763,8 @@ if [ \"\$#\" -gt 0 ]; then
 else
   tar -czf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") --files-from=/dev/null
 fi
-test -s $(printf '%q' "${dir}/db-${env}-${STAMP}.sql.gz") || exit \$?
 test -s $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") || exit \$?
-gzip -t $(printf '%q' "${dir}/db-${env}-${STAMP}.sql.gz") || exit \$?
+$(remote_dump_content_check_snippet "${dir}/db-${env}-${STAMP}.sql.gz")
 tar -tzf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") >/dev/null || exit \$?
 chmod 600 $(printf '%q' "${dir}/db-${env}-${STAMP}.sql.gz") $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz")
 find $(printf '%q' "$backup_root") -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +6 | cut -d' ' -f2- | while IFS= read -r old_backup; do [ -n \"\$old_backup\" ] && rm -rf -- \"\$old_backup\"; done"
@@ -735,9 +790,11 @@ find $(printf '%q' "$backup_root") -mindepth 1 -maxdepth 1 -type d -printf '%T@ 
       tar -czf "${dir}/files-${env}-${STAMP}.tar.gz" --files-from=/dev/null || return $?
     fi
 
-    [ -s "${dir}/db-${env}-${STAMP}.sql.gz" ] || return 1
     [ -s "${dir}/files-${env}-${STAMP}.tar.gz" ] || return 1
-    gzip -t "${dir}/db-${env}-${STAMP}.sql.gz" || return $?
+    # Valida o CONTEÚDO do dump, não só o envelope: um gzip íntegro pode conter
+    # SQL truncado ou apenas cabeçalho, e o rollback dependeria dele.
+    assert_dump_content_complete "${dir}/db-${env}-${STAMP}.sql.gz" \
+      "backup de ${env}" || return $?
     tar -tzf "${dir}/files-${env}-${STAMP}.tar.gz" >/dev/null || return $?
     chmod 600 "${dir}/db-${env}-${STAMP}.sql.gz" "${dir}/files-${env}-${STAMP}.tar.gz" || return $?
 
@@ -905,8 +962,10 @@ export_source_db() {
   else
     local_db_dump | gzip -c >"$dump_file" || return $?
   fi
-  [ -s "$dump_file" ] || return 1
-  gzip -t "$dump_file" || return $?
+  # O dump da origem é o que será IMPORTADO no destino: validar o conteúdo aqui
+  # impede que um SQL truncado substitua o banco de destino. `gzip -t` sozinho
+  # aprovaria, porque o envelope de um dump interrompido continua íntegro.
+  assert_dump_content_complete "$dump_file" "dump da origem (${env})" || return $?
   export_source_author_map "$env" "${dump_file}.authors.tsv" || return $?
 }
 
@@ -1126,10 +1185,42 @@ set_target_identity() {
 
   log "Ajustando URL e identidade do destino: ${env}"
 
+  # Duas passagens são necessárias. Medido em WordPress real com 20 asserções: a
+  # forma JSON-escapada (barras com contrabarra) SOBREVIVE intacta ao padrão
+  # literal, porque `wp search-replace` desserializa e conserta tamanhos mas
+  # compara bytes — e as duas formas têm bytes diferentes.
+  #
+  # Em blocos Gutenberg o efeito é pior que sobreviver: o HTML visível migra e o
+  # atributo dentro do comentário `wp:image` fica na origem. O bloco passa a
+  # apontar para dois domínios, invalida no editor e a URL antiga volta ao
+  # re-salvar.
+  #
+  # ORDEM: o passe ESCAPADO vem primeiro. Ele só casa texto que ainda tem
+  # contrabarras, e o passe literal seguinte não reprocessa o que já foi
+  # convertido. A ordem inversa também funcionaria aqui, mas esta é a que mantém
+  # a invariante mesmo se um dos domínios for substring do outro.
+  #
+  # Nunca substituir por HOST PURO (sem esquema): em QA→DEV a origem
+  # `uonix.ksio.dev` é substring do destino `test.uonix.ksio.dev`, e um segundo
+  # passe geraria `test.test.uonix.ksio.dev`.
+  local source_url_escaped target_url_escaped
+  source_url_escaped="$(json_escaped_url "$source_url")" || return $?
+  target_url_escaped="$(json_escaped_url "$target_url")" || return $?
+
+  wp_exec "$env" search-replace "$source_url_escaped" "$target_url_escaped" --all-tables-with-prefix --skip-columns=guid --quiet || return $?
   wp_exec "$env" search-replace "$source_url" "$target_url" --all-tables-with-prefix --skip-columns=guid --quiet || return $?
   wp_exec "$env" option update home "$target_url" >/dev/null || return $?
   wp_exec "$env" option update siteurl "$target_url" >/dev/null || return $?
   wp_exec "$env" option update blogname "$target_title" >/dev/null || return $?
+}
+
+json_escaped_url() {
+  local url="$1"
+
+  [ -n "$url" ] || return 1
+  # Converte https://host em https:\/\/host, a forma como o WordPress serializa
+  # URLs dentro de JSON (atributos de bloco Gutenberg, opções serializadas).
+  printf '%s' "$url" | sed 's|/|\\/|g'
 }
 
 valid_author_id() {
@@ -1648,19 +1739,39 @@ sync_runtime_files() {
 
 database_identity() {
   local env="$1"
-  local wp_root wp_cli
+  local wp_root wp_cli raw
 
+  # Devolve somente um HASH de host|schema. Basta para decidir se origem e
+  # destino são o mesmo banco, sem devolver os valores ao chamador nem expô-los
+  # em log ou mensagem de erro.
   if is_remote_env "$env"; then
     wp_root="$(wp_path "$env")" || return $?
     wp_cli="$(wp_cli_shell "$env")" || return $?
-    remote_run "$env" "set -uo pipefail
-printf '%s|%s\n' \
+    raw="$(remote_run "$env" "set -uo pipefail
+printf '%s|%s' \
   \"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\" \
-  \"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)\"" || return $?
+  \"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)\"")" || return $?
   else
-    printf '%s|%s\n' \
-      "$(local_wp config get DB_HOST)" \
-      "$(local_wp config get DB_NAME)" || return $?
+    raw="$(printf '%s|%s' "$(local_wp config get DB_HOST)" "$(local_wp config get DB_NAME)")" || return $?
+  fi
+
+  # Identidade incompleta não pode virar hash: viraria um hash válido de lixo.
+  case "$raw" in
+    ''|'|'*|*'|') return 1 ;;
+  esac
+
+  printf '%s' "$raw" | identity_digest
+}
+
+identity_digest() {
+  # sha256sum no Linux (CI), shasum no macOS. Sem fallback silencioso: se nenhum
+  # existir, falha em vez de devolver algo que pareça um hash.
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | cut -d' ' -f1
+  else
+    return 1
   fi
 }
 
@@ -1670,27 +1781,31 @@ assert_distinct_databases() {
   local source_identity target_identity
 
   # O nome do ambiente não prova que o banco é outro. Se origem e destino
-  # apontarem para o MESMO host e schema — o que é plausível na HostGator, onde
-  # QA e DEV dividem conta e servidor — o clone exporta e reimporta sobre si
-  # mesmo: o conteúdo do destino é destruído e o backup passa a ser a única
-  # cópia existente. A comparação acontece no preflight, antes de qualquer
-  # escrita, para que a execução aborte com o destino intacto.
+  # apontarem para o MESMO host e schema — plausível na HostGator, onde QA e DEV
+  # dividem conta e servidor — o clone exporta e reimporta sobre si mesmo: o
+  # conteúdo do destino é destruído e o backup passa a ser a única cópia. A
+  # comparação roda no preflight e de novo antes da primeira escrita.
   source_identity="$(database_identity "$source_env")" || {
-    uonix_env_error "não foi possível ler a identidade do banco de ${source_env}"
+    uonix_env_error "não foi possível identificar o banco de ${source_env}"
+    return 1
+  }
+  [ -n "$source_identity" ] || {
+    uonix_env_error "não foi possível identificar o banco de ${source_env}"
     return 1
   }
   target_identity="$(database_identity "$target_env")" || {
-    uonix_env_error "não foi possível ler a identidade do banco de ${target_env}"
+    uonix_env_error "não foi possível identificar o banco de ${target_env}"
     return 1
   }
-
-  [ -n "${source_identity#|}" ] && [ -n "${target_identity#|}" ] || {
-    uonix_env_error 'identidade de banco vazia; abortando por precaução'
+  [ -n "$target_identity" ] || {
+    uonix_env_error "não foi possível identificar o banco de ${target_env}"
     return 1
   }
 
   if [ "$source_identity" = "$target_identity" ]; then
-    uonix_env_error "origem (${source_env}) e destino (${target_env}) usam o MESMO banco (${source_identity}); o clone destruiria os dados"
+    # Value-blind: a mensagem não revela host nem schema, e a comparação é entre
+    # hashes. Quem opera o clone já sabe quais ambientes escolheu.
+    uonix_env_error "origem (${source_env}) e destino (${target_env}) usam o MESMO banco; o clone destruiria os dados"
     return 1
   fi
 
@@ -1718,6 +1833,9 @@ command -v tar >/dev/null || exit \$?
 command -v sha256sum >/dev/null || exit \$?
 command -v cmp >/dev/null || exit \$?
 (command -v mysql >/dev/null || command -v mariadb >/dev/null) || exit \$?
+# O PRODUTOR do dump tambem e obrigatorio. Exigir so o cliente deixava a falta do
+# mysqldump aparecer no MEIO do clone, quando o destino ja pode estar mutado.
+(command -v mysqldump >/dev/null || command -v mariadb-dump >/dev/null) || exit \$?
 test -d $(printf '%q' "$wp_root") || exit \$?
 test -d $(printf '%q' "$wp_content") || exit \$?
 $wp_cli --path=$(printf '%q' "$wp_root") db prefix >/dev/null || exit \$?
@@ -1864,9 +1982,8 @@ rollback_target() {
     remote_run_idempotent "$env" "set -euo pipefail
 test -n $(printf '%q' "$wp_content")
 test $(printf '%q' "$wp_content") != /
-test -s $(printf '%q' "$dump_file")
 test -s $(printf '%q' "$files_file")
-gzip -t $(printf '%q' "$dump_file")
+$(remote_dump_content_check_snippet "$dump_file")
 tar -tzf $(printf '%q' "$files_file") >/dev/null
 staging=\"\$(mktemp -d $(printf '%q' "$wp_content")/.uonix-rollback.XXXXXX)\"
 # O trap remove SOMENTE o que ainda nao foi promovido. Um rm -rf cego no staging
@@ -1913,7 +2030,9 @@ $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
     [ -n "$LOCAL_WP_CONTENT" ] && [ "$LOCAL_WP_CONTENT" != / ] || return 1
     [ -s "$dump_file" ] || return 1
     [ -s "$files_file" ] || return 1
-    gzip -t "$dump_file" || return 1
+    # Rollback só é rollback se o backup for utilizável. Validar o conteúdo aqui
+    # evita restaurar um SQL truncado sobre um destino já mutado.
+    assert_dump_content_complete "$dump_file" 'backup para rollback' || return 1
     tar -tzf "$files_file" >/dev/null || return 1
     # Extrai PRIMEIRO para o staging, sem tocar em nada do destino. Se o archive
     # estiver corrompido, o rollback aborta com o destino ainda intacto e o banco
