@@ -73,6 +73,39 @@ done
 printf 'não é gzip' >"${TMP_ROOT}/corrompido.sql.gz"
 expect_fail corrompido
 
+# Dump legítimo com MUITAS linhas em branco no fim: `tail -n 5` era uma janela
+# arbitrária e empurrava o marcador para fora, reprovando dump bom (falso
+# negativo = clone abortado sem motivo).
+{
+  printf -- '-- MariaDB dump\n'
+  # SQL literal: os backticks são do MySQL, não expansão de shell.
+  # shellcheck disable=SC2016
+  printf 'CREATE TABLE `x` (`id` int);\n'
+  printf -- '-- Dump completed on 2026-08-05  1:00:00\n'
+  printf '\n\n\n\n\n\n\n\n'
+} | gzip -c >"${TMP_ROOT}/completo_muitas_linhas_vazias.sql.gz"
+expect_pass completo_muitas_linhas_vazias
+
+# Terminador CRLF (host Windows / transferência ASCII): o \r residual não pode
+# transformar dump bom em reprovado. Este caso usa --skip-dump-date, onde o
+# marcador é a linha INTEIRA: sem normalizar o \r, o `case` não tem glob final
+# para absorvê-lo e o dump legítimo seria reprovado.
+{
+  printf -- '-- MariaDB dump\r\n'
+  # shellcheck disable=SC2016
+  printf 'CREATE TABLE `x` (`id` int);\r\n'
+  printf -- '-- Dump completed\r\n'
+} | gzip -c >"${TMP_ROOT}/completo_crlf.sql.gz"
+expect_pass completo_crlf
+
+# Mesma forma, com data: aqui o glob absorveria o \r, então este caso sozinho
+# NÃO provaria a normalização — por isso o de cima existe.
+{
+  printf -- '-- MariaDB dump\r\n'
+  printf -- '-- Dump completed on 2026-08-05  1:00:00\r\n'
+} | gzip -c >"${TMP_ROOT}/completo_crlf_com_data.sql.gz"
+expect_pass completo_crlf_com_data
+
 # O backup de QA/DEV fica no host remoto. O snippet enviado por SSH precisa ter
 # o MESMO contrato; testar só o helper local deixaria o caminho real sem prova.
 expect_remote_pass() {
@@ -126,5 +159,31 @@ rollback_body="$(function_body rollback_target)"
   || fail 'rollback remoto não revalida o marcador final do SQL'
 [ "$(printf '%s\n' "$rollback_body" | grep -c 'assert_dump_content_complete')" -eq 1 ] \
   || fail 'rollback local não revalida o marcador final do SQL'
+
+# O snippet remoto precisa DERIVAR o marcador do helper, não repetir a string.
+# Sem isso, mudar dump_completion_marker deixaria os dois lados divergentes com
+# o teste ainda verde, porque as fixtures usam o marcador antigo nos dois casos.
+snippet_body="$(function_body remote_dump_content_check_snippet)"
+printf '%s\n' "$snippet_body" | grep -q 'dump_completion_marker' \
+  || fail 'snippet remoto hard-codeia o marcador em vez de usar dump_completion_marker'
+printf '%s\n' "$snippet_body" | grep -q "'-- Dump completed'" \
+  && fail 'snippet remoto ainda repete o marcador como literal'
+
+# Prova comportamental da ligação: trocando o helper, o snippet acompanha.
+generated_with_custom_marker="$(
+  # Override deliberado: o snippet chama este helper indiretamente.
+  # shellcheck disable=SC2329
+  dump_completion_marker() { printf '%s' '-- MARCADOR_TROCADO'; }
+  remote_dump_content_check_snippet '/tmp/x.sql.gz'
+)" || fail 'não foi possível gerar o snippet com marcador substituído'
+printf '%s\n' "$generated_with_custom_marker" | grep -q 'MARCADOR_TROCADO' \
+  || fail 'snippet remoto não acompanha mudança em dump_completion_marker'
+
+# Nenhum dos dois caminhos pode voltar à janela fixa de linhas.
+for fn in assert_dump_content_complete remote_dump_content_check_snippet; do
+  if printf '%s\n' "$(function_body "$fn")" | grep -qE 'tail -n [2-9]'; then
+    fail "${fn} usa janela fixa de linhas; dump com muitas linhas vazias reprovaria"
+  fi
+done
 
 printf 'PASS: conteúdo do dump exige marcador final exato em todos os caminhos.\n'
