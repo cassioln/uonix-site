@@ -472,46 +472,73 @@ jobs:
           new_end='# END UonixAdminPath'
 
           test -s "$htaccess"
-          [ "$(grep -Fxc "$old_begin" "$htaccess")" -eq 1 ]
-          [ "$(grep -Fxc "$old_end" "$htaccess")" -eq 1 ]
+          # `grep -Fx` não casaria o marcador num arquivo CRLF (o \r final faz
+          # parte da linha). A contagem canônica é feita pelo PHP, que faz rtrim
+          # do \r; aqui só exigimos que o marcador exista de alguma forma.
+          [ "$(grep -Fc "$old_begin" "$htaccess")" -ge 1 ]
+          [ "$(grep -Fc "$old_end" "$htaccess")" -ge 1 ]
 
           tmp="${htaccess}.uonix-marker.$$"
           before="${tmp}.before"
           after="${tmp}.after"
           trap 'rm -f "$tmp" "$before" "$after"' EXIT
 
+          # Terminadores medidos ANTES: o .htaccess real é LF e não termina em
+          # newline. Converter CRLF<->LF faria o Apache reinterpretar o arquivo.
+          cr_antes="$(tr -dc '\r' < "$htaccess" | wc -c | tr -d ' ')"
+          printf 'CR_ANTES=%s\n' "$cr_antes"
+
           # A cópia preserva dono, grupo e modo. O original só é substituído
           # depois de todas as provas abaixo passarem.
           cp -p "$htaccess" "$tmp"
+          # Comparação por LINHA, com rtrim do \r: casar o marcador com "\n"
+          # colado falharia quando o bloco fosse a última linha de um arquivo sem
+          # terminador final. Preserva o terminador original de cada linha.
           "$php_bin" -d disable_functions= -r '
             $path = $argv[1];
-            $pairs = [
-              $argv[2] . "\n" => $argv[3] . "\n",
-              $argv[4] . "\n" => $argv[5] . "\n",
-            ];
+            $map  = [ $argv[2] => $argv[3], $argv[4] => $argv[5] ];
             $data = file_get_contents($path);
             if ($data === false) { exit(20); }
-            foreach ($pairs as $old => $new) {
-              if (substr_count($data, $old) !== 1) { exit(21); }
-              $data = str_replace($old, $new, $data, $count);
-              if ($count !== 1) { exit(22); }
+            $lines = explode("\n", $data);
+            $hits  = [];
+            foreach ($lines as $i => $line) {
+              $bare = rtrim($line, "\r");
+              if (isset($map[$bare])) {
+                $hits[$bare] = ($hits[$bare] ?? 0) + 1;
+                $eol = strlen($line) > strlen($bare) ? "\r" : "";
+                $lines[$i] = $map[$bare] . $eol;
+              }
             }
-            if (file_put_contents($path, $data) !== strlen($data)) { exit(23); }
+            foreach ($map as $old => $new) {
+              if (($hits[$old] ?? 0) !== 1) { exit(21); }
+            }
+            $count = count($hits);
+            if ($count !== 2) { exit(22); }
+            $out = implode("\n", $lines);
+            if (file_put_contents($path, $out) !== strlen($out)) { exit(23); }
           ' "$tmp" "$old_begin" "$new_begin" "$old_end" "$new_end"
 
           # Remove somente os dois comentários de cada lado e compara o resto.
-          # Se uma única diretiva, espaço ou byte mudar, cmp reprova e o original
-          # permanece intacto.
-          grep -Fvx -e "$old_begin" -e "$old_end" "$htaccess" > "$before"
-          grep -Fvx -e "$new_begin" -e "$new_end" "$tmp" > "$after"
+          # O `tr -d '\r'` é aplicado apenas na EXTRAÇÃO para a comparação, para
+          # que -Fvx case o marcador também em arquivos CRLF. O arquivo real
+          # mantém seus terminadores — provado pela contagem de CR abaixo.
+          tr -d '\r' < "$htaccess" | grep -Fvx -e "$old_begin" -e "$old_end" > "$before"
+          tr -d '\r' < "$tmp" | grep -Fvx -e "$new_begin" -e "$new_end" > "$after"
           cmp -s "$before" "$after" || {
             echo 'Diretivas do /painel mudariam; abortando antes de substituir .htaccess.' >&2
             exit 1
           }
-          [ "$(grep -Fxc "$new_begin" "$tmp")" -eq 1 ]
-          [ "$(grep -Fxc "$new_end" "$tmp")" -eq 1 ]
-          ! grep -Fxq "$old_begin" "$tmp"
-          ! grep -Fxq "$old_end" "$tmp"
+          # Também sem -Fx, pelo mesmo motivo do CRLF acima.
+          [ "$(grep -Fc "$new_begin" "$tmp")" -ge 1 ]
+          [ "$(grep -Fc "$new_end" "$tmp")" -ge 1 ]
+          ! grep -Fq "$old_begin" "$tmp"
+          ! grep -Fq "$old_end" "$tmp"
+          # Terminadores idênticos: nenhuma conversão CRLF<->LF escapou.
+          cr_depois="$(tr -dc '\r' < "$tmp" | wc -c | tr -d ' ')"
+          [ "$cr_antes" = "$cr_depois" ] || {
+            echo "Terminadores de linha mudariam ($cr_antes -> $cr_depois); abortando." >&2
+            exit 1
+          }
 
           mv -f "$tmp" "$htaccess"
           rm -f "$before" "$after"

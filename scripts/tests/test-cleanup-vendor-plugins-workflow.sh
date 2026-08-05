@@ -105,6 +105,11 @@ has_word() {
 has_i() {
   grep -qi -e "$2" <<<"$1"
 }
+# Literal, sem interpretar regex: código PHP com `[$var]`, `??` e `!==` casaria
+# como classe de caracteres em BRE e daria falso negativo silencioso.
+has_lit() {  # has_lit <texto> <string-literal>
+  grep -qF -e "$2" <<<"$1"
+}
 count_of() {
   grep -c -e "$2" <<<"$1" || true
 }
@@ -134,27 +139,76 @@ has "$rename_block" '# BEGIN Loginizer' \
   || fail 'renomeação não exige o marcador BEGIN antigo exato'
 has "$rename_block" '# END Loginizer' \
   || fail 'renomeação não exige o marcador END antigo exato'
-has "$rename_block" '# BEGIN UonixAdminPath (NAO REMOVER: serve a URL de admin /painel)' \
+has_lit "$rename_block" '# BEGIN UonixAdminPath (NAO REMOVER: serve a URL de admin /painel)' \
   || fail 'renomeação não grava o marcador BEGIN autoexplicativo'
 has "$rename_block" '# END UonixAdminPath' \
   || fail 'renomeação não grava o marcador END novo'
 # Os `$...` abaixo são o TEXTO que precisa existir no script remoto; não devem
 # expandir enquanto este teste roda.
 # shellcheck disable=SC2016
-has "$rename_block" 'cp -p "$htaccess" "$tmp"' \
+has_lit "$rename_block" 'cp -p "$htaccess" "$tmp"' \
   || fail 'renomeação não trabalha numa cópia que preserva metadados'
 # shellcheck disable=SC2016
-has "$rename_block" 'grep -Fxc "$old_begin"' \
+has_lit "$rename_block" 'grep -Fc "$old_begin"' \
   || fail 'renomeação não exige exatamente um marcador BEGIN antigo'
 # shellcheck disable=SC2016
-has "$rename_block" 'grep -Fxc "$old_end"' \
+has_lit "$rename_block" 'grep -Fc "$old_end"' \
   || fail 'renomeação não exige exatamente um marcador END antigo'
 # shellcheck disable=SC2016
-has "$rename_block" 'grep -Fxc "$new_begin"' \
+has_lit "$rename_block" 'grep -Fc "$new_begin"' \
   || fail 'renomeação não prova exatamente um marcador BEGIN novo'
 # shellcheck disable=SC2016
-has "$rename_block" '! grep -Fxq "$old_begin"' \
+has_lit "$rename_block" '! grep -Fq "$old_begin"' \
   || fail 'renomeação não prova que o marcador BEGIN antigo sumiu da cópia'
+# shellcheck disable=SC2016
+has_lit "$rename_block" '($hits[$old] ?? 0) !== 1' \
+  || fail 'substituição PHP não exige ocorrência única de cada marcador'
+# shellcheck disable=SC2016
+has_lit "$rename_block" '$count !== 2' \
+  || fail 'substituição PHP não confirma que trocou exatamente os dois marcadores'
+# As DUAS extrações (original e cópia) precisam de -Fvx. Trocar só uma por
+# `grep -v` desancorado descartaria linhas legítimas e o cmp compararia lixo.
+[ "$(count_of "$rename_block" 'grep -Fvx')" -ge 2 ] \
+  || fail 'comparação usa grep desancorado; descartaria linhas legítimas do .htaccess'
+# O .htaccess vivo só pode ser ESCRITO pelo mv final. Edição in-place ou
+# redirecionamento sobre ele burla a prova byte a byte inteira.
+# shellcheck disable=SC2016
+if has_re "$rename_block" 'sed -i.*htaccess|tee .*\$htaccess|> *"\$htaccess"|>> *"\$htaccess"'; then
+  fail 'renomeação escreve direto no .htaccess vivo em vez de trocar a cópia validada'
+fi
+# ORDEM REAL, não só presença: copiar -> comparar -> trocar. Um `mv` antes do
+# `cmp` trocaria o arquivo e só depois verificaria — exatamente o inverso.
+# shellcheck disable=SC2016
+rename_cp_line="$(grep -n 'cp -p "\$htaccess"' <<<"$rename_block" | head -1 | cut -d: -f1)"
+rename_cmp_line="$(grep -n 'cmp -s' <<<"$rename_block" | head -1 | cut -d: -f1)"
+rename_mv_line="$(grep -n 'mv -f' <<<"$rename_block" | head -1 | cut -d: -f1)"
+[ -n "$rename_cp_line" ] && [ -n "$rename_cmp_line" ] && [ -n "$rename_mv_line" ] \
+  || fail 'não localizei cp/cmp/mv no step de renomeação'
+[ "$rename_cp_line" -lt "$rename_cmp_line" ] \
+  || fail "cópia (linha $rename_cp_line) não precede a comparação (linha $rename_cmp_line)"
+[ "$rename_cmp_line" -lt "$rename_mv_line" ] \
+  || fail "comparação (linha $rename_cmp_line) não precede a troca (linha $rename_mv_line)"
+# O step precisa mesmo executar a renomeação: reduzi-lo a echos mantendo as
+# strings satisfaria qualquer asserção puramente textual.
+has "$rename_block" 'file_put_contents' \
+  || fail 'step de renomeação não escreve a cópia; seria apenas eco de texto'
+# Medido no host: o .htaccess real NÃO termina em newline. Casar o marcador com
+# "\n" colado quebraria se o bloco fosse a última linha. A comparação precisa ser
+# por LINHA, tolerando \r e ausência de terminador final.
+# shellcheck disable=SC2016
+has_lit "$rename_block" 'rtrim($line, "\r")' \
+  || fail 'substituição não compara linha a linha tolerando CR e ausência de newline final'
+# Se os terminadores mudarem, o Apache pode reinterpretar o arquivo. Exige as
+# duas medições E a comparação entre elas: só o printf do CR_ANTES passaria sem
+# nunca comparar nada.
+has "$rename_block" 'CR_ANTES' \
+  || fail 'renomeação não mede os terminadores antes da troca'
+# shellcheck disable=SC2016
+has_lit "$rename_block" 'cr_depois="$(tr -dc' \
+  || fail 'renomeação não mede os terminadores depois da troca'
+# shellcheck disable=SC2016
+has_lit "$rename_block" '[ "$cr_antes" = "$cr_depois" ]' \
+  || fail 'renomeação não compara os terminadores antes/depois; conversão CRLF passaria'
 has "$rename_block" 'cmp -s' \
   || fail 'renomeação não prova que as diretivas ficaram byte-idênticas'
 has "$rename_block" 'mv -f' \
