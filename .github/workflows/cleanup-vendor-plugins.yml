@@ -235,8 +235,21 @@ jobs:
             || echo 'NENHUM_ALVO_PRESENTE'
           echo '--- total de plugins ---'
           wp plugin list --format=csv --fields=name | tail -n +2 | wc -l
-          echo '--- Turnstile precisa estar ativo antes de remover o loginizer ---'
-          wp eval 'echo (defined("UONIX_TURNSTILE_ENABLED") && UONIX_TURNSTILE_ENABLED) ? "TURNSTILE_ATIVO" : "TURNSTILE_INDEFINIDO";' || true
+          echo '--- Turnstile precisa estar ATIVO antes de remover o loginizer ---'
+          # Contrato real do módulo: uonix_login_turnstile_is_active() em
+          # mu-plugins/uonix-admin/51-login-turnstile.php exige as três funções do
+          # uonix-integrations E uonix_turnstile_is_enabled(). Checar uma constante
+          # UONIX_TURNSTILE_ENABLED seria inventar API: ela não existe no repo.
+          wp eval '
+            $active = function_exists("uonix_login_turnstile_is_active")
+              ? uonix_login_turnstile_is_active() : false;
+            echo $active ? "TURNSTILE_ATIVO" : "TURNSTILE_INATIVO";
+            echo "\n";
+            echo "site_key_definida=" . (defined("UONIX_TURNSTILE_SITE_KEY") && UONIX_TURNSTILE_SITE_KEY ? "sim" : "nao") . "\n";
+            echo "secret_key_definida=" . (defined("UONIX_TURNSTILE_SECRET_KEY") && UONIX_TURNSTILE_SECRET_KEY ? "sim" : "nao") . "\n";' || true
+          echo '--- loginizer ainda instalado? ---'
+          wp plugin is-installed loginizer >/dev/null 2>&1 \
+            && echo 'LOGINIZER_PRESENTE' || echo 'LOGINIZER_AUSENTE'
           REMOTE
 
       - name: Acquire exclusive lock
