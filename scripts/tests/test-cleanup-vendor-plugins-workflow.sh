@@ -245,11 +245,22 @@ has_re "$backup_block" 'cp -p .*htaccess.*htaccess\.bak' \
   || fail 'step de backup não copia o .htaccess'
 has "$backup_block" 'mysqldump' \
   || fail 'step de backup não gera dump do banco'
+# O preflight aceita mysqldump OU mariadb-dump. Se o produtor chamar mysqldump
+# fixo, um host só-MariaDB passa o preflight e falha DEPOIS de adquirir o lock.
+has "$backup_block" 'mariadb-dump' \
+  || fail 'produtor não detecta mariadb-dump; divergiria do preflight e falharia pós-lock'
+# shellcheck disable=SC2016
+has_lit "$backup_block" '"$dump_bin"' \
+  || fail 'produtor não invoca o binário detectado; a detecção seria decorativa'
 has "$backup_block" '--no-tablespaces' \
   || fail 'mysqldump não usa --no-tablespaces; usuário compartilhado sem PROCESS aborta o dump'
 for dump_flag in --routines --triggers --events; do
   has "$backup_block" "$dump_flag" \
     || fail "mysqldump omite $dump_flag; backup não cobre o schema completo"
+done
+for footer_flag in --comments --dump-date; do
+  has "$backup_block" "$footer_flag" \
+    || fail "mysqldump não força $footer_flag; my.cnf pode suprimir o marcador final"
 done
 
 # --- Uma única sessão SSH para o lote ------------------------------------
@@ -338,6 +349,67 @@ has "$remote_release" 'set -uo pipefail' \
 # não funciona em grep linha-a-linha, então comparo as POSIÇÕES das duas linhas.
 has "$backup_block" 'BACKUP_VALIDO' \
   || fail 'step de backup não valida o dump'
+# O footer do mysqldump NÃO é confiável neste host: dois runs reais (31034098987 e
+# 31037659803) terminaram rc=0 sem `-- Dump completed`, inclusive já com
+# --comments --dump-date. A prova de conclusão passa a ser um marcador NOSSO,
+# acrescentado ao fluxo somente quando o produtor sai com status zero.
+# Exige as DUAS pontas: quem grava o marcador e quem o compara. Só mencionar o
+# nome num comentário, ou gravá-lo sem comparar, não vale.
+# shellcheck disable=SC2016
+has_lit "$backup_block" "printf -- '-- UONIX_DUMP_COMPLETO\\n' | gzip -c >> \"\$dump\"" \
+  || fail 'dump não recebe o marcador de conclusão próprio acrescentado ao fluxo'
+# shellcheck disable=SC2016
+has_lit "$backup_block" '[ "$last" != '"'"'-- UONIX_DUMP_COMPLETO'"'"' ]' \
+  || fail 'prova não compara a última linha com o marcador próprio'
+# A prova NÃO pode voltar a depender do footer do cliente.
+if has "$backup_block" 'Dump completed'; then
+  # shellcheck disable=SC2016
+  fail 'prova volta a depender do footer `-- Dump completed`, que este host não emite'
+fi
+# O marcador só vale se for acrescentado APÓS o produtor terminar bem. Sob
+# pipefail, `dump | gzip` propaga a falha; o marcador vem num segundo append.
+# shellcheck disable=SC2016
+has_lit "$backup_block" 'set -o pipefail' \
+  || fail 'produtor do dump não roda sob pipefail; falha do mysqldump passaria como sucesso'
+has_lit "$backup_block" "tail -n 1" \
+  || fail 'prova não exige o marcador como última linha não vazia'
+# Mínimo de tabelas: gzip íntegro + marcador ainda passariam num dump que perdeu
+# tabelas no meio. O CREATE TABLE é a evidência de cobertura.
+has "$backup_block" 'CREATE TABLE' \
+  || fail 'prova não conta tabelas; dump parcial com marcador passaria'
+# O piso precisa ser REAL: produção tem 158 tabelas, então `-ge 0` ou `-ge 1`
+# tornaria o gate decorativo. Extrai o número e exige um piso significativo.
+# shellcheck disable=SC2016
+tabelas_min="$(sed -n 's/.*"\$tabelas" -ge \([0-9]\{1,\}\).*/\1/p' <<<"$backup_block" | head -1)"
+[ -n "$tabelas_min" ] \
+  || fail 'não encontrei o piso de tabelas do gate de cobertura'
+[ "$tabelas_min" -ge 100 ] \
+  || fail "piso de tabelas é $tabelas_min; baixo demais para produção (158 tabelas)"
+# Guard anti-vazamento AMPLO: a auditoria provou que proibir só `printf "$last"`
+# deixa passar echo, ${last}, here-string e linha de continuação. A regra passa a
+# ser por CONTEXTO: comparar $last é legítimo; imprimi-lo não. Só ${#last} pode
+# aparecer numa linha de saída.
+while IFS= read -r linha; do
+  # shellcheck disable=SC2016
+  case "$linha" in
+    *'$last'*|*'${last}'*) : ;;
+    *) continue ;;
+  esac
+  # Remove os usos permitidos antes de julgar a linha.
+  resto="${linha//\$\{#last\}/}"
+  # shellcheck disable=SC2016
+  case "$resto" in
+    *'$last'*|*'${last}'*) : ;;
+    *) continue ;;
+  esac
+  # Sobrou um $last cru: só é aceitável em teste/comparação/atribuição.
+  case "$resto" in
+    *printf*|*echo*|*'cat '*|*tee*|*'>&2'*|*'>>'*)
+      # shellcheck disable=SC2016
+      fail 'step de backup imprime $last; só ${#last} pode ir para a saída (não vazar SQL)'
+      ;;
+  esac
+done <<<"$backup_block"
 backup_dir_line="$(grep -n 'BACKUP_DIR=%s' <<<"$backup_block" | head -1 | cut -d: -f1)"
 valid_line="$(grep -n 'BACKUP_VALIDO' <<<"$backup_block" | head -1 | cut -d: -f1)"
 [ -n "$backup_dir_line" ] \
