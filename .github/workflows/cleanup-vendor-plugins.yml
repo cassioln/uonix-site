@@ -344,25 +344,34 @@ jobs:
           printf 'dump_bin=%s\n' "${dump_bin##*/}"
 
           dump="$backup_dir/db.sql.gz"
+          sql_tmp="$backup_dir/db.sql.partial"
+          rm -f -- "$sql_tmp"
+          trap 'rm -f -- "$sql_tmp"' EXIT
           set -o pipefail
           # O footer `-- Dump completed` do cliente NÃO é confiável neste host: dois
           # runs reais terminaram com status zero sem emiti-lo, inclusive já com
           # --comments --dump-date. A prova de conclusão passa a ser um marcador
-          # NOSSO, emitido no MESMO stream logo após o produtor terminar bem.
+          # NOSSO anexado a um SQL físico DEPOIS de o produtor sair bem.
           #
-          # NÃO usar um segundo `gzip -c >>`: o run 31046533827 provou que este host
-          # não enxerga o segundo membro gzip na leitura, e a última linha continuou
-          # sendo a do dump. O `&&` garante que o marcador só é emitido quando o
-          # produtor sai com status zero; sob pipefail, a falha aborta o step.
-          { MYSQL_PWD="$(wp config get DB_PASSWORD)" "$dump_bin" \
+          # Dois desenhos em stream foram refutados pela produção:
+          # - 31046533827: o segundo membro gzip não apareceu na leitura;
+          # - 31050726743: o marcador no mesmo pipeline também não apareceu.
+          #
+          # Sem pipeline no produtor não há status implícito para interpretar: com
+          # `set -e`, rc != 0 aborta ANTES do append. A quebra de linha inicial
+          # garante marcador autônomo mesmo se o cliente terminar sem newline.
+          MYSQL_PWD="$(wp config get DB_PASSWORD)" "$dump_bin" \
             --host="$(wp config get DB_HOST)" \
             --user="$(wp config get DB_USER)" \
             --single-transaction --quick --skip-lock-tables \
             --no-tablespaces --routines --triggers --events \
             --comments --dump-date \
             --default-character-set=utf8mb4 \
-            "$(wp config get DB_NAME)" \
-            && printf -- '-- UONIX_DUMP_COMPLETO\n'; } | gzip -c > "$dump"
+            "$(wp config get DB_NAME)" > "$sql_tmp"
+          printf -- '\n-- UONIX_DUMP_COMPLETO\n' >> "$sql_tmp"
+          gzip -c "$sql_tmp" > "$dump"
+          rm -f -- "$sql_tmp"
+          trap - EXIT
 
           # gzip -t valida o ENVELOPE, não o conteúdo: um dump interrompido produz
           # gzip íntegro. Exigir o nosso marcador como última linha não vazia é o

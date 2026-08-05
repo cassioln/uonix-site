@@ -356,19 +356,43 @@ has "$backup_block" 'BACKUP_VALIDO' \
 # Exige as DUAS pontas: quem grava o marcador e quem o compara. Só mencionar o
 # nome num comentário, ou gravá-lo sem comparar, não vale.
 #
-# O append como SEGUNDO membro gzip foi REFUTADO pelo host (run 31046533827): o
-# marcador não apareceu na leitura e a última linha continuou sendo a do dump.
-# O marcador precisa entrar no MESMO stream, antes do gzip, e somente quando o
-# produtor sai bem — daí o `&&`, que sob pipefail propaga a falha do produtor.
+# Os dois caminhos em stream foram REFUTADOS pelo host:
+# - run 31046533827: marcador como segundo membro gzip não apareceu;
+# - run 31050726743: marcador no mesmo pipeline também não apareceu.
+# A prova deixa de depender do comportamento de pipe/gzip do host: o produtor
+# grava um SQL físico, o marcador é anexado a ESSE arquivo depois de rc=0, e só
+# então um único gzip é criado. O temporário precisa ser limpo até em falha.
 # shellcheck disable=SC2016
-if has_lit "$backup_block" 'gzip -c >> "$dump"'; then
-  fail 'marcador vai como segundo membro gzip; o host não o enxerga na leitura'
+has_lit "$backup_block" 'sql_tmp="$backup_dir/db.sql.partial"' \
+  || fail 'backup não usa arquivo SQL temporário físico para atestar conclusão'
+# shellcheck disable=SC2016
+has_lit "$backup_block" 'trap '\''rm -f -- "$sql_tmp"'\'' EXIT' \
+  || fail 'arquivo SQL temporário pode sobreviver a falha e vazar dados'
+# shellcheck disable=SC2016
+has_lit "$backup_block" '"$(wp config get DB_NAME)" > "$sql_tmp"' \
+  || fail 'mysqldump não grava diretamente no arquivo SQL temporário'
+# Garante linha autônoma mesmo se o cliente terminar sem newline.
+# shellcheck disable=SC2016
+has_lit "$backup_block" "printf -- '\\n-- UONIX_DUMP_COMPLETO\\n' >> \"\$sql_tmp\"" \
+  || fail 'marcador não é anexado como linha autônoma ao SQL físico'
+# shellcheck disable=SC2016
+has_lit "$backup_block" 'gzip -c "$sql_tmp" > "$dump"' \
+  || fail 'gzip não é gerado em um único membro a partir do SQL atestado'
+# Rejeita as duas implementações já refutadas em produção.
+# shellcheck disable=SC2016
+if has_lit "$backup_block" 'gzip -c >> "$dump"' \
+  || has_lit "$backup_block" '; } | gzip -c > "$dump"'; then
+  fail 'backup reutiliza stream gzip refutado pelo host; precisa comprimir SQL físico'
 fi
-has_lit "$backup_block" "&& printf -- '-- UONIX_DUMP_COMPLETO" \
-  || fail 'marcador não é gerado no mesmo stream condicionado ao sucesso do produtor'
+# Ordem concreta: produtor -> marcador -> gzip. Uma menção decorativa não basta.
 # shellcheck disable=SC2016
-has_lit "$backup_block" '; } | gzip -c > "$dump"' \
-  || fail 'dump não é gerado como membro gzip único; volta a depender de multi-membro'
+producer_line="$(grep -nF '"$(wp config get DB_NAME)" > "$sql_tmp"' <<<"$backup_block" | head -1 | cut -d: -f1)"
+marker_line="$(grep -nF "printf -- '\\n-- UONIX_DUMP_COMPLETO\\n' >> \"\$sql_tmp\"" <<<"$backup_block" | head -1 | cut -d: -f1)"
+# shellcheck disable=SC2016
+gzip_line="$(grep -nF 'gzip -c "$sql_tmp" > "$dump"' <<<"$backup_block" | head -1 | cut -d: -f1)"
+[ -n "$producer_line" ] && [ -n "$marker_line" ] && [ -n "$gzip_line" ] \
+  && [ "$producer_line" -lt "$marker_line" ] && [ "$marker_line" -lt "$gzip_line" ] \
+  || fail 'ordem do atestado físico não é produtor -> marcador -> gzip'
 # shellcheck disable=SC2016
 has_lit "$backup_block" '[ "$last" != '"'"'-- UONIX_DUMP_COMPLETO'"'"' ]' \
   || fail 'prova não compara a última linha com o marcador próprio'
@@ -377,11 +401,12 @@ if has "$backup_block" 'Dump completed'; then
   # shellcheck disable=SC2016
   fail 'prova volta a depender do footer `-- Dump completed`, que este host não emite'
 fi
-# O marcador só vale se for acrescentado APÓS o produtor terminar bem. Sob
-# pipefail, `dump | gzip` propaga a falha; o marcador vem num segundo append.
-# shellcheck disable=SC2016
-has_lit "$backup_block" 'set -o pipefail' \
-  || fail 'produtor do dump não roda sob pipefail; falha do mysqldump passaria como sucesso'
+# O marcador só vale se o script remoto abortar imediatamente quando o produtor
+# retornar rc != 0; sem `-e`, o append poderia rodar depois de um dump parcial.
+remote_backup="$(awk "/<<'REMOTE'/,/^          REMOTE$/" <<<"$backup_block")"
+[ -n "$remote_backup" ] || fail 'não encontrei o script remoto do backup'
+has_lit "$remote_backup" 'set -euo pipefail' \
+  || fail 'backup remoto não usa set -euo pipefail; marcador poderia seguir falha do produtor'
 has_lit "$backup_block" "tail -n 1" \
   || fail 'prova não exige o marcador como última linha não vazia'
 # Mínimo de tabelas: gzip íntegro + marcador ainda passariam num dump que perdeu
