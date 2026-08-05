@@ -135,6 +135,12 @@ jobs:
       - name: Test clone distinct databases
         run: bash scripts/tests/test-clone-distinct-databases.sh
 
+      - name: Test clone dump content
+        run: bash scripts/tests/test-clone-dump-content.sh
+
+      - name: Test clone URL replacement
+        run: bash scripts/tests/test-clone-url-replacement.sh
+
       - name: Test CI covers every test
         run: |
           python3 -c 'import yaml' \
