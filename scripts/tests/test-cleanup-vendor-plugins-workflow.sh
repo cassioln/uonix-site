@@ -421,6 +421,39 @@ tabelas_min="$(sed -n 's/.*"\$tabelas" -ge \([0-9]\{1,\}\).*/\1/p' <<<"$backup_b
   || fail 'não encontrei o piso de tabelas do gate de cobertura'
 [ "$tabelas_min" -ge 100 ] \
   || fail "piso de tabelas é $tabelas_min; baixo demais para produção (158 tabelas)"
+# --no-defaults é OBRIGATÓRIO e precisa vir ANTES das outras opções. Auditoria
+# provou em MariaDB 10.11 real que um `~/.my.cnf` com `[mysqldump] no-data` (ou
+# `where=1=0`) faz o produtor sair rc=0 com ZERO dados: marcador presente e 160
+# linhas CREATE TABLE. Em hospedagem compartilhada o painel cria esse arquivo, o
+# que dispensa invasor. Restaurar esse backup entregaria um site vazio.
+has_lit "$backup_block" '--no-defaults' \
+  || fail 'produtor sem --no-defaults; ~/.my.cnf poderia injetar no-data e zerar os dados'
+nodefaults_line="$(grep -nF -- '--no-defaults' <<<"$backup_block" | head -1 | cut -d: -f1)"
+firstopt_line="$(grep -nF -- '--single-transaction' <<<"$backup_block" | head -1 | cut -d: -f1)"
+[ -n "$nodefaults_line" ] && [ -n "$firstopt_line" ] && [ "$nodefaults_line" -lt "$firstopt_line" ] \
+  || fail '--no-defaults não precede as demais opções do produtor'
+# Cobertura por CREATE TABLE é falsificável: auditoria provou que o corpo de uma
+# ROUTINE é emitido verbatim por --routines, e um corpo com linhas literais
+# `CREATE TABLE ...` fez um dump de 1 tabela contar 121. A prova precisa medir
+# VOLUME DE DADOS, não só estrutura.
+has_lit "$backup_block" "grep -c '^INSERT INTO'" \
+  || fail 'prova não conta INSERT; dump só-estrutura (no-data) passaria'
+# shellcheck disable=SC2016
+inserts_min="$(sed -n 's/.*"\$inserts" -ge \([0-9]\{1,\}\).*/\1/p' <<<"$backup_block" | head -1)"
+[ -n "$inserts_min" ] \
+  || fail 'não encontrei o piso de INSERT do gate de volume'
+[ "$inserts_min" -ge 20 ] \
+  || fail "piso de INSERT é $inserts_min; baixo demais para provar que há dados"
+# Bytes descomprimidos: o ataque no-data produziu 2861 bytes. Um piso de bytes
+# reprova estrutura-sem-dados mesmo se a contagem de INSERT for burlada.
+has_lit "$backup_block" 'bytes_sql=' \
+  || fail 'prova não mede o tamanho descomprimido do dump'
+# shellcheck disable=SC2016
+bytes_min="$(sed -n 's/.*"\$bytes_sql" -ge \([0-9]\{1,\}\).*/\1/p' <<<"$backup_block" | head -1)"
+[ -n "$bytes_min" ] \
+  || fail 'não encontrei o piso de bytes do gate de volume'
+[ "$bytes_min" -ge 100000 ] \
+  || fail "piso de bytes é $bytes_min; baixo demais (ataque no-data gerou 2861)"
 # Guard anti-vazamento AMPLO: a auditoria provou que proibir só `printf "$last"`
 # deixa passar echo, ${last}, here-string e linha de continuação. A regra passa a
 # ser por CONTEXTO: comparar $last é legítimo; imprimi-lo não. Só ${#last} pode

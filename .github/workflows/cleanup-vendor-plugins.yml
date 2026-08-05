@@ -360,7 +360,13 @@ jobs:
           # Sem pipeline no produtor não há status implícito para interpretar: com
           # `set -e`, rc != 0 aborta ANTES do append. A quebra de linha inicial
           # garante marcador autônomo mesmo se o cliente terminar sem newline.
+          # --no-defaults precede TODAS as opções: sem ele, mysqldump lê ~/.my.cnf
+          # e um `[mysqldump] no-data` (ou `where=1=0`) faz o produtor sair rc=0 com
+          # ZERO dados, marcador presente e as 158 linhas CREATE TABLE intactas.
+          # Auditoria provou isso em MariaDB 10.11 real; em host compartilhado o
+          # painel cria esse arquivo, então não é preciso invasor.
           MYSQL_PWD="$(wp config get DB_PASSWORD)" "$dump_bin" \
+            --no-defaults \
             --host="$(wp config get DB_HOST)" \
             --user="$(wp config get DB_USER)" \
             --single-transaction --quick --skip-lock-tables \
@@ -390,6 +396,22 @@ jobs:
           printf 'tabelas=%s\n' "$tabelas"
           [ "$tabelas" -ge 100 ] || {
             printf 'BACKUP_INVALIDO: apenas %s tabelas no dump (esperado >= 100)\n' "$tabelas" >&2
+            exit 1
+          }
+          # Estrutura NÃO é dado. A contagem de CREATE TABLE é falsificável: o corpo
+          # de uma ROUTINE é emitido verbatim por --routines, e a auditoria mediu um
+          # dump de 1 tabela contando 121 "CREATE TABLE". Além disso um dump só de
+          # estrutura tem todos os CREATE TABLE e nenhum dado. Medir VOLUME é o que
+          # separa backup restaurável de casca vazia.
+          inserts="$(gzip -dc "$dump" | grep -c '^INSERT INTO' || true)"
+          bytes_sql="$(gzip -dc "$dump" | wc -c | tr -d '[:space:]')"
+          printf 'inserts=%s bytes_sql=%s\n' "$inserts" "$bytes_sql"
+          [ "$inserts" -ge 20 ] || {
+            printf 'BACKUP_INVALIDO: apenas %s INSERT no dump; backup sem dados\n' "$inserts" >&2
+            exit 1
+          }
+          [ "$bytes_sql" -ge 100000 ] || {
+            printf 'BACKUP_INVALIDO: dump com apenas %s bytes; volume incompatível com produção\n' "$bytes_sql" >&2
             exit 1
           }
           echo 'BACKUP_VALIDO'
