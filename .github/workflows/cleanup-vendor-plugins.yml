@@ -336,6 +336,7 @@ jobs:
             --user="$(wp config get DB_USER)" \
             --single-transaction --quick --skip-lock-tables \
             --no-tablespaces --routines --triggers --events \
+            --comments --dump-date \
             --default-character-set=utf8mb4 \
             "$(wp config get DB_NAME)" | gzip -c > "$dump"
 
@@ -347,8 +348,15 @@ jobs:
           gzip -t "$dump"
           last="$(gzip -dc "$dump" | tr -d '\r' | grep -v '^[[:space:]]*$' | tail -n 1)"
           case "$last" in
-            '-- Dump completed'|'-- Dump completed on '*) echo 'BACKUP_VALIDO' ;;
-            *) echo 'BACKUP_INVALIDO: dump sem marcador final' >&2; exit 1 ;;
+            '-- Dump completed'*) echo 'BACKUP_VALIDO' ;;
+            --*|'/*!'*)
+              printf 'BACKUP_INVALIDO: última linha é comentário SQL sem marcador (bytes=%s)\n' "${#last}" >&2
+              exit 1
+              ;;
+            *)
+              printf 'BACKUP_INVALIDO: última linha não é marcador de controle (bytes=%s)\n' "${#last}" >&2
+              exit 1
+              ;;
           esac
           chmod 600 "$dump" "$backup_dir/htaccess.bak"
           ls -la "$backup_dir"
