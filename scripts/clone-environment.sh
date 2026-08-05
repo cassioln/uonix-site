@@ -2147,7 +2147,7 @@ validate_http_endpoint() {
   local status
   local curl_status
   local attempt=1
-  local max_attempts=5
+  local max_attempts=6
   local delay=5
   local last_reason=''
 
@@ -2156,19 +2156,36 @@ validate_http_endpoint() {
   # padrão automatizado em wp-login.php mesmo com o site saudável — foi o que
   # abortou um clone qa->dev já concluído e disparou rollback desnecessário.
   #
-  # Então indisponibilidade transitória é RETENTADA, não fatal. O que não é
-  # tolerado: erro que persiste em todas as tentativas, e veredito de conteúdo
-  # (como 404), que reprova de imediato porque tentar de novo não muda nada.
+  # A janela precisa cobrir a DECADÊNCIA MEDIDA do bloqueio: reproduzindo o deny
+  # por rajada, ele persistiu em t+75s e só liberou perto de t+180s. Por isso são
+  # 6 tentativas com espera 5+10+20+40+60 = 135s, mais o tempo das requisições.
+  # Com 5 tentativas (75s de espera) o clone ainda morreria dentro do bloqueio.
+  #
+  # Indisponibilidade transitória é RETENTADA, não fatal. O que não é tolerado:
+  # erro que persiste em todas as tentativas, e veredito de conteúdo (como 404),
+  # que reprova de imediato porque tentar de novo não muda o diagnóstico.
+  #
+  # O User-Agent é próprio para que essas requisições sejam localizáveis no
+  # modsec_audit.log do cPanel e possam receber exceção. Ele NÃO evita o bloqueio
+  # (medido: UA de navegador também é barrado; o gatilho é frequência).
   while :; do
-    if status="$(curl -L -sS -o /dev/null -w '%{http_code}' --max-time 30 "$url")"; then
+    if status="$(curl -L -sS -o /dev/null -w '%{http_code}' \
+      -A 'uonix-clone-smoke/1.0' --max-time 30 "$url")"; then
       case "$status" in
-        2??|3??) return 0 ;;
+        2??|3??)
+          if [ "$attempt" -gt 1 ]; then
+            # Sucesso só após retry não pode ser silencioso: seria mascarar
+            # degradação real da borda.
+            log "AVISO: ${label} só respondeu de forma saudável na tentativa ${attempt} (último erro: ${last_reason})."
+          fi
+          return 0
+          ;;
         404|410)
           # Página ausente é falha de clone, não de disponibilidade.
           die "$label respondeu HTTP $status"
           return 1
           ;;
-        406|409|429|500|502|503|504)
+        408|409|425|429|406|500|502|503|504)
           last_reason="HTTP $status"
           ;;
         *)
@@ -2188,7 +2205,10 @@ validate_http_endpoint() {
     log "${label}: ${last_reason}; nova tentativa em ${delay}s (${attempt}/${max_attempts})."
     sleep "$delay"
     attempt=$((attempt + 1))
-    delay=$((delay * 2))
+    if [ "$delay" -lt 60 ]; then
+      delay=$((delay * 2))
+      [ "$delay" -le 60 ] || delay=60
+    fi
   done
 }
 

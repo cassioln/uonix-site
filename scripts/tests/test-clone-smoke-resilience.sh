@@ -143,6 +143,29 @@ case "$result" in
   *) fail "200 imediato deveria usar 1 chamada; obtive: ${result}" ;;
 esac
 
+# 8) A janela de retry precisa cobrir a DECADÊNCIA MEDIDA do bloqueio: o deny do
+#    Mod_Security persistiu em t+75s e só liberou perto de t+180s. Um bloqueio
+#    que libera na 6ª tentativa ainda precisa resultar em clone aprovado — com
+#    5 tentativas (75s de espera) o clone morreria dentro do bloqueio.
+result="$(run_smoke '406 406 406 406 406 200')"
+case "$result" in
+  'EXIT=0 CALLS=6') ;;
+  *) fail "bloqueio que libera perto de 180s deveria ser tolerado; obtive: ${result}" ;;
+esac
+
+# 8b) A soma das esperas precisa alcançar ~135s. Verificado no texto porque o
+#     teste mocka sleep: o risco é alguém reduzir a janela e reintroduzir o bug.
+smoke_body="$(awk '$0 == "validate_http_endpoint() {" { inside = 1 } inside { print } inside && /^}$/ { exit }' "$CLONE_SCRIPT")"
+attempts_declared="$(printf '%s\n' "$smoke_body" | sed -n 's/^[[:space:]]*local max_attempts=\([0-9]*\).*/\1/p' | head -n 1)"
+[ -n "$attempts_declared" ] || fail 'não encontrei max_attempts no smoke'
+[ "$attempts_declared" -ge 6 ] \
+  || fail "max_attempts=${attempts_declared} não cobre os ~180s medidos de bloqueio do WAF"
+
+# 9) Sucesso obtido só após retry precisa ser ANOTADO. Um retry silencioso
+#    mascararia degradação real da borda.
+printf '%s\n' "$smoke_body" | grep -qi 'AVISO' \
+  || fail 'sucesso após retry não emite aviso; degradação passaria silenciosa'
+
 # 8) O tratamento tolerante precisa estar no CÓDIGO, não só no comportamento do
 #    mock: exige retry real e classificação explícita de status transitório.
 body="$(awk '$0 == "validate_http_endpoint() {" { inside = 1 } inside { print } inside && /^}$/ { exit }' "$CLONE_SCRIPT")"
