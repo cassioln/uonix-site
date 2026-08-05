@@ -48,16 +48,18 @@ def idx(fragment):
             return i
     die(f'step ausente: {fragment}')
 
-# ORDEM CRÍTICA: preflight -> lock -> backup -> prova de uso -> remoção -> validação.
+# ORDEM CRÍTICA: preflight -> lock -> backup -> prova de uso -> remoção ->
+# renomear APENAS comentários do /painel -> validação.
 i_pre    = idx('Preflight SSH')
 i_lock   = idx('Acquire exclusive lock')
 i_backup = idx('Back up')
 i_usage  = idx('zero content usage')
 i_remove = idx('Remove vendor plugins')
+i_rename = idx('Rename misleading /painel markers')
 i_valid  = idx('Validate the site after removal')
 i_rel    = idx('Release exclusive lock')
 
-if not (i_pre < i_lock < i_backup < i_usage < i_remove < i_valid):
+if not (i_pre < i_lock < i_backup < i_usage < i_remove < i_rename < i_valid):
     die(f'ordem dos steps não é fail-closed: {names}')
 if i_rel < i_remove:
     die('lock é liberado antes da remoção')
@@ -122,9 +124,43 @@ has "$prod_branch" 'UONIX_REQUEST_CONFIRMATION' \
 has "$code" 'refs/heads/master' \
   || fail 'workflow não exige master'
 
-# --- O bloco que serve /painel jamais pode ser removido -------------------
-if has_re "$code" 'sed .*BEGIN Loginizer|rm .*htaccess|BEGIN Loginizer.*d;'; then
-  fail 'workflow tenta editar/remover o bloco do .htaccess que serve /painel'
+# --- O bloco que serve /painel só pode ter os MARCADORES renomeados --------
+# As diretivas precisam ficar byte-idênticas. O step deve trabalhar numa cópia
+# temporária, remover dos dois lados somente os comentários esperados, comparar
+# o restante e só então trocar o arquivo original.
+rename_block="$(awk '/name: Rename misleading \/painel markers/,/name: Validate the site after removal/' <<<"$code")"
+[ -n "$rename_block" ] || fail 'não encontrei o step de renomear os marcadores de /painel'
+has "$rename_block" '# BEGIN Loginizer' \
+  || fail 'renomeação não exige o marcador BEGIN antigo exato'
+has "$rename_block" '# END Loginizer' \
+  || fail 'renomeação não exige o marcador END antigo exato'
+has "$rename_block" '# BEGIN UonixAdminPath (NAO REMOVER: serve a URL de admin /painel)' \
+  || fail 'renomeação não grava o marcador BEGIN autoexplicativo'
+has "$rename_block" '# END UonixAdminPath' \
+  || fail 'renomeação não grava o marcador END novo'
+# Os `$...` abaixo são o TEXTO que precisa existir no script remoto; não devem
+# expandir enquanto este teste roda.
+# shellcheck disable=SC2016
+has "$rename_block" 'cp -p "$htaccess" "$tmp"' \
+  || fail 'renomeação não trabalha numa cópia que preserva metadados'
+# shellcheck disable=SC2016
+has "$rename_block" 'grep -Fxc "$old_begin"' \
+  || fail 'renomeação não exige exatamente um marcador BEGIN antigo'
+# shellcheck disable=SC2016
+has "$rename_block" 'grep -Fxc "$old_end"' \
+  || fail 'renomeação não exige exatamente um marcador END antigo'
+# shellcheck disable=SC2016
+has "$rename_block" 'grep -Fxc "$new_begin"' \
+  || fail 'renomeação não prova exatamente um marcador BEGIN novo'
+# shellcheck disable=SC2016
+has "$rename_block" '! grep -Fxq "$old_begin"' \
+  || fail 'renomeação não prova que o marcador BEGIN antigo sumiu da cópia'
+has "$rename_block" 'cmp -s' \
+  || fail 'renomeação não prova que as diretivas ficaram byte-idênticas'
+has "$rename_block" 'mv -f' \
+  || fail 'renomeação não troca o arquivo apenas após validar a cópia temporária'
+if has_re "$rename_block" 'BEGIN Loginizer.*d;|END Loginizer.*d;|rm .*htaccess'; then
+  fail 'workflow tenta apagar o bloco que serve /painel'
 fi
 # A validação do /painel tem de estar no step de validação pós-remoção, não
 # apenas mencionada num comentário em qualquer lugar do arquivo.
@@ -155,11 +191,17 @@ has_re "$backup_block" 'cp -p .*htaccess.*htaccess\.bak' \
   || fail 'step de backup não copia o .htaccess'
 has "$backup_block" 'mysqldump' \
   || fail 'step de backup não gera dump do banco'
+has "$backup_block" '--no-tablespaces' \
+  || fail 'mysqldump não usa --no-tablespaces; usuário compartilhado sem PROCESS aborta o dump'
+for dump_flag in --routines --triggers --events; do
+  has "$backup_block" "$dump_flag" \
+    || fail "mysqldump omite $dump_flag; backup não cobre o schema completo"
+done
 
 # --- Uma única sessão SSH para o lote ------------------------------------
 has "$body" 'ControlMaster auto' \
   || fail 'sem multiplexação SSH; a rajada faz o host recusar a porta'
-remove_block="$(awk '/name: Remove vendor plugins/,/name: Validate the site/' <<<"$body")"
+remove_block="$(awk '/name: Remove vendor plugins/,/name: Rename misleading \/painel markers/' <<<"$body")"
 [ "$(count_of "$remove_block" 'sshpass -e ssh')" -eq 1 ] \
   || fail 'remoção usa mais de uma sessão SSH; deve ser um laço remoto único'
 has "$remove_block" 'for p in' \
