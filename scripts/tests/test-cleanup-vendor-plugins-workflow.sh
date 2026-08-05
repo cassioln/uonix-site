@@ -250,4 +250,16 @@ valid_line="$(grep -n 'BACKUP_VALIDO' <<<"$backup_block" | head -1 | cut -d: -f1
 [ "$backup_dir_line" -gt "$valid_line" ] \
   || fail "BACKUP_DIR é publicado (linha $backup_dir_line) antes da validação do dump (linha $valid_line)"
 
+# O check do Turnstile precisa usar o CONTRATO REAL do módulo. A primeira versão
+# testava uma constante UONIX_TURNSTILE_ENABLED que NÃO existe no repositório, e o
+# dry-run em produção devolveu "TURNSTILE_INDEFINIDO" — falso alarme sobre um site
+# que tinha o widget ativo. API inventada produz diagnóstico errado.
+inventory_block="$(awk '/name: Report the real inventory/,/name: Acquire exclusive lock/' <<<"$code")"
+[ -n "$inventory_block" ] || fail 'não encontrei o step de inventário'
+has "$inventory_block" 'uonix_login_turnstile_is_active' \
+  || fail 'check do Turnstile não usa uonix_login_turnstile_is_active (contrato real)'
+if has "$inventory_block" 'UONIX_TURNSTILE_ENABLED'; then
+  fail 'check do Turnstile usa UONIX_TURNSTILE_ENABLED, constante que não existe no repo'
+fi
+
 printf 'PASS: gates do workflow de limpeza são fail-closed e preservam /painel.\n'
