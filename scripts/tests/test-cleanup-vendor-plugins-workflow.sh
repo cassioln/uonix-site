@@ -251,6 +251,10 @@ for dump_flag in --routines --triggers --events; do
   has "$backup_block" "$dump_flag" \
     || fail "mysqldump omite $dump_flag; backup não cobre o schema completo"
 done
+for footer_flag in --comments --dump-date; do
+  has "$backup_block" "$footer_flag" \
+    || fail "mysqldump não força $footer_flag; my.cnf pode suprimir o marcador final"
+done
 
 # --- Uma única sessão SSH para o lote ------------------------------------
 has "$body" 'ControlMaster auto' \
@@ -338,6 +342,14 @@ has "$remote_release" 'set -uo pipefail' \
 # não funciona em grep linha-a-linha, então comparo as POSIÇÕES das duas linhas.
 has "$backup_block" 'BACKUP_VALIDO' \
   || fail 'step de backup não valida o dump'
+has_lit "$backup_block" "'-- Dump completed'*)" \
+  || fail 'prova do footer não aceita o prefixo oficial do mysqldump'
+has_lit "$backup_block" "tail -n 1" \
+  || fail 'prova do footer não exige o marcador como última linha não vazia'
+# shellcheck disable=SC2016
+if has_re "$backup_block" 'printf.*"\$last"'; then
+  fail 'diagnóstico de backup imprime a última linha SQL; pode vazar dados de dump truncado'
+fi
 backup_dir_line="$(grep -n 'BACKUP_DIR=%s' <<<"$backup_block" | head -1 | cut -d: -f1)"
 valid_line="$(grep -n 'BACKUP_VALIDO' <<<"$backup_block" | head -1 | cut -d: -f1)"
 [ -n "$backup_dir_line" ] \
