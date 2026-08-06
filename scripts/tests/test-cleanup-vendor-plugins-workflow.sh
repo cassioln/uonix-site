@@ -365,9 +365,34 @@ has "$backup_block" 'BACKUP_VALIDO' \
 # shellcheck disable=SC2016
 has_lit "$backup_block" 'sql_tmp="$backup_dir/db.sql.partial"' \
   || fail 'backup não usa arquivo SQL temporário físico para atestar conclusão'
+# O trap precisa limpar E abortar. Um handler HUP/TERM que só executa `rm` pode
+# retornar e deixar o script continuar; o `exit` dispara a limpeza centralizada
+# do trap EXIT e preserva o status convencional do sinal.
 # shellcheck disable=SC2016
-has_lit "$backup_block" 'trap '\''rm -f -- "$sql_tmp"'\'' EXIT' \
-  || fail 'arquivo SQL temporário pode sobreviver a falha e vazar dados'
+has_lit "$backup_block" 'cleanup_sql_tmp() { rm -f -- "$sql_tmp"; }' \
+  || fail 'backup não centraliza a limpeza do SQL temporário'
+has_lit "$backup_block" 'trap cleanup_sql_tmp EXIT' \
+  || fail 'falha normal não limpa o SQL temporário no EXIT'
+has_lit "$backup_block" "trap 'exit 129' HUP" \
+  || fail 'HUP não aborta; queda do SSH poderia deixar o script continuar'
+has_lit "$backup_block" "trap 'exit 130' INT" \
+  || fail 'INT não aborta o backup após limpar o SQL temporário'
+has_lit "$backup_block" "trap 'exit 143' TERM" \
+  || fail 'TERM não aborta; cancelamento poderia deixar o script continuar'
+has_lit "$backup_block" 'trap - EXIT HUP INT TERM' \
+  || fail 'traps do SQL temporário não são todos desarmados no sucesso'
+
+# O SQL físico e o gzip coexistem. Antes do dump, exigir espaço livre suficiente
+# no filesystem; sem isso a duplicação transitória pode esgotá-lo no meio.
+# shellcheck disable=SC2016
+has_lit "$backup_block" 'df -Pk "$backup_dir"' \
+  || fail 'backup não consulta espaço livre antes de gerar SQL+gzip'
+has_lit "$backup_block" 'BACKUP_INVALIDO: espaço livre insuficiente' \
+  || fail 'preflight de espaço não aborta com diagnóstico sanitizado'
+# shellcheck disable=SC2016
+espaco_min="$(sed -n 's/.*"\$livre_kb" -ge \([0-9]\{1,\}\).*/\1/p' <<<"$backup_block" | head -1)"
+[ -n "$espaco_min" ] && [ "$espaco_min" -ge 500000 ] \
+  || fail "piso de espaço livre ausente ou baixo (${espaco_min:-0}KB)"
 # shellcheck disable=SC2016
 has_lit "$backup_block" '"$(wp config get DB_NAME)" > "$sql_tmp"' \
   || fail 'mysqldump não grava diretamente no arquivo SQL temporário'

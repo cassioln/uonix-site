@@ -346,7 +346,24 @@ jobs:
           dump="$backup_dir/db.sql.gz"
           sql_tmp="$backup_dir/db.sql.partial"
           rm -f -- "$sql_tmp"
-          trap 'rm -f -- "$sql_tmp"' EXIT
+          # EXIT cobre falhas normais. Nos sinais, `exit` é obrigatório: um handler
+          # que apenas remove o arquivo retorna e pode deixar o script CONTINUAR.
+          # O exit dispara o trap EXIT, que elimina o SQL completo em claro.
+          cleanup_sql_tmp() { rm -f -- "$sql_tmp"; }
+          trap cleanup_sql_tmp EXIT
+          trap 'exit 129' HUP
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          # O SQL físico e o gzip coexistem por alguns instantes. Reprovar antes do
+          # dump se o filesystem não tiver ao menos 500 MB livres; não substitui a
+          # quota da conta, mas evita esgotamento do volume visível pelo host.
+          livre_kb="$(df -Pk "$backup_dir" | awk 'NR==2 {print $4}')"
+          printf 'livre_kb=%s\n' "$livre_kb"
+          [ "$livre_kb" -ge 500000 ] || {
+            printf 'BACKUP_INVALIDO: espaço livre insuficiente (%s KB, mínimo 500000)\n' "$livre_kb" >&2
+            exit 1
+          }
           set -o pipefail
           # O footer `-- Dump completed` do cliente NÃO é confiável neste host: dois
           # runs reais terminaram com status zero sem emiti-lo, inclusive já com
@@ -377,7 +394,7 @@ jobs:
           printf -- '\n-- UONIX_DUMP_COMPLETO\n' >> "$sql_tmp"
           gzip -c "$sql_tmp" > "$dump"
           rm -f -- "$sql_tmp"
-          trap - EXIT
+          trap - EXIT HUP INT TERM
 
           # gzip -t valida o ENVELOPE, não o conteúdo: um dump interrompido produz
           # gzip íntegro. Exigir o nosso marcador como última linha não vazia é o
