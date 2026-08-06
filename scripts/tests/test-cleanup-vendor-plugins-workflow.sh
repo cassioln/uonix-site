@@ -469,8 +469,8 @@ has "$backup_block" 'CREATE TABLE' \
 # uma ROUTINE (emitido verbatim por --routines) e a contagem é inflável — a
 # auditoria mediu 121 "CREATE TABLE" num dump de 1 tabela real.
 # shellcheck disable=SC2016
-has_lit "$backup_block" 'grep -c '"'"'^CREATE TABLE `'"'" \
-  || fail 'contagem de tabelas sem âncora de crase; corpo de routine infla o total'
+has_lit "$backup_block" 'grep -a -c '"'"'^CREATE TABLE `'"'" \
+  || fail 'contagem de tabelas não trata dump binário como texto ou perdeu a âncora de crase'
 # O piso precisa ser REAL: produção tem 158 tabelas, então `-ge 0` ou `-ge 1`
 # tornaria o gate decorativo. Extrai o número e exige um piso significativo.
 # shellcheck disable=SC2016
@@ -494,8 +494,8 @@ firstopt_line="$(grep -nF -- '--single-transaction' <<<"$backup_block" | head -1
 # ROUTINE é emitido verbatim por --routines, e um corpo com linhas literais
 # `CREATE TABLE ...` fez um dump de 1 tabela contar 121. A prova precisa medir
 # VOLUME DE DADOS, não só estrutura.
-has_lit "$backup_block" "grep -c '^INSERT INTO'" \
-  || fail 'prova não conta INSERT; dump só-estrutura (no-data) passaria'
+has_lit "$backup_block" "grep -a -c '^INSERT INTO'" \
+  || fail 'prova não conta INSERT em dump binário; dump só-estrutura (no-data) passaria'
 # shellcheck disable=SC2016
 inserts_min="$(sed -n 's/.*"\$inserts" -ge \([0-9]\{1,\}\).*/\1/p' <<<"$backup_block" | head -1)"
 [ -n "$inserts_min" ] \
@@ -607,8 +607,8 @@ case "$last_assign" in
   *) fail 'extração do marcador não normaliza CRLF no código' ;;
 esac
 case "$last_assign" in
-  *"grep -v '^[[:space:]]*\$'"*) : ;;
-  *) fail 'extração do marcador não filtra linhas vazias no código' ;;
+  *"grep -a -v '^[[:space:]]*\$'"*) : ;;
+  *) fail 'extração do marcador não filtra linhas vazias como texto de dump binário' ;;
 esac
 
 # 5. Contagens precisam ser ancoradas e não podem ter default fabricado.
@@ -621,8 +621,8 @@ for par in "tabelas:^CREATE TABLE" "inserts:^INSERT INTO"; do
   linha="$(grep -F "${var}=\"\$(gzip -dc" <<<"$backup_code" | head -1)"
   [ -n "$linha" ] || fail "não encontrei a contagem de $var"
   case "$linha" in
-    *"grep -c '${pat}"*) : ;;
-    *) fail "contagem de $var não está ancorada em '${pat}'" ;;
+    *"grep -a -c '${pat}"*) : ;;
+    *) fail "contagem de $var não trata dump binário como texto e ancora em '${pat}'" ;;
   esac
   case "$linha" in
     *'|| echo'*|*'|| printf'*)
@@ -708,6 +708,22 @@ probe_root="$(mktemp -d "${TMPDIR:-/tmp}/uonix-cleanup-test.XXXXXX")" \
   || fail 'não foi possível criar diretório temporário para probes'
 cleanup_probe_root() { rm -rf -- "$probe_root"; }
 trap cleanup_probe_root EXIT
+
+# O dump real pode conter bytes NUL em colunas binárias. Sem forçar o grep a
+# tratar o SQL como texto, o host e o macOS substituem o resultado por
+# `Binary file (standard input) matches` (36 bytes) e reprovam um marcador válido.
+# Executa exatamente a atribuição extraída do workflow contra esse caso real.
+binary_dump="$probe_root/binary.sql.gz"
+# shellcheck disable=SC2016
+printf 'CREATE TABLE `t` (`b` blob);\nINSERT INTO `t` VALUES ("a\000b");\n\n-- UONIX_DUMP_COMPLETO\n' \
+  | gzip -c > "$binary_dump"
+# shellcheck disable=SC2034
+dump="$binary_dump"
+eval "$last_assign"
+# `last` é atribuído pela linha do workflow executada no eval acima.
+# shellcheck disable=SC2154
+[ "$last" = '-- UONIX_DUMP_COMPLETO' ] \
+  || fail "validação do marcador não trata dump binário como texto (bytes=${#last})"
 
 signal_code="$(awk '
   index($0, "cleanup_sql_tmp() {") { copy=1 }

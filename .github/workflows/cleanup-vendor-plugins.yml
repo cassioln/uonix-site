@@ -445,10 +445,12 @@ jobs:
           # gzip -t valida o ENVELOPE, não o conteúdo: um dump interrompido produz
           # gzip íntegro. Exigir o nosso marcador como última linha não vazia é o
           # que prova que o produtor chegou ao fim. Filtra vazias antes do tail e
-          # normaliza CRLF — janela fixa reprovaria dump legítimo.
+          # normaliza CRLF — janela fixa reprovaria dump legítimo. `-a` é obrigatório:
+          # bytes NUL válidos no SQL fizeram o grep do host devolver a mensagem de
+          # arquivo binário (36 bytes) no run 31066284676, ocultando o marcador.
           test -s "$dump"
           gzip -t "$dump"
-          last="$(gzip -dc "$dump" | tr -d '\r' | grep -v '^[[:space:]]*$' | tail -n 1)"
+          last="$(gzip -dc "$dump" | tr -d '\r' | grep -a -v '^[[:space:]]*$' | tail -n 1)"
           if [ "$last" != '-- UONIX_DUMP_COMPLETO' ]; then
             printf 'BACKUP_INVALIDO: dump sem marcador de conclusão (bytes=%s)\n' "${#last}" >&2
             exit 1
@@ -460,8 +462,9 @@ jobs:
           # o corpo de uma ROUTINE, emitido verbatim por --routines: a auditoria
           # mediu um dump de 1 tabela real contando 121 "CREATE TABLE". Os gates de
           # volume abaixo cobrem o dump-casca, mas esta contagem é usada por si só
-          # como piso de cobertura, então precisa ser difícil de inflar.
-          tabelas="$(gzip -dc "$dump" | grep -c '^CREATE TABLE `' || true)"
+          # como piso de cobertura, então precisa ser difícil de inflar. O mesmo
+          # modo texto da prova do marcador vale para todas as leituras do SQL.
+          tabelas="$(gzip -dc "$dump" | grep -a -c '^CREATE TABLE `' || true)"
           printf 'tabelas=%s\n' "$tabelas"
           [ "$tabelas" -ge 100 ] || {
             printf 'BACKUP_INVALIDO: apenas %s tabelas no dump (esperado >= 100)\n' "$tabelas" >&2
@@ -472,7 +475,7 @@ jobs:
           # dump de 1 tabela contando 121 "CREATE TABLE". Além disso um dump só de
           # estrutura tem todos os CREATE TABLE e nenhum dado. Medir VOLUME é o que
           # separa backup restaurável de casca vazia.
-          inserts="$(gzip -dc "$dump" | grep -c '^INSERT INTO' || true)"
+          inserts="$(gzip -dc "$dump" | grep -a -c '^INSERT INTO' || true)"
           bytes_sql="$(gzip -dc "$dump" | wc -c | tr -d '[:space:]')"
           printf 'inserts=%s bytes_sql=%s\n' "$inserts" "$bytes_sql"
           [ "$inserts" -ge 20 ] || {
