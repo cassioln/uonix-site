@@ -18,7 +18,7 @@ uonix_env_auto_load_dotenv() {
           var_value="${line#*=}"
           # shellcheck disable=SC2016
           case "$var_value" in
-            '$HOME'/*) var_value="${HOME}${var_value#\$HOME}" ;;
+            "\$HOME"/*) var_value="${HOME}${var_value#\$HOME}" ;;
             '~'/*) var_value="${HOME}${var_value#\~}" ;;
           esac
           case "$var_name" in
