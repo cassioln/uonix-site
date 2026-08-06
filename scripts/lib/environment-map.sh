@@ -2,6 +2,37 @@
 # Mapa declarativo dos quatro ambientes Uonix, compatível com Bash 3.2.
 # Source this file; do not execute it directly.
 
+uonix_env_auto_load_dotenv() {
+  local lib_dir root_dir env_file line var_name var_value
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  root_dir="$(cd "${lib_dir}/../.." && pwd)"
+  env_file="${root_dir}/.env"
+
+  if [ -f "$env_file" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        '#'*|'') continue ;;
+        *=*)
+          var_name="${line%%=*}"
+          var_name="$(printf '%s' "$var_name" | tr -d '[:space:]')"
+          var_value="${line#*=}"
+          # shellcheck disable=SC2016
+          case "$var_value" in
+            '$HOME'/*) var_value="${HOME}${var_value#\$HOME}" ;;
+            '~'/*) var_value="${HOME}${var_value#\~}" ;;
+          esac
+          case "$var_name" in
+            [a-zA-Z_][a-zA-Z0-9_]*)
+              eval "if [ -z \"\${$var_name+x}\" ]; then export $var_name=\"\$var_value\"; fi"
+              ;;
+          esac
+          ;;
+      esac
+    done < "$env_file"
+  fi
+}
+uonix_env_auto_load_dotenv
+
 uonix_env_error() {
   printf 'Erro de ambiente: %s\n' "$*" >&2
 }

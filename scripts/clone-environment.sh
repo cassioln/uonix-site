@@ -47,16 +47,12 @@ EXCLUDED_RSYNC_ARGS=(
   --exclude='*~'
   --exclude='*.log'
   --exclude='cache/'
-  --exclude='speedycache/'
   --exclude='wc-logs/'
   --exclude='wp-staging/'
   --exclude='wpmc-trash/'
   --exclude='wp-personal-data-exports/'
   --exclude='curriculos-recebidos/'
   --exclude='FLUENT_PDF_TEMPLATES/'
-  --exclude='gosmtp-attachments/'
-  --exclude='loginizer-config/'
-  --exclude='speedycache-binary/'
   --exclude='ai1wm-backups/'
   --exclude='wpvivid_uploads/'
   --exclude='wpvividbackups/'
@@ -68,24 +64,14 @@ EXCLUDED_RSYNC_ARGS=(
 PLUGIN_RSYNC_EXCLUDES=(
   # Plugins com configuração própria por ambiente não entram em clones.
   --exclude='all-in-one-wp-migration-10GB/'
-  --exclude='backuply/'
-  --exclude='backuply-pro/'
   --exclude='compressx/'
   --exclude='fluent-smtp/'
   --exclude='fluentform/'
-  # GoSMTP é legado removido; manter excluído impede que volte por runtime antigo.
-  --exclude='gosmtp/'
-  --exclude='gosmtp-pro/'
-  --exclude='loginizer/'
-  --exclude='loginizer-security/'
-  --exclude='speedycache/'
-  --exclude='speedycache-pro/'
   --exclude='wp-mail-logging/'
   --exclude='wpvivid-backuprestore/'
 )
 
 SUPPORTED_SMTP_PLUGIN="fluent-smtp"
-LEGACY_SMTP_PLUGINS=(gosmtp gosmtp-pro)
 CRITICAL_POST_CLONE_PLUGINS=(
   "$SUPPORTED_SMTP_PLUGIN"
   fluentform
@@ -316,7 +302,6 @@ protected_options_where() {
   cat <<'SQL'
 option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron')
 OR option_name = 'downloaded_font_files'
-OR option_name LIKE '%backuply%'
 OR option_name LIKE '%ai1wm%'
 OR option_name LIKE 'compressx%'
 OR option_name LIKE '%fluentform%'
@@ -324,17 +309,13 @@ OR option_name LIKE '\_fluent\_%'
 OR option_name LIKE 'fluent\_%'
 OR option_name LIKE '%fluentmail%'
 OR option_name LIKE '%mailchimp%'
-OR option_name LIKE '%gosmtp%'
 OR option_name LIKE '%smtp%'
 OR option_name LIKE 'mailserver\_%'
-OR option_name LIKE '%loginizer%'
-OR option_name LIKE '%speedycache%'
 OR option_name LIKE '%turnstile%'
 OR option_name LIKE '%captcha%'
 OR option_name LIKE '%recaptcha%'
 OR option_name LIKE '%hcaptcha%'
 OR option_name LIKE '%wp_captcha%'
-OR option_name LIKE 'lz\_%'
 OR option_name LIKE '%wp_mail_logging%'
 OR option_name LIKE '%mail_logging%'
 OR option_name LIKE '%wpvivid%'
@@ -622,6 +603,25 @@ fi
 SNIPPET
 }
 
+remote_db_query_snippet() {
+  local wp_cli="$1"
+  local wp_root="$2"
+  local query_expression="$3"
+
+  # `wp db query` shella out e falha na Locaweb (proc_open desabilitado).
+  # Usa o cliente mysql direto com MYSQL_PWD; fallback para wp-cli.
+  cat <<SNIPPET
+$(remote_db_client_snippet "$wp_cli" "$wp_root")
+if [ -n "\$mysql_bin" ]; then
+  MYSQL_PWD="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)" \\
+    "\$mysql_bin" --host="\$db_host" --user="\$db_user" \\
+    --default-character-set=utf8mb4 "\$db_name" -e ${query_expression}
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db query ${query_expression}
+fi
+SNIPPET
+}
+
 remote_db_dump_tables_snippet() {
   local wp_cli="$1"
   local wp_root="$2"
@@ -701,10 +701,12 @@ assert_dump_content_complete() {
   # suposição sobre quantas linhas em branco o dump termina, e empurrava o
   # marcador para fora em dump legítimo — falso negativo aborta clone bom.
   # O `tr -d '\r'` normaliza CRLF, senão o \r residual reprovaria dump válido.
+  # `grep -a` é obrigatório: valores SQL podem conter NUL e o modo binário do
+  # grep interrompe a leitura antes do footer com "binary file matches".
   last_nonempty="$(
     gzip -dc "$dump_gz" 2>/dev/null \
-      | tr -d '\r' \
-      | grep -v '^[[:space:]]*$' \
+      | LC_ALL=C tr -d '\r' \
+      | grep -a -v '^[[:space:]]*$' \
       | tail -n 1
   )" || {
     uonix_env_error "${label}: conteúdo SQL ilegível ou vazio"
@@ -736,7 +738,7 @@ remote_dump_content_check_snippet() {
   printf '%s\n' \
     "test -s ${quoted_dump} || exit 1" \
     "gzip -t ${quoted_dump} 2>/dev/null || exit 1" \
-    "last_nonempty=\$(gzip -dc ${quoted_dump} 2>/dev/null | tr -d '\\r' | grep -v '^[[:space:]]*\$' | tail -n 1) || exit 1" \
+    "last_nonempty=\$(gzip -dc ${quoted_dump} 2>/dev/null | LC_ALL=C tr -d '\\r' | grep -a -v '^[[:space:]]*\$' | tail -n 1) || exit 1" \
     "case \"\$last_nonempty\" in $(printf '%q' "$marker")|$(printf '%q' "${marker} on ")*) ;; *) exit 1 ;; esac"
 }
 
@@ -774,7 +776,7 @@ for item in $(shell_join "${backup_items[@]}"); do
 done
 if [ \"\$#\" -gt 0 ]; then
   tar -czf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") \
-    --exclude='cache' --exclude='speedycache' --exclude='wc-logs' --exclude='wp-staging' -- \"\$@\"
+    --exclude='cache' --exclude='wc-logs' --exclude='wp-staging' -- \"\$@\"
 else
   tar -czf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") --files-from=/dev/null
 fi
@@ -799,7 +801,7 @@ find $(printf '%q' "$backup_root") -mindepth 1 -maxdepth 1 -type d -printf '%T@ 
     if [ "${#existing_items[@]}" -gt 0 ]; then
       tar -czf "${dir}/files-${env}-${STAMP}.tar.gz" \
         -C "$LOCAL_WP_CONTENT" \
-        --exclude='cache' --exclude='speedycache' --exclude='wc-logs' --exclude='wp-staging' \
+        --exclude='cache' --exclude='wc-logs' --exclude='wp-staging' \
         -- "${existing_items[@]}" || return $?
     else
       tar -czf "${dir}/files-${env}-${STAMP}.tar.gz" --files-from=/dev/null || return $?
@@ -1110,7 +1112,14 @@ options_sha256=$(printf '%q' "${dir}/options.sha256")
 ) || exit \$?
 prefix=\"\$($wp_cli --path=$(printf '%q' "$wp_root") db prefix)\" || exit \$?
 delete_sql=\"DELETE FROM \${prefix}options WHERE ${where}\"
-$wp_cli --path=$(printf '%q' "$wp_root") db query \"\$delete_sql\" >/dev/null || exit \$?
+$(remote_db_client_snippet "$wp_cli" "$wp_root")
+if [ -n \"\$mysql_bin\" ]; then
+  MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" \\
+    \"\$mysql_bin\" --host=\"\$db_host\" --user=\"\$db_user\" \\
+    --default-character-set=utf8mb4 \"\$db_name\" -e \"\$delete_sql\" || exit \$?
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db query \"\$delete_sql\" >/dev/null || exit \$?
+fi
 if [ -s \"\$options_sql\" ]; then
   $(remote_db_import_file_snippet "$wp_cli" "$wp_root" "$remote_options_sql_ref") || exit \$?
 fi" || return $?
@@ -1165,9 +1174,12 @@ export_source_author_map() {
   local prefix
   local query
   local status
+  local wp_root wp_cli
 
   [ "$PRESERVE_DESTINATION_USERS" = "1" ] || return 0
   if is_remote_env "$env"; then
+    wp_root="$(wp_path "$env")" || return $?
+    wp_cli="$(wp_cli_shell "$env")" || return $?
     prefix="$(wp_exec "$env" db prefix)" || return $?
   else
     prefix="$(local_db_prefix)" || return $?
@@ -1178,12 +1190,32 @@ export_source_author_map() {
   mkdir -p "$(dirname "$map_file")" || return $?
   : > "$map_file" || return $?
   chmod 600 "$map_file" || return $?
-  if wp_exec "$env" db query "$query" --skip-column-names --batch --raw > "$map_file"; then
-    :
+
+  if is_remote_env "$env"; then
+    # `wp db query` shella out e falha na Locaweb. Usa o cliente mysql direto.
+    if remote_run "$env" "set -euo pipefail
+$(remote_db_client_snippet "$wp_cli" "$wp_root")
+if [ -n \"\$mysql_bin\" ]; then
+  MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" \\
+    \"\$mysql_bin\" --host=\"\$db_host\" --user=\"\$db_user\" \\
+    --default-character-set=utf8mb4 \"\$db_name\" -N -B -e \"$query\"
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db query \"$query\" --skip-column-names --batch --raw
+fi" > "$map_file"; then
+      :
+    else
+      status=$?
+      rm -f -- "$map_file"
+      return "$status"
+    fi
   else
-    status=$?
-    rm -f -- "$map_file"
-    return "$status"
+    if wp_exec "$env" db query "$query" --skip-column-names --batch --raw > "$map_file"; then
+      :
+    else
+      status=$?
+      rm -f -- "$map_file"
+      return "$status"
+    fi
   fi
   chmod 600 "$map_file" || return $?
   validate_source_author_map "$map_file"
@@ -1264,6 +1296,7 @@ remap_missing_authors() {
   local lookup_query
   local update_query
   local case_sql=''
+  local wp_root wp_cli
   local source_ids=''
   local status
 
@@ -1274,6 +1307,8 @@ remap_missing_authors() {
   log "Remapeando autores ausentes no destino: ${env}"
 
   if is_remote_env "$env"; then
+    wp_root="$(wp_path "$env")" || return $?
+    wp_cli="$(wp_cli_shell "$env")" || return $?
     prefix="$(wp_exec "$env" db prefix)" || return $?
   else
     prefix="$(local_db_prefix)" || return $?
@@ -1303,11 +1338,28 @@ remap_missing_authors() {
     destination_id=''
     if [ -n "$login_hex" ]; then
       lookup_query="SELECT ID FROM ${prefix}users WHERE HEX(user_login) = '${login_hex}' ORDER BY ID LIMIT 1"
-      if destination_id="$(wp_exec "$env" db query "$lookup_query" --skip-column-names --batch --raw)"; then
-        :
+      if is_remote_env "$env"; then
+        if destination_id="$(remote_run "$env" "set -euo pipefail
+$(remote_db_client_snippet "$wp_cli" "$wp_root")
+if [ -n \"\$mysql_bin\" ]; then
+  MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" \\
+    \"\$mysql_bin\" --host=\"\$db_host\" --user=\"\$db_user\" \\
+    --default-character-set=utf8mb4 \"\$db_name\" -N -B -e \"$lookup_query\"
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db query \"$lookup_query\" --skip-column-names --batch --raw
+fi")"; then
+          destination_id="${destination_id%$'\n'}"
+        else
+          status=$?
+          return "$status"
+        fi
       else
-        status=$?
-        return "$status"
+        if destination_id="$(wp_exec "$env" db query "$lookup_query" --skip-column-names --batch --raw)"; then
+          :
+        else
+          status=$?
+          return "$status"
+        fi
       fi
     fi
     [ -n "$destination_id" ] || destination_id="$fallback_id"
@@ -1325,7 +1377,15 @@ remap_missing_authors() {
   [ -n "$source_ids" ] || return 0
   update_query="UPDATE ${prefix}posts SET post_author = CASE post_author${case_sql} ELSE ${fallback_id} END WHERE post_author IN (${source_ids})"
   if is_remote_env "$env"; then
-    wp_exec "$env" db query "$update_query" >/dev/null || return $?
+    remote_run "$env" "set -euo pipefail
+$(remote_db_client_snippet "$wp_cli" "$wp_root")
+if [ -n \"\$mysql_bin\" ]; then
+  MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" \\
+    \"\$mysql_bin\" --host=\"\$db_host\" --user=\"\$db_user\" \\
+    --default-character-set=utf8mb4 \"\$db_name\" -e \"$update_query\"
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db query \"$update_query\"
+fi" >/dev/null || return $?
   else
     local_db_query "$update_query" >/dev/null || return $?
   fi
@@ -1396,10 +1456,6 @@ enforce_smtp_plugin_policy() {
   local env="$1"
   local active_state
   local installed_state
-  local plugin
-  local options_table
-  local prefix
-  local status
 
   log "Aplicando política SMTP do destino: ${env}"
 
@@ -1444,48 +1500,11 @@ enforce_smtp_plugin_policy() {
         ;;
     esac
   fi
-
-  for plugin in "${LEGACY_SMTP_PLUGINS[@]}"; do
-    installed_state="$(wp_plugin_predicate_state "$env" is-installed "$plugin")" || return $?
-    case "$installed_state" in
-      true)
-        wp_exec "$env" plugin deactivate "$plugin" >/dev/null 2>&1 || true
-        if wp_exec "$env" plugin delete "$plugin" >/dev/null 2>&1; then
-          :
-        else
-          status=$?
-          die "Não foi possível remover plugin SMTP legado ${plugin} no destino: ${env}" || :
-          return "$status"
-        fi
-        log "Plugin SMTP legado removido do destino: ${plugin}"
-        ;;
-      false) ;;
-      *)
-        die "Estado de instalação inesperado de ${plugin} em ${env}: ${installed_state}"
-        return 1
-        ;;
-    esac
-  done
-
-  if prefix="$(wp_exec "$env" db prefix | awk 'NF { value = $0 } END { print value }')"; then
-    :
-  else
-    status=$?
-    die "Não foi possível obter o prefixo do banco no destino: ${env}" || :
-    return "$status"
-  fi
-  if [ -z "$prefix" ]; then
-    die "Prefixo vazio do banco no destino: ${env}" || :
-    return 1
-  fi
-  options_table="$(quote_sql_identifier "${prefix}options")" || return $?
-  wp_exec "$env" db query "DELETE FROM ${options_table} WHERE option_name LIKE '%gosmtp%'" >/dev/null || return $?
 }
 
 clear_cache() {
   local env="$1"
   local cache_dirs=(
-    speedycache
     min
     critical-css
     background-css
@@ -2162,7 +2181,7 @@ validate_http_endpoint() {
   local status
   local curl_status
   local attempt=1
-  local max_attempts=6
+  local max_attempts=7
   local delay=5
   local last_reason=''
 
@@ -2172,9 +2191,10 @@ validate_http_endpoint() {
   # abortou um clone qa->dev já concluído e disparou rollback desnecessário.
   #
   # A janela precisa cobrir a DECADÊNCIA MEDIDA do bloqueio: reproduzindo o deny
-  # por rajada, ele persistiu em t+75s e só liberou perto de t+180s. Por isso são
-  # 6 tentativas com espera 5+10+20+40+60 = 135s, mais o tempo das requisições.
-  # Com 5 tentativas (75s de espera) o clone ainda morreria dentro do bloqueio.
+  # por rajada, ele persistiu em t+75s e pode ultrapassar t+135s. O run real
+  # 31093629513 recebeu 409 nas 6 tentativas e abortou aos ~137s. Por isso são
+  # 7 tentativas com espera 5+10+20+40+60+60 = 195s, mais o tempo das requisições.
+  # Com 6 tentativas o clone ainda pode morrer dentro do bloqueio.
   #
   # Indisponibilidade transitória é RETENTADA, não fatal. O que não é tolerado:
   # erro que persiste em todas as tentativas, e veredito de conteúdo (como 404),

@@ -770,6 +770,14 @@ cat > "$RESTORE_FAKE_BIN/mysql" <<'MOCK'
 #!/usr/bin/env bash
 set -u
 : "${RESTORE_REMOTE_DB_LOG:?}"
+# -e  = query  (DELETE/UPDATE/SELECT)
+# stdin = import (usado pelo remote_db_import_file_snippet)
+for arg in "$@"; do
+  if [ "$arg" = '-e' ]; then
+    printf 'delete\n' >> "$RESTORE_REMOTE_DB_LOG"
+    exit "${RESTORE_DELETE_STATUS:-0}"
+  fi
+done
 printf 'import\n' >> "$RESTORE_REMOTE_DB_LOG"
 cat >/dev/null
 exit "${RESTORE_IMPORT_STATUS:-0}"
@@ -823,6 +831,7 @@ append_restore_sequence() {
 }
 
 log() { :; }
+# shellcheck disable=SC2329
 is_remote_env() { [ "$1" != local ]; }
 protected_options_where() {
   printf '%s\n' "$RESTORE_REAL_WHERE"
@@ -864,6 +873,7 @@ wp_cli_shell() {
   printf '%q\n' "$RESTORE_REMOTE_WP"
   return "$RESTORE_WP_CLI_STATUS"
 }
+# shellcheck disable=SC2329
 remote_run() {
   RESTORE_REMOTE_RUN_COUNT=$((RESTORE_REMOTE_RUN_COUNT + 1))
   RESTORE_REMOTE_SCRIPT="$2"
@@ -1849,6 +1859,7 @@ fi
 
 # wp_exec é o boundary comum das consultas e mutações C3. Uma falha ao
 # resolver o document root deve impedir a resolução do CLI e o transporte.
+# shellcheck disable=SC2329
 is_remote_env() { return 0; }
 # This resolver mock is exercised indirectly by wp_plugin_predicate_state.
 # shellcheck disable=SC2329
@@ -1862,6 +1873,7 @@ wp_cli_shell() {
   printf 'wp-cli\n' >> "$wp_resolver_log"
   printf 'wp\n'
 }
+# shellcheck disable=SC2329
 remote_run() {
   printf 'remote\n' >> "$wp_resolver_log"
   printf '1\n'
@@ -1881,24 +1893,16 @@ fi
   'consulta Fluent resolveu WP-CLI ou abriu remoto após falha de wp_path'
 
 # A resolução do comando WP-CLI é o segundo gate obrigatório do mesmo boundary.
+# shellcheck disable=SC2329
 wp_path() {
   printf 'wp-path\n' >> "$wp_resolver_log"
   printf '/mock/wp\n'
 }
+# shellcheck disable=SC2329
 wp_cli_shell() {
   printf 'wp-cli\n' >> "$wp_resolver_log"
   return 64
 }
-: > "$wp_resolver_log"
-if wp_exec qa db query "DELETE FROM wp_options WHERE option_name LIKE '%gosmtp%'" >/dev/null 2>&1; then
-  wp_cli_resolver_status='0'
-else
-  wp_cli_resolver_status="$?"
-fi
-[ "$wp_cli_resolver_status" -eq 64 ] || fail \
-  "mutação GoSMTP mascarou falha de wp_cli_shell (esperado 64, obtido ${wp_cli_resolver_status})"
-[ "$(tr '\n' ':' < "$wp_resolver_log")" = 'wp-path:wp-cli:' ] || fail \
-  'mutação GoSMTP abriu remoto após falha de wp_cli_shell'
 
 # A mesma falha do resolver, quando ocorre numa validação central após o início
 # da mutação, precisa atravessar o boundary e acionar exatamente um rollback.
@@ -1989,47 +1993,6 @@ fi
 [ ! -s "$option_identifier_podman_log" ] || fail \
   'local_db_dump_options abriu Podman/DB após falha de quote_sql_identifier'
 unset -f podman
-
-# O mesmo helper também protege a limpeza GoSMTP no C3. Uma falha ao cotar a
-# tabela não pode ser convertida em sucesso por uma consulta DB posterior.
-# shellcheck source=scripts/clone-environment.sh
-source "$CLONE_SCRIPT"
-# Guarda de bancos distintos consulta o banco real; no fixture retornaria
-# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
-# test-clone-database-transport.sh.
-# shellcheck disable=SC2329
-assert_distinct_databases() { :; }
-gosmtp_quote_log="$TMP_DIR/gosmtp-quote.log"
-: > "$gosmtp_quote_log"
-log() { :; }
-wp_plugin_predicate_state() {
-  case "$3" in
-    fluent-smtp) printf 'true\n' ;;
-    gosmtp|gosmtp-pro) printf 'false\n' ;;
-    *) return 90 ;;
-  esac
-}
-wp_exec() {
-  if [ "${2:-}" = db ] && [ "${3:-}" = prefix ]; then
-    printf 'wp_\n'
-    return 0
-  fi
-  printf 'wp-exec:%s\n' "${2:-unknown}" >> "$gosmtp_quote_log"
-  return 0
-}
-quote_sql_identifier() {
-  printf 'quote\n' >> "$gosmtp_quote_log"
-  return 61
-}
-if enforce_smtp_plugin_policy qa >/dev/null 2>&1; then
-  gosmtp_quote_status='0'
-else
-  gosmtp_quote_status="$?"
-fi
-[ "$gosmtp_quote_status" -eq 61 ] || fail \
-  "limpeza GoSMTP mascarou quote_sql_identifier (esperado 61, obtido ${gosmtp_quote_status})"
-[ "$(tr '\n' ':' < "$gosmtp_quote_log")" = 'wp-exec:plugin:quote:' ] || fail \
-  'limpeza GoSMTP abriu consulta DB após falha de quote_sql_identifier'
 
 # 12. Todo boundary remoto direto do clone deve preservar falhas dos resolvers
 # de document root/WP-CLI mesmo quando o chamador está em um OR-list. Nenhum
