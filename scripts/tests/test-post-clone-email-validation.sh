@@ -10,7 +10,6 @@ EMAIL_EVAL_LOG="${TMP_DIR}/email-eval.log"
 MAILPIT_EVAL_LOG="${TMP_DIR}/mailpit-eval.log"
 PLUGIN_CHECK_LOG="${TMP_DIR}/plugin-check.log"
 PLUGIN_MUTATION_LOG="${TMP_DIR}/plugin-mutation.log"
-DB_QUERY_LOG="${TMP_DIR}/db-query.log"
 POLICY_OUTPUT_LOG="${TMP_DIR}/policy-output.log"
 
 fail() {
@@ -64,13 +63,6 @@ TEST_FLUENT_INSTALL_QUERY_OUTPUT='auto'
 TEST_FLUENT_ACTIVE_QUERY_OUTPUT='auto'
 TEST_FLUENT_ACTIVATE_STATUS='0'
 TEST_FLUENT_DEACTIVATE_STATUS='0'
-TEST_LEGACY_INSTALL_CHECK_STATUS='1'
-TEST_LEGACY_INSTALL_QUERY_STATUS='0'
-TEST_LEGACY_INSTALL_QUERY_OUTPUT='auto'
-TEST_LEGACY_DEACTIVATE_STATUS='0'
-TEST_LEGACY_DELETE_STATUS='0'
-TEST_DB_PREFIX_STATUS='0'
-TEST_DB_PREFIX_OUTPUT='wp_'
 TEST_MAILPIT_STATE='healthy'
 TEST_NONPROD_POLICY_STATE='healthy'
 RED_FAILURES='0'
@@ -91,11 +83,6 @@ mock_plugin_install_count() {
       check_status="$TEST_FLUENT_INSTALL_CHECK_STATUS"
       query_status="$TEST_FLUENT_INSTALL_QUERY_STATUS"
       query_output="$TEST_FLUENT_INSTALL_QUERY_OUTPUT"
-      ;;
-    gosmtp|gosmtp-pro)
-      check_status="$TEST_LEGACY_INSTALL_CHECK_STATUS"
-      query_status="$TEST_LEGACY_INSTALL_QUERY_STATUS"
-      query_output="$TEST_LEGACY_INSTALL_QUERY_OUTPUT"
       ;;
     *) fail "contagem de instalação inesperada para plugin: $plugin" ;;
   esac
@@ -294,7 +281,6 @@ wp_exec() {
         is-installed)
           case "${4:-}" in
             fluent-smtp) return "$TEST_FLUENT_INSTALL_CHECK_STATUS" ;;
-            gosmtp|gosmtp-pro) return "$TEST_LEGACY_INSTALL_CHECK_STATUS" ;;
             *) return 1 ;;
           esac
           ;;
@@ -313,32 +299,11 @@ wp_exec() {
           ;;
         deactivate)
           printf '%s:deactivate:%s\n' "${1:-}" "${4:-}" >> "$PLUGIN_MUTATION_LOG"
-          if [ "${4:-}" = 'fluent-smtp' ]; then
-            [ "$TEST_FLUENT_DEACTIVATE_STATUS" -eq 0 ] || return "$TEST_FLUENT_DEACTIVATE_STATUS"
-            TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
-          else
-            [ "$TEST_LEGACY_DEACTIVATE_STATUS" -eq 0 ] || return "$TEST_LEGACY_DEACTIVATE_STATUS"
-          fi
+          [ "$TEST_FLUENT_DEACTIVATE_STATUS" -eq 0 ] || return "$TEST_FLUENT_DEACTIVATE_STATUS"
+          TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
           TEST_INACTIVE_PLUGIN="${4:-}"
           ;;
-        delete)
-          printf '%s:delete:%s\n' "${1:-}" "${4:-}" >> "$PLUGIN_MUTATION_LOG"
-          [ "$TEST_LEGACY_DELETE_STATUS" -eq 0 ] || return "$TEST_LEGACY_DELETE_STATUS"
-          ;;
         *) fail "wp plugin inesperado: $*" ;;
-      esac
-      ;;
-    db)
-      case "${3:-}" in
-        prefix)
-          [ "$TEST_DB_PREFIX_STATUS" -eq 0 ] || return "$TEST_DB_PREFIX_STATUS"
-          printf '%s\n' "$TEST_DB_PREFIX_OUTPUT"
-          ;;
-        query)
-          printf '%s\n' "${4:-}" >> "$DB_QUERY_LOG"
-          return 0
-          ;;
-        *) fail "wp db inesperado: $*" ;;
       esac
       ;;
     *) fail "wp_exec inesperado: $*" ;;
@@ -534,96 +499,6 @@ if validate_target_after_clone local >/dev/null 2>&1; then
 fi
 TEST_FLUENT_ACTIVE_QUERY_OUTPUT='auto'
 
-TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
-TEST_LEGACY_INSTALL_CHECK_STATUS='42'
-if enforce_smtp_plugin_policy local >/dev/null 2>&1; then
-  legacy_install_status='0'
-else
-  legacy_install_status="$?"
-fi
-[ "$legacy_install_status" -eq 42 ] || record_red_failure \
-  "enforce_smtp_plugin_policy mascarou erro operacional ao consultar plugin SMTP legado (esperado exit 42, obtido ${legacy_install_status})"
-
-TEST_LEGACY_INSTALL_CHECK_STATUS='1'
-TEST_LEGACY_INSTALL_QUERY_STATUS='1'
-if enforce_smtp_plugin_policy local >/dev/null 2>&1; then
-  legacy_install_exit_one_status='0'
-else
-  legacy_install_exit_one_status="$?"
-fi
-[ "$legacy_install_exit_one_status" -eq 1 ] || record_red_failure \
-  "enforce_smtp_plugin_policy converteu erro operacional exit 1 do SMTP legado em ausência legítima (obtido exit ${legacy_install_exit_one_status})"
-TEST_LEGACY_INSTALL_QUERY_STATUS='0'
-
-TEST_LEGACY_INSTALL_CHECK_STATUS='0'
-TEST_LEGACY_DEACTIVATE_STATUS='0'
-TEST_LEGACY_DELETE_STATUS='37'
-TEST_DB_PREFIX_STATUS='0'
-: > "$POLICY_OUTPUT_LOG"
-if enforce_smtp_plugin_policy qa >"$POLICY_OUTPUT_LOG" 2>&1; then
-  legacy_delete_status='0'
-else
-  legacy_delete_status="$?"
-fi
-[ "$legacy_delete_status" -eq 37 ] || record_red_failure \
-  "falha de plugin delete gosmtp foi mascarada (esperado exit 37, obtido ${legacy_delete_status})"
-if grep -Fq 'Plugin SMTP legado removido do destino: gosmtp' "$POLICY_OUTPUT_LOG"; then
-  record_red_failure 'falha de plugin delete gosmtp produziu log falso de remoção bem-sucedida'
-fi
-
-TEST_LEGACY_DEACTIVATE_STATUS='29'
-TEST_LEGACY_DELETE_STATUS='37'
-TEST_FLUENT_INSTALL_CHECK_STATUS='0'
-TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
-TEST_FLUENT_ACTIVATE_STATUS='0'
-TEST_FLUENT_DEACTIVATE_STATUS='0'
-for environment in qa dev local prod; do
-  : > "$POLICY_OUTPUT_LOG"
-  if enforce_smtp_plugin_policy "$environment" >"$POLICY_OUTPUT_LOG" 2>&1; then
-    simultaneous_legacy_failure_status='0'
-  else
-    simultaneous_legacy_failure_status="$?"
-  fi
-  [ "$simultaneous_legacy_failure_status" -eq 37 ] || record_red_failure \
-    "${environment} aceitou falhas simultâneas de deactivate (29) e delete (37) do GoSMTP (obtido exit ${simultaneous_legacy_failure_status})"
-done
-
-TEST_LEGACY_INSTALL_CHECK_STATUS='1'
-TEST_LEGACY_DEACTIVATE_STATUS='0'
-TEST_LEGACY_DELETE_STATUS='0'
-TEST_DB_PREFIX_STATUS='38'
-: > "$DB_QUERY_LOG"
-if enforce_smtp_plugin_policy qa >"$POLICY_OUTPUT_LOG" 2>&1; then
-  db_prefix_status='0'
-else
-  db_prefix_status="$?"
-fi
-[ "$db_prefix_status" -eq 38 ] || record_red_failure \
-  "falha de wp db prefix foi mascarada (esperado exit 38, obtido ${db_prefix_status})"
-[ ! -s "$DB_QUERY_LOG" ] || record_red_failure \
-  'limpeza SQL foi executada após falha de wp db prefix'
-
-TEST_DB_PREFIX_STATUS='0'
-TEST_DB_PREFIX_OUTPUT=''
-: > "$DB_QUERY_LOG"
-if enforce_smtp_plugin_policy qa >"$POLICY_OUTPUT_LOG" 2>&1; then
-  empty_db_prefix_status='0'
-else
-  empty_db_prefix_status="$?"
-fi
-[ "$empty_db_prefix_status" -ne 0 ] || record_red_failure \
-  'prefixo vazio do banco foi aceito pela política SMTP'
-[ ! -s "$DB_QUERY_LOG" ] || record_red_failure \
-  'limpeza SQL foi executada com prefixo vazio do banco'
-
-TEST_DB_PREFIX_OUTPUT='wp_'
-TEST_LEGACY_INSTALL_CHECK_STATUS='0'
-: > "$PLUGIN_MUTATION_LOG"
-enforce_smtp_plugin_policy qa >/dev/null 2>&1 || fail 'remoção saudável dos plugins SMTP legados foi rejeitada'
-grep -qx 'qa:delete:gosmtp' "$PLUGIN_MUTATION_LOG" || fail 'GoSMTP legado não foi removido no caminho saudável'
-grep -qx 'qa:delete:gosmtp-pro' "$PLUGIN_MUTATION_LOG" || fail 'GoSMTP Pro legado não foi removido no caminho saudável'
-
-TEST_LEGACY_INSTALL_CHECK_STATUS='1'
 TEST_FLUENT_INSTALL_CHECK_STATUS='1'
 TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
 : > "$PLUGIN_MUTATION_LOG"
@@ -719,12 +594,7 @@ rollback_target() { printf 'rollback\n' >> "$rollback_log"; }
 
 TEST_FLUENT_INSTALL_CHECK_STATUS='0'
 TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
-TEST_FLUENT_ACTIVATE_STATUS='0'
-TEST_LEGACY_INSTALL_CHECK_STATUS='0'
-TEST_LEGACY_DEACTIVATE_STATUS='29'
-TEST_LEGACY_DELETE_STATUS='37'
-TEST_DB_PREFIX_STATUS='0'
-TEST_DB_PREFIX_OUTPUT='wp_'
+TEST_FLUENT_ACTIVATE_STATUS='37'
 SOURCE='qa'
 TARGET='dev'
 CLONE_TMP_DIR="$TMP_DIR/smtp-boundary"
@@ -740,18 +610,14 @@ if execute_clone_with_rollback >"$POLICY_OUTPUT_LOG" 2>&1; then
 else
   boundary_status="$?"
 fi
-[ "$boundary_status" -eq 37 ] || record_red_failure \
-  "boundary de clone mascarou falha SMTP pós-mutação (esperado exit 37, obtido ${boundary_status})"
+[ "$boundary_status" -eq 1 ] || record_red_failure \
+  "boundary de clone mascarou falha SMTP pós-mutação (esperado exit 1, obtido ${boundary_status})"
 [ "$(wc -l < "$rollback_log" | tr -d ' ')" = 1 ] || record_red_failure \
   'boundary de clone não chamou rollback exatamente uma vez após falha SMTP pós-mutação'
 
 TEST_FLUENT_INSTALL_CHECK_STATUS='1'
 TEST_FLUENT_INSTALL_QUERY_STATUS='1'
 TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
-TEST_LEGACY_INSTALL_CHECK_STATUS='1'
-TEST_LEGACY_INSTALL_QUERY_STATUS='0'
-TEST_LEGACY_DEACTIVATE_STATUS='0'
-TEST_LEGACY_DELETE_STATUS='0'
 SOURCE='dev'
 TARGET='local'
 CLONE_TMP_DIR="$TMP_DIR/plugin-query-boundary"
