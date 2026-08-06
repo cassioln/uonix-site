@@ -566,7 +566,8 @@ O painel exige `manage_options` e valida nonce, ambientes, modo e par.
 
 - Par remoto sem escrita em produção: dispara
   `.github/workflows/clone-environment.yml` em `master`, desde que
-  `UONIX_GITHUB_TOKEN` esteja configurado fora do Git.
+  `UONIX_GITHUB_TOKEN` esteja configurado fora do Git no ambiente onde o painel
+  é aberto (veja [Onde configurar](#onde-configurar-uonixgithubtoken)).
 - Dry-run com destino produção: pode disparar o workflow; a confirmação fica
   vazia porque não há escrita.
 - Execute com destino produção: é recusado pelo painel, pois ele não consegue
@@ -582,6 +583,53 @@ O painel exige `manage_options` e valida nonce, ambientes, modo e par.
 
 O painel nunca recebe credenciais SSH no formulário e não as inclui no comando
 gerado.
+
+### Onde configurar `UONIX_GITHUB_TOKEN`
+
+O painel só dispara o workflow quando `UONIX_GITHUB_TOKEN` está definido como
+constante PHP no ambiente **onde o painel é aberto**. O predicado é
+`uox_clone_has_github_token()`: exige `define()` com valor não vazio.
+
+O token é necessário apenas para pares **remoto ↔ remoto**. Pares que envolvem
+`local` são resolvidos como `mac` — o painel apenas monta um comando para você
+executar no Mac e nunca chama a API do GitHub.
+
+| Ambiente | Onde definir |
+| --- | --- |
+| `local` | `local/compose.yml`: a env var `UONIX_GITHUB_TOKEN` é repassada aos serviços `wordpress` e `wpcli`, e o `WORDPRESS_CONFIG_EXTRA` faz o `define()` condicional. O valor vem do `.env` da raiz, que está no `.gitignore`. |
+| `qa` | `/home2/uonix/public_html/wp-config.php`, antes da linha `stop editing`. |
+| `dev` | `/home2/uonix/dev_uonix/wp-config.php`, antes da linha `stop editing`. |
+| `prod` | `/home/storage/f/34/12/siteuonix1/public_html/wp-config.php`. Só necessário se o painel for usado a partir de produção; `execute` com destino `prod` continua recusado. |
+
+No `local`, exporte o `.env` antes de subir os containers para a variável chegar
+ao Compose:
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+set -a && . ./.env && set +a
+podman-compose -p uonix-local -f local/compose.yml up -d --force-recreate wordpress
+```
+
+O `define()` no Compose é condicional: sem a variável no host, a constante
+simplesmente não é criada e o painel exibe o erro orientando a configuração —
+não há fallback silencioso nem valor vazio aceito.
+
+Para conferir se o ambiente está apto, sem imprimir o valor:
+
+```bash
+podman exec uonix-local-app php -r 'require "/var/www/html/wp-config.php";
+  echo defined("UONIX_GITHUB_TOKEN") && "" !== trim(UONIX_GITHUB_TOKEN) ? "OK\n" : "AUSENTE\n";'
+```
+
+> [!IMPORTANT]
+> Nunca versione o valor do token. No `local` ele vive só no `.env` (ignorado
+> pelo Git); nos ambientes remotos, apenas no `wp-config.php` do host, que
+> também não é versionado. Ao editar um `wp-config.php` remoto, faça backup
+> datado e valide com `php -l` antes de substituir o arquivo em uso.
+
+O token precisa de permissão para disparar workflows no repositório
+(`actions: write` em token fine-grained). Um token sem esse escopo faz o painel
+falhar no dispatch mesmo com a constante presente.
 
 ## Como executar um par com `local` no Mac
 
