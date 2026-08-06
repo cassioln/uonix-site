@@ -248,6 +248,12 @@ rmdir -- \"\$lock_path\"" || return $?
 }
 
 local_wp() {
+  if [ "${1:-}" = "db" ] && [ "${2:-}" = "query" ]; then
+    shift 2
+    local_db_query "$@"
+    return $?
+  fi
+
   cd "$ROOT_DIR"
   podman-compose -p "$LOCAL_COMPOSE_PROJECT" -f "$LOCAL_COMPOSE_FILE" --profile tools run --rm --no-deps -T wpcli --skip-plugins --skip-themes "$@" </dev/null
 }
@@ -282,14 +288,32 @@ local_db_prefix() {
 }
 
 local_db_query() {
+  local query=""
+  local skip_column_names=0
+  local raw=0
+  local arg
+
+  for arg in "$@"; do
+    case "$arg" in
+      --skip-column-names) skip_column_names=1 ;;
+      --batch|--raw) raw=1 ;;
+      -*) ;;
+      *) query="$arg" ;;
+    esac
+  done
+
+  local flags=("--skip-ssl")
+  [ "$skip_column_names" -eq 1 ] && flags+=("-N")
+  [ "$raw" -eq 1 ] && flags+=("-r" "-B")
+
   MYSQL_PWD="$LOCAL_DB_PASSWORD" podman exec \
     -e MYSQL_PWD \
     "$LOCAL_DB_CONTAINER" \
     mariadb \
+    "${flags[@]}" \
     -u "$LOCAL_DB_USER" \
-    --skip-ssl \
     "$LOCAL_DB_NAME" \
-    -e "$1"
+    -e "$query"
 }
 
 local_db_dump_options() {
@@ -703,7 +727,7 @@ assert_dump_content_complete() {
   # O `tr -d '\r'` normaliza CRLF, senão o \r residual reprovaria dump válido.
   last_nonempty="$(
     gzip -dc "$dump_gz" 2>/dev/null \
-      | tr -d '\r' \
+      | LC_ALL=C tr -d '\r' \
       | grep -v '^[[:space:]]*$' \
       | tail -n 1
   )" || {
@@ -736,7 +760,7 @@ remote_dump_content_check_snippet() {
   printf '%s\n' \
     "test -s ${quoted_dump} || exit 1" \
     "gzip -t ${quoted_dump} 2>/dev/null || exit 1" \
-    "last_nonempty=\$(gzip -dc ${quoted_dump} 2>/dev/null | tr -d '\\r' | grep -v '^[[:space:]]*\$' | tail -n 1) || exit 1" \
+    "last_nonempty=\$(gzip -dc ${quoted_dump} 2>/dev/null | LC_ALL=C tr -d '\\r' | grep -v '^[[:space:]]*\$' | tail -n 1) || exit 1" \
     "case \"\$last_nonempty\" in $(printf '%q' "$marker")|$(printf '%q' "${marker} on ")*) ;; *) exit 1 ;; esac"
 }
 
