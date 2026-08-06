@@ -382,17 +382,44 @@ has_lit "$backup_block" "trap 'exit 143' TERM" \
 has_lit "$backup_block" 'trap - EXIT HUP INT TERM' \
   || fail 'traps do SQL temporário não são todos desarmados no sucesso'
 
+# SIGKILL não pode ser interceptado. Como o lock remoto já foi adquirido, o
+# próximo run deve varrer qualquer db.sql.partial deixado por execução anterior
+# dentro do diretório dedicado — nunca procurar fora dele.
+has_lit "$backup_block" 'cleanup_stale_sql() {' \
+  || fail 'backup não define limpeza dos SQL plaintext órfãos de SIGKILL'
+# shellcheck disable=SC2016
+has_lit "$backup_block" 'for stale_sql in "$backup_root"/*/db.sql.partial' \
+  || fail 'limpeza de órfãos não está limitada ao backup_root dedicado'
+# shellcheck disable=SC2016
+has_lit "$backup_block" 'rm -f -- "$stale_sql"' \
+  || fail 'próximo run não remove SQL plaintext órfão'
+
 # O SQL físico e o gzip coexistem. Antes do dump, exigir espaço livre suficiente
-# no filesystem; sem isso a duplicação transitória pode esgotá-lo no meio.
+# no filesystem e dimensionado pelo banco; piso fixo sozinho ficaria obsoleto.
 # shellcheck disable=SC2016
 has_lit "$backup_block" 'df -Pk "$backup_dir"' \
   || fail 'backup não consulta espaço livre antes de gerar SQL+gzip'
 has_lit "$backup_block" 'BACKUP_INVALIDO: espaço livre insuficiente' \
   || fail 'preflight de espaço não aborta com diagnóstico sanitizado'
 # shellcheck disable=SC2016
-espaco_min="$(sed -n 's/.*"\$livre_kb" -ge \([0-9]\{1,\}\).*/\1/p' <<<"$backup_block" | head -1)"
-[ -n "$espaco_min" ] && [ "$espaco_min" -ge 500000 ] \
-  || fail "piso de espaço livre ausente ou baixo (${espaco_min:-0}KB)"
+has_lit "$backup_block" 'required_space_kb() {' \
+  || fail 'backup não encapsula o dimensionamento de espaço pelo banco'
+has_lit "$backup_block" 'INFORMATION_SCHEMA.TABLES' \
+  || fail 'preflight não mede o tamanho real das tabelas do banco'
+has_lit "$backup_block" 'TABLE_SCHEMA = DATABASE()' \
+  || fail 'medição de espaço não está limitada ao banco WordPress atual'
+# shellcheck disable=SC2016
+has_lit "$backup_block" '$wpdb->last_error' \
+  || fail 'erro ao medir INFORMATION_SCHEMA vira tamanho zero e passa pelo piso'
+has_lit "$backup_block" 'exit(24);' \
+  || fail 'wp eval não aborta quando a medição do banco falha'
+has_lit "$backup_block" 'db_kb * 3 + 200000' \
+  || fail 'espaço exigido não cobre SQL+gzip com margem proporcional'
+has_lit "$backup_block" 'required_kb=500000' \
+  || fail 'dimensionamento perdeu o piso absoluto de 500 MB'
+# shellcheck disable=SC2016
+has_lit "$backup_block" '[ "$livre_kb" -ge "$required_kb" ]' \
+  || fail 'espaço livre não é comparado ao requisito derivado do banco'
 # shellcheck disable=SC2016
 has_lit "$backup_block" '"$(wp config get DB_NAME)" > "$sql_tmp"' \
   || fail 'mysqldump não grava diretamente no arquivo SQL temporário'
@@ -532,16 +559,20 @@ valid_line="$(grep -n 'BACKUP_VALIDO' <<<"$backup_block" | head -1 | cut -d: -f1
 # shellcheck disable=SC2001
 backup_code="$(sed 's/[[:space:]]*#.*$//' <<<"$backup_block" | grep -v '^[[:space:]]*$')"
 
-# 1. Todo diagnóstico BACKUP_INVALIDO precisa abortar de fato.
+# 1. Todo diagnóstico BACKUP_INVALIDO precisa abortar de fato. Comparar a
+# quantidade global de mensagens com a de linhas `exit 1` não prova vínculo de
+# controle e reprova um `echo ...; exit 1` legítimo. Verifica cada gate localmente.
 if grep -qE 'exit[[:space:]]+0' <<<"$backup_code"; then
   fail 'step de backup contém exit 0; um gate que "reprova" e segue é enfeite de log'
 fi
 invalidos="$(grep -c 'BACKUP_INVALIDO' <<<"$backup_code" || true)"
-exits="$(grep -cE '^[[:space:]]*exit[[:space:]]+1[[:space:]]*$' <<<"$backup_code" || true)"
 [ "$invalidos" -ge 3 ] \
   || fail "apenas $invalidos diagnósticos BACKUP_INVALIDO; provas de marcador, volume e tabelas são obrigatórias"
-[ "$exits" -ge "$invalidos" ] \
-  || fail "há $invalidos BACKUP_INVALIDO mas só $exits 'exit 1'; algum gate não aborta"
+while IFS=: read -r linha _; do
+  janela="$(sed -n "${linha},$((linha + 1))p" <<<"$backup_code")"
+  grep -qE '(^|;)[[:space:]]*exit[[:space:]]+1([[:space:]]*;|[[:space:]]*$)' <<<"$janela" \
+    || fail "diagnóstico BACKUP_INVALIDO na linha $linha não aborta imediatamente"
+done < <(grep -n 'BACKUP_INVALIDO' <<<"$backup_code")
 
 # 2. Provas de envelope não podem ser neutralizadas por `|| true`.
 # shellcheck disable=SC2016
@@ -670,5 +701,79 @@ has "$inventory_block" 'uonix_login_turnstile_is_active' \
 if has "$inventory_block" 'UONIX_TURNSTILE_ENABLED'; then
   fail 'check do Turnstile usa UONIX_TURNSTILE_ENABLED, constante que não existe no repo'
 fi
+
+# Provas EXECUTÁVEIS dos controles novos. Não basta o texto do workflow conter os
+# tokens certos: roda exatamente as funções/traps extraídos do heredoc remoto.
+probe_root="$(mktemp -d "${TMPDIR:-/tmp}/uonix-cleanup-test.XXXXXX")" \
+  || fail 'não foi possível criar diretório temporário para probes'
+cleanup_probe_root() { rm -rf -- "$probe_root"; }
+trap cleanup_probe_root EXIT
+
+signal_code="$(awk '
+  index($0, "cleanup_sql_tmp() {") { copy=1 }
+  copy { print }
+  copy && index($0, "exit 143") && index($0, "TERM") { exit }
+' <<<"$backup_code")"
+[ -n "$signal_code" ] || fail 'não foi possível extrair os traps para prova executável'
+for spec in HUP:129 INT:130 TERM:143; do
+  signal="${spec%%:*}"; expected_rc="${spec##*:}"
+  case_dir="$probe_root/$signal"
+  mkdir -p "$case_dir"
+  probe_script="$case_dir/probe.sh"
+  {
+    printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+    printf 'sql_tmp=%q\n' "$case_dir/db.sql.partial"
+    printf 'after=%q\n' "$case_dir/after"
+    printf '%s\n' "$signal_code"
+    # shellcheck disable=SC2016
+    printf ': > "$sql_tmp"\nkill -%s "$$"\n: > "$after"\n' "$signal"
+  } > "$probe_script"
+  /bin/bash "$probe_script" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -eq "$expected_rc" ] \
+    || fail "$signal saiu rc=$rc; esperado $expected_rc"
+  [ ! -e "$case_dir/db.sql.partial" ] \
+    || fail "$signal deixou SQL plaintext no disco"
+  [ ! -e "$case_dir/after" ] \
+    || fail "$signal limpou mas deixou o script continuar"
+done
+
+space_code="$(awk '
+  index($0, "required_space_kb() {") { copy=1 }
+  copy { print }
+  copy && $0 ~ /^[[:space:]]*}[[:space:]]*$/ { exit }
+' <<<"$backup_code")"
+[ -n "$space_code" ] || fail 'não foi possível extrair o dimensionamento de espaço'
+eval "$space_code"
+[ "$(required_space_kb 1048576)" -eq 500000 ] \
+  || fail 'banco pequeno não preserva piso de 500 MB'
+expected_large=$(( ((3221225472 + 1023) / 1024) * 3 + 200000 ))
+[ "$(required_space_kb 3221225472)" -eq "$expected_large" ] \
+  || fail 'banco grande não aumenta proporcionalmente o espaço exigido'
+if required_space_kb abc >/dev/null 2>&1; then
+  fail 'tamanho de banco inválido é aceito pelo preflight'
+fi
+
+stale_code="$(awk '
+  index($0, "cleanup_stale_sql() {") { copy=1 }
+  copy { print }
+  copy && $0 ~ /^[[:space:]]*}[[:space:]]*$/ { exit }
+' <<<"$backup_code")"
+[ -n "$stale_code" ] || fail 'não foi possível extrair a limpeza de órfãos'
+stale_sql_removed=0
+eval "$stale_code"
+backup_root="$probe_root/backups"
+mkdir -p "$backup_root/old-a" "$backup_root/old-b"
+: > "$backup_root/old-a/db.sql.partial"
+: > "$backup_root/old-b/db.sql.partial"
+cleanup_stale_sql >/dev/null
+[ ! -e "$backup_root/old-a/db.sql.partial" ] \
+  && [ ! -e "$backup_root/old-b/db.sql.partial" ] \
+  || fail 'limpeza executável não removeu SQL plaintext órfão'
+[ "$stale_sql_removed" -eq 2 ] \
+  || fail 'limpeza de órfãos não contabilizou os dois arquivos removidos'
+
+cleanup_probe_root
+trap - EXIT
 
 printf 'PASS: gates do workflow de limpeza são fail-closed e preservam /painel.\n'

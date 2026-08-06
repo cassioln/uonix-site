@@ -319,10 +319,31 @@ jobs:
             bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$backup_dir" <<'REMOTE'
           set -euo pipefail
           document_root="$1"; php_bin="$2"; wp_bin="$3"; backup_dir="$4"
+          backup_root="${backup_dir%/*}"
           wp() { "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" "$@"; }
           umask 077
           mkdir -p "$backup_dir"
           chmod 700 "$backup_dir"
+
+          # SIGKILL não dispara trap. Como o lock exclusivo foi adquirido no step
+          # anterior, nenhum dump deste workflow está ativo agora: remover somente
+          # db.sql.partial órfãos dentro do root dedicado é seguro e impede que um
+          # SQL em claro sobreviva indefinidamente após interrupção abrupta.
+          case "$backup_root" in
+            */_uonix-cleanup-backups) ;;
+            *) echo 'BACKUP_INVALIDO: backup_root inesperado; órfãos não serão varridos' >&2; exit 1 ;;
+          esac
+          cleanup_stale_sql() {
+            local stale_sql
+            stale_sql_removed=0
+            for stale_sql in "$backup_root"/*/db.sql.partial; do
+              [ -f "$stale_sql" ] || continue
+              rm -f -- "$stale_sql"
+              stale_sql_removed=$((stale_sql_removed + 1))
+            done
+          }
+          cleanup_stale_sql
+          printf 'sql_plaintext_orfaos_removidos=%s\n' "$stale_sql_removed"
 
           cp -p "$document_root/.htaccess" "$backup_dir/htaccess.bak"
           test -s "$backup_dir/htaccess.bak"
@@ -355,13 +376,38 @@ jobs:
           trap 'exit 130' INT
           trap 'exit 143' TERM
 
-          # O SQL físico e o gzip coexistem por alguns instantes. Reprovar antes do
-          # dump se o filesystem não tiver ao menos 500 MB livres; não substitui a
-          # quota da conta, mas evita esgotamento do volume visível pelo host.
+          # O SQL físico e o gzip coexistem por alguns instantes. Dimensionar pelo
+          # banco atual (3x + 200 MB) evita que um piso hoje suficiente fique
+          # obsoleto conforme o site cresça; 500 MB continua sendo o mínimo.
+          # `wp eval` usa a conexão mysqli do WordPress e não o `wp db size`, que
+          # dependeria de proc_open — indisponível nesta hospedagem.
+          required_space_kb() {
+            local db_bytes="$1" db_kb required_kb
+            case "$db_bytes" in
+              ''|*[!0-9]*) return 1 ;;
+            esac
+            db_kb=$(( (db_bytes + 1023) / 1024 ))
+            required_kb=$(( db_kb * 3 + 200000 ))
+            [ "$required_kb" -ge 500000 ] || required_kb=500000
+            printf '%s\n' "$required_kb"
+          }
+          db_bytes="$(wp eval '
+            global $wpdb;
+            $bytes = $wpdb->get_var("SELECT COALESCE(SUM(DATA_LENGTH + INDEX_LENGTH), 0) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()");
+            if ($wpdb->last_error !== "") {
+              fwrite(STDERR, "Falha ao medir o tamanho do banco.\n");
+              exit(24);
+            }
+            echo (int) $bytes;
+          ')"
+          if ! required_kb="$(required_space_kb "$db_bytes")"; then
+            echo 'BACKUP_INVALIDO: tamanho do banco não numérico' >&2
+            exit 1
+          fi
           livre_kb="$(df -Pk "$backup_dir" | awk 'NR==2 {print $4}')"
-          printf 'livre_kb=%s\n' "$livre_kb"
-          [ "$livre_kb" -ge 500000 ] || {
-            printf 'BACKUP_INVALIDO: espaço livre insuficiente (%s KB, mínimo 500000)\n' "$livre_kb" >&2
+          printf 'db_bytes=%s livre_kb=%s requerido_kb=%s\n' "$db_bytes" "$livre_kb" "$required_kb"
+          [ "$livre_kb" -ge "$required_kb" ] || {
+            printf 'BACKUP_INVALIDO: espaço livre insuficiente (%s KB, requerido %s KB)\n' "$livre_kb" "$required_kb" >&2
             exit 1
           }
           set -o pipefail
