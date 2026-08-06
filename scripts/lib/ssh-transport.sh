@@ -90,6 +90,9 @@ uonix_transport_build_ssh_command() {
   local key_file
   local known_hosts_file
   local password_file
+  local control_dir
+  local control_path
+  local expanded_control_path_length
 
   environment="$(uonix_environment_canonical "$1")" || return
   transport="$(uonix_environment_field "$environment" transport)" || return
@@ -103,6 +106,46 @@ uonix_transport_build_ssh_command() {
 
   UONIX_TRANSPORT_REMOTE="${user}@${host}"
   UONIX_TRANSPORT_PASSWORD_FILE=""
+
+  # O clone abre várias sessões SSH/rsync no mesmo processo (preflight, dumps,
+  # backup, sync, smoke e eventual rollback). Sem multiplexação, o firewall do
+  # HostGator pode bloquear a rajada exatamente no meio da mutação — inclusive
+  # impedindo o rollback. Essa foi a causa comprovada de quatro deploys falhos.
+  #
+  # %C mantém o socket curto e único por host/porta/usuário. No Actions usamos
+  # RUNNER_TEMP para que dry-run e execute, que são etapas do mesmo job,
+  # compartilhem o master. No Mac usamos /tmp em vez do TMPDIR longo do macOS.
+  #
+  # O diretório default fica em /tmp, que é previsível e gravável por qualquer
+  # usuário. Se sobrar um diretório de outro dono ou com modo divergente, o
+  # mkdir/chmod falha — e falhar aqui aborta TODO o transporte, inclusive o
+  # rollback de um clone já em mutação. Por isso cada falha é reportada com a
+  # causa, em vez de sair silenciosamente com o erro cru do mkdir.
+  control_dir="${UONIX_SSH_CONTROL_DIR:-${RUNNER_TEMP:-/tmp/uonix-ssh-${UID:-0}}}"
+  if ! mkdir -p "$control_dir" 2>/dev/null; then
+    uonix_transport_error "não foi possível criar o diretório de sockets SSH: ${control_dir}"
+    return 1
+  fi
+  if [ -L "$control_dir" ]; then
+    uonix_transport_error "diretório de sockets SSH é um symlink: ${control_dir}"
+    return 1
+  fi
+  if [ ! -O "$control_dir" ]; then
+    uonix_transport_error "diretório de sockets SSH pertence a outro usuário: ${control_dir}"
+    return 1
+  fi
+  if ! chmod 700 "$control_dir" 2>/dev/null; then
+    uonix_transport_error "não foi possível restringir o diretório de sockets SSH: ${control_dir}"
+    return 1
+  fi
+  control_path="${control_dir%/}/uonix-%C"
+  # OpenSSH expande %C para 40 hexadecimais; sockets Unix têm limite próximo de
+  # 104 bytes em várias plataformas. Falhar cedo é melhor que ignorar o config.
+  expanded_control_path_length=$(( ${#control_path} + 38 ))
+  if [ "$expanded_control_path_length" -gt 100 ]; then
+    uonix_transport_error "ControlPath SSH longo demais (${expanded_control_path_length} bytes)."
+    return 1
+  fi
 
   case "$transport" in
     hostgator-key)
@@ -118,6 +161,12 @@ uonix_transport_build_ssh_command() {
         -o IdentitiesOnly=yes
         -o StrictHostKeyChecking=yes
         -o "UserKnownHostsFile=$known_hosts_file"
+        -o ControlMaster=auto
+        -o ControlPersist=120
+        -o "ControlPath=$control_path"
+        -o ServerAliveInterval=15
+        -o ServerAliveCountMax=4
+        -o ConnectTimeout=30
       )
       ;;
     locaweb-password)
@@ -135,6 +184,12 @@ uonix_transport_build_ssh_command() {
         -o NumberOfPasswordPrompts=1
         -o StrictHostKeyChecking=yes
         -o "UserKnownHostsFile=$known_hosts_file"
+        -o ControlMaster=auto
+        -o ControlPersist=120
+        -o "ControlPath=$control_path"
+        -o ServerAliveInterval=15
+        -o ServerAliveCountMax=4
+        -o ConnectTimeout=30
       )
       ;;
     local-podman)
@@ -162,6 +217,20 @@ uonix_transport_ssh_once() {
 
   uonix_transport_build_ssh_command "$environment" || return
   uonix_transport_execute_built_ssh "$UONIX_TRANSPORT_REMOTE" "$remote_command"
+}
+
+uonix_transport_close_master() {
+  local environment="$1"
+
+  # Encerra o master multiplexado do ambiente. Importa mais na Locaweb: lá a
+  # sessão é autenticada por SENHA, e um socket vivo permite a qualquer processo
+  # do mesmo usuário reusar a sessão sem apresentar credencial. Fechar ao fim da
+  # operação reduz a janela de 120s (ControlPersist) para ~zero.
+  #
+  # Nunca falha o chamador: é limpeza, e um master já encerrado é sucesso.
+  uonix_transport_build_ssh_command "$environment" >/dev/null 2>&1 || return 0
+  uonix_transport_execute_built_ssh -O exit "$UONIX_TRANSPORT_REMOTE" >/dev/null 2>&1 || true
+  return 0
 }
 
 uonix_transport_validate_retry_config() {

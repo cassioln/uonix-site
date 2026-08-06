@@ -166,15 +166,21 @@ if ( ! defined('UONIX_CUSTOM_LOGIN_SNIPPET_LOADED') ) {
 
             /*
              * Logo UONIX - mesma estratégia do snippet que não cortava.
+             *
+             * Escopo restrito a `#login > h1`: o core usa <h1> mais de uma vez na
+             * tela de login. Em `action=confirm_admin_email` o próprio conteúdo do
+             * formulário é um <h1 class="admin-email__heading">, então um seletor
+             * amplo `.login h1` transformava aquele título em caixa de logo e ainda
+             * colava "PAINEL DE CONTROLE" via ::after no meio do card.
              */
-            .login h1 {
+            .login #login > h1 {
                 width: 100% !important;
                 margin: 0 0 25px 0 !important;
                 padding: 0 !important;
                 overflow: visible !important;
             }
 
-            .login h1 a {
+            .login #login > h1 a {
                 background-image: url('<?php echo esc_url($logo_url); ?>') !important;
                 background-size: contain !important;
                 background-position: center bottom !important;
@@ -189,7 +195,7 @@ if ( ! defined('UONIX_CUSTOM_LOGIN_SNIPPET_LOADED') ) {
                 box-shadow: none !important;
             }
 
-            .login h1::after {
+            .login #login > h1::after {
                 content: "Painel de controle";
                 display: block;
                 margin-top: 0;
@@ -207,7 +213,8 @@ if ( ! defined('UONIX_CUSTOM_LOGIN_SNIPPET_LOADED') ) {
             body.login div#login form#loginform,
             body.login div#login form#lostpasswordform,
             body.login div#login form#registerform,
-            body.login div#login form#resetpassform {
+            body.login div#login form#resetpassform,
+            body.login div#login form.admin-email-confirm-form {
                 margin-top: 0;
                 padding: 34px;
                 border: 1px solid rgba(255, 255, 255, 0.58) !important;
@@ -218,6 +225,66 @@ if ( ! defined('UONIX_CUSTOM_LOGIN_SNIPPET_LOADED') ) {
                     inset 0 1px 0 rgba(255, 255, 255, 0.85);
                 backdrop-filter: blur(18px);
                 -webkit-backdrop-filter: blur(18px);
+            }
+
+            /*
+             * Tela `action=confirm_admin_email`: o conteúdo do card é um <h1> do
+             * core, não o logo. Precisa voltar a parecer título de texto.
+             */
+            body.login .admin-email-confirm-form h1.admin-email__heading {
+                width: auto !important;
+                margin: 0 0 18px !important;
+                padding: 0 !important;
+                overflow: visible !important;
+                color: var(--uonix-text-dark) !important;
+                font-size: 21px;
+                font-weight: 700;
+                line-height: 1.3;
+                text-align: left;
+                text-indent: 0;
+                background: none !important;
+                text-transform: none;
+                letter-spacing: normal;
+            }
+
+            body.login .admin-email-confirm-form h1.admin-email__heading::after,
+            body.login .admin-email-confirm-form h1.admin-email__heading::before {
+                content: none !important;
+                display: none !important;
+            }
+
+            body.login .admin-email-confirm-form .admin-email__details {
+                margin: 0 0 14px;
+                color: #334155 !important;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+
+            body.login .admin-email-confirm-form .admin-email__details strong {
+                color: var(--uonix-text-dark) !important;
+            }
+
+            body.login .admin-email-confirm-form .admin-email__details a {
+                color: var(--uonix-blue) !important;
+                font-weight: 600;
+            }
+
+            body.login .admin-email-confirm-form .admin-email__actions-primary {
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+                align-items: center;
+                margin-top: 22px;
+            }
+
+            body.login .admin-email-confirm-form .admin-email__actions-secondary {
+                margin-top: 16px;
+            }
+
+            body.login .admin-email-confirm-form .admin-email__actions-secondary a {
+                color: var(--uonix-blue) !important;
+                font-size: 13px;
+                font-weight: 600;
             }
 
             body.login label {
@@ -430,7 +497,7 @@ if ( ! defined('UONIX_CUSTOM_LOGIN_SNIPPET_LOADED') ) {
                 padding: 34px 0 18px !important;
             }
 
-            body.login.interim-login h1 {
+            body.login.interim-login #login > h1 {
                 width: 100% !important;
                 margin: 0 0 22px 0 !important;
                 padding: 0 !important;
@@ -440,7 +507,7 @@ if ( ! defined('UONIX_CUSTOM_LOGIN_SNIPPET_LOADED') ) {
                 overflow: visible !important;
             }
 
-            body.login.interim-login h1 a {
+            body.login.interim-login #login > h1 a {
                 width: 100% !important;
                 height: 82px !important;
                 background-size: contain !important;
@@ -449,7 +516,7 @@ if ( ! defined('UONIX_CUSTOM_LOGIN_SNIPPET_LOADED') ) {
                 overflow: hidden !important;
             }
 
-            body.login.interim-login h1::after {
+            body.login.interim-login #login > h1::after {
                 content: "Sessão expirada";
                 margin-top: 0;
                 color: rgba(226, 232, 240, 0.82);
@@ -542,14 +609,15 @@ if ( ! defined('UONIX_CUSTOM_LOGIN_SNIPPET_LOADED') ) {
                     padding: 0 !important;
                 }
 
-                .login h1 a {
+                .login #login > h1 a {
                     height: 78px !important;
                 }
 
                 body.login div#login form#loginform,
                 body.login div#login form#lostpasswordform,
                 body.login div#login form#registerform,
-                body.login div#login form#resetpassform {
+                body.login div#login form#resetpassform,
+                body.login div#login form.admin-email-confirm-form {
                     padding: 28px 24px;
                     border-radius: 22px;
                 }
@@ -581,7 +649,7 @@ if ( ! defined('UONIX_CUSTOM_LOGIN_SNIPPET_LOADED') ) {
                     padding-top: 24px !important;
                 }
 
-                body.login.interim-login h1 a {
+                body.login.interim-login #login > h1 a {
                     height: 76px !important;
                     background-size: contain !important;
                 }

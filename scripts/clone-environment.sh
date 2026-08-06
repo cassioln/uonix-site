@@ -257,6 +257,7 @@ local_db_dump() {
     -e MYSQL_PWD \
     "$LOCAL_DB_CONTAINER" \
     mariadb-dump \
+    --no-defaults \
     -u "$LOCAL_DB_USER" \
     --skip-ssl \
     --single-transaction \
@@ -314,6 +315,7 @@ local_db_dump_options() {
 protected_options_where() {
   cat <<'SQL'
 option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron')
+OR option_name = 'downloaded_font_files'
 OR option_name LIKE '%backuply%'
 OR option_name LIKE '%ai1wm%'
 OR option_name LIKE 'compressx%'
@@ -524,6 +526,220 @@ remote_wp_content_dir() {
   printf '%s/wp-content\n' "$wp_root"
 }
 
+remote_db_dump_snippet() {
+  local wp_cli="$1"
+  local wp_root="$2"
+  local target_gz="$3"
+
+  # `wp db export` shella out via Process::run e a Locaweb desabilita proc_open
+  # de forma COMPILADA — `-d disable_functions=` não vence isso. Ou seja: qualquer
+  # clone com produção na origem OU no destino ficava sem backup utilizável,
+  # justamente o artefato de que o rollback depende.
+  #
+  # O padrão aqui é o mesmo que snapshot_options já usa: ler credenciais por
+  # `wp config get` e chamar o cliente direto, com MYSQL_PWD para manter a senha
+  # fora de argv. Preferimos mysqldump/mariadb-dump e só caímos em `wp db export`
+  # onde o cliente não existe — capacidade do host, não nome do ambiente.
+  cat <<SNIPPET
+db_name="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)"
+db_user="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)"
+db_host="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)"
+dump_bin="\$(command -v mysqldump || command -v mariadb-dump || true)"
+if [ -n "\$dump_bin" ]; then
+  # --no-defaults PRIMEIRO: sem ela o cliente lê ~/.my.cnf antes do nosso argv,
+  # e um grupo [mysqldump] com no-data produz dump rc=0 com schema e ZERO dados.
+  dump_flags='--no-defaults --single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'
+  # Cliente 8.0 contra servidor 5.7 avisa sobre column statistics em todo dump:
+  # inofensivo, mas polui o log e parece falha. A flag só existe no cliente 8.0+.
+  if "\$dump_bin" --help 2>/dev/null | grep -q -- '--column-statistics'; then
+    dump_flags="\$dump_flags --column-statistics=0"
+  fi
+  MYSQL_PWD="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)" \\
+    "\$dump_bin" \$dump_flags \\
+    --host="\$db_host" --user="\$db_user" "\$db_name" | gzip -c > $(printf '%q' "$target_gz")
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db export - | gzip -c > $(printf '%q' "$target_gz")
+fi
+SNIPPET
+}
+
+remote_db_dump_to_stdout() {
+  local wp_cli="$1"
+  local wp_root="$2"
+
+  # Variante que emite o dump comprimido em STDOUT, para o caso em que o
+  # artefato é transmitido ao runner em vez de gravado no host remoto.
+  # Mesma razão do helper acima: `wp db export` shella out e a Locaweb bloqueia
+  # proc_open de forma compilada, então o clone com produção na origem falhava.
+  # `set -o pipefail` e OBRIGATORIO aqui: este comando vai CRU para o ssh, sem
+  # `bash -s`, e o shell remoto nao herda o pipefail do script local. Sem ele,
+  # "mysqldump | gzip -c" devolve o exit do gzip (0) mesmo quando o mysqldump
+  # aborta no meio, e um dump TRUNCADO passa por `[ -s ]` e `gzip -t` — que
+  # validam o envelope gzip, nao o SQL dentro. Comprovado: dump cortado com
+  # exit 0 e ambas as validacoes aprovando.
+  printf '%s' "set -o pipefail; \
+db_name=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)\"; \
+db_user=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)\"; \
+db_host=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\"; \
+dump_bin=\"\$(command -v mysqldump || command -v mariadb-dump || true)\"; \
+if [ -n \"\$dump_bin\" ]; then \
+dump_flags='--no-defaults --single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'; \
+if \"\$dump_bin\" --help 2>/dev/null | grep -q -- '--column-statistics'; then dump_flags=\"\$dump_flags --column-statistics=0\"; fi; \
+MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" \"\$dump_bin\" \$dump_flags --host=\"\$db_host\" --user=\"\$db_user\" \"\$db_name\" | gzip -c; \
+else $wp_cli --path=$(printf '%q' "$wp_root") db export - | gzip -c; fi"
+}
+
+remote_db_client_snippet() {
+  local wp_cli="$1"
+  local wp_root="$2"
+
+  # Resolve o cliente `mysql` e as credenciais numa forma reutilizável.
+  # `wp db import` também shella out, então importar precisa do mesmo tratamento
+  # que exportar: em produção o wp-cli não consegue invocar o cliente.
+  cat <<SNIPPET
+db_name="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)"
+db_user="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)"
+db_host="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)"
+mysql_bin="\$(command -v mysql || command -v mariadb || true)"
+dump_bin="\$(command -v mysqldump || command -v mariadb-dump || true)"
+SNIPPET
+}
+
+remote_db_import_file_snippet() {
+  local wp_cli="$1"
+  local wp_root="$2"
+  local sql_file_expression="$3"
+
+  cat <<SNIPPET
+$(remote_db_client_snippet "$wp_cli" "$wp_root")
+if [ -n "\$mysql_bin" ]; then
+  MYSQL_PWD="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)" \\
+    "\$mysql_bin" --host="\$db_host" --user="\$db_user" \\
+    --default-character-set=utf8mb4 "\$db_name" < ${sql_file_expression}
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db import ${sql_file_expression} >/dev/null
+fi
+SNIPPET
+}
+
+remote_db_dump_tables_snippet() {
+  local wp_cli="$1"
+  local wp_root="$2"
+  local tables_expression="$3"
+  local sql_file_expression="$4"
+  local tables_csv_expression="$5"
+
+  # Dump de tabelas específicas (snapshot de usuários do destino). Mesmo motivo
+  # dos outros helpers: `wp db export --tables` shella out e falha na Locaweb.
+  #
+  # As tabelas vêm em duas formas porque os dois caminhos exigem sintaxes
+  # diferentes: mysqldump recebe argumentos separados, `wp db export --tables`
+  # recebe uma lista separada por vírgula. Passar a forma errada ao fallback
+  # descartaria silenciosamente todas as tabelas além da primeira.
+  cat <<SNIPPET
+$(remote_db_client_snippet "$wp_cli" "$wp_root")
+if [ -n "\$dump_bin" ]; then
+  # --no-defaults PRIMEIRO: blinda contra ~/.my.cnf que injete no-data/where.
+  dump_flags='--no-defaults --single-transaction --quick --no-tablespaces --default-character-set=utf8mb4'
+  if "\$dump_bin" --help 2>/dev/null | grep -q -- '--column-statistics'; then
+    dump_flags="\$dump_flags --column-statistics=0"
+  fi
+  MYSQL_PWD="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)" \\
+    "\$dump_bin" \$dump_flags \\
+    --host="\$db_host" --user="\$db_user" "\$db_name" ${tables_expression} > ${sql_file_expression}
+else
+  $wp_cli --path=$(printf '%q' "$wp_root") db export ${sql_file_expression} --tables=${tables_csv_expression} >/dev/null
+fi
+SNIPPET
+}
+
+remote_db_import_stdin_command() {
+  local wp_cli="$1"
+  local wp_root="$2"
+
+  # Comando de import que consome SQL do STDIN, usado quando o dump é
+  # transmitido do runner. `wp db import -` shella out e falha na Locaweb.
+  # Mesmo motivo do dump por stdout: comando cru, shell remoto sem pipefail.
+  # Aqui o pipeline e "gzip -dc arquivo | mysql", montado pelo CHAMADOR; sem
+  # pipefail um gzip corrompido devolvia o exit do mysql e DEV ficava
+  # meio-importado sem disparar rollback.
+  printf '%s' "set -o pipefail; \
+mysql_bin=\"\$(command -v mysql || command -v mariadb || true)\"; \
+if [ -n \"\$mysql_bin\" ]; then \
+MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" \"\$mysql_bin\" \
+--host=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\" \
+--user=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)\" \
+--default-character-set=utf8mb4 \"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)\"; \
+else $wp_cli --path=$(printf '%q' "$wp_root") db import -; fi"
+}
+
+dump_completion_marker() {
+  # Prefixo exato emitido por mysqldump e mariadb-dump. Com --skip-dump-date a
+  # linha termina aqui; sem a flag, continua com " on AAAA-MM-DD ...".
+  printf '%s' '-- Dump completed'
+}
+
+assert_dump_content_complete() {
+  local dump_gz="$1"
+  local label="${2:-dump}"
+  local last_nonempty
+
+  [ -s "$dump_gz" ] || {
+    uonix_env_error "${label}: arquivo vazio"
+    return 1
+  }
+  gzip -t "$dump_gz" 2>/dev/null || {
+    uonix_env_error "${label}: envelope gzip corrompido"
+    return 1
+  }
+
+  # O marcador deve ser a ÚLTIMA linha não vazia. Procurá-lo em qualquer lugar
+  # dá falso positivo quando há truncamento/lixo anexado depois do footer. A
+  # leitura é em fluxo e usa memória constante; não materializa o SQL em disco.
+  #
+  # Filtrar as linhas vazias ANTES do tail: uma janela fixa (`tail -n 5`) era
+  # suposição sobre quantas linhas em branco o dump termina, e empurrava o
+  # marcador para fora em dump legítimo — falso negativo aborta clone bom.
+  # O `tr -d '\r'` normaliza CRLF, senão o \r residual reprovaria dump válido.
+  last_nonempty="$(
+    gzip -dc "$dump_gz" 2>/dev/null \
+      | tr -d '\r' \
+      | grep -v '^[[:space:]]*$' \
+      | tail -n 1
+  )" || {
+    uonix_env_error "${label}: conteúdo SQL ilegível ou vazio"
+    return 1
+  }
+
+  case "$last_nonempty" in
+    "$(dump_completion_marker)"|"$(dump_completion_marker) on "*) ;;
+    *)
+      uonix_env_error "${label}: dump sem marcador final de conclusão (interrompido no meio)"
+      return 1
+      ;;
+  esac
+}
+
+remote_dump_content_check_snippet() {
+  local dump_gz="$1"
+  local quoted_dump
+  local marker
+
+  quoted_dump="$(printf '%q' "$dump_gz")" || return $?
+  # O marcador vem do MESMO helper do caminho local. Hard-codear a string aqui
+  # faria os dois lados divergirem em silêncio se ela mudasse, com o teste ainda
+  # verde porque nada ligava snippet e helper.
+  marker="$(dump_completion_marker)" || return $?
+  # Produz shell auto-contido para o host remoto. Não depende das funções deste
+  # script: o transporte envia o texto cru via SSH. A negação é dupla — falha com
+  # pipefail (exit 1) e sem pipefail (valor vazio cai no `*)` do case).
+  printf '%s\n' \
+    "test -s ${quoted_dump} || exit 1" \
+    "gzip -t ${quoted_dump} 2>/dev/null || exit 1" \
+    "last_nonempty=\$(gzip -dc ${quoted_dump} 2>/dev/null | tr -d '\\r' | grep -v '^[[:space:]]*\$' | tail -n 1) || exit 1" \
+    "case \"\$last_nonempty\" in $(printf '%q' "$marker")|$(printf '%q' "${marker} on ")*) ;; *) exit 1 ;; esac"
+}
+
 prepare_target_backup() {
   local env="$1"
   local dir="$2"
@@ -550,7 +766,7 @@ prepare_target_backup() {
 umask 077
 mkdir -p $(printf '%q' "$dir")
 chmod 700 $(printf '%q' "$dir")
-$wp_cli --path=$(printf '%q' "$wp_root") db export - | gzip -c > $(printf '%q' "${dir}/db-${env}-${STAMP}.sql.gz")
+$(remote_db_dump_snippet "$wp_cli" "$wp_root" "${dir}/db-${env}-${STAMP}.sql.gz")
 cd $(printf '%q' "$wp_content")
 set --
 for item in $(shell_join "${backup_items[@]}"); do
@@ -562,9 +778,8 @@ if [ \"\$#\" -gt 0 ]; then
 else
   tar -czf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") --files-from=/dev/null
 fi
-test -s $(printf '%q' "${dir}/db-${env}-${STAMP}.sql.gz") || exit \$?
 test -s $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") || exit \$?
-gzip -t $(printf '%q' "${dir}/db-${env}-${STAMP}.sql.gz") || exit \$?
+$(remote_dump_content_check_snippet "${dir}/db-${env}-${STAMP}.sql.gz")
 tar -tzf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") >/dev/null || exit \$?
 chmod 600 $(printf '%q' "${dir}/db-${env}-${STAMP}.sql.gz") $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz")
 find $(printf '%q' "$backup_root") -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +6 | cut -d' ' -f2- | while IFS= read -r old_backup; do [ -n \"\$old_backup\" ] && rm -rf -- \"\$old_backup\"; done"
@@ -590,9 +805,11 @@ find $(printf '%q' "$backup_root") -mindepth 1 -maxdepth 1 -type d -printf '%T@ 
       tar -czf "${dir}/files-${env}-${STAMP}.tar.gz" --files-from=/dev/null || return $?
     fi
 
-    [ -s "${dir}/db-${env}-${STAMP}.sql.gz" ] || return 1
     [ -s "${dir}/files-${env}-${STAMP}.tar.gz" ] || return 1
-    gzip -t "${dir}/db-${env}-${STAMP}.sql.gz" || return $?
+    # Valida o CONTEÚDO do dump, não só o envelope: um gzip íntegro pode conter
+    # SQL truncado ou apenas cabeçalho, e o rollback dependeria dele.
+    assert_dump_content_complete "${dir}/db-${env}-${STAMP}.sql.gz" \
+      "backup de ${env}" || return $?
     tar -tzf "${dir}/files-${env}-${STAMP}.tar.gz" >/dev/null || return $?
     chmod 600 "${dir}/db-${env}-${STAMP}.sql.gz" "${dir}/files-${env}-${STAMP}.tar.gz" || return $?
 
@@ -621,6 +838,20 @@ snapshot_users() {
     wp_root="$(wp_path "$env")" || return $?
     wp_cli="$(wp_cli_shell "$env")" || return $?
 
+    # Montadas fora do heredoc de propósito: estas referências pertencem ao shell
+    # REMOTO, e mantê-las em variáveis evita que o ShellCheck as leia como
+    # expansões locais perdidas (SC2016) num trecho onde a diretiva de disable
+    # cairia dentro da string enviada ao host.
+    local remote_users_tables remote_users_tables_csv remote_users_sql
+    # As aspas simples são deliberadas: prefix e users_sql são resolvidos pelo
+    # shell REMOTO, não aqui.
+    # shellcheck disable=SC2016
+    remote_users_tables='"${prefix}users" "${prefix}usermeta"'
+    # shellcheck disable=SC2016
+    remote_users_tables_csv='"${prefix}users,${prefix}usermeta"'
+    # shellcheck disable=SC2016
+    remote_users_sql='"$users_sql"'
+
     remote_run "$env" "set -uo pipefail
 umask 077
 users_dir=$(printf '%q' "$dir")
@@ -632,7 +863,7 @@ chmod 700 \"\$users_dir\" || exit \$?
 : > \"\$users_sha256\" || exit \$?
 chmod 600 \"\$users_sql\" \"\$users_sha256\" || exit \$?
 prefix=\"\$($wp_cli --path=$(printf '%q' "$wp_root") db prefix)\" || exit \$?
-$wp_cli --path=$(printf '%q' "$wp_root") db export \"\$users_sql\" --tables=\"\${prefix}users,\${prefix}usermeta\" >/dev/null || exit \$?
+$(remote_db_dump_tables_snippet "$wp_cli" "$wp_root" "$remote_users_tables" "$remote_users_sql" "$remote_users_tables_csv") || exit \$?
 test -s \"\$users_sql\" || exit \$?
 (
   cd \"\$users_dir\" || exit \$?
@@ -741,13 +972,15 @@ export_source_db() {
     wp_cli="$(wp_cli_shell "$env")" || return $?
     remote_stream_to_file \
       "$env" \
-      "$wp_cli --path=$(printf '%q' "$wp_root") db export - | gzip -c" \
+      "$(remote_db_dump_to_stdout "$wp_cli" "$wp_root")" \
       "$dump_file" || return $?
   else
     local_db_dump | gzip -c >"$dump_file" || return $?
   fi
-  [ -s "$dump_file" ] || return 1
-  gzip -t "$dump_file" || return $?
+  # O dump da origem é o que será IMPORTADO no destino: validar o conteúdo aqui
+  # impede que um SQL truncado substitua o banco de destino. `gzip -t` sozinho
+  # aprovaria, porque o envelope de um dump interrompido continua íntegro.
+  assert_dump_content_complete "$dump_file" "dump da origem (${env})" || return $?
   export_source_author_map "$env" "${dump_file}.authors.tsv" || return $?
 }
 
@@ -764,7 +997,7 @@ import_db_to_target() {
     remote_import_gzip_dump \
       "$env" \
       "$dump_file" \
-      "$wp_cli --path=$(printf '%q' "$wp_root") db import -"
+      "$(remote_db_import_stdin_command "$wp_cli" "$wp_root")"
   else
     gzip -dc "$dump_file" | local_db_import
   fi
@@ -805,6 +1038,11 @@ restore_users() {
     wp_root="$(wp_path "$env")" || return $?
     wp_cli="$(wp_cli_shell "$env")" || return $?
 
+    # Referência ao arquivo no shell REMOTO, montada fora do heredoc para não
+    # ser lida como expansão local perdida.
+    # shellcheck disable=SC2016
+    local remote_users_sql_ref='"$users_sql"'
+
     remote_run "$env" "set -uo pipefail
 users_dir=$(printf '%q' "$dir")
 users_sql=$(printf '%q' "${dir}/users.sql")
@@ -820,7 +1058,7 @@ users_sha256=$(printf '%q' "${dir}/users.sha256")
   set -o pipefail
   sha256sum users.sql | cmp -s - users.sha256
 ) || exit \$?
-$wp_cli --path=$(printf '%q' "$wp_root") db import \"\$users_sql\" || exit \$?" || return $?
+$(remote_db_import_file_snippet "$wp_cli" "$wp_root" "$remote_users_sql_ref") || exit \$?" || return $?
   else
     validate_users_snapshot "$dir" || return $?
     local_db_import <"${dir}/users.sql" || return $?
@@ -856,6 +1094,10 @@ restore_options() {
     wp_root="$(wp_path "$env")" || return $?
     wp_cli="$(wp_cli_shell "$env")" || return $?
 
+    # Referência ao arquivo no shell REMOTO, montada fora do heredoc.
+    # shellcheck disable=SC2016
+    local remote_options_sql_ref='"$options_sql"'
+
     remote_run "$env" "set -euo pipefail
 options_sql=$(printf '%q' "${dir}/options.sql")
 options_sha256=$(printf '%q' "${dir}/options.sha256")
@@ -870,7 +1112,7 @@ prefix=\"\$($wp_cli --path=$(printf '%q' "$wp_root") db prefix)\" || exit \$?
 delete_sql=\"DELETE FROM \${prefix}options WHERE ${where}\"
 $wp_cli --path=$(printf '%q' "$wp_root") db query \"\$delete_sql\" >/dev/null || exit \$?
 if [ -s \"\$options_sql\" ]; then
-  $wp_cli --path=$(printf '%q' "$wp_root") db import \"\$options_sql\" >/dev/null || exit \$?
+  $(remote_db_import_file_snippet "$wp_cli" "$wp_root" "$remote_options_sql_ref") || exit \$?
 fi" || return $?
   else
     local prefix
@@ -958,10 +1200,42 @@ set_target_identity() {
 
   log "Ajustando URL e identidade do destino: ${env}"
 
+  # Duas passagens são necessárias. Medido em WordPress real com 20 asserções: a
+  # forma JSON-escapada (barras com contrabarra) SOBREVIVE intacta ao padrão
+  # literal, porque `wp search-replace` desserializa e conserta tamanhos mas
+  # compara bytes — e as duas formas têm bytes diferentes.
+  #
+  # Em blocos Gutenberg o efeito é pior que sobreviver: o HTML visível migra e o
+  # atributo dentro do comentário `wp:image` fica na origem. O bloco passa a
+  # apontar para dois domínios, invalida no editor e a URL antiga volta ao
+  # re-salvar.
+  #
+  # ORDEM: o passe ESCAPADO vem primeiro. Ele só casa texto que ainda tem
+  # contrabarras, e o passe literal seguinte não reprocessa o que já foi
+  # convertido. A ordem inversa também funcionaria aqui, mas esta é a que mantém
+  # a invariante mesmo se um dos domínios for substring do outro.
+  #
+  # Nunca substituir por HOST PURO (sem esquema): em QA→DEV a origem
+  # `uonix.ksio.dev` é substring do destino `test.uonix.ksio.dev`, e um segundo
+  # passe geraria `test.test.uonix.ksio.dev`.
+  local source_url_escaped target_url_escaped
+  source_url_escaped="$(json_escaped_url "$source_url")" || return $?
+  target_url_escaped="$(json_escaped_url "$target_url")" || return $?
+
+  wp_exec "$env" search-replace "$source_url_escaped" "$target_url_escaped" --all-tables-with-prefix --skip-columns=guid --quiet || return $?
   wp_exec "$env" search-replace "$source_url" "$target_url" --all-tables-with-prefix --skip-columns=guid --quiet || return $?
   wp_exec "$env" option update home "$target_url" >/dev/null || return $?
   wp_exec "$env" option update siteurl "$target_url" >/dev/null || return $?
   wp_exec "$env" option update blogname "$target_title" >/dev/null || return $?
+}
+
+json_escaped_url() {
+  local url="$1"
+
+  [ -n "$url" ] || return 1
+  # Converte https://host em https:\/\/host, a forma como o WordPress serializa
+  # URLs dentro de JSON (atributos de bloco Gutenberg, opções serializadas).
+  printf '%s' "$url" | sed 's|/|\\/|g'
 }
 
 valid_author_id() {
@@ -1478,6 +1752,81 @@ sync_runtime_files() {
   done
 }
 
+database_identity() {
+  local env="$1"
+  local wp_root wp_cli raw
+
+  # Devolve somente um HASH de host|schema. Basta para decidir se origem e
+  # destino são o mesmo banco, sem devolver os valores ao chamador nem expô-los
+  # em log ou mensagem de erro.
+  if is_remote_env "$env"; then
+    wp_root="$(wp_path "$env")" || return $?
+    wp_cli="$(wp_cli_shell "$env")" || return $?
+    raw="$(remote_run "$env" "set -uo pipefail
+printf '%s|%s' \
+  \"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\" \
+  \"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_NAME)\"")" || return $?
+  else
+    raw="$(printf '%s|%s' "$(local_wp config get DB_HOST)" "$(local_wp config get DB_NAME)")" || return $?
+  fi
+
+  # Identidade incompleta não pode virar hash: viraria um hash válido de lixo.
+  case "$raw" in
+    ''|'|'*|*'|') return 1 ;;
+  esac
+
+  printf '%s' "$raw" | identity_digest
+}
+
+identity_digest() {
+  # sha256sum no Linux (CI), shasum no macOS. Sem fallback silencioso: se nenhum
+  # existir, falha em vez de devolver algo que pareça um hash.
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | cut -d' ' -f1
+  else
+    return 1
+  fi
+}
+
+assert_distinct_databases() {
+  local source_env="$1"
+  local target_env="$2"
+  local source_identity target_identity
+
+  # O nome do ambiente não prova que o banco é outro. Se origem e destino
+  # apontarem para o MESMO host e schema — plausível na HostGator, onde QA e DEV
+  # dividem conta e servidor — o clone exporta e reimporta sobre si mesmo: o
+  # conteúdo do destino é destruído e o backup passa a ser a única cópia. A
+  # comparação roda no preflight e de novo antes da primeira escrita.
+  source_identity="$(database_identity "$source_env")" || {
+    uonix_env_error "não foi possível identificar o banco de ${source_env}"
+    return 1
+  }
+  [ -n "$source_identity" ] || {
+    uonix_env_error "não foi possível identificar o banco de ${source_env}"
+    return 1
+  }
+  target_identity="$(database_identity "$target_env")" || {
+    uonix_env_error "não foi possível identificar o banco de ${target_env}"
+    return 1
+  }
+  [ -n "$target_identity" ] || {
+    uonix_env_error "não foi possível identificar o banco de ${target_env}"
+    return 1
+  }
+
+  if [ "$source_identity" = "$target_identity" ]; then
+    # Value-blind: a mensagem não revela host nem schema, e a comparação é entre
+    # hashes. Quem opera o clone já sabe quais ambientes escolheu.
+    uonix_env_error "origem (${source_env}) e destino (${target_env}) usam o MESMO banco; o clone destruiria os dados"
+    return 1
+  fi
+
+  log "Bancos distintos confirmados: ${source_env} e ${target_env}."
+}
+
 preflight_env() {
   local env="$1"
   local wp_root
@@ -1499,6 +1848,9 @@ command -v tar >/dev/null || exit \$?
 command -v sha256sum >/dev/null || exit \$?
 command -v cmp >/dev/null || exit \$?
 (command -v mysql >/dev/null || command -v mariadb >/dev/null) || exit \$?
+# O PRODUTOR do dump tambem e obrigatorio. Exigir so o cliente deixava a falta do
+# mysqldump aparecer no MEIO do clone, quando o destino ja pode estar mutado.
+(command -v mysqldump >/dev/null || command -v mariadb-dump >/dev/null) || exit \$?
 test -d $(printf '%q' "$wp_root") || exit \$?
 test -d $(printf '%q' "$wp_content") || exit \$?
 $wp_cli --path=$(printf '%q' "$wp_root") db prefix >/dev/null || exit \$?
@@ -1548,6 +1900,8 @@ dry_run_clone() {
 
   preflight_env "$SOURCE" || return $?
   preflight_env "$TARGET" || return $?
+
+  assert_distinct_databases "$SOURCE" "$TARGET" || return $?
 
   log "Diretórios que seriam sincronizados em wp-content: ${dirs[*]}"
   log "Opções preservadas no destino: plugins gerenciados, active_plugins, cron, SMTP/captcha/Turnstile/CompressX/admin_email."
@@ -1631,30 +1985,145 @@ rollback_target() {
     wp_root="$(wp_path "$env")" || return $?
     wp_content="${wp_root}/wp-content"
     wp_cli="$(wp_cli_shell "$env")" || return $?
-    remote_run "$env" "set -euo pipefail
+    # Rollback usa o caminho COM retry, ao contrário do resto da mutação: ele
+    # restaura a partir de um backup já validado, então repetir converge para o
+    # mesmo estado — é idempotente por construção. E uma única tentativa aqui
+    # falharia exatamente no cenário que motivou a multiplexação: rede instável.
+    # Sem retry, o destino ficaria com banco da origem e arquivos parciais.
+    #
+    # A extração vai para um diretório temporário e só então substitui os itens,
+    # em vez de apagar antes de extrair. Uma queda no meio deixava o destino sem
+    # arquivos E sem segunda chance.
+    remote_run_idempotent "$env" "set -euo pipefail
 test -n $(printf '%q' "$wp_content")
 test $(printf '%q' "$wp_content") != /
-test -s $(printf '%q' "$dump_file")
 test -s $(printf '%q' "$files_file")
-gzip -t $(printf '%q' "$dump_file")
+$(remote_dump_content_check_snippet "$dump_file")
 tar -tzf $(printf '%q' "$files_file") >/dev/null
-for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
-  rm -rf -- $(printf '%q' "$wp_content")/\"\$item\"
+staging=\"\$(mktemp -d $(printf '%q' "$wp_content")/.uonix-rollback.XXXXXX)\"
+# O trap remove SOMENTE o que ainda nao foi promovido. Um rm -rf cego no staging
+# destruiria o item original guardado como .replaced-item: com set -e, um mv
+# falho aborta o script, o trap roda e o original vai embora junto — perda de
+# dados, nao estado misto. Antes de limpar, devolve o que estiver guardado.
+# Definido ANTES do trap: sob set -u, um trap que le \$swapped antes da primeira
+# atribuicao aborta e deixa o staging orfao dentro de wp-content.
+swapped=''
+trap 'for undo in \$swapped; do
+  test -e \"\$staging/.replaced-\$undo\" || continue
+  rm -rf -- $(printf '%q' "$wp_content")/\"\$undo\" 2>/dev/null || true
+  mv -- \"\$staging/.replaced-\$undo\" $(printf '%q' "$wp_content")/\"\$undo\" 2>/dev/null || true
 done
-tar -xzf $(printf '%q' "$files_file") -C $(printf '%q' "$wp_content")
-gzip -dc $(printf '%q' "$dump_file") | $wp_cli --path=$(printf '%q' "$wp_root") db import -
+for replaced in \"\$staging\"/.replaced-*; do
+  test -e \"\$replaced\" || continue
+  original=\"\${replaced##*/.replaced-}\"
+  test -e $(printf '%q' "$wp_content")/\"\$original\" || mv -- \"\$replaced\" $(printf '%q' "$wp_content")/\"\$original\" || true
+done
+rm -rf -- \"\$staging\"' EXIT
+# Extrai antes de tocar em qualquer coisa: com set -e um archive corrompido
+# aborta aqui, com o destino intacto e o banco ainda nao mexido. Restaurar o
+# banco e falhar nos arquivos deixaria schema novo com arquivos antigos.
+tar -xzf $(printf '%q' "$files_file") -C \"\$staging\"
+gzip -dc $(printf '%q' "$dump_file") | { $(remote_db_import_stdin_command "$wp_cli" "$wp_root"); }
+# A troca e TODO-OU-NADA. Abortar no meio deixaria o destino com arquivos de duas
+# geracoes sobre um banco ja restaurado, e nenhum smoke detecta isso porque cada
+# arquivo isolado parece integro. Sob set -e qualquer falha cai no trap, que
+# devolve os originais guardados e desfaz as trocas ja feitas.
+swapped=''
+for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
+  if [ -e \"\$staging/\$item\" ]; then
+    if [ -e $(printf '%q' "$wp_content")/\"\$item\" ]; then
+      mv -- $(printf '%q' "$wp_content")/\"\$item\" \"\$staging/.replaced-\$item\"
+    fi
+    mv -- \"\$staging/\$item\" $(printf '%q' "$wp_content")/\"\$item\"
+    swapped=\"\$item \$swapped\"
+  fi
+done
+# Chegou ao fim: as trocas viraram definitivas e nao devem ser desfeitas.
+swapped=''
 $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
   else
     [ -n "$LOCAL_WP_CONTENT" ] && [ "$LOCAL_WP_CONTENT" != / ] || return 1
     [ -s "$dump_file" ] || return 1
     [ -s "$files_file" ] || return 1
-    gzip -t "$dump_file" || return 1
+    # Rollback só é rollback se o backup for utilizável. Validar o conteúdo aqui
+    # evita restaurar um SQL truncado sobre um destino já mutado.
+    assert_dump_content_complete "$dump_file" 'backup para rollback' || return 1
     tar -tzf "$files_file" >/dev/null || return 1
+    # Extrai PRIMEIRO para o staging, sem tocar em nada do destino. Se o archive
+    # estiver corrompido, o rollback aborta com o destino ainda intacto e o banco
+    # não é mexido — restaurar o banco e falhar nos arquivos deixaria o destino
+    # com schema novo e arquivos antigos, um estado que nenhum smoke detecta.
+    local rollback_staging rollback_status
+    rollback_staging="$(mktemp -d "${LOCAL_WP_CONTENT:?}/.uonix-rollback.XXXXXX")" || return $?
+    # Preserva o status ORIGINAL de cada passo em vez de achatar para 1: o
+    # relatório de falha do rollback informa esse código, e trocá-lo esconde a
+    # causa real de quem for investigar.
+    #
+    # O status é capturado com `|| rollback_status=$?`, não dentro de
+    # `if ! cmd; then rollback_status=$?`: nessa forma o `!` já normalizou $? para
+    # 0 e o rollback devolvia sucesso mesmo tendo falhado.
+    rollback_status=0
+    tar -xzf "$files_file" -C "$rollback_staging" || rollback_status=$?
+    if [ "$rollback_status" -ne 0 ]; then
+      rm -rf -- "$rollback_staging"
+      return "$rollback_status"
+    fi
+
+    # Com os arquivos já garantidos em staging, o banco vem antes da troca:
+    # restaurar arquivos sobre um schema divergente passa num smoke de arquivos e
+    # mente sobre o conteúdo.
+    gzip -dc "$dump_file" | local_db_import || rollback_status=$?
+    if [ "$rollback_status" -ne 0 ]; then
+      rm -rf -- "$rollback_staging"
+      return "$rollback_status"
+    fi
+
+    # A troca precisa ser TODO-OU-NADA. Trocar item por item e abortar no meio
+    # deixa o destino com arquivos de DUAS gerações (alguns do backup, outros da
+    # tentativa que falhou) sobre um banco já restaurado — estado que nenhum
+    # smoke detecta, porque cada arquivo isolado parece íntegro.
+    # Comprovado: falha no 3º item deixou uploads/plugins do backup e languages
+    # mutado, com status 42 e nenhum aviso sobre a mistura.
+    # Lista de itens já trocados, como string separada por espaço: arrays vazios
+    # sob `set -u` são um campo minado no bash 3.2 do macOS, e a lista aqui é de
+    # nomes fixos sem espaço.
+    local rollback_swapped=''
+    rollback_undo_swaps() {
+      local swapped
+      for swapped in $rollback_swapped; do
+        [ -e "$rollback_staging/.replaced-${swapped}" ] || continue
+        rm -rf -- "${LOCAL_WP_CONTENT:?}/${swapped}" 2>/dev/null || :
+        mv -- "$rollback_staging/.replaced-${swapped}" "${LOCAL_WP_CONTENT:?}/${swapped}" 2>/dev/null || :
+      done
+    }
+
     for item in uploads plugins languages compressx compressx-nextgen .htaccess; do
-      rm -rf -- "${LOCAL_WP_CONTENT:?}/${item}" || return $?
+      if [ -e "$rollback_staging/$item" ]; then
+        # Move o atual para dentro do staging em vez de apagá-lo: se o `mv`
+        # seguinte falhar, o item original ainda existe e é devolvido ao lugar.
+        if [ -e "${LOCAL_WP_CONTENT:?}/${item}" ]; then
+          mv -- "${LOCAL_WP_CONTENT:?}/${item}" "$rollback_staging/.replaced-${item}" || rollback_status=$?
+          if [ "$rollback_status" -ne 0 ]; then
+            rollback_undo_swaps
+            rm -rf -- "$rollback_staging"
+            return "$rollback_status"
+          fi
+        fi
+        mv -- "$rollback_staging/$item" "${LOCAL_WP_CONTENT:?}/${item}" || rollback_status=$?
+        if [ "$rollback_status" -ne 0 ]; then
+          # Devolve o original deste item e desfaz os anteriores, para não
+          # deixar o destino com duas gerações de arquivos.
+          if [ -e "$rollback_staging/.replaced-${item}" ]; then
+            mv -- "$rollback_staging/.replaced-${item}" "${LOCAL_WP_CONTENT:?}/${item}" || true
+          fi
+          rollback_undo_swaps
+          rm -rf -- "$rollback_staging"
+          return "$rollback_status"
+        fi
+        rollback_swapped="${item} ${rollback_swapped}"
+      fi
     done
-    tar -xzf "$files_file" -C "$LOCAL_WP_CONTENT" || return $?
-    gzip -dc "$dump_file" | local_db_import || return $?
+    rm -rf -- "$rollback_staging"
     local_wp cache flush || true
   fi
 }
@@ -1692,21 +2161,70 @@ validate_http_endpoint() {
   local url="$2"
   local status
   local curl_status
+  local attempt=1
+  local max_attempts=6
+  local delay=5
+  local last_reason=''
 
-  if status="$(curl -L -sS -o /dev/null -w '%{http_code}' --max-time 30 "$url")"; then
-    :
-  else
-    curl_status=$?
-    die "$label falhou no curl (exit $curl_status)"
-    return 1
-  fi
-  case "$status" in
-    2??|3??) return 0 ;;
-    *)
-      die "$label respondeu HTTP $status"
+  # O smoke roda logo após o cache flush e depois de rsync + dezenas de chamadas
+  # wp-cli pelo mesmo IP. O Mod_Security do HostGator responde 406/409 a esse
+  # padrão automatizado em wp-login.php mesmo com o site saudável — foi o que
+  # abortou um clone qa->dev já concluído e disparou rollback desnecessário.
+  #
+  # A janela precisa cobrir a DECADÊNCIA MEDIDA do bloqueio: reproduzindo o deny
+  # por rajada, ele persistiu em t+75s e só liberou perto de t+180s. Por isso são
+  # 6 tentativas com espera 5+10+20+40+60 = 135s, mais o tempo das requisições.
+  # Com 5 tentativas (75s de espera) o clone ainda morreria dentro do bloqueio.
+  #
+  # Indisponibilidade transitória é RETENTADA, não fatal. O que não é tolerado:
+  # erro que persiste em todas as tentativas, e veredito de conteúdo (como 404),
+  # que reprova de imediato porque tentar de novo não muda o diagnóstico.
+  #
+  # O User-Agent é próprio para que essas requisições sejam localizáveis no
+  # modsec_audit.log do cPanel e possam receber exceção. Ele NÃO evita o bloqueio
+  # (medido: UA de navegador também é barrado; o gatilho é frequência).
+  while :; do
+    if status="$(curl -L -sS -o /dev/null -w '%{http_code}' \
+      -A 'uonix-clone-smoke/1.0' --max-time 30 "$url")"; then
+      case "$status" in
+        2??|3??)
+          if [ "$attempt" -gt 1 ]; then
+            # Sucesso só após retry não pode ser silencioso: seria mascarar
+            # degradação real da borda.
+            log "AVISO: ${label} só respondeu de forma saudável na tentativa ${attempt} (último erro: ${last_reason})."
+          fi
+          return 0
+          ;;
+        404|410)
+          # Página ausente é falha de clone, não de disponibilidade.
+          die "$label respondeu HTTP $status"
+          return 1
+          ;;
+        408|409|425|429|403|406|500|502|503|504)
+          last_reason="HTTP $status"
+          ;;
+        *)
+          die "$label respondeu HTTP $status"
+          return 1
+          ;;
+      esac
+    else
+      curl_status=$?
+      last_reason="curl exit $curl_status"
+    fi
+
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      die "$label não respondeu de forma saudável em ${max_attempts} tentativas (${last_reason})"
       return 1
-      ;;
-  esac
+    fi
+    log "${label}: ${last_reason}; nova tentativa em ${delay}s (${attempt}/${max_attempts})."
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    if [ "$delay" -lt 60 ]; then
+      delay=$((delay * 2))
+      [ "$delay" -le 60 ] || delay=60
+    fi
+  done
 }
 
 validate_local_mailpit() {
@@ -1981,6 +2499,11 @@ execute_clone_mutation() {
   log "Clone solicitado: ${SOURCE} -> ${TARGET}"
   log "Substituir usuários: ${REPLACE_USERS}"
 
+  # Antes de qualquer escrita — inclusive antes do backup, que gravaria no host:
+  # se origem e destino compartilham banco, o clone se sobrescreve. O nome do
+  # ambiente não prova nada; a identidade real do banco, sim.
+  assert_distinct_databases "$SOURCE" "$TARGET" || return $?
+
   prepare_target_backup "$TARGET" "$TARGET_BACKUP_DIR" || return $?
   snapshot_users "$TARGET" "$TARGET_BACKUP_DIR" || return $?
   snapshot_options "$TARGET" "$TARGET_BACKUP_DIR" || return $?
@@ -2062,6 +2585,7 @@ clone_on_signal() {
 clone_cleanup() {
   local status="$1"
   local release_status=0
+  local cleanup_environment
 
   trap - EXIT
   if [ "$CLONE_LOCK_HELD" = 1 ]; then
@@ -2073,6 +2597,16 @@ clone_cleanup() {
     fi
   fi
   rm -rf "${CLONE_TMP_DIR:-}"
+
+  # Fecha os masters SSH desta execução. Na Locaweb (senha) um socket vivo
+  # permitiria a qualquer processo do mesmo usuário reusar a sessão autenticada
+  # durante os 120s de ControlPersist. É limpeza: nunca altera o status de saída.
+  for cleanup_environment in "$SOURCE" "$TARGET"; do
+    [ -n "$cleanup_environment" ] || continue
+    is_remote_env "$cleanup_environment" || continue
+    uonix_transport_close_master "$cleanup_environment" || true
+  done
+
   if [ "$status" -eq 0 ] && [ "$release_status" -ne 0 ]; then
     exit "$release_status"
   fi

@@ -33,3 +33,23 @@ local/wp-content/
 # Versionamos apenas o template authorized_keys.example.
 local/ssh/authorized_keys
 .compose_check.txt
+
+# Credenciais locais de migração de e-mail
+/migracao_emails.txt
+# Passfiles gerados por scripts/email-migration/prepare_passfiles.py (modo 600).
+# O script é versionado; os segredos que ele materializa nunca são.
+scripts/email-migration/passfiles/
+*.pass
+
+# Artefatos Python
+__pycache__/
+*.pyc
+
+# Planos de sessão do agente (contexto local de trabalho)
+.hermes/plans/
+
+# Worktrees git criados para trabalho isolado (git worktree add .worktrees/...).
+# São checkouts locais, nunca conteúdo do repositório: versioná-los aninharia
+# uma cópia da árvore dentro dela mesma. Remover com `git worktree remove`,
+# não com `rm -rf` — o registro em .git/worktrees/ precisa sair junto.
+.worktrees/

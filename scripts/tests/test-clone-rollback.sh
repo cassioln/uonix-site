@@ -22,6 +22,11 @@ export HOSTGATOR_DEV_ROOT='/synthetic/dev'
 export UONIX_CLONE_LIBRARY_ONLY=1
 # shellcheck source=../clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 
 # FR1.A — artefatos não vazios porém corruptos devem falhar antes da primeira
 # mutação. Os casos focados podem ser executados isoladamente por
@@ -38,6 +43,11 @@ fr1_test_corrupt_backup_before_mutation() (
 
   # shellcheck source=../clone-environment.sh
   source "$CLONE_SCRIPT"
+  # Guarda de bancos distintos consulta o banco real; no fixture retornaria
+  # vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+  # test-clone-database-transport.sh.
+  # shellcheck disable=SC2329
+  assert_distinct_databases() { :; }
   mkdir -p "$case_root/wp-content/uploads" "$case_root/runtime"
   printf 'fixture\n' > "$case_root/wp-content/uploads/file.txt"
   : > "$steps_log"
@@ -62,7 +72,7 @@ fr1_test_corrupt_backup_before_mutation() (
   log() { :; }
   backup_dir() { printf '%s\n' "$FR1_BACKUP_PATH"; }
   resolve_backup_root() { printf '%s\n' "$FR1_BACKUP_ROOT"; }
-  local_db_dump() { printf 'SQL fixture\n'; }
+  local_db_dump() { printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n'; }
   gzip() {
     if [ "${1:-}" = '-c' ] && [ "$FR1_CORRUPT_KIND" = db ]; then
       cat >/dev/null
@@ -101,9 +111,34 @@ fr1_test_corrupt_backup_before_mutation() (
     FR1_BACKUP_PATH="$backup_path"
     wp_path() { printf '%s\n' "$case_root/wp"; }
     wp_cli_shell() { printf 'fr1_mock_wp\n'; }
-    fr1_mock_wp() { printf 'SQL fixture\n'; }
+    # O backup remoto passou a preferir mysqldump direto (wp db export shella out
+    # e falha na Locaweb), então o mock precisa responder a `config get` além de
+    # emitir SQL. Sem isso o dump sai vazio e o teste reprova por fixture, não
+    # por comportamento.
+    fr1_mock_wp() {
+      local argument
+      for argument in "$@"; do
+        case "$argument" in
+          DB_NAME) printf 'fixture_db\n'; return 0 ;;
+          DB_USER) printf 'fixture_user\n'; return 0 ;;
+          DB_HOST) printf 'fixture_host\n'; return 0 ;;
+          DB_PASSWORD) printf 'fixture_password\n'; return 0 ;;
+        esac
+      done
+      printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n'
+    }
+    # mysqldump sintético: sem ele o snippet cairia no fallback e o caminho real
+    # nunca seria exercitado.
+    # shellcheck disable=SC2329
+    mysqldump() {
+      case " $* " in
+        *' --help '*) printf -- '--single-transaction\n' ;;
+        *) printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n' ;;
+      esac
+    }
     is_remote_env() { return 0; }
     remote_run() ( find() { return 0; }; eval "$2" )
+    remote_run_idempotent() ( find() { return 0; }; eval "$2" )
     mkdir -p "$case_root/wp/wp-content/uploads"
     printf 'fixture\n' > "$case_root/wp/wp-content/uploads/file.txt"
   fi
@@ -135,12 +170,17 @@ fr1_test_corrupt_export() (
 
   # shellcheck source=../clone-environment.sh
   source "$CLONE_SCRIPT"
+  # Guarda de bancos distintos consulta o banco real; no fixture retornaria
+  # vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+  # test-clone-database-transport.sh.
+  # shellcheck disable=SC2329
+  assert_distinct_databases() { :; }
   mkdir -p "$case_root"
   log() { :; }
 
   if [ "$location" = local ]; then
     is_remote_env() { return 1; }
-    local_db_dump() { printf 'SQL fixture\n'; }
+    local_db_dump() { printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n'; }
     gzip() {
       if [ "${1:-}" = '-c' ]; then
         cat >/dev/null
@@ -222,7 +262,7 @@ ROLLBACK_RUNNING='0'
 CLONE_FAILURE_STATUS='0'
 
 log() { :; }
-local_db_dump() { printf 'SQL fixture\n'; }
+local_db_dump() { printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n'; }
 chmod() {
   if [ "${1:-}" = 600 ]; then
     return 42
@@ -265,12 +305,17 @@ unset -f chmod
 # archive de arquivos ausente deve preservar os dados e não tocar o banco.
 # shellcheck source=../clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 missing_archive_root="$TMP_DIR/missing-archive"
 missing_archive_backup="$missing_archive_root/backup"
 missing_archive_db_log="$missing_archive_root/db.log"
 mkdir -p "$missing_archive_backup" "$missing_archive_root/wp-content/uploads"
 printf 'sentinel\n' > "$missing_archive_root/wp-content/uploads/sentinel.txt"
-printf 'database fixture\n' | gzip -c > "$missing_archive_backup/db-local-${STAMP}.sql.gz"
+printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n' | gzip -c > "$missing_archive_backup/db-local-${STAMP}.sql.gz"
 : > "$missing_archive_db_log"
 
 LOCAL_WP_CONTENT="$missing_archive_root/wp-content"
@@ -295,6 +340,11 @@ fi
 # com a causa primária e aciona exatamente um rollback, sem passos posteriores.
 # shellcheck source=../clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 post_import_root="$TMP_DIR/post-import"
 post_import_log="$post_import_root/steps.log"
 mkdir -p "$post_import_root/runtime"
@@ -363,6 +413,11 @@ if SIGNAL_LOG="$signal_log" SIGNAL_BACKUP="$signal_backup" CLONE_SCRIPT="$CLONE_
     set -u
     export UONIX_CLONE_LIBRARY_ONLY=1
     source "$CLONE_SCRIPT"
+    # Guarda de bancos distintos consulta o banco real; no fixture retornaria
+    # vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+    # test-clone-database-transport.sh.
+    # shellcheck disable=SC2329
+    assert_distinct_databases() { :; }
     TARGET="dev"
     TARGET_BACKUP_DIR="$SIGNAL_BACKUP"
     MUTATION_STARTED="1"
@@ -390,6 +445,11 @@ fi
 # reporta o status do rollback, preserva o backup e não avança para o banco.
 # shellcheck source=../clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 rollback_failure_root="$TMP_DIR/rollback-failure"
 rollback_failure_backup="$rollback_failure_root/backup"
 rollback_failure_archive_source="$rollback_failure_root/archive-source"
@@ -403,7 +463,7 @@ mkdir -p \
   "$rollback_failure_root/runtime"
 printf 'backup payload\n' > "$rollback_failure_archive_source/uploads/backup.txt"
 printf 'current target\n' > "$rollback_failure_wp_content/uploads/current.txt"
-printf 'database backup\n' | gzip -c > "$rollback_failure_backup/db-local-${STAMP}.sql.gz"
+printf 'CREATE TABLE wp_options (option_id bigint);\n-- Dump completed\n' | gzip -c > "$rollback_failure_backup/db-local-${STAMP}.sql.gz"
 command tar -czf "$rollback_failure_backup/files-local-${STAMP}.tar.gz" \
   -C "$rollback_failure_archive_source" uploads
 : > "$rollback_failure_log"

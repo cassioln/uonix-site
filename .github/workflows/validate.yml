@@ -42,8 +42,20 @@ jobs:
       - name: Test indexing policy
         run: php scripts/tests/test-indexing-policy.php
 
+      - name: Test REST user enumeration
+        run: php scripts/tests/test-rest-user-enumeration.php
+
       - name: Test analytics policy
         run: php scripts/tests/test-analytics-policy.php
+
+      - name: Test hook dispatch arguments
+        run: php scripts/tests/test-hook-dispatch-arguments.php
+
+      - name: Test login Turnstile contract
+        run: php scripts/tests/test-login-turnstile.php
+
+      - name: Test login visual scope
+        run: php scripts/tests/test-login-visual-scope.php
 
       - name: Test blog archive without WooCommerce
         run: php scripts/tests/test-blog-archive-optional-woocommerce.php
@@ -105,8 +117,65 @@ jobs:
       - name: Test SSH transport
         run: bash scripts/tests/test-ssh-transport.sh
 
+      - name: Test database backup contract
+        run: bash scripts/tests/test-database-backup.sh
+
+      - name: Test SSH connection reuse
+        run: bash scripts/tests/test-ssh-connection-reuse.sh
+
+      - name: Test Turnstile API unavailable
+        run: bash scripts/tests/test-turnstile-api-unavailable.sh
+
       - name: Test clone guards
         run: bash scripts/tests/test-clone-guards.sh
+
+      - name: Test clone database transport
+        run: bash scripts/tests/test-clone-database-transport.sh
+
+      - name: Test clone distinct databases
+        run: bash scripts/tests/test-clone-distinct-databases.sh
+
+      - name: Test clone dump content
+        run: bash scripts/tests/test-clone-dump-content.sh
+
+      - name: Test clone URL replacement
+        run: bash scripts/tests/test-clone-url-replacement.sh
+
+      - name: Test clone smoke resilience
+        run: bash scripts/tests/test-clone-smoke-resilience.sh
+
+      - name: Test cleanup vendor plugins workflow
+        run: bash scripts/tests/test-cleanup-vendor-plugins-workflow.sh
+
+      - name: Test CI covers every test
+        run: |
+          python3 -c 'import yaml' \
+            || { echo 'PyYAML ausente: instalando para auditar a cobertura de testes'; python3 -m pip install --quiet pyyaml; }
+          bash scripts/tests/test-ci-covers-all-tests.sh
+
+      - name: Test reusable workflow secret propagation
+        run: bash scripts/tests/test-reusable-workflow-secrets.sh
+
+      - name: Test the secret propagation guard itself
+        run: bash scripts/tests/test-reusable-workflow-secrets-guard.sh
+
+      - name: Test mu-plugin loader resilience
+        run: bash scripts/tests/test-mu-loader-resilience.sh
+
+      - name: Test deploy mu-plugin publish order
+        run: bash scripts/tests/test-deploy-mu-plugin-order.sh
+
+      - name: Test clone path-bound option protection
+        run: bash scripts/tests/test-clone-path-bound-options.sh
+
+      - name: Test clone panel contract
+        run: bash scripts/tests/test-clone-panel-contract.sh
+
+      - name: Test clone rollback
+        run: bash scripts/tests/test-clone-rollback.sh
+
+      - name: Test deploy remote blocks
+        run: bash scripts/tests/test-deploy-remote-blocks.sh
 
       - name: Test clone workflow contract
         run: bash scripts/tests/test-clone-workflow.sh
@@ -151,6 +220,12 @@ jobs:
 
       - name: Validate PageSpeed script
         run: node --check scripts/pagespeed-check.mjs
+
+      - name: Test PageSpeed check script
+        run: node --test scripts/tests/test-pagespeed-check.mjs
+
+      - name: Test email migration passfile tooling
+        run: python3 -m unittest discover --start-directory scripts/email-migration --pattern 'test_*.py' --verbose
 
       - name: Parse local Compose configuration
         run: podman-compose -p uonix-local -f local/compose.yml config

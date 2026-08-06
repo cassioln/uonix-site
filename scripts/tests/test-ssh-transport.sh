@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LIBRARY="${ROOT_DIR}/scripts/lib/ssh-transport.sh"
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
+CONTROL_DIR="/tmp/uonix-ssh-transport-test-$$"
+trap 'rm -rf "$TMP_DIR" "$CONTROL_DIR"' EXIT HUP INT TERM
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -100,6 +101,7 @@ export LOCAWEB_SSH_KNOWN_HOSTS_FILE="$TMP_DIR/known-hosts"
 export UONIX_TRANSPORT_RETRY_DELAY=0
 export UONIX_TRANSPORT_MAX_ATTEMPTS=5
 export UONIX_LOCAL_APP_CONTAINER='uonix-local-app'
+export UONIX_SSH_CONTROL_DIR="$CONTROL_DIR"
 
 export LOCAWEB_SSH_HOST='ftp.site.uonix.com.br'
 export LOCAWEB_SSH_PORT='22'
@@ -263,7 +265,29 @@ qa_log="$(cat "$MOCK_TRANSPORT_LOG")"
 printf '%s' "$qa_log" | grep -q 'StrictHostKeyChecking=yes' || fail 'QA sem host key estrita'
 printf '%s' "$qa_log" | grep -q "UserKnownHostsFile=$TMP_DIR/known-hosts" || fail 'QA sem known_hosts fixado'
 printf '%s' "$qa_log" | grep -q "<$TMP_DIR/key>" || fail 'QA sem chave dedicada'
+printf '%s' "$qa_log" | grep -q 'ControlMaster=auto' || fail 'QA abre conexões independentes'
+printf '%s' "$qa_log" | grep -q 'ControlPersist=120' || fail 'QA não mantém o socket entre etapas'
+printf '%s' "$qa_log" | grep -Fq "ControlPath=$CONTROL_DIR/uonix-%C" || fail 'QA sem ControlPath curto e hashado'
 printf '%s' "$qa_log" | grep -q 'accept-new' && fail 'QA ainda aceita host key nova'
+printf '%s' "$qa_log" | grep -q 'ServerAliveInterval=15' \
+  || fail 'QA sem keepalive: master pendurado travaria até timeout do kernel'
+printf '%s' "$qa_log" | grep -q 'ConnectTimeout=30' || fail 'QA sem ConnectTimeout'
+
+# O master multiplexado precisa poder ser encerrado. Na Locaweb a sessão é
+# autenticada por SENHA: um socket vivo deixaria qualquer processo do mesmo
+# usuário reusar a sessão sem credencial durante o ControlPersist.
+type uonix_transport_close_master >/dev/null 2>&1 \
+  || fail 'não há como encerrar o master multiplexado'
+: > "$MOCK_TRANSPORT_LOG"
+uonix_transport_close_master prod || fail 'encerrar master retornou falha'
+close_log="$(cat "$MOCK_TRANSPORT_LOG")"
+printf '%s' "$close_log" | grep -q '<-O> <exit>' \
+  || fail 'encerramento do master não usou -O exit'
+
+# Limpeza nunca pode derrubar o chamador: um master já encerrado é sucesso.
+: > "$MOCK_TRANSPORT_LOG"
+MOCK_SSH_MODE=fail uonix_transport_close_master prod \
+  || fail 'encerramento do master propagou falha de limpeza'
 
 : > "$MOCK_TRANSPORT_LOG"
 : > "$MOCK_TRANSPORT_COUNT"
@@ -271,9 +295,86 @@ MOCK_SSH_MODE=success uonix_exec prod -- printf production >/dev/null
 production_log="$(cat "$MOCK_TRANSPORT_LOG")"
 printf '%s' "$production_log" | grep -q 'sshpass <-e>' || fail 'produção não usou sshpass -e'
 printf '%s' "$production_log" | grep -q 'StrictHostKeyChecking=yes' || fail 'produção sem host key estrita'
+printf '%s' "$production_log" | grep -q 'ControlMaster=auto' || fail 'produção abre conexões independentes'
+printf '%s' "$production_log" | grep -q 'ControlPersist=120' || fail 'produção não mantém o socket entre etapas'
+printf '%s' "$production_log" | grep -Fq "ControlPath=$CONTROL_DIR/uonix-%C" || fail 'produção sem ControlPath curto e hashado'
 if printf '%s' "$production_log" | grep -q 'correct-password-not-for-logs'; then
   fail 'senha apareceu na linha de comando/log'
 fi
+
+short_control_dir="$UONIX_SSH_CONTROL_DIR"
+UONIX_SSH_CONTROL_DIR="$TMP_DIR/$(printf 'x%.0s' {1..90})"
+export UONIX_SSH_CONTROL_DIR
+if uonix_transport_build_ssh_command qa >/dev/null 2>&1; then
+  fail 'ControlPath longo foi aceito e falharia silenciosamente no OpenSSH real'
+fi
+UONIX_SSH_CONTROL_DIR="$short_control_dir"
+export UONIX_SSH_CONTROL_DIR
+
+# O diretório de sockets fica em /tmp, previsível e gravável por qualquer
+# usuário. Falhar ali aborta TODO o transporte, inclusive o rollback de um clone
+# já em mutação, então a causa precisa aparecer — não o erro cru do mkdir.
+#
+# Sob root o cenário não existe: root escreve em diretório 0555, então `mkdir`
+# tem sucesso e não há falha para diagnosticar. Rodar como root é o caso do CI em
+# container; ali este caso é pulado em vez de reprovar por uma condição
+# impossível de reproduzir.
+if [ "$(id -u)" -eq 0 ]; then
+  printf 'SKIP: diretório de sockets não-criável não se aplica a root.\n'
+else
+  hostile_parent="$CONTROL_DIR-hostile"
+  mkdir -p "$hostile_parent"
+  chmod 555 "$hostile_parent"
+  UONIX_SSH_CONTROL_DIR="$hostile_parent/sub"
+  export UONIX_SSH_CONTROL_DIR
+  control_dir_error="$(uonix_transport_build_ssh_command qa 2>&1 >/dev/null)" && \
+    fail 'diretório de sockets não-criável foi aceito'
+  printf '%s' "$control_dir_error" | grep -q 'diretório de sockets SSH' \
+    || fail 'falha no diretório de sockets não explicou a causa'
+  chmod 755 "$hostile_parent"
+  rm -rf "$hostile_parent"
+fi
+
+symlinked_control="$CONTROL_DIR-symlink"
+symlink_victim="$CONTROL_DIR-symlink-target"
+rm -rf "$symlinked_control" "$symlink_victim"
+# O alvo é nosso e tem o modo correto, então só a checagem de symlink pode
+# reprovar este caso: sem ela, o transporte aceitaria um socket redirecionado.
+mkdir -m 700 "$symlink_victim"
+ln -s "$symlink_victim" "$symlinked_control"
+UONIX_SSH_CONTROL_DIR="$symlinked_control"
+export UONIX_SSH_CONTROL_DIR
+symlink_error="$(uonix_transport_build_ssh_command qa 2>&1 >/dev/null)" && \
+  fail 'diretório de sockets apontando para symlink foi aceito'
+printf '%s' "$symlink_error" | grep -q 'symlink' \
+  || fail 'symlink no diretório de sockets não foi identificado'
+rm -f "$symlinked_control"
+rm -rf "$symlink_victim"
+
+# Um diretório existente, real (não symlink), gravável e de OUTRO dono isola a
+# checagem de propriedade. O caminho varia por plataforma: /private/tmp no
+# macOS, /var/tmp no Linux. Se nenhum servir, a checagem é pulada em vez de
+# passar por engano.
+foreign_control=''
+for candidate in /private/tmp /var/tmp /dev/shm; do
+  if [ -d "$candidate" ] && [ ! -L "$candidate" ] && [ ! -O "$candidate" ] && [ -w "$candidate" ]; then
+    foreign_control="$candidate"
+    break
+  fi
+done
+if [ -n "$foreign_control" ]; then
+  UONIX_SSH_CONTROL_DIR="$foreign_control"
+  export UONIX_SSH_CONTROL_DIR
+  owner_error="$(uonix_transport_build_ssh_command qa 2>&1 >/dev/null)" && \
+    fail 'diretório de sockets de outro usuário foi aceito'
+  printf '%s' "$owner_error" | grep -q 'outro usuário' \
+    || fail 'dono divergente do diretório de sockets não foi identificado'
+else
+  printf 'AVISO: nenhum diretório de outro dono disponível; checagem de posse não exercitada.\n' >&2
+fi
+
+UONIX_SSH_CONTROL_DIR="$short_control_dir"
+export UONIX_SSH_CONTROL_DIR
 
 : > "$MOCK_TRANSPORT_LOG"
 uonix_exec local -- wp option get home >/dev/null

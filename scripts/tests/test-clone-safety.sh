@@ -29,6 +29,11 @@ export HOSTGATOR_DEV_ROOT='/home2/uonix/dev_uonix'
 export UONIX_CLONE_LIBRARY_ONLY=1
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 
 # FR1.B — o snapshot de usuários é obrigatório, privado e autenticado antes de
 # qualquer mutação; o restore valida novamente o mesmo manifesto canônico.
@@ -104,6 +109,11 @@ fr1_test_users_snapshot() (
 
   # shellcheck source=scripts/clone-environment.sh
   source "$CLONE_SCRIPT"
+  # Guarda de bancos distintos consulta o banco real; no fixture retornaria
+  # vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+  # test-clone-database-transport.sh.
+  # shellcheck disable=SC2329
+  assert_distinct_databases() { :; }
   rm -rf "$directory"
   PRESERVE_DESTINATION_USERS='1'
   log() { :; }
@@ -124,6 +134,22 @@ fr1_test_users_snapshot() (
     fr1_users_wp() {
       local argument
       local output_file=''
+      # O snapshot passou a preferir mysqldump direto (wp db export --tables
+      # shella out e falha na Locaweb), então o mock precisa responder a
+      # `config get`. Sem isso ele devolvia 92 e o dump nunca era gerado.
+      case " $* " in
+        *' config get '*)
+          for argument in "$@"; do
+            case "$argument" in
+              DB_NAME) printf 'synthetic_db\n'; return 0 ;;
+              DB_USER) printf 'synthetic_user\n'; return 0 ;;
+              DB_HOST) printf 'synthetic_host\n'; return 0 ;;
+              DB_PASSWORD) printf 'synthetic_password\n'; return 0 ;;
+            esac
+          done
+          return 93
+          ;;
+      esac
       case " $* " in
         *' db prefix '*) printf 'wpis_\n'; return 0 ;;
         *' db export '*)
@@ -137,6 +163,16 @@ fr1_test_users_snapshot() (
           ;;
       esac
       return 92
+    }
+    # mysqldump sintético: o snapshot o prefere ao wp-cli, então sem ele o teste
+    # exercitaria apenas o fallback e nunca o caminho usado em produção.
+    # shellcheck disable=SC2329
+    mysqldump() {
+      case " $* " in
+        *' --help '*) printf -- '--single-transaction\n'; return 0 ;;
+      esac
+      [ "$FR1_USERS_PRODUCER" = empty ] || printf 'INSERT INTO users VALUES (1);\n'
+      return 0
     }
     remote_run() (
       # The sourced script's xargs call does not invoke this eval-scoped mock.
@@ -152,7 +188,8 @@ fr1_test_users_snapshot() (
         fi
       }
       # Evaluated remote shell snippets invoke this test-local mock indirectly.
-      # shellcheck disable=SC2329
+      # The evaluated snippets call it through a pipe, with no positional args.
+      # shellcheck disable=SC2120,SC2329
       sha256sum() { shasum -a 256 "$@"; }
       eval "$2"
     )
@@ -193,6 +230,11 @@ fr1_test_users_restore_variant() (
 
   # shellcheck source=scripts/clone-environment.sh
   source "$CLONE_SCRIPT"
+  # Guarda de bancos distintos consulta o banco real; no fixture retornaria
+  # vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+  # test-clone-database-transport.sh.
+  # shellcheck disable=SC2329
+  assert_distinct_databases() { :; }
   fr1_prepare_users_variant "$directory" "$variant"
   : > "$import_log"
   PRESERVE_DESTINATION_USERS='1'
@@ -206,10 +248,34 @@ fr1_test_users_restore_variant() (
     # Invoked indirectly through the command returned by wp_cli_shell.
     # shellcheck disable=SC2329
     fr1_users_restore_wp() {
+      # O restore passou a resolver o cliente `mysql` (wp db import shella out e
+      # falha na Locaweb), então o mock precisa responder a `config get`.
+      local argument
+      case " $* " in
+        *' config get '*)
+          for argument in "$@"; do
+            case "$argument" in
+              DB_NAME) printf 'synthetic_db\n'; return 0 ;;
+              DB_USER) printf 'synthetic_user\n'; return 0 ;;
+              DB_HOST) printf 'synthetic_host\n'; return 0 ;;
+              DB_PASSWORD) printf 'synthetic_password\n'; return 0 ;;
+            esac
+          done
+          return 93
+          ;;
+      esac
       case " $* " in
         *' db import '*) printf 'import\n' >> "$import_log"; return 0 ;;
       esac
       return 94
+    }
+    # Cliente `mysql` sintético: sem ele o restore cairia no fallback e o caminho
+    # real nunca seria exercitado.
+    # shellcheck disable=SC2329
+    mysql() {
+      printf 'import\n' >> "$import_log"
+      cat >/dev/null
+      return 0
     }
     remote_run() (
       # Evaluated remote shell snippets invoke this test-local mock indirectly.
@@ -223,7 +289,8 @@ fr1_test_users_restore_variant() (
         fi
       }
       # Evaluated remote shell snippets invoke this test-local mock indirectly.
-      # shellcheck disable=SC2329
+      # The evaluated snippets call it through a pipe, with no positional args.
+      # shellcheck disable=SC2120,SC2329
       sha256sum() { shasum -a 256 "$@"; }
       eval "$2"
     )
@@ -355,6 +422,11 @@ set -e
 # implementações reais do script, sem executar podman real.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 podman_mock_dir="$TMP_DIR/podman-mock-bin"
 podman_capture_dir="$TMP_DIR/podman-captures"
 mkdir -p "$podman_mock_dir" "$podman_capture_dir"
@@ -528,6 +600,11 @@ unset -f podman
 # no snapshot do destino. Nenhum Podman ou host remoto é acessado nesta seção.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 restore_options_root="$TMP_DIR/restore-options"
 restore_nonempty_dir="$restore_options_root/nonempty"
 restore_empty_dir="$restore_options_root/empty"
@@ -646,6 +723,22 @@ while [ "$#" -gt 0 ]; do
     *) break ;;
   esac
 done
+
+# O import remoto passou a resolver o cliente `mysql` em vez de chamar
+# `wp db import`, que shella out e falha na Locaweb. Por isso o mock precisa
+# responder também a `config get`, usado para obter as credenciais sem imprimir
+# a senha em argv.
+if [ "${1:-}" = config ] && [ "${2:-}" = get ]; then
+  case "${3:-}" in
+    DB_NAME) printf 'synthetic_db\n' ;;
+    DB_USER) printf 'synthetic_user\n' ;;
+    DB_HOST) printf 'synthetic_host\n' ;;
+    DB_PASSWORD) printf 'synthetic_password\n' ;;
+    *) exit 93 ;;
+  esac
+  exit 0
+fi
+
 [ "${1:-}" = db ] || exit 90
 
 case "${2:-}" in
@@ -668,6 +761,22 @@ case "${2:-}" in
 esac
 MOCK
 chmod 700 "$RESTORE_REMOTE_WP"
+
+# Cliente `mysql` sintético no PATH: o import remoto o prefere ao wp-cli, então
+# sem ele o teste exercitaria apenas o fallback e nunca o caminho real.
+RESTORE_FAKE_BIN="$restore_options_root/bin"
+mkdir -p "$RESTORE_FAKE_BIN"
+cat > "$RESTORE_FAKE_BIN/mysql" <<'MOCK'
+#!/usr/bin/env bash
+set -u
+: "${RESTORE_REMOTE_DB_LOG:?}"
+printf 'import\n' >> "$RESTORE_REMOTE_DB_LOG"
+cat >/dev/null
+exit "${RESTORE_IMPORT_STATUS:-0}"
+MOCK
+chmod 700 "$RESTORE_FAKE_BIN/mysql"
+PATH="$RESTORE_FAKE_BIN:$PATH"
+export PATH
 
 record_restore_failure() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -980,12 +1089,17 @@ case "$RESTORE_REMOTE_SCRIPT" in
   *'db query "$delete_sql" >/dev/null || exit $?'*) ;;
   *) record_restore_failure 'restore_options remoto não propaga explicitamente falha do DELETE' ;;
 esac
-# The assertion matches literal remote-shell variables, not local expansions.
+# A assertiva casa variáveis do shell remoto, não expansões locais.
+# O import agora resolve o cliente `mysql` em vez de chamar `wp db import`, que
+# shella out e falha na Locaweb; o que importa é que a falha continue propagada
+# explicitamente com `|| exit $?`.
 # shellcheck disable=SC2016
 case "$RESTORE_REMOTE_SCRIPT" in
-  *'db import "$options_sql" >/dev/null || exit $?'*) ;;
+  *'"$options_sql"'*' || exit $?'*) ;;
   *) record_restore_failure 'restore_options remoto não propaga explicitamente falha do import' ;;
 esac
+printf '%s' "$RESTORE_REMOTE_SCRIPT" | grep -q 'mysql_bin' \
+  || record_restore_failure 'restore_options remoto não resolve o cliente mysql (wp db import falha na Locaweb)'
 
 # Boundary real pós-mutation: corrupção após a conclusão do snapshot deve
 # preservar o status da validação, fazer rollback uma vez e não alcançar nenhum
@@ -1068,6 +1182,11 @@ fi
 # ou qualquer sinal de conclusão bem-sucedida.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 snapshot_root="$TMP_DIR/snapshot-options"
 snapshot_boundary_root="$snapshot_root/boundary"
 snapshot_call_log="$snapshot_root/calls.log"
@@ -1363,6 +1482,11 @@ fi
 # tanto o preflight seguinte quanto qualquer execução/mutação.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 preflight_call_log="$TMP_DIR/preflight-calls.log"
 : > "$preflight_call_log"
 
@@ -1469,6 +1593,11 @@ fi
 # o document root remoto precisa falhar antes de montar WP-CLI ou abrir SSH.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 preflight_inner_log="$TMP_DIR/preflight-inner.log"
 : > "$preflight_inner_log"
 
@@ -1545,7 +1674,8 @@ for remote_preflight_marker in \
   'command -v tar >/dev/null || exit $?' \
   'command -v sha256sum >/dev/null || exit $?' \
   'command -v cmp >/dev/null || exit $?' \
-  '(command -v mysql >/dev/null || command -v mariadb >/dev/null) || exit $?'; do
+  '(command -v mysql >/dev/null || command -v mariadb >/dev/null) || exit $?' \
+  '(command -v mysqldump >/dev/null || command -v mariadb-dump >/dev/null) || exit $?'; do
   case "$PREFLIGHT_REMOTE_SCRIPT" in
     *"$remote_preflight_marker"*) ;;
     *) fail "preflight remoto não propaga dependência obrigatória: ${remote_preflight_marker}" ;;
@@ -1671,6 +1801,11 @@ fi
 # campo WP-CLI seguinte.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 wp_resolver_log="$TMP_DIR/wp-resolver.log"
 : > "$wp_resolver_log"
 
@@ -1769,6 +1904,11 @@ fi
 # da mutação, precisa atravessar o boundary e acionar exatamente um rollback.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 central_resolver_log="$TMP_DIR/central-resolver.log"
 central_rollback_log="$TMP_DIR/central-resolver-rollback.log"
 : > "$central_resolver_log"
@@ -1814,6 +1954,11 @@ fi
 # deve interromper antes de iniciar qualquer cliente Podman/DB.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 option_identifier_log="$TMP_DIR/option-identifier.log"
 option_identifier_podman_log="$TMP_DIR/option-identifier-podman.log"
 : > "$option_identifier_log"
@@ -1849,6 +1994,11 @@ unset -f podman
 # tabela não pode ser convertida em sucesso por uma consulta DB posterior.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 gosmtp_quote_log="$TMP_DIR/gosmtp-quote.log"
 : > "$gosmtp_quote_log"
 log() { :; }
@@ -1886,6 +2036,11 @@ fi
 # formatter pode fabricar /wp-content e nenhum transporte pode ser aberto.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r9_resolver_log="$TMP_DIR/c3r9-resolver-boundaries.log"
 c3r9_bridge_root="$TMP_DIR/c3r9-bridge"
 c3r9_author_map="$TMP_DIR/c3r9-source-authors.tsv"
@@ -2026,6 +2181,11 @@ done
 # substituído pelo status de um resolver ou wp_exec posterior.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r9_identity_log="$TMP_DIR/c3r9-identity-resolvers.log"
 log() { :; }
 env_url() {
@@ -2094,6 +2254,11 @@ assert_c3r9_identity_failure validate_target_after_clone env-type 69 'env-url:en
 # observável sem substituir o exit primário.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r9_boundary_log="$TMP_DIR/c3r9-post-mutation-boundary.log"
 c3r9_boundary_error="$TMP_DIR/c3r9-post-mutation-boundary.err"
 : > "$c3r9_boundary_log"
@@ -2133,7 +2298,12 @@ wp_path() {
   return 88
 }
 wp_cli_shell() { printf 'rollback-wp-cli\n' >> "$c3r9_boundary_log"; printf 'wp\n'; }
-remote_run() { printf 'rollback-transport\n' >> "$c3r9_boundary_log"; }
+# Invocado indiretamente pelo rollback do script sourceado, se ele chegar lá — o
+# ponto do teste é justamente que NÃO deve chegar. O rollback usa o caminho com
+# retry (remote_run_idempotent) porque restaurar de um backup validado é
+# idempotente.
+# shellcheck disable=SC2329
+remote_run_idempotent() { printf 'rollback-transport\n' >> "$c3r9_boundary_log"; }
 
 SOURCE=qa
 TARGET=dev
@@ -2170,6 +2340,11 @@ esac
 # atravessar todos os callers sem fabricar /<STAMP> nem abrir transporte.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r10_backup_log="$TMP_DIR/c3r10-backup-root.log"
 c3r10_backup_failures=0
 : > "$c3r10_backup_log"
@@ -2373,6 +2548,11 @@ esac
 # não existe, usando apenas configuração sintética e sem abrir transporte.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r10_saved_locaweb_root="${LOCAWEB_ACCOUNT_ROOT-}"
 unset LOCAWEB_ACCOUNT_ROOT
 if c3r10_prod_backup_output="$(backup_dir prod 2>/dev/null)"; then
@@ -2393,6 +2573,11 @@ export LOCAWEB_ACCOUNT_ROOT
 # próxima etapa, mesmo quando bridge_runtime_directory está em um OR-list.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r10_bridge_log="$TMP_DIR/c3r10-bridge.log"
 c3r10_bridge_failures=0
 c3r10_bridge_root="$TMP_DIR/c3r10-bridge-root"
@@ -2475,6 +2660,11 @@ done
 # cada boundary também precisa preservar seu próprio status.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r10_target_verify_log="$TMP_DIR/c3r10-target-verify.log"
 c3r10_target_manifest="$TMP_DIR/c3r10-target-manifest.sha256"
 printf 'synthetic manifest\n' > "$c3r10_target_manifest"
@@ -2525,6 +2715,11 @@ done
 # sync_runtime_files para imediatamente no primeiro diretório com falha.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r10_sync_log="$TMP_DIR/c3r10-sync.log"
 : > "$c3r10_sync_log"
 log() { :; }
@@ -2549,6 +2744,11 @@ fi
 # um rollback e não publica nenhum indicador de sucesso.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r10_bridge_boundary_log="$TMP_DIR/c3r10-bridge-boundary.log"
 : > "$c3r10_bridge_boundary_log"
 log() { printf 'log:%s\n' "$*" >> "$c3r10_bridge_boundary_log"; }
@@ -2611,6 +2811,11 @@ esac
 # falha preserva o status e impede todas as atualizações posteriores.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r10_identity_log="$TMP_DIR/c3r10-identity.log"
 c3r10_identity_failures=0
 
@@ -2625,7 +2830,15 @@ env_title() { printf 'Synthetic %s\n' "$1"; }
 wp_exec() {
   local operation
   case "$2" in
-    search-replace) operation='search-replace' ;;
+    # Os dois passes de search-replace são distinguidos pela forma do padrão: o
+    # escapado tem contrabarras. Rotular ambos como 'search-replace' esconderia a
+    # perda de um deles, e é justamente um dos dois que cobre blocos Gutenberg.
+    search-replace)
+      case "$3" in
+        *'\/'*) operation='search-replace-escaped' ;;
+        *) operation='search-replace' ;;
+      esac
+      ;;
     option) operation="option-${4:-unknown}" ;;
     *) operation='unexpected' ;;
   esac
@@ -2635,10 +2848,11 @@ wp_exec() {
 }
 
 for c3r10_identity_case in \
-  'search-replace:73:search-replace:' \
-  'option-home:74:search-replace:option-home:' \
-  'option-siteurl:75:search-replace:option-home:option-siteurl:' \
-  'option-blogname:76:search-replace:option-home:option-siteurl:option-blogname:'; do
+  'search-replace-escaped:72:search-replace-escaped:' \
+  'search-replace:73:search-replace-escaped:search-replace:' \
+  'option-home:74:search-replace-escaped:search-replace:option-home:' \
+  'option-siteurl:75:search-replace-escaped:search-replace:option-home:option-siteurl:' \
+  'option-blogname:76:search-replace-escaped:search-replace:option-home:option-siteurl:option-blogname:'; do
   C3R10_IDENTITY_FAIL_OPERATION="${c3r10_identity_case%%:*}"
   c3r10_identity_remainder="${c3r10_identity_case#*:}"
   C3R10_IDENTITY_FAIL_STATUS="${c3r10_identity_remainder%%:*}"
@@ -2661,6 +2875,11 @@ done
 # alcança restore/sync/validação/resumo.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 c3r10_identity_boundary_log="$TMP_DIR/c3r10-identity-boundary.log"
 : > "$c3r10_identity_boundary_log"
 log() { printf 'log:%s\n' "$*" >> "$c3r10_identity_boundary_log"; }
@@ -2687,7 +2906,13 @@ C3R10_IDENTITY_FAIL_STATUS=75
 wp_exec() {
   local operation
   case "$2" in
-    search-replace) operation='search-replace' ;;
+    # Mesma distinção do bloco anterior: o passe escapado carrega contrabarras.
+    search-replace)
+      case "$3" in
+        *'\/'*) operation='search-replace-escaped' ;;
+        *) operation='search-replace' ;;
+      esac
+      ;;
     option) operation="option-${4:-unknown}" ;;
     *) operation='unexpected' ;;
   esac
@@ -2715,7 +2940,7 @@ fi
 [ "$(awk '$0 == "rollback" { count++ } END { print count + 0 }' "$c3r10_identity_boundary_log")" -eq 1 ] || \
   record_c3r10_identity_failure 'falha de identidade não acionou exatamente um rollback'
 [ "$(awk '/^wp:/ { printf "%s:", $0 }' "$c3r10_identity_boundary_log")" = \
-  'wp:search-replace:wp:option-home:wp:option-siteurl:' ] || \
+  'wp:search-replace-escaped:wp:search-replace:wp:option-home:wp:option-siteurl:' ] || \
   record_c3r10_identity_failure 'boundary executou wp_exec posterior à falha intermediária'
 case "$(<"$c3r10_identity_boundary_log")" in
   *restore-after-failure*|*authors-after-failure*|*sync-after-failure*|*smtp-after-failure*|*cache-after-failure*|*validation-after-failure*|*compressx-after-failure*|*summary-after-failure*|*'Clone concluído:'*)
@@ -2730,6 +2955,11 @@ esac
 # lookup devem preservar o status e impedir qualquer UPDATE parcial.
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
+# Guarda de bancos distintos consulta o banco real; no fixture retornaria
+# vazio e abortaria antes do comportamento sob teste. Cobertura propria em
+# test-clone-database-transport.sh.
+# shellcheck disable=SC2329
+assert_distinct_databases() { :; }
 remap_query_log="$TMP_DIR/remap-missing-authors-queries.log"
 remap_lookup_calls_file="$TMP_DIR/remap-missing-authors-lookup-calls"
 remap_map_file="$TMP_DIR/remap-missing-authors-source.tsv"
