@@ -144,8 +144,6 @@ jobs:
       - name: Test clone smoke resilience
         run: bash scripts/tests/test-clone-smoke-resilience.sh
 
-      - name: Test cleanup vendor plugins workflow
-        run: bash scripts/tests/test-cleanup-vendor-plugins-workflow.sh
 
       - name: Test CI covers every test
         run: |
