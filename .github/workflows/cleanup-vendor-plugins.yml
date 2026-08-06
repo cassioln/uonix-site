@@ -319,10 +319,31 @@ jobs:
             bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$backup_dir" <<'REMOTE'
           set -euo pipefail
           document_root="$1"; php_bin="$2"; wp_bin="$3"; backup_dir="$4"
+          backup_root="${backup_dir%/*}"
           wp() { "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" "$@"; }
           umask 077
           mkdir -p "$backup_dir"
           chmod 700 "$backup_dir"
+
+          # SIGKILL não dispara trap. Como o lock exclusivo foi adquirido no step
+          # anterior, nenhum dump deste workflow está ativo agora: remover somente
+          # db.sql.partial órfãos dentro do root dedicado é seguro e impede que um
+          # SQL em claro sobreviva indefinidamente após interrupção abrupta.
+          case "$backup_root" in
+            */_uonix-cleanup-backups) ;;
+            *) echo 'BACKUP_INVALIDO: backup_root inesperado; órfãos não serão varridos' >&2; exit 1 ;;
+          esac
+          cleanup_stale_sql() {
+            local stale_sql
+            stale_sql_removed=0
+            for stale_sql in "$backup_root"/*/db.sql.partial; do
+              [ -f "$stale_sql" ] || continue
+              rm -f -- "$stale_sql"
+              stale_sql_removed=$((stale_sql_removed + 1))
+            done
+          }
+          cleanup_stale_sql
+          printf 'sql_plaintext_orfaos_removidos=%s\n' "$stale_sql_removed"
 
           cp -p "$document_root/.htaccess" "$backup_dir/htaccess.bak"
           test -s "$backup_dir/htaccess.bak"
@@ -346,7 +367,49 @@ jobs:
           dump="$backup_dir/db.sql.gz"
           sql_tmp="$backup_dir/db.sql.partial"
           rm -f -- "$sql_tmp"
-          trap 'rm -f -- "$sql_tmp"' EXIT
+          # EXIT cobre falhas normais. Nos sinais, `exit` é obrigatório: um handler
+          # que apenas remove o arquivo retorna e pode deixar o script CONTINUAR.
+          # O exit dispara o trap EXIT, que elimina o SQL completo em claro.
+          cleanup_sql_tmp() { rm -f -- "$sql_tmp"; }
+          trap cleanup_sql_tmp EXIT
+          trap 'exit 129' HUP
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          # O SQL físico e o gzip coexistem por alguns instantes. Dimensionar pelo
+          # banco atual (3x + 200 MB) evita que um piso hoje suficiente fique
+          # obsoleto conforme o site cresça; 500 MB continua sendo o mínimo.
+          # `wp eval` usa a conexão mysqli do WordPress e não o `wp db size`, que
+          # dependeria de proc_open — indisponível nesta hospedagem.
+          required_space_kb() {
+            local db_bytes="$1" db_kb required_kb
+            case "$db_bytes" in
+              ''|*[!0-9]*) return 1 ;;
+            esac
+            db_kb=$(( (db_bytes + 1023) / 1024 ))
+            required_kb=$(( db_kb * 3 + 200000 ))
+            [ "$required_kb" -ge 500000 ] || required_kb=500000
+            printf '%s\n' "$required_kb"
+          }
+          db_bytes="$(wp eval '
+            global $wpdb;
+            $bytes = $wpdb->get_var("SELECT COALESCE(SUM(DATA_LENGTH + INDEX_LENGTH), 0) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()");
+            if ($wpdb->last_error !== "") {
+              fwrite(STDERR, "Falha ao medir o tamanho do banco.\n");
+              exit(24);
+            }
+            echo (int) $bytes;
+          ')"
+          if ! required_kb="$(required_space_kb "$db_bytes")"; then
+            echo 'BACKUP_INVALIDO: tamanho do banco não numérico' >&2
+            exit 1
+          fi
+          livre_kb="$(df -Pk "$backup_dir" | awk 'NR==2 {print $4}')"
+          printf 'db_bytes=%s livre_kb=%s requerido_kb=%s\n' "$db_bytes" "$livre_kb" "$required_kb"
+          [ "$livre_kb" -ge "$required_kb" ] || {
+            printf 'BACKUP_INVALIDO: espaço livre insuficiente (%s KB, requerido %s KB)\n' "$livre_kb" "$required_kb" >&2
+            exit 1
+          }
           set -o pipefail
           # O footer `-- Dump completed` do cliente NÃO é confiável neste host: dois
           # runs reais terminaram com status zero sem emiti-lo, inclusive já com
@@ -377,22 +440,31 @@ jobs:
           printf -- '\n-- UONIX_DUMP_COMPLETO\n' >> "$sql_tmp"
           gzip -c "$sql_tmp" > "$dump"
           rm -f -- "$sql_tmp"
-          trap - EXIT
+          trap - EXIT HUP INT TERM
 
           # gzip -t valida o ENVELOPE, não o conteúdo: um dump interrompido produz
           # gzip íntegro. Exigir o nosso marcador como última linha não vazia é o
           # que prova que o produtor chegou ao fim. Filtra vazias antes do tail e
-          # normaliza CRLF — janela fixa reprovaria dump legítimo.
+          # normaliza CRLF — janela fixa reprovaria dump legítimo. `-a` é obrigatório:
+          # bytes NUL válidos no SQL fizeram o grep do host devolver a mensagem de
+          # arquivo binário (36 bytes) no run 31066284676, ocultando o marcador.
           test -s "$dump"
           gzip -t "$dump"
-          last="$(gzip -dc "$dump" | tr -d '\r' | grep -v '^[[:space:]]*$' | tail -n 1)"
+          last="$(gzip -dc "$dump" | tr -d '\r' | grep -a -v '^[[:space:]]*$' | tail -n 1)"
           if [ "$last" != '-- UONIX_DUMP_COMPLETO' ]; then
             printf 'BACKUP_INVALIDO: dump sem marcador de conclusão (bytes=%s)\n' "${#last}" >&2
             exit 1
           fi
           # Marcador presente ainda não é cobertura: um dump que perdeu tabelas no
           # meio pode terminar bem. Conta as tabelas realmente presentes.
-          tabelas="$(gzip -dc "$dump" | grep -c '^CREATE TABLE' || true)"
+          #
+          # A âncora inclui a crase de abertura. Sem ela `^CREATE TABLE` também casa
+          # o corpo de uma ROUTINE, emitido verbatim por --routines: a auditoria
+          # mediu um dump de 1 tabela real contando 121 "CREATE TABLE". Os gates de
+          # volume abaixo cobrem o dump-casca, mas esta contagem é usada por si só
+          # como piso de cobertura, então precisa ser difícil de inflar. O mesmo
+          # modo texto da prova do marcador vale para todas as leituras do SQL.
+          tabelas="$(gzip -dc "$dump" | grep -a -c '^CREATE TABLE `' || true)"
           printf 'tabelas=%s\n' "$tabelas"
           [ "$tabelas" -ge 100 ] || {
             printf 'BACKUP_INVALIDO: apenas %s tabelas no dump (esperado >= 100)\n' "$tabelas" >&2
@@ -403,7 +475,7 @@ jobs:
           # dump de 1 tabela contando 121 "CREATE TABLE". Além disso um dump só de
           # estrutura tem todos os CREATE TABLE e nenhum dado. Medir VOLUME é o que
           # separa backup restaurável de casca vazia.
-          inserts="$(gzip -dc "$dump" | grep -c '^INSERT INTO' || true)"
+          inserts="$(gzip -dc "$dump" | grep -a -c '^INSERT INTO' || true)"
           bytes_sql="$(gzip -dc "$dump" | wc -c | tr -d '[:space:]')"
           printf 'inserts=%s bytes_sql=%s\n' "$inserts" "$bytes_sql"
           [ "$inserts" -ge 20 ] || {
