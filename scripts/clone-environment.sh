@@ -257,6 +257,7 @@ local_db_dump() {
     -e MYSQL_PWD \
     "$LOCAL_DB_CONTAINER" \
     mariadb-dump \
+    --no-defaults \
     -u "$LOCAL_DB_USER" \
     --skip-ssl \
     --single-transaction \
@@ -545,7 +546,9 @@ db_user="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)"
 db_host="\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)"
 dump_bin="\$(command -v mysqldump || command -v mariadb-dump || true)"
 if [ -n "\$dump_bin" ]; then
-  dump_flags='--single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'
+  # --no-defaults PRIMEIRO: sem ela o cliente lê ~/.my.cnf antes do nosso argv,
+  # e um grupo [mysqldump] com no-data produz dump rc=0 com schema e ZERO dados.
+  dump_flags='--no-defaults --single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'
   # Cliente 8.0 contra servidor 5.7 avisa sobre column statistics em todo dump:
   # inofensivo, mas polui o log e parece falha. A flag só existe no cliente 8.0+.
   if "\$dump_bin" --help 2>/dev/null | grep -q -- '--column-statistics'; then
@@ -580,7 +583,7 @@ db_user=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)\"; \
 db_host=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\"; \
 dump_bin=\"\$(command -v mysqldump || command -v mariadb-dump || true)\"; \
 if [ -n \"\$dump_bin\" ]; then \
-dump_flags='--single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'; \
+dump_flags='--no-defaults --single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'; \
 if \"\$dump_bin\" --help 2>/dev/null | grep -q -- '--column-statistics'; then dump_flags=\"\$dump_flags --column-statistics=0\"; fi; \
 MYSQL_PWD=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" \"\$dump_bin\" \$dump_flags --host=\"\$db_host\" --user=\"\$db_user\" \"\$db_name\" | gzip -c; \
 else $wp_cli --path=$(printf '%q' "$wp_root") db export - | gzip -c; fi"
@@ -636,7 +639,8 @@ remote_db_dump_tables_snippet() {
   cat <<SNIPPET
 $(remote_db_client_snippet "$wp_cli" "$wp_root")
 if [ -n "\$dump_bin" ]; then
-  dump_flags='--single-transaction --quick --no-tablespaces --default-character-set=utf8mb4'
+  # --no-defaults PRIMEIRO: blinda contra ~/.my.cnf que injete no-data/where.
+  dump_flags='--no-defaults --single-transaction --quick --no-tablespaces --default-character-set=utf8mb4'
   if "\$dump_bin" --help 2>/dev/null | grep -q -- '--column-statistics'; then
     dump_flags="\$dump_flags --column-statistics=0"
   fi

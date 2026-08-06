@@ -392,7 +392,13 @@ jobs:
           fi
           # Marcador presente ainda não é cobertura: um dump que perdeu tabelas no
           # meio pode terminar bem. Conta as tabelas realmente presentes.
-          tabelas="$(gzip -dc "$dump" | grep -c '^CREATE TABLE' || true)"
+          #
+          # A âncora inclui a crase de abertura. Sem ela `^CREATE TABLE` também casa
+          # o corpo de uma ROUTINE, emitido verbatim por --routines: a auditoria
+          # mediu um dump de 1 tabela real contando 121 "CREATE TABLE". Os gates de
+          # volume abaixo cobrem o dump-casca, mas esta contagem é usada por si só
+          # como piso de cobertura, então precisa ser difícil de inflar.
+          tabelas="$(gzip -dc "$dump" | grep -c '^CREATE TABLE `' || true)"
           printf 'tabelas=%s\n' "$tabelas"
           [ "$tabelas" -ge 100 ] || {
             printf 'BACKUP_INVALIDO: apenas %s tabelas no dump (esperado >= 100)\n' "$tabelas" >&2

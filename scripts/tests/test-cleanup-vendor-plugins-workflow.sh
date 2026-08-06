@@ -413,6 +413,12 @@ has_lit "$backup_block" "tail -n 1" \
 # tabelas no meio. O CREATE TABLE é a evidência de cobertura.
 has "$backup_block" 'CREATE TABLE' \
   || fail 'prova não conta tabelas; dump parcial com marcador passaria'
+# A âncora precisa da crase de abertura: sem ela `^CREATE TABLE` casa o corpo de
+# uma ROUTINE (emitido verbatim por --routines) e a contagem é inflável — a
+# auditoria mediu 121 "CREATE TABLE" num dump de 1 tabela real.
+# shellcheck disable=SC2016
+has_lit "$backup_block" 'grep -c '"'"'^CREATE TABLE `'"'" \
+  || fail 'contagem de tabelas sem âncora de crase; corpo de routine infla o total'
 # O piso precisa ser REAL: produção tem 158 tabelas, então `-ge 0` ou `-ge 1`
 # tornaria o gate decorativo. Extrai o número e exige um piso significativo.
 # shellcheck disable=SC2016
@@ -550,12 +556,16 @@ case "$last_assign" in
 esac
 
 # 5. Contagens precisam ser ancoradas e não podem ter default fabricado.
+# A âncora de `tabelas` aceita um sufixo APÓS o padrão (a crase de abertura de
+# `^CREATE TABLE \``), que é mais restritiva, não menos: sem ela o padrão casa o
+# corpo de uma ROUTINE emitido verbatim por --routines. O que não se admite é
+# âncora ausente ou mais frouxa que o padrão exigido.
 for par in "tabelas:^CREATE TABLE" "inserts:^INSERT INTO"; do
   var="${par%%:*}"; pat="${par#*:}"
   linha="$(grep -F "${var}=\"\$(gzip -dc" <<<"$backup_code" | head -1)"
   [ -n "$linha" ] || fail "não encontrei a contagem de $var"
   case "$linha" in
-    *"grep -c '${pat}'"*) : ;;
+    *"grep -c '${pat}"*) : ;;
     *) fail "contagem de $var não está ancorada em '${pat}'" ;;
   esac
   case "$linha" in
