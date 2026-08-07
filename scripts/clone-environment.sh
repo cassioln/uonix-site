@@ -234,6 +234,12 @@ rmdir -- \"\$lock_path\"" || return $?
 }
 
 local_wp() {
+  if [ "${1:-}" = "db" ] && [ "${2:-}" = "query" ]; then
+    shift 2
+    local_db_query "$@"
+    return $?
+  fi
+
   cd "$ROOT_DIR"
   podman-compose -p "$LOCAL_COMPOSE_PROJECT" -f "$LOCAL_COMPOSE_FILE" --profile tools run --rm --no-deps -T wpcli --skip-plugins --skip-themes "$@" </dev/null
 }
