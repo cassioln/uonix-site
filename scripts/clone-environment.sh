@@ -255,6 +255,7 @@ local_db_dump() {
     --single-transaction \
     --quick \
     --skip-lock-tables \
+    --default-character-set=utf8mb4 \
     "$LOCAL_DB_NAME" \
     "$@"
 }
@@ -297,6 +298,7 @@ local_db_dump_options() {
     mariadb \
     -u "$LOCAL_DB_USER" \
     --skip-ssl \
+    --default-character-set=utf8mb4 \
     --batch \
     --raw \
     --skip-column-names \
@@ -937,13 +939,14 @@ db_user=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_USER)\" || e
 db_pass=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_PASSWORD)\" || exit \$?
 db_host=\"\$($wp_cli --path=$(printf '%q' "$wp_root") config get DB_HOST)\" || exit \$?
 mysql_cmd=\"\$(command -v mysql || command -v mariadb)\" || exit \$?
-MYSQL_PWD=\"\$db_pass\" \"\$mysql_cmd\" \
-  --host=\"\$db_host\" \
-  --user=\"\$db_user\" \
-  --batch \
-  --raw \
-  --skip-column-names \
-  \"\$db_name\" \
+MYSQL_PWD=\"\$db_pass\" \"\$mysql_cmd\" \\
+  --host=\"\$db_host\" \\
+  --user=\"\$db_user\" \\
+  --default-character-set=utf8mb4 \\
+  --batch \\
+  --raw \\
+  --skip-column-names \\
+  \"\$db_name\" \\
   -e $(printf '%q' "$query") > \"\$options_sql\" || exit \$?
 (
   cd $(printf '%q' "$dir") || exit \$?

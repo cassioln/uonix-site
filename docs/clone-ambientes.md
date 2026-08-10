@@ -171,6 +171,35 @@ origem. Ao introduzir uma configuração nova que pertença ao host — especial
 um caminho absoluto — atualize `protected_options_where()` e o teste
 `scripts/tests/test-clone-path-bound-options.sh` antes de clonar.
 
+#### Transporte multibyte-safe das opções protegidas
+
+Estar na lista de proteção garante que a opção seja *fotografada*, não que ela
+chegue íntegra. O transporte também precisa preservar bytes.
+
+Todo cliente `mysql`/`mariadb` usado no snapshot e na restauração passa
+`--default-character-set=utf8mb4` explicitamente. Isso não é redundância: a
+conexão, sem essa opção, assume o default do servidor — medido como `latin1` no
+MySQL 5.7.44-48 da HostGator. Combinado com `--raw`, que desliga o escaping, um
+valor `utf8mb4` é convertido na saída e o serialize PHP chega cortado.
+
+O sintoma real (2026-08-10): `fluentmail-settings` chegou ao DEV com 283 dos
+1202 bytes, cortado entre os dois bytes do `Ô` de `SITE UÔNIX` (`0xC3 0x94`).
+Como `unserialize()` devolve `false` para serialize inválido, `get_option()`
+passou a retornar a string crua em vez do array, e o painel do Fluent SMTP ficou
+em loading infinito ao salvar — indistinguível, para o usuário, de
+"configurações perdidas".
+
+Duas conclusões operacionais:
+
+- **Dump e restore precisam usar o mesmo charset.** A assimetria é o defeito: o
+  restore já usava `utf8mb4` e só o dump não usava.
+- **Qualquer opção protegida com acentuação está exposta** ao mesmo problema, não
+  só as do Fluent SMTP. `sender_name`, títulos e mensagens em português são os
+  casos mais prováveis.
+
+O teste `scripts/tests/test-protected-options-charset.sh` trava essa regressão e
+falha se qualquer função que use `--raw` perder o charset explícito.
+
 > [!IMPORTANT]
 > Não existe proteção genérica para todo nome contendo `license`, `api_key`,
 > gateway de pagamento ou credencial de integração. Se o valor estiver em uma
