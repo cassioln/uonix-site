@@ -166,6 +166,9 @@ jobs:
       - name: Test clone path-bound option protection
         run: bash scripts/tests/test-clone-path-bound-options.sh
 
+      - name: Test protected options charset is multibyte-safe
+        run: bash scripts/tests/test-protected-options-charset.sh
+
       - name: Test clone panel contract
         run: bash scripts/tests/test-clone-panel-contract.sh
 
