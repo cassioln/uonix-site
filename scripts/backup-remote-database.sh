@@ -138,10 +138,16 @@ case "$mechanism" in
     #                         triggers e eventos agendados — a restauração fica
     #                         silenciosamente incompleta.
     #   --default-character-set=utf8mb4  preserva acentos e emoji.
+    #   --no-defaults         PRIMEIRA flag, por segurança: sem ela o cliente lê
+    #                         ~/.my.cnf e /etc/my.cnf antes do nosso argv. Um
+    #                         `[mysqldump]\nno-data` ali faz o dump sair rc=0 com
+    #                         schema completo e ZERO dados (reproduzido em MariaDB
+    #                         10.11). Em hospedagem compartilhada esse arquivo é
+    #                         criado por painéis de controle.
     #
     # JAMAIS --flush-logs, --master-data ou --flush-privileges: exigem RELOAD,
     # que o usuário não possui (erro 1227, rc=2), e quebrariam o deploy.
-    dump_flags='--single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'
+    dump_flags='--no-defaults --single-transaction --quick --no-tablespaces --routines --triggers --events --default-character-set=utf8mb4'
 
     # Cliente 8.0 contra servidor 5.7 emite "column statistics not supported by
     # the server" em TODO dump. É inofensivo, mas polui o log do deploy e pode

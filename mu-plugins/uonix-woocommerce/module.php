@@ -19,6 +19,7 @@ uonix_mu_require_files(
 		'17-woocommerce-checkout-design.php',
 		'18-produto-alertas-variacao.php',
 		'20-catalogo-titulos-produtos.php',
+		'22-ficha-tecnica-variacao.php',
 	),
 	'uonix-woocommerce'
 );

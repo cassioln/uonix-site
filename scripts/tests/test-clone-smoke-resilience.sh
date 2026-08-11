@@ -9,7 +9,7 @@
 set -uo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-CLONE_SCRIPT="${ROOT_DIR}/scripts/clone-environment.sh"
+CLONE_SCRIPT="${UONIX_TEST_CLONE_SCRIPT:-${ROOT_DIR}/scripts/clone-environment.sh}"
 export UONIX_CLONE_LIBRARY_ONLY=1
 
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/uonix-smoke.XXXXXX")" || exit 1
@@ -23,6 +23,7 @@ run_smoke() {
   local codes="$1"
   printf '%s\n' "$codes" | tr ' ' '\n' > "${TMP_ROOT}/codes"
   : > "${TMP_ROOT}/calls"
+  : > "${TMP_ROOT}/sleeps"
   # Estado do caso anterior faria um ABORT parecer sucesso herdado.
   rm -f "${TMP_ROOT}/exit"
   (
@@ -48,7 +49,7 @@ run_smoke() {
     }
     # Não dormir de verdade dentro do teste.
     # shellcheck disable=SC2329
-    sleep() { :; }
+    sleep() { printf '%s\n' "${1:-MISSING}" >> "${TMP_ROOT}/sleeps"; }
 
     validate_http_endpoint 'wp-login' 'https://test.uonix.ksio.dev/wp-login.php' >/dev/null 2>&1
     printf '%s' "$?" > "${TMP_ROOT}/exit"
@@ -86,8 +87,17 @@ esac
 result="$(run_smoke '406 406 406 406 406 406 406 406')"
 case "$result" in
   EXIT=0*) fail "bloqueio permanente de WAF foi aceito: ${result}" ;;
-  'EXIT=1 CALLS=6'|'EXIT=ABORT CALLS=6') ;;
-  *) fail "bloqueio permanente deveria reprovar com exatamente 6 chamadas; obtive: ${result}" ;;
+  'EXIT=1 CALLS=7'|'EXIT=ABORT CALLS=7') ;;
+  *) fail "bloqueio permanente deveria reprovar com exatamente 7 chamadas; obtive: ${result}" ;;
+esac
+
+# 3b) Incidente real 31093629513: o runner recebeu 409 nas seis tentativas e
+#     abortou dentro da janela do ModSecurity. Se o WAF liberar na tentativa
+#     seguinte, o clone deve seguir em vez de executar rollback desnecessário.
+result="$(run_smoke '409 409 409 409 409 409 200')"
+case "$result" in
+  'EXIT=0 CALLS=7') ;;
+  *) fail "409 que libera na 7a tentativa deveria passar; obtive: ${result}" ;;
 esac
 
 # 4) Erro de servidor real também é retentado, mas reprova se persistir.
@@ -147,22 +157,31 @@ case "$result" in
 esac
 
 # 8) A janela de retry precisa cobrir a DECADÊNCIA MEDIDA do bloqueio: o deny do
-#    Mod_Security persistiu em t+75s e só liberou perto de t+180s. Um bloqueio
-#    que libera na 6ª tentativa ainda precisa resultar em clone aprovado — com
-#    5 tentativas (75s de espera) o clone morreria dentro do bloqueio.
-result="$(run_smoke '406 406 406 406 406 200')"
+#    Mod_Security persistiu além das 6 tentativas no run 31093629513. Um bloqueio
+#    que libera na 7ª tentativa ainda precisa resultar em clone aprovado — com
+#    6 tentativas (135s de espera) o clone morreu dentro do bloqueio.
+result="$(run_smoke '406 406 406 406 406 406 200')"
 case "$result" in
-  'EXIT=0 CALLS=6') ;;
-  *) fail "bloqueio que libera perto de 180s deveria ser tolerado; obtive: ${result}" ;;
+  'EXIT=0 CALLS=7') ;;
+  *) fail "bloqueio que libera depois de 6 tentativas deveria ser tolerado; obtive: ${result}" ;;
 esac
 
-# 8b) A soma das esperas precisa alcançar ~135s. Verificado no texto porque o
-#     teste mocka sleep: o risco é alguém reduzir a janela e reintroduzir o bug.
+# 8b) O mock registra o comportamento real do backoff. Fixar somente o número de
+#     tentativas deixaria `delay=0` passar verde e reduziria a janela a quase zero.
+sleep_sequence="$(tr '\n' ' ' < "${TMP_ROOT}/sleeps" | sed 's/[[:space:]]*$//')"
+[ "$sleep_sequence" = '5 10 20 40 60 60' ] \
+  || fail "backoff deveria ser 5 10 20 40 60 60; obtive: ${sleep_sequence:-vazio}"
+sleep_count=0
+sleep_total=0
+while IFS= read -r sleep_delay; do
+  [ -n "$sleep_delay" ] || fail 'sleep recebeu atraso vazio'
+  sleep_count=$((sleep_count + 1))
+  sleep_total=$((sleep_total + sleep_delay))
+done < "${TMP_ROOT}/sleeps"
+[ "$sleep_count" -eq 6 ] || fail "esperava 6 sleeps; obtive: $sleep_count"
+[ "$sleep_total" -eq 195 ] || fail "backoff deveria somar 195s; obtive: ${sleep_total}s"
+
 smoke_body="$(awk '$0 == "validate_http_endpoint() {" { inside = 1 } inside { print } inside && /^}$/ { exit }' "$CLONE_SCRIPT")"
-attempts_declared="$(printf '%s\n' "$smoke_body" | sed -n 's/^[[:space:]]*local max_attempts=\([0-9]*\).*/\1/p' | head -n 1)"
-[ -n "$attempts_declared" ] || fail 'não encontrei max_attempts no smoke'
-[ "$attempts_declared" -ge 6 ] \
-  || fail "max_attempts=${attempts_declared} não cobre os ~180s medidos de bloqueio do WAF"
 
 # 9) Sucesso obtido só após retry precisa ser ANOTADO. Um retry silencioso
 #    mascararia degradação real da borda.

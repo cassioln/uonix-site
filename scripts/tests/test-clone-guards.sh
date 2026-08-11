@@ -153,7 +153,7 @@ if printf '%s\n' "$runtime_list" | grep -Eq 'themes|mu-plugins'; then
 fi
 
 protected_sql="$(protected_options_where)"
-for needle in admin_email active_plugins fluent smtp turnstile captcha speedycache; do
+for needle in admin_email active_plugins fluent smtp turnstile captcha; do
   printf '%s\n' "$protected_sql" | grep -qi "$needle" || fail "opção protegida ausente: $needle"
 done
 

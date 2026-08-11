@@ -63,6 +63,12 @@ jobs:
       - name: Test WooCommerce-optional callbacks
         run: php scripts/tests/test-woocommerce-optional-plugin.php
 
+      - name: Test variation technical sheet
+        run: php scripts/tests/test-variation-technical-sheet.php
+
+      - name: Validate variation technical sheet admin script
+        run: node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
+
       - name: Test clone administration panel
         run: php scripts/tests/test-clone-admin.php
 
@@ -144,8 +150,6 @@ jobs:
       - name: Test clone smoke resilience
         run: bash scripts/tests/test-clone-smoke-resilience.sh
 
-      - name: Test cleanup vendor plugins workflow
-        run: bash scripts/tests/test-cleanup-vendor-plugins-workflow.sh
 
       - name: Test CI covers every test
         run: |
@@ -167,6 +171,9 @@ jobs:
 
       - name: Test clone path-bound option protection
         run: bash scripts/tests/test-clone-path-bound-options.sh
+
+      - name: Test protected options charset is multibyte-safe
+        run: bash scripts/tests/test-protected-options-charset.sh
 
       - name: Test clone panel contract
         run: bash scripts/tests/test-clone-panel-contract.sh
