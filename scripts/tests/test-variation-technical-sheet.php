@@ -2060,17 +2060,17 @@ vts_assert_contains( 'min-width: 32px', $admin_css, 'controles possuem largura m
 vts_assert_contains( 'min-height: 32px', $admin_css, 'controles neutralizam a altura mínima do WordPress' );
 vts_assert_same(
 	1,
-	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__icon-button \.dashicons\s*\{[^}]*line-height:\s*18px;[^}]*\}~s', $admin_css ),
+	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__icon-button \.dashicons\s*\{[^}]*line-height:\s*8px;[^}]*\}~s', $admin_css ),
 	'ícones dos botões quadrados vencem o line-height global do WordPress'
 );
 vts_assert_same(
 	1,
-	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__remove-sheet \.dashicons\s*\{[^}]*line-height:\s*2;[^}]*\}~s', $admin_css ),
+	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__remove-sheet \.dashicons\s*\{[^}]*line-height:\s*1;[^}]*\}~s', $admin_css ),
 	'lixeira da remoção possui alinhamento vertical próprio'
 );
 vts_assert_same(
 	1,
-	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__remove-sheet\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*16px;[^}]*align-items:\s*center;[^}]*\}~s', $admin_css ),
+	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__remove-sheet\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*10px;[^}]*align-items:\s*center;[^}]*\}~s', $admin_css ),
 	'botão remover ficha aplica espaço real entre ícone e texto'
 );
 vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__icon-button--danger,', $admin_css, 'ações destrutivas vencem a cor nativa do botão' );
