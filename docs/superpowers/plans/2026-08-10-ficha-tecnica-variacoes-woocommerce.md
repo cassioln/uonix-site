@@ -1233,6 +1233,229 @@ git commit -m "test(woocommerce): verifica ficha em ciclo real"
 
 ---
 
+### Task 8A: Post-QA Section Divider and Accessible Admin Reordering
+
+**Files:**
+- Modify: `scripts/tests/test-variation-technical-sheet.php`
+- Modify: `mu-plugins/uonix-woocommerce/assets/css/ficha-tecnica-variacao.css`
+- Modify: `mu-plugins/uonix-woocommerce/ficha-tecnica-variacao/class-uonix-vts-admin.php`
+- Modify: `mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js`
+- Modify: `mu-plugins/uonix-woocommerce/assets/css/admin-ficha-tecnica-variacao.css`
+
+**Interfaces:**
+- Consumes: existing `.uonix-vts__section`, admin templates, `collectSheet()`, `sync()` and jQuery UI Sortable.
+- Produces: a CSS-only divider plus drag, move-up and move-down controls that preserve DOM order in the submitted JSON envelope.
+
+#### Task 8A.1: Divider between frontend sections
+
+- [ ] **Step 1: Add the failing divider contract**
+
+Append beside the existing frontend CSS assertions in `scripts/tests/test-variation-technical-sheet.php`:
+
+```php
+vts_assert_contains(
+    '.uonix-vts__section + .uonix-vts__section { border-top: 6px solid #f1f5f9; }',
+    $frontend_css,
+    'divisor aparece somente entre seções adjacentes'
+);
+vts_assert_same(
+    1,
+    substr_count( $frontend_css, 'border-top: 6px solid #f1f5f9' ),
+    'divisor é declarado uma única vez'
+);
+```
+
+- [ ] **Step 2: Run RED in both normative PHP versions**
+
+```bash
+podman run --rm -v "$PWD:/workspace:ro" -w /workspace php:8.3-cli \
+  php scripts/tests/test-variation-technical-sheet.php
+podman run --rm -v "$PWD:/workspace:ro" -w /workspace php:8.5-cli \
+  php scripts/tests/test-variation-technical-sheet.php
+```
+
+Expected in both: non-zero with `divisor aparece somente entre seções adjacentes`.
+
+- [ ] **Step 3: Add the minimal CSS-only divider**
+
+Append exactly:
+
+```css
+.uonix-vts__section + .uonix-vts__section { border-top: 6px solid #f1f5f9; }
+```
+
+Do not add markup or `:first-child`/`:last-child` rules.
+
+- [ ] **Step 4: Run GREEN and commit the divider**
+
+```bash
+podman run --rm -v "$PWD:/workspace:ro" -w /workspace php:8.3-cli \
+  php scripts/tests/test-variation-technical-sheet.php
+podman run --rm -v "$PWD:/workspace:ro" -w /workspace php:8.5-cli \
+  php scripts/tests/test-variation-technical-sheet.php
+git diff --check
+git add scripts/tests/test-variation-technical-sheet.php \
+  mu-plugins/uonix-woocommerce/assets/css/ficha-tecnica-variacao.css
+git commit -m "style(woocommerce): separa secoes da ficha tecnica"
+```
+
+Expected: both harnesses exit 0 and commit contains only the test plus frontend CSS.
+
+#### Task 8A.2: WordPress-native action layout and click reordering
+
+- [ ] **Step 1: Reproduce the reported click failure in the real admin**
+
+Open product `10382`, expand variation `10460`, record item labels and hidden payload, then dispatch a click on the current `[aria-label="Reordenar item"]`. Require both DOM and payload to remain unchanged; this is the observed RED and proves the current button is only a drag handle. Reload without saving.
+
+- [ ] **Step 2: Add failing markup, JavaScript and CSS contracts**
+
+Replace the old `Reordenar seção/item` assertions with the exact accessible labels below and compare the complete sorted set of `aria-label` values in `$existing_admin_html`:
+
+```php
+$expected_admin_aria_labels = array(
+    'Arrastar para reordenar item',
+    'Arrastar para reordenar seção',
+    'Ações da seção',
+    'Ações do item',
+    'Cabeçalho automático da variação',
+    'Formato da seção',
+    'Mover item para baixo',
+    'Mover item para cima',
+    'Mover seção para baixo',
+    'Mover seção para cima',
+    'Remover item',
+    'Remover seção',
+    'Rótulo do item',
+    'Título geral da ficha técnica',
+    'Título opcional da seção',
+    'Valor do item',
+    'Variação de origem',
+);
+preg_match_all( '/\\baria-label="([^"]+)"/', $existing_admin_html, $admin_aria_matches );
+$actual_admin_aria_labels = $admin_aria_matches[1];
+sort( $expected_admin_aria_labels );
+sort( $actual_admin_aria_labels );
+vts_assert_same( $expected_admin_aria_labels, $actual_admin_aria_labels, 'editor expõe exatamente os nomes acessíveis aprovados' );
+vts_assert_not_contains( '>↕</button>', $existing_admin_html, 'interface não usa seta literal como ícone' );
+vts_assert_not_contains( '>×</button>', $existing_admin_html, 'interface não usa xis literal como ícone' );
+vts_assert_same( 9, substr_count( $existing_admin_html, 'aria-hidden="true"' ), 'ícones são decorativos para leitores de tela' );
+```
+
+Append source-scoped contracts for:
+
+```php
+vts_assert_contains( 'function refreshMoveButtons($root)', $admin_js, 'limites de movimento possuem atualizador próprio' );
+vts_assert_contains( 'function moveRelative($element, direction, selector)', $admin_js, 'movimento por clique possui primitiva própria' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__move-item-up'", $admin_js, 'item sobe por evento delegado' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__move-item-down'", $admin_js, 'item desce por evento delegado' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__move-section-up'", $admin_js, 'seção sobe por evento delegado' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__move-section-down'", $admin_js, 'seção desce por evento delegado' );
+vts_assert_contains( '$button.trigger(\'focus\');', $admin_js, 'foco acompanha o elemento movido' );
+vts_assert_contains( 'grid-template-columns: minmax(0, 1fr) auto', $admin_css, 'cópia alinha select e botão' );
+vts_assert_contains( 'min-width: 32px', $admin_css, 'controles possuem alvo mínimo aprovado' );
+vts_assert_contains( '.uonix-vts-admin__sheet-footer', $admin_css, 'ações da ficha têm rodapé próprio' );
+```
+
+- [ ] **Step 3: Run RED in PHP 8.3 and 8.5**
+
+Use the two Podman commands from Task 8A.1. Expected: non-zero on the first new admin contract, not syntax or fixture failure.
+
+- [ ] **Step 4: Replace text glyphs with native Dashicons and grouped actions**
+
+In the section template, render a `.uonix-vts-admin__section-handle` button with `dashicons-move`, then title, layout and:
+
+```html
+<div class="uonix-vts-admin__actions" role="group" aria-label="Ações da seção">
+  <button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__move-section-up" aria-label="Mover seção para cima"><span class="dashicons dashicons-arrow-up-alt2" aria-hidden="true"></span></button>
+  <button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__move-section-down" aria-label="Mover seção para baixo"><span class="dashicons dashicons-arrow-down-alt2" aria-hidden="true"></span></button>
+  <button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__icon-button--danger uonix-vts-admin__remove-section" aria-label="Remover seção"><span class="dashicons dashicons-trash" aria-hidden="true"></span></button>
+</div>
+```
+
+Use the same shape for each item with `move-item-up`, `move-item-down` and `remove-item`. Wrap **Adicionar item** in `.uonix-vts-admin__section-footer`; wrap **Adicionar seção** and a full-text **Remover ficha** button containing one decorative `dashicons-trash` in `.uonix-vts-admin__sheet-footer`.
+
+- [ ] **Step 5: Implement deterministic movement and boundary states**
+
+Add before `initSortable()`:
+
+```javascript
+function refreshMoveButtons($root) {
+    const $sections = $root.find('.uonix-vts-admin__sections').children('.uonix-vts-admin__section');
+    $sections.each(function (sectionIndex) {
+        const $section = $(this);
+        const $head = $section.children('.uonix-vts-admin__section-head');
+        $head.find('.uonix-vts-admin__move-section-up').prop('disabled', sectionIndex === 0);
+        $head.find('.uonix-vts-admin__move-section-down').prop('disabled', sectionIndex === $sections.length - 1);
+        const $items = $section.children('.uonix-vts-admin__items').children('.uonix-vts-admin__item');
+        $items.each(function (itemIndex) {
+            const $item = $(this);
+            $item.find('.uonix-vts-admin__move-item-up').prop('disabled', itemIndex === 0);
+            $item.find('.uonix-vts-admin__move-item-down').prop('disabled', itemIndex === $items.length - 1);
+        });
+    });
+}
+
+function moveRelative($element, direction, selector) {
+    const $sibling = direction === 'up' ? $element.prev(selector) : $element.next(selector);
+    if (!$sibling.length) return false;
+    if (direction === 'up') $element.insertBefore($sibling);
+    else $element.insertAfter($sibling);
+    return true;
+}
+
+function moveFromButton(button, elementSelector, direction) {
+    const $button = $(button);
+    const $root = $button.closest('.uonix-vts-admin');
+    if (!moveRelative($button.closest(elementSelector), direction, elementSelector)) return;
+    refreshMoveButtons($root);
+    sync($root);
+    $button.trigger('focus');
+}
+```
+
+Call `refreshMoveButtons($root)` after sortable updates, initialization, addition and removal. Add four delegated click handlers that call `moveFromButton()` with section/item selector and `up`/`down`.
+
+- [ ] **Step 6: Implement the approved responsive admin CSS**
+
+Use `32px minmax(...) ... auto` grids, a flex `.uonix-vts-admin__actions`, 32 × 32 icon buttons, `cursor: grab` on drag handles, a two-column copy grid above 782 px, right-aligned section footer, split sheet footer and a one-column/stacked layout inside `@media (max-width: 782px)`.
+
+- [ ] **Step 7: Run GREEN, syntax and real behavior checks**
+
+Run both PHP harnesses, then:
+
+```bash
+node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
+git diff --check
+```
+
+In the real browser, prove without saving:
+
+1. item labels `A,B` become `B,A` after **Mover item para baixo** on A;
+2. hidden payload starts with item labels `B,A`;
+3. **Mover item para cima** restores `A,B` in DOM and payload;
+4. sections `compact,detailed` become `detailed,compact` and return;
+5. first **Subir** and last **Descer** are disabled;
+6. dragging an item changes DOM and payload;
+7. reload restores the persisted order because no save occurred.
+
+- [ ] **Step 8: Prove the click regression test is load-bearing**
+
+Record SHA-256 of the JavaScript. Temporarily mutate the unique `.uonix-vts-admin__move-item-down` delegated-handler selector to `.uonix-vts-admin__move-item-down-MUTATED`, reload with cache bypass and require the real click proof to fail while the page remains healthy. Restore byte for byte, confirm the original SHA-256 and rerun GREEN. Report mutation as `1→0`, valid and detected.
+
+- [ ] **Step 9: Commit the admin correction**
+
+```bash
+git add scripts/tests/test-variation-technical-sheet.php \
+  mu-plugins/uonix-woocommerce/ficha-tecnica-variacao/class-uonix-vts-admin.php \
+  mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js \
+  mu-plugins/uonix-woocommerce/assets/css/admin-ficha-tecnica-variacao.css
+git commit -m "fix(woocommerce): corrige controles da ficha no admin"
+```
+
+Continue with Task 8 full gates. Before inviting human testing, verify hashes of variations `10410`, `10411`, `10460`, `10461` and `10462` against the post-migration baseline and retain `11054` without a sheet.
+
+---
+
 ### Task 8: Full Gates, Local Migration, Visual QA and PR
 
 **Files:**
