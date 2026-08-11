@@ -63,6 +63,9 @@ jobs:
       - name: Test WooCommerce-optional callbacks
         run: php scripts/tests/test-woocommerce-optional-plugin.php
 
+      - name: Test variation technical sheet
+        run: php scripts/tests/test-variation-technical-sheet.php
+
       - name: Test clone administration panel
         run: php scripts/tests/test-clone-admin.php
 
