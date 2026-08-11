@@ -119,9 +119,14 @@ $GLOBALS['vts_current_screen']    = null;
 $GLOBALS['vts_current_post_id']   = 0;
 $GLOBALS['vts_escaped_html']      = array();
 $GLOBALS['vts_is_product']        = false;
-$GLOBALS['vts_editable_posts']  = array();
-$GLOBALS['vts_products']        = array();
-$GLOBALS['wc_meta_box_errors']  = array();
+$GLOBALS['vts_editable_posts']    = array();
+$GLOBALS['vts_products']         = array();
+$GLOBALS['vts_nonce_valid']      = true;
+$GLOBALS['vts_nonce_checks']     = array();
+$GLOBALS['vts_created_nonces']   = array();
+$GLOBALS['vts_json_response']    = null;
+$GLOBALS['vts_formatted_calls']  = array();
+$GLOBALS['wc_meta_box_errors']   = array();
 $GLOBALS['vts_terms']           = array(
 	'pa_tipo'     => array( 'pesado' => 'Pesado' ),
 	'pa_material' => array( 'inox-316' => 'Inox 316' ),
@@ -172,6 +177,61 @@ function current_user_can( $capability, $object_id = 0 ) {
 
 function wc_get_product( $product_id ) {
 	return $GLOBALS['vts_products'][ absint( $product_id ) ] ?? false;
+}
+
+function wc_get_formatted_variation( $variation, $flat = false, $include_names = true, $skip_attributes_in_name = false ) {
+	$GLOBALS['vts_formatted_calls'][] = array( $variation, $flat, $include_names, $skip_attributes_in_name );
+	return is_object( $variation ) && method_exists( $variation, 'get_copy_label' ) ? $variation->get_copy_label() : '';
+}
+
+function admin_url( $path = '', $scheme = 'admin' ) {
+	return 'https://example.test/wp-admin/' . ltrim( (string) $path, '/' );
+}
+
+function wp_create_nonce( $action = -1 ) {
+	$GLOBALS['vts_created_nonces'][] = $action;
+	return 'nonce:' . (string) $action;
+}
+
+function check_ajax_referer( $action = -1, $query_arg = false, $stop = true ) {
+	$GLOBALS['vts_nonce_checks'][] = array(
+		'action'    => $action,
+		'query_arg' => $query_arg,
+		'stop'      => $stop,
+	);
+	return $GLOBALS['vts_nonce_valid'] ? 1 : false;
+}
+
+final class VTS_Json_Response_Exception extends RuntimeException {}
+
+function wp_send_json_success( $value = null, $status_code = null, $flags = 0 ) {
+	$GLOBALS['vts_json_response'] = array(
+		'success' => true,
+		'data'    => $value,
+		'status'  => $status_code,
+		'flags'   => $flags,
+	);
+	throw new VTS_Json_Response_Exception( 'json_success' );
+}
+
+function wp_send_json_error( $value = null, $status_code = null, $flags = 0 ) {
+	$GLOBALS['vts_json_response'] = array(
+		'success' => false,
+		'data'    => $value,
+		'status'  => $status_code,
+		'flags'   => $flags,
+	);
+	throw new VTS_Json_Response_Exception( 'json_error' );
+}
+
+function vts_capture_json_response( $callback ) {
+	$GLOBALS['vts_json_response'] = null;
+	try {
+		$callback();
+	} catch ( VTS_Json_Response_Exception $exception ) {
+		return $GLOBALS['vts_json_response'];
+	}
+	return $GLOBALS['vts_json_response'];
 }
 
 final class WC_Admin_Meta_Boxes {
@@ -328,18 +388,38 @@ final class VTS_Fake_Render_Variation {
 	}
 }
 
+final class VTS_Fake_Admin_Parent {
+	private $children;
+	private $id;
+
+	public function __construct( $id, array $children ) {
+		$this->id       = $id;
+		$this->children = $children;
+	}
+
+	public function get_id() {
+		return $this->id;
+	}
+
+	public function get_children() {
+		return $this->children;
+	}
+}
+
 final class VTS_Fake_Admin_Variation {
 	public $meta;
 	public $save_calls = 0;
 	private $attributes;
+	private $copy_label;
 	private $id;
 	private $parent_id;
 
-	public function __construct( $id, $parent_id, array $attributes = array(), array $meta = array() ) {
+	public function __construct( $id, $parent_id, array $attributes = array(), array $meta = array(), $copy_label = '' ) {
 		$this->id         = $id;
 		$this->parent_id  = $parent_id;
 		$this->attributes = $attributes;
 		$this->meta       = $meta;
+		$this->copy_label = $copy_label;
 	}
 
 	public function get_id() {
@@ -352,6 +432,10 @@ final class VTS_Fake_Admin_Variation {
 
 	public function get_attributes() {
 		return $this->attributes;
+	}
+
+	public function get_copy_label() {
+		return $this->copy_label;
 	}
 
 	public function get_meta( $key, $single = true ) {
@@ -370,6 +454,55 @@ final class VTS_Fake_Admin_Variation {
 		++$this->save_calls;
 	}
 }
+
+$copy_sheet = vts_valid_sheet();
+$copy_sheet['sections'][0]['items'][0]['value'] = '<b>37</b>';
+$GLOBALS['vts_products'][10382] = new VTS_Fake_Admin_Parent( 10382, array( 10410, 10410, 10411, 10412, 10414, 99998 ) );
+$GLOBALS['vts_products'][10410] = new VTS_Fake_Admin_Variation(
+	10410,
+	10382,
+	array(),
+	array( Uonix_VTS_Schema::META_KEY => $copy_sheet ),
+	'Leve, 3/8", Inox 316'
+);
+$GLOBALS['vts_products'][10411] = new VTS_Fake_Admin_Variation(
+	10411,
+	10382,
+	array(),
+	array(),
+	'<script>indevido</script> Pesado, 5/16", Inox 316'
+);
+$GLOBALS['vts_products'][10412] = new VTS_Fake_Admin_Variation(
+	10412,
+	99999,
+	array(),
+	array( Uonix_VTS_Schema::META_KEY => vts_valid_sheet() ),
+	'Variação de outro produto'
+);
+$GLOBALS['vts_products'][10413] = new VTS_Fake_Admin_Variation(
+	10413,
+	10382,
+	array(),
+	array( Uonix_VTS_Schema::META_KEY => array( 'version' => 2 ) ),
+	'Ficha inválida'
+);
+$GLOBALS['vts_products'][10414] = new VTS_Fake_Admin_Variation(
+	10415,
+	10382,
+	array(),
+	array( Uonix_VTS_Schema::META_KEY => vts_valid_sheet() ),
+	'Objeto com identidade divergente'
+);
+$GLOBALS['vts_editable_posts'][10382] = true;
+
+vts_assert_hook(
+	'vts_actions',
+	'wp_ajax_uonix_get_variation_technical_sheet',
+	array( 'Uonix_VTS_Admin', 'ajax_get_copy_sheet' ),
+	10,
+	0,
+	'endpoint AJAX de cópia registrado sem argumentos'
+);
 
 vts_assert_hook(
 	'vts_actions',
@@ -395,6 +528,79 @@ vts_assert_hook(
 	1,
 	'assets administrativos registrados na prioridade 10 com um argumento'
 );
+
+$copy_options = Uonix_VTS_Admin::copy_options( 10382 );
+vts_assert_same( 2, count( $copy_options ), 'lista inclui somente filhas válidas do produto pai' );
+vts_assert_same( array( 'id', 'label' ), array_keys( $copy_options[0] ), 'opção de cópia expõe somente ID e label' );
+vts_assert_same( 10410, $copy_options[0]['id'], 'lista contém a primeira variação filha' );
+vts_assert_contains( '#10410', $copy_options[0]['label'], 'label inclui o ID da variação' );
+vts_assert_contains( 'Inox 316', $copy_options[0]['label'], 'label preserva o atributo oficial completo' );
+vts_assert_same( 10411, $copy_options[1]['id'], 'lista contém filha sem ficha para resposta fail-closed posterior' );
+vts_assert_not_contains( '<script', $copy_options[1]['label'], 'label de opção remove markup inesperado' );
+vts_assert_same( array(), Uonix_VTS_Admin::copy_options( 99997 ), 'produto pai inexistente não produz opções' );
+vts_assert_same( 2, count( $GLOBALS['vts_formatted_calls'] ), 'somente filhas válidas têm label formatado' );
+vts_assert_same( array( true, false, false ), array_slice( $GLOBALS['vts_formatted_calls'][0], 1 ), 'label usa assinatura normativa do WooCommerce' );
+
+$copy = Uonix_VTS_Admin::get_copy_sheet( 10410, 10382 );
+vts_assert_same( array( 'ok', 'code', 'message', 'sheet' ), array_keys( $copy ), 'resultado de cópia possui contrato estável' );
+vts_assert_same( true, $copy['ok'], 'ficha da irmã é retornada' );
+vts_assert_same( '37', $copy['sheet']['sections'][0]['items'][0]['value'], 'dados retornados passam pelo schema' );
+vts_assert_not_contains( '<b>', wp_json_encode( $copy['sheet'] ), 'cópia retorna somente texto normalizado' );
+$wrong_parent = Uonix_VTS_Admin::get_copy_sheet( 10410, 99999 );
+vts_assert_same( false, $wrong_parent['ok'], 'origem fora do pai é recusada' );
+vts_assert_same( null, $wrong_parent['sheet'], 'falha de parentesco não expõe ficha' );
+$without_sheet = Uonix_VTS_Admin::get_copy_sheet( 10411, 10382 );
+vts_assert_same( false, $without_sheet['ok'], 'origem sem ficha é recusada' );
+vts_assert_same( 'missing_sheet', $without_sheet['code'], 'origem sem ficha possui código específico' );
+vts_assert_same( null, $without_sheet['sheet'], 'origem sem ficha não expõe dados' );
+$invalid_copy_sheet = Uonix_VTS_Admin::get_copy_sheet( 10413, 10382 );
+vts_assert_same( false, $invalid_copy_sheet['ok'], 'meta armazenado inválido é recusado' );
+vts_assert_same( 'invalid_sheet', $invalid_copy_sheet['code'], 'meta inválido possui código específico' );
+vts_assert_same( null, $invalid_copy_sheet['sheet'], 'meta inválido não expõe dados' );
+$mismatched_copy_source = Uonix_VTS_Admin::get_copy_sheet( 10414, 10382 );
+vts_assert_same( false, $mismatched_copy_source['ok'], 'objeto com ID divergente da consulta é recusado' );
+vts_assert_same( null, $mismatched_copy_source['sheet'], 'identidade divergente não expõe dados' );
+
+$GLOBALS['vts_nonce_valid'] = true;
+$_POST = array(
+	'source_id' => '-10410',
+	'parent_id' => '10382',
+);
+$ajax_success = vts_capture_json_response( array( 'Uonix_VTS_Admin', 'ajax_get_copy_sheet' ) );
+vts_assert_same( true, $ajax_success['success'], 'endpoint autenticado retorna sucesso' );
+vts_assert_same( array( 'sheet' ), array_keys( $ajax_success['data'] ), 'endpoint retorna somente a ficha' );
+vts_assert_same( '37', $ajax_success['data']['sheet']['sections'][0]['items'][0]['value'], 'endpoint retorna ficha normalizada' );
+vts_assert_same(
+	array( 'action' => 'uonix_variation_technical_sheet_copy', 'query_arg' => 'nonce', 'stop' => false ),
+	$GLOBALS['vts_nonce_checks'][0],
+	'endpoint valida nonce sem encerrar antes da resposta controlada'
+);
+
+$GLOBALS['vts_nonce_valid'] = false;
+$ajax_bad_nonce = vts_capture_json_response( array( 'Uonix_VTS_Admin', 'ajax_get_copy_sheet' ) );
+vts_assert_same( false, $ajax_bad_nonce['success'], 'nonce inválido é recusado' );
+vts_assert_same( 403, $ajax_bad_nonce['status'], 'nonce inválido responde como proibido' );
+vts_assert_same( array( 'code' ), array_keys( $ajax_bad_nonce['data'] ), 'nonce inválido não expõe ficha' );
+
+$GLOBALS['vts_nonce_valid'] = true;
+$GLOBALS['vts_editable_posts'][10382] = false;
+$ajax_forbidden = vts_capture_json_response( array( 'Uonix_VTS_Admin', 'ajax_get_copy_sheet' ) );
+vts_assert_same( false, $ajax_forbidden['success'], 'usuário sem edit_post é recusado' );
+vts_assert_same( 403, $ajax_forbidden['status'], 'falta de capacidade responde como proibida' );
+vts_assert_same( array( 'code' ), array_keys( $ajax_forbidden['data'] ), 'falta de capacidade não expõe ficha' );
+
+$GLOBALS['vts_editable_posts'][10382] = true;
+$GLOBALS['vts_editable_posts'][99999] = true;
+$_POST['parent_id'] = '99999';
+$ajax_wrong_parent = vts_capture_json_response( array( 'Uonix_VTS_Admin', 'ajax_get_copy_sheet' ) );
+vts_assert_same( false, $ajax_wrong_parent['success'], 'origem fora do pai falha também no endpoint' );
+vts_assert_same( array( 'code' ), array_keys( $ajax_wrong_parent['data'] ), 'parentesco inválido não expõe ficha via AJAX' );
+
+$_POST = array( 'source_id' => '10411', 'parent_id' => '10382' );
+$ajax_without_sheet = vts_capture_json_response( array( 'Uonix_VTS_Admin', 'ajax_get_copy_sheet' ) );
+vts_assert_same( false, $ajax_without_sheet['success'], 'origem sem ficha falha também no endpoint' );
+vts_assert_same( array( 'code' ), array_keys( $ajax_without_sheet['data'] ), 'origem sem ficha não expõe outros dados via AJAX' );
+$_POST = array();
 
 $GLOBALS['vts_current_screen']  = (object) array( 'post_type' => 'product' );
 $GLOBALS['vts_current_post_id'] = 10382;
@@ -430,8 +636,16 @@ vts_assert_same( (string) filemtime( UONIX_MU_PATH . 'uonix-woocommerce/assets/c
 vts_assert_same( 'uonix-vts-admin', $admin_config['handle'], 'configuração é associada ao script correto' );
 vts_assert_same( 'uonixVtsAdmin', $admin_config['object_name'], 'objeto JavaScript global tem nome fixo' );
 vts_assert_same( 10382, $admin_config['data']['parentId'], 'configuração inclui o produto pai atual' );
+vts_assert_same( 'https://example.test/wp-admin/admin-ajax.php', $admin_config['data']['ajaxUrl'], 'configuração aponta para o endpoint AJAX administrativo' );
+vts_assert_same( 'nonce:uonix_variation_technical_sheet_copy', $admin_config['data']['nonce'], 'configuração inclui nonce dedicado à cópia' );
+vts_assert_same( 'uonix_get_variation_technical_sheet', $admin_config['data']['copyAction'], 'configuração inclui action AJAX estável' );
+vts_assert_same( $copy_options, $admin_config['data']['copyOptions'], 'opções irmãs são localizadas uma única vez por produto' );
+vts_assert_same( 'uonix_variation_technical_sheet_copy', $GLOBALS['vts_created_nonces'][0], 'nonce usa ação dedicada' );
 vts_assert_same( 'Remover a ficha técnica desta variação ao salvar?', $admin_config['data']['strings']['removeConfirm'], 'confirmação de remoção é localizada' );
 vts_assert_same( 'Não foi possível carregar a ficha técnica salva.', $admin_config['data']['strings']['payloadError'], 'erro de hidratação é localizado' );
+vts_assert_same( 'Substituir a ficha atual pela ficha selecionada?', $admin_config['data']['strings']['copyConfirm'], 'confirmação de sobrescrita é localizada' );
+vts_assert_same( 'Não foi possível copiar a ficha selecionada.', $admin_config['data']['strings']['copyError'], 'erro de cópia é localizado' );
+vts_assert_same( 'Selecione uma variação', $admin_config['data']['strings']['copyPlaceholder'], 'placeholder da origem é localizado' );
 
 $GLOBALS['vts_enqueued_scripts']  = array();
 $GLOBALS['vts_enqueued_styles']   = array();
@@ -823,6 +1037,10 @@ vts_assert_contains( '&quot;value&quot;:&quot;37&quot;', $existing_admin_html, '
 vts_assert_contains( 'value="Modelo: Pesado · Material: Inox 316 · Pol.: 5/16&quot;"', $existing_admin_html, 'readonly usa atributos oficiais escapados' );
 vts_assert_contains( 'aria-label="Título geral da ficha técnica"', $existing_admin_html, 'título geral possui nome acessível' );
 vts_assert_contains( 'aria-label="Cabeçalho automático da variação" readonly', $existing_admin_html, 'cabeçalho derivado é readonly e acessível' );
+vts_assert_contains( 'class="uonix-vts-admin__copy-control"', $existing_admin_html, 'controle de cópia possui label real' );
+vts_assert_contains( 'class="uonix-vts-admin__copy-source" aria-label="Variação de origem"', $existing_admin_html, 'origem da cópia possui nome acessível' );
+vts_assert_contains( 'type="button" class="button uonix-vts-admin__copy"', $existing_admin_html, 'ação de cópia é botão explícito' );
+vts_assert_same( 1, substr_count( $existing_admin_html, 'class="uonix-vts-admin__copy-source"' ), 'cada editor possui um único seletor de origem' );
 vts_assert_contains( 'aria-label="Reordenar seção"', $existing_admin_html, 'handle de seção possui nome acessível' );
 vts_assert_contains( 'aria-label="Título opcional da seção"', $existing_admin_html, 'título opcional da seção possui nome acessível' );
 vts_assert_contains( 'aria-label="Formato da seção"', $existing_admin_html, 'formato da seção possui nome acessível' );
@@ -973,6 +1191,46 @@ vts_assert_contains( "if ('delete' === envelope.action)", $admin_js, 'delete sal
 vts_assert_contains( "\$root.attr('data-had-sheet', '0');", $admin_js, 'delete salvo deixa de ser tratado como ficha persistida' );
 vts_assert_same( 2, substr_count( $admin_js, "\$root.removeClass('is-active is-deleted');" ), 'remoção local e delete salvo recolhem o editor separadamente' );
 vts_assert_same( 2, substr_count( $admin_js, "\$payload.prop('disabled', true).val('');" ), 'estado inativo e delete confirmado desabilitam o payload separadamente' );
+vts_assert_contains( 'function populateCopyOptions($root)', $admin_js, 'script possui inicializador próprio das opções de cópia' );
+vts_assert_contains( 'Array.isArray(config.copyOptions)', $admin_js, 'opções localizadas são validadas como array' );
+vts_assert_same( 2, substr_count( $admin_js, 'sourceId === destinationId' ), 'preenchimento e clique recusam copiar a própria variação' );
+vts_assert_same( 2, substr_count( $admin_js, "\$('<option>', {" ), 'placeholder e origens são criados como nós de texto, sem HTML dinâmico' );
+vts_assert_same( 2, substr_count( $admin_js, 'populateCopyOptions($root)' ), 'inicializador de opções é definido e chamado no ciclo AJAX' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__copy'", $admin_js, 'ação de cópia usa evento delegado' );
+vts_assert_contains( "collectSheet(\$root).sections.length > 0", $admin_js, 'sobrescrita detecta ficha atual com conteúdo' );
+vts_assert_same( 2, substr_count( $admin_js, 'config.strings.copyConfirm' ), 'confirmação de sobrescrita usa string localizada' );
+vts_assert_same( 2, substr_count( $admin_js, 'config.strings.copyError' ), 'falha de cópia usa string localizada' );
+vts_assert_contains( '$.post(config.ajaxUrl, {', $admin_js, 'cópia consulta o endpoint localizado' );
+vts_assert_contains( 'action: config.copyAction', $admin_js, 'requisição usa action localizada' );
+vts_assert_contains( 'nonce: config.nonce', $admin_js, 'requisição envia o nonce dedicado' );
+vts_assert_contains( 'source_id: sourceId', $admin_js, 'requisição envia somente a origem selecionada' );
+vts_assert_contains( 'parent_id: config.parentId', $admin_js, 'requisição vincula a origem ao produto pai' );
+vts_assert_contains( 'function isValidCopySheet(sheet)', $admin_js, 'resposta AJAX possui validador estrutural próprio' );
+vts_assert_contains( 'function isValidText(value, maxLength, allowEmpty)', $admin_js, 'validador possui contrato de texto compartilhado' );
+vts_assert_contains( "typeof value !== 'string'", $admin_js, 'validador recusa valores não textuais' );
+vts_assert_contains( '/[\\u0000-\\u001F\\u007F]/.test(value)', $admin_js, 'validador recusa caracteres de controle' );
+vts_assert_contains( 'Array.from(value).length > maxLength', $admin_js, 'validador conta caracteres Unicode no limite' );
+vts_assert_contains( 'value.trim().length > 0', $admin_js, 'validador recusa texto obrigatório vazio após trim' );
+vts_assert_contains( 'function isPlainObject(value)', $admin_js, 'validador distingue objetos de arrays e nulos' );
+vts_assert_contains( "null !== value && 'object' === typeof value && !Array.isArray(value)", $admin_js, 'validador exige objeto simples antes de acessar campos' );
+vts_assert_contains( 'sheet.version !== 1', $admin_js, 'validador exige versão estrita do schema' );
+vts_assert_contains( "isValidText(sheet.title, 160, false)", $admin_js, 'validador exige título geral não vazio dentro do limite' );
+vts_assert_contains( 'sheet.sections.length < 1 || sheet.sections.length > 50) {', $admin_js, 'validador exige quantidade segura de seções' );
+vts_assert_contains( 'isValidText(section.title, 120, true)', $admin_js, 'validador limita o título opcional da seção' );
+vts_assert_contains( "section.layout !== 'compact' && section.layout !== 'detailed'", $admin_js, 'validador restringe layouts à whitelist' );
+vts_assert_contains( 'section.items.length < 1 || section.items.length > 100) {', $admin_js, 'validador exige quantidade segura de itens' );
+vts_assert_contains( 'isValidText(item.label, 120, false)', $admin_js, 'validador exige rótulo completo' );
+vts_assert_contains( 'isValidText(item.value, 500, false)', $admin_js, 'validador exige valor completo' );
+vts_assert_contains( '!isValidCopySheet(response.data.sheet)', $admin_js, 'resposta sem ficha válida falha antes de alterar o editor' );
+vts_assert_true(
+	strpos( $admin_js, '!isValidCopySheet(response.data.sheet)' ) < strpos( $admin_js, 'renderSheetIntoEditor($root, response.data.sheet)' ),
+	'validação da resposta precede qualquer alteração do editor'
+);
+vts_assert_contains( 'renderSheetIntoEditor($root, response.data.sheet)', $admin_js, 'cópia reutiliza o renderer preservando ordem' );
+vts_assert_contains( "renderSheetIntoEditor(\$root, response.data.sheet);\n\t\t\t\t\$root.addClass('is-active').removeClass('is-deleted has-payload-error');\n\t\t\t\tsync(\$root);", $admin_js, 'resposta válida aplica render, estado e payload na mesma sequência' );
+vts_assert_contains( "removeClass('is-deleted has-payload-error')", $admin_js, 'resposta válida substitui estado removido ou payload inválido' );
+vts_assert_contains( '.fail(showCopyError)', $admin_js, 'falha de transporte mostra erro controlado' );
+vts_assert_not_contains( "trigger('woocommerce_variations_save')", $admin_js, 'cópia não salva automaticamente' );
 vts_assert_not_contains( 'variable_description', $admin_js, 'script não depende de IDs internos de descrição' );
 
 $admin_css = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/admin-ficha-tecnica-variacao.css' );

@@ -15,6 +15,7 @@ final class Uonix_VTS_Admin {
 		add_action( 'woocommerce_product_after_variable_attributes', array( __CLASS__, 'render_editor' ), 10, 3 );
 		add_action( 'woocommerce_admin_process_variation_object', array( __CLASS__, 'save_variation' ), 10, 2 );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ), 10, 1 );
+		add_action( 'wp_ajax_uonix_get_variation_technical_sheet', array( __CLASS__, 'ajax_get_copy_sheet' ), 10, 0 );
 	}
 
 	/**
@@ -47,16 +48,160 @@ final class Uonix_VTS_Admin {
 			array(),
 			(string) filemtime( UONIX_MU_PATH . $style_relative )
 		);
+		$parent_id = function_exists( 'get_the_ID' ) ? absint( get_the_ID() ) : 0;
 		wp_localize_script(
 			'uonix-vts-admin',
 			'uonixVtsAdmin',
 			array(
-				'parentId' => function_exists( 'get_the_ID' ) ? absint( get_the_ID() ) : 0,
-				'strings'  => array(
-					'removeConfirm' => 'Remover a ficha técnica desta variação ao salvar?',
-					'payloadError'  => 'Não foi possível carregar a ficha técnica salva.',
+				'parentId'   => $parent_id,
+				'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
+				'nonce'      => wp_create_nonce( 'uonix_variation_technical_sheet_copy' ),
+				'copyAction' => 'uonix_get_variation_technical_sheet',
+				'copyOptions' => self::copy_options( $parent_id ),
+				'strings'    => array(
+					'removeConfirm'   => 'Remover a ficha técnica desta variação ao salvar?',
+					'payloadError'    => 'Não foi possível carregar a ficha técnica salva.',
+					'copyConfirm'     => 'Substituir a ficha atual pela ficha selecionada?',
+					'copyError'       => 'Não foi possível copiar a ficha selecionada.',
+					'copyPlaceholder' => 'Selecione uma variação',
 				),
 			)
+		);
+	}
+
+	/**
+	 * Lista variações filhas válidas para o seletor de cópia.
+	 *
+	 * @param mixed $parent_id Produto variável pai.
+	 * @return array<int, array{id:int,label:string}>
+	 */
+	public static function copy_options( $parent_id ) {
+		$parent_id = absint( $parent_id );
+		if ( ! $parent_id || ! function_exists( 'wc_get_product' ) || ! function_exists( 'wc_get_formatted_variation' ) ) {
+			return array();
+		}
+
+		$parent = wc_get_product( $parent_id );
+		if ( ! is_object( $parent ) || ! method_exists( $parent, 'get_children' ) ) {
+			return array();
+		}
+		$children = $parent->get_children();
+		if ( ! is_array( $children ) ) {
+			return array();
+		}
+
+		$options = array();
+		$seen    = array();
+		foreach ( $children as $child_id ) {
+			$child_id = absint( $child_id );
+			if ( ! $child_id || isset( $seen[ $child_id ] ) ) {
+				continue;
+			}
+			$variation = wc_get_product( $child_id );
+			if (
+				! is_object( $variation ) ||
+				! method_exists( $variation, 'get_id' ) ||
+				! method_exists( $variation, 'get_parent_id' ) ||
+				$child_id !== absint( $variation->get_id() ) ||
+				$parent_id !== absint( $variation->get_parent_id() )
+			) {
+				continue;
+			}
+
+			$formatted = wc_get_formatted_variation( $variation, true, false, false );
+			$formatted = is_scalar( $formatted ) ? sanitize_text_field( wp_strip_all_tags( (string) $formatted, true ) ) : '';
+			$options[] = array(
+				'id'    => $child_id,
+				'label' => sprintf( '#%d%s', $child_id, '' === $formatted ? '' : ' — ' . $formatted ),
+			);
+			$seen[ $child_id ] = true;
+		}
+		return $options;
+	}
+
+	/**
+	 * Retorna somente uma ficha normalizada pertencente ao produto informado.
+	 *
+	 * @param mixed $source_id Variação de origem.
+	 * @param mixed $parent_id Produto variável pai.
+	 * @return array{ok:bool,code:string|null,message:string|null,sheet:array|null}
+	 */
+	public static function get_copy_sheet( $source_id, $parent_id ) {
+		$source_id = absint( $source_id );
+		$parent_id = absint( $parent_id );
+		if ( ! $source_id || ! $parent_id || ! function_exists( 'wc_get_product' ) ) {
+			return self::copy_failure( 'invalid_source', 'A variação de origem é inválida.' );
+		}
+
+		$variation = wc_get_product( $source_id );
+		if (
+			! is_object( $variation ) ||
+			! method_exists( $variation, 'get_id' ) ||
+			! method_exists( $variation, 'get_parent_id' ) ||
+			! method_exists( $variation, 'get_meta' ) ||
+			$source_id !== absint( $variation->get_id() ) ||
+			$parent_id !== absint( $variation->get_parent_id() )
+		) {
+			return self::copy_failure( 'invalid_parent', 'A variação de origem não pertence a este produto.' );
+		}
+
+		$stored = $variation->get_meta( Uonix_VTS_Schema::META_KEY, true );
+		if ( ! is_array( $stored ) ) {
+			return self::copy_failure( 'missing_sheet', 'A variação de origem não possui ficha técnica válida.' );
+		}
+		$normalized = Uonix_VTS_Schema::normalize_sheet( $stored );
+		if ( ! $normalized['ok'] ) {
+			return self::copy_failure( 'invalid_sheet', 'A ficha técnica da variação de origem é inválida.' );
+		}
+		return array(
+			'ok'      => true,
+			'code'    => null,
+			'message' => null,
+			'sheet'   => $normalized['sheet'],
+		);
+	}
+
+	/**
+	 * Endpoint autenticado da cópia entre variações irmãs.
+	 */
+	public static function ajax_get_copy_sheet() {
+		if ( false === check_ajax_referer( 'uonix_variation_technical_sheet_copy', 'nonce', false ) ) {
+			wp_send_json_error( array( 'code' => 'invalid_nonce' ), 403 );
+			return;
+		}
+
+		$source_raw = isset( $_POST['source_id'] ) ? wp_unslash( $_POST['source_id'] ) : 0;
+		$parent_raw = isset( $_POST['parent_id'] ) ? wp_unslash( $_POST['parent_id'] ) : 0;
+		$source_id  = is_scalar( $source_raw ) ? absint( $source_raw ) : 0;
+		$parent_id  = is_scalar( $parent_raw ) ? absint( $parent_raw ) : 0;
+		if ( ! $source_id || ! $parent_id ) {
+			wp_send_json_error( array( 'code' => 'invalid_request' ), 400 );
+			return;
+		}
+		if ( ! current_user_can( 'edit_post', $parent_id ) ) {
+			wp_send_json_error( array( 'code' => 'forbidden' ), 403 );
+			return;
+		}
+
+		$result = self::get_copy_sheet( $source_id, $parent_id );
+		if ( ! $result['ok'] ) {
+			wp_send_json_error( array( 'code' => $result['code'] ), 422 );
+			return;
+		}
+		wp_send_json_success( array( 'sheet' => $result['sheet'] ) );
+	}
+
+	/**
+	 * @param string $code Código estável da falha.
+	 * @param string $message Mensagem administrativa.
+	 * @return array{ok:bool,code:string,message:string,sheet:null}
+	 */
+	private static function copy_failure( $code, $message ) {
+		return array(
+			'ok'      => false,
+			'code'    => $code,
+			'message' => $message,
+			'sheet'   => null,
 		);
 	}
 
@@ -119,6 +264,12 @@ final class Uonix_VTS_Admin {
 			<input type="hidden" class="uonix-vts-admin__payload" name="<?php echo esc_attr( $field_name ); ?>" value="<?php echo esc_attr( $payload ); ?>"<?php if ( ! $has_sheet ) : ?> disabled<?php endif; ?>>
 			<button type="button" class="button uonix-vts-admin__add">Adicionar ficha técnica</button>
 			<div class="uonix-vts-admin__editor">
+				<div class="uonix-vts-admin__copy-actions">
+					<label class="uonix-vts-admin__copy-control">Copiar de outra variação
+						<select class="uonix-vts-admin__copy-source" aria-label="Variação de origem"></select>
+					</label>
+					<button type="button" class="button uonix-vts-admin__copy" disabled>Copiar</button>
+				</div>
 				<label>Título geral<input type="text" class="uonix-vts-admin__sheet-title" aria-label="Título geral da ficha técnica"></label>
 				<label>Cabeçalho automático<input type="text" class="uonix-vts-admin__subtitle" aria-label="Cabeçalho automático da variação" readonly value="<?php echo esc_attr( implode( ' · ', $subtitle ) ); ?>"></label>
 				<div class="uonix-vts-admin__sections"></div>

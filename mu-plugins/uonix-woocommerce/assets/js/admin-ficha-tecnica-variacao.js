@@ -29,6 +29,45 @@
 		};
 	}
 
+	function isValidText(value, maxLength, allowEmpty) {
+		if (typeof value !== 'string' || /[\u0000-\u001F\u007F]/.test(value)) {
+			return false;
+		}
+		if (Array.from(value).length > maxLength) {
+			return false;
+		}
+		return allowEmpty || value.trim().length > 0;
+	}
+
+	function isPlainObject(value) {
+		return null !== value && 'object' === typeof value && !Array.isArray(value);
+	}
+
+	function isValidCopySheet(sheet) {
+		if (!isPlainObject(sheet) || sheet.version !== 1 || !isValidText(sheet.title, 160, false) || !Array.isArray(sheet.sections)) {
+			return false;
+		}
+		if (sheet.sections.length < 1 || sheet.sections.length > 50) {
+			return false;
+		}
+		return sheet.sections.every(function (section) {
+			if (!isPlainObject(section) || !isValidText(section.title, 120, true)) {
+				return false;
+			}
+			if (section.layout !== 'compact' && section.layout !== 'detailed') {
+				return false;
+			}
+			if (!Array.isArray(section.items) || section.items.length < 1 || section.items.length > 100) {
+				return false;
+			}
+			return section.items.every(function (item) {
+				return isPlainObject(item) &&
+					isValidText(item.label, 120, false) &&
+					isValidText(item.value, 500, false);
+			});
+		});
+	}
+
 	function sync($root) {
 		const $payload = $root.find('.uonix-vts-admin__payload');
 		if ($root.hasClass('has-payload-error')) {
@@ -121,6 +160,36 @@
 		window.alert(message);
 	}
 
+	function showCopyError() {
+		const message = config.strings && config.strings.copyError
+			? config.strings.copyError
+			: 'Não foi possível copiar a ficha selecionada.';
+		window.alert(message);
+	}
+
+	function populateCopyOptions($root) {
+		const $select = $root.find('.uonix-vts-admin__copy-source');
+		const destinationId = Number($root.attr('data-variation-id')) || 0;
+		const placeholder = config.strings && config.strings.copyPlaceholder
+			? config.strings.copyPlaceholder
+			: 'Selecione uma variação';
+		$select.empty().append($('<option>', {
+			value: '',
+			text: placeholder
+		}));
+		(Array.isArray(config.copyOptions) ? config.copyOptions : []).forEach(function (option) {
+			const sourceId = Number(option && option.id) || 0;
+			if (!sourceId || sourceId === destinationId) {
+				return;
+			}
+			$select.append($('<option>', {
+				value: String(sourceId),
+				text: String(option.label || ('#' + sourceId))
+			}));
+		});
+		$root.find('.uonix-vts-admin__copy').prop('disabled', $select.find('option').length < 2);
+	}
+
 	function initAll() {
 		$('.uonix-vts-admin').each(function () {
 			const $root = $(this);
@@ -128,6 +197,7 @@
 				return;
 			}
 			$root.data('uonixVtsReady', true);
+			populateCopyOptions($root);
 			const raw = String($root.find('.uonix-vts-admin__payload').val() || '');
 			let hydrated = false;
 			if (raw) {
@@ -211,6 +281,36 @@
 			const $root = $(this).closest('.uonix-vts-admin');
 			$(this).closest('.uonix-vts-admin__section').remove();
 			sync($root);
+		})
+		.on('click', '.uonix-vts-admin__copy', function () {
+			const $root = $(this).closest('.uonix-vts-admin');
+			const sourceId = Number($root.find('.uonix-vts-admin__copy-source').val()) || 0;
+			const destinationId = Number($root.attr('data-variation-id')) || 0;
+			if (!sourceId || sourceId === destinationId) {
+				showCopyError();
+				return;
+			}
+			const hasData = $root.hasClass('is-active') && collectSheet($root).sections.length > 0;
+			const message = config.strings && config.strings.copyConfirm
+				? config.strings.copyConfirm
+				: 'Substituir a ficha atual pela ficha selecionada?';
+			if (hasData && !window.confirm(message)) {
+				return;
+			}
+			$.post(config.ajaxUrl, {
+				action: config.copyAction,
+				nonce: config.nonce,
+				source_id: sourceId,
+				parent_id: config.parentId
+			}).done(function (response) {
+				if (!response || !response.success || !response.data || !isValidCopySheet(response.data.sheet)) {
+					showCopyError();
+					return;
+				}
+				renderSheetIntoEditor($root, response.data.sheet);
+				$root.addClass('is-active').removeClass('is-deleted has-payload-error');
+				sync($root);
+			}).fail(showCopyError);
 		})
 		.on('click', '.uonix-vts-admin__remove-sheet', function () {
 			const $root = $(this).closest('.uonix-vts-admin');
