@@ -207,7 +207,8 @@ printf(
 Run:
 
 ```bash
-php scripts/tests/test-rfq-product-default.php
+podman run --rm -v "$PWD:/app:ro" -w /app php:8.3-cli \
+  php scripts/tests/test-rfq-product-default.php
 ```
 
 Expected: exit `1` com:
@@ -287,9 +288,12 @@ Adicionar a `.github/workflows/validate.yml`, no job PHP, depois de `Test WooCom
 Run:
 
 ```bash
-php scripts/tests/test-rfq-product-default.php
-php -l mu-plugins/uonix-woocommerce/23-rfq-produto-padrao.php
-php -l scripts/tests/test-rfq-product-default.php
+podman run --rm -v "$PWD:/app:ro" -w /app php:8.3-cli \
+  php scripts/tests/test-rfq-product-default.php
+podman run --rm -v "$PWD:/app:ro" -w /app php:8.3-cli \
+  php -l mu-plugins/uonix-woocommerce/23-rfq-produto-padrao.php
+podman run --rm -v "$PWD:/app:ro" -w /app php:8.3-cli \
+  php -l scripts/tests/test-rfq-product-default.php
 python3 -c 'import yaml' || python3 -m pip install --quiet pyyaml
 bash scripts/tests/test-ci-covers-all-tests.sh
 actionlint
@@ -319,7 +323,8 @@ Aplicar temporariamente esta mutação somente em `23-rfq-produto-padrao.php`:
 Run:
 
 ```bash
-php scripts/tests/test-rfq-product-default.php
+podman run --rm -v "$PWD:/app:ro" -w /app php:8.3-cli \
+  php scripts/tests/test-rfq-product-default.php
 ```
 
 Expected: exit `1` com:
@@ -331,7 +336,8 @@ FAIL: hook default_post_metadata registrado exatamente uma vez
 Reverter imediatamente a mutação para `default_post_metadata` e repetir:
 
 ```bash
-php scripts/tests/test-rfq-product-default.php
+podman run --rm -v "$PWD:/app:ro" -w /app php:8.3-cli \
+  php scripts/tests/test-rfq-product-default.php
 ```
 
 Expected: PASS com 14 asserções.
@@ -463,7 +469,8 @@ A execução deve terminar com código `0`; o `finally` remove o produto tempor�
 - [ ] **Step 3: Rodar os gates finais do repositório**
 
 ```bash
-php scripts/tests/test-rfq-product-default.php
+podman run --rm -v "$PWD:/app:ro" -w /app php:8.3-cli \
+  php scripts/tests/test-rfq-product-default.php
 bash scripts/tests/test-ci-covers-all-tests.sh
 actionlint
 git diff --check
@@ -476,7 +483,7 @@ Expected:
 - auditor de CI PASS;
 - `actionlint` e `git diff --check` com exit `0`;
 - árvore sem arquivos modificados após o commit funcional;
-- branch à frente de `origin/master` somente pelos commits da especificação, do plano e da implementação.
+- branch à frente de `origin/master` somente pelos commits da especificação, do plano, da adaptação do plano ao PHP em container e da implementação.
 
 - [ ] **Step 4: Confirmar escopo do histórico antes do push**
 
@@ -490,6 +497,7 @@ Expected:
 
 - commit da especificação `docs(woocommerce): especifica RFQ habilitado por padrao`;
 - commit do plano `docs(woocommerce): planeja RFQ habilitado por padrao`;
+- commit da adaptação `docs(woocommerce): usa PHP em container no plano RFQ`;
 - commit funcional `feat(woocommerce): habilita RFQ por padrao`;
 - somente especificação, plano, módulo RFQ, loader, teste focal e workflow de validação no diff;
 - nenhum arquivo de plugin de terceiros e nenhum arquivo de banco.
