@@ -1,7 +1,7 @@
 # Ficha técnica estruturada por variação no WooCommerce
 
 **Data:** 2026-08-10
-**Status:** desenho funcional e técnico aprovado
+**Status:** desenho funcional e técnico aprovado; revisão pós-QA aprovada em 2026-08-11
 **Escopo:** editor de produto variável, persistência, frontend e migração das fichas legadas
 
 ## 1. Resumo
@@ -198,17 +198,18 @@ O editor exibirá:
 
 1. título geral editável;
 2. cabeçalho automático somente leitura;
-3. botão **Copiar de outra variação**;
-4. botão **Remover ficha**;
+3. barra **Copiar de outra variação**, com select flexível e botão **Copiar** alinhados na mesma linha em viewport amplo;
+4. rodapé próprio com **Adicionar seção** e **Remover ficha** visualmente separados;
 5. seções ordenadas;
 6. em cada seção:
-   - alça de reordenação;
+   - alça de arraste;
+   - botões explícitos **Subir** e **Descer**;
    - título opcional;
    - seletor `Compacta` ou `Detalhada`;
-   - botão de remoção;
+   - botão **Remover seção**;
    - itens ordenados de Rótulo + Valor;
-   - botão **Adicionar item**;
-7. botão **Adicionar seção**.
+   - em cada item, alça de arraste e botões **Subir**, **Descer** e **Remover item**;
+   - rodapé próprio com botão **Adicionar item**.
 
 A remoção e a cópia alteram apenas o estado local até o usuário acionar o salvamento nativo do WooCommerce.
 
@@ -235,6 +236,23 @@ Fundo somente leitura:     #f0f2f4
 ```
 
 Texto branco será reservado a botões de fundo escuro e ao estado nativo de seleção de texto. Placeholders opcionais poderão ser itálicos, mas dados preenchidos não.
+
+### 7.6 Revisão pós-QA: controles e hierarquia visual
+
+A validação humana no clone local mostrou que uma alça `↕` implementada como texto dentro de `.button-link` não comunica corretamente o arraste, fica visualmente inconsistente no WordPress e não oferece comportamento ao clique. A revisão aprovada adota:
+
+- `dashicons-move` para a alça de arraste;
+- `dashicons-arrow-up-alt2` e `dashicons-arrow-down-alt2` para mover por clique ou teclado;
+- `dashicons-trash` para remoção;
+- um botão real por ação, com `type="button"`, `aria-label`, foco visível, alvo mínimo de 32 × 32 px e ícone decorativo com `aria-hidden="true"`;
+- estado `disabled` em **Subir** para o primeiro elemento e em **Descer** para o último;
+- sincronização imediata do JSON oculto após arraste ou clique;
+- foco mantido no controle equivalente do elemento depois de ele mudar de posição;
+- as mesmas regras para seções e itens, sem permitir que itens atravessem seções.
+
+Acima de 782 px, cada linha de item terá alça, campos Rótulo + Valor e uma toolbar compacta de ações na mesma linha. O cabeçalho da seção terá alça, título, formato e toolbar. Em 782 px ou menos, os campos poderão quebrar de linha, mas a toolbar permanecerá agrupada.
+
+A barra de cópia usará CSS Grid com `grid-template-columns: minmax(0, 1fr) auto` acima de 782 px e uma coluna em viewport menor. O rodapé de cada seção conterá somente **Adicionar item**, alinhado à direita. O rodapé da ficha usará flex com **Adicionar seção** à esquerda e **Remover ficha** à direita; em viewport estreito poderá quebrar linha sem sobrepor ações. Caracteres literais `↕` e `×` não serão usados como ícones de interface.
 
 ## 8. Subtítulo automático
 
@@ -318,7 +336,8 @@ O cartão seguirá o padrão aprovado:
 - células compactas centralizadas, com rótulo menor e valor destacado;
 - células detalhadas alinhadas à esquerda, com rótulo menor e valor destacado;
 - título de seção omitido quando vazio;
-- título de seção exibido como faixa discreta quando preenchido.
+- título de seção exibido como faixa discreta quando preenchido;
+- faixa divisória de 6 px em `#f1f5f9` entre seções adjacentes dentro de `.uonix-vts__card`.
 
 As classes novas usarão prefixo próprio e não reutilizarão os seletores legados.
 
@@ -332,6 +351,8 @@ Cada seção será sua própria grade CSS:
 Assim, seis itens ocupam seis colunas quando houver espaço, quatro itens detalhados ocupam quatro colunas, e quantidades maiores quebram apenas quando a largura mínima não couber. O cabeçalho empilha título e atributos em telas estreitas.
 
 Os separadores usarão `gap` de 1 px com a cor da borda como fundo da grade, evitando regras frágeis de `:last-child` quando houver quebra de linha.
+
+Além dos separadores internos da grade, `.uonix-vts__section + .uonix-vts__section` terá uma faixa superior de 6 px em `#f1f5f9`. O divisor não adicionará markup, não aparecerá antes da primeira seção e continuará contido pelos cantos arredondados do cartão.
 
 ## 11. Assets e compatibilidade
 
@@ -459,7 +480,10 @@ Adicionar teste PHP de contrato ao padrão de `scripts/tests/` e registrá-lo em
 - descrição livre independente;
 - subtítulo com valores oficiais;
 - parser da estrutura legada;
-- idempotência e pré-condições do rollback.
+- idempotência e pré-condições do rollback;
+- divisor somente entre seções adjacentes;
+- markup administrativo sem glyphs literais `↕`/`×` e com controles separados de arraste, subir, descer e remover;
+- handlers delegados de subir/descer para seções e itens, incluindo sincronização do payload e limites desabilitados.
 
 Os gates existentes executarão `php -l` em PHP 8.3 e PHP 8.5. O workflow também executará `node --check` no novo JavaScript administrativo. `test-ci-covers-all-tests.sh` deverá reconhecer o teste novo como coberto.
 
@@ -472,7 +496,7 @@ Verificar no clone local:
 3. adicionar variação individualmente;
 4. gerar variações a partir de atributos;
 5. navegar entre páginas de variações por AJAX;
-6. reordenar seções e itens;
+6. reordenar seções e itens por arraste e por botões **Subir/Descer**, comprovando no payload `A,B → B,A → A,B`;
 7. copiar ficha de variação em outra página;
 8. confirmar aviso antes de sobrescrever destino preenchido;
 9. remover ficha e salvar;
@@ -530,6 +554,9 @@ A solução estará pronta quando:
 - títulos de seção vazios não produzirem faixa extra;
 - o cartão reproduzir o padrão visual aprovado;
 - textos dos inputs forem escuros e legíveis;
+- select e botão de cópia permanecerem alinhados em viewport amplo, com toolbars compactas e ações destrutivas separadas;
+- seções e itens puderem ser reordenados tanto por arraste quanto por botões acessíveis de subir/descer;
+- o frontend exibir divisor somente entre seções adjacentes;
 - o cabeçalho usar `Modelo`, `Material` e `Pol.` com valores oficiais;
 - novas variações começarem sem ficha e puderem copiar outra explicitamente;
 - variações carregadas por AJAX funcionarem;

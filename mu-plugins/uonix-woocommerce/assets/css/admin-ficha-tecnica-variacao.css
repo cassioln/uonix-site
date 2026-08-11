@@ -1,0 +1,210 @@
+.uonix-vts-admin {
+	clear: both;
+	margin: 16px 0 0;
+	padding: 14px;
+	border: 1px solid #c9d5e6;
+	border-radius: 6px;
+	background: #f8fafc;
+}
+
+.uonix-vts-admin label {
+	display: block;
+	margin: 0 0 10px;
+	color: #2c3338;
+	font-weight: 600;
+}
+
+.uonix-vts-admin input[type="text"],
+.uonix-vts-admin select {
+	width: 100%;
+	margin-top: 4px;
+	color: #2c3338 !important;
+	background: #fff;
+}
+
+.uonix-vts-admin input[readonly] {
+	color: #50575e !important;
+	background: #f0f2f4;
+}
+
+.uonix-vts-admin input::placeholder {
+	color: #8c8f94;
+	opacity: 1;
+}
+
+.uonix-vts-admin__copy-actions {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 8px;
+	align-items: end;
+	margin-bottom: 10px;
+}
+
+.uonix-vts-admin__copy-actions .uonix-vts-admin__copy-control,
+.uonix-vts-admin__copy-actions .uonix-vts-admin__copy {
+	margin: 0;
+}
+
+.uonix-vts-admin__editor {
+	display: none;
+}
+
+.uonix-vts-admin.is-active .uonix-vts-admin__editor {
+	display: block;
+}
+
+.uonix-vts-admin.is-active .uonix-vts-admin__add {
+	display: none;
+}
+
+.uonix-vts-admin__section {
+	margin-top: 12px;
+	border: 1px solid #cbd5e1;
+	border-radius: 5px;
+	background: #fff;
+	overflow: hidden;
+}
+
+.uonix-vts-admin__section-head,
+.uonix-vts-admin__item {
+	display: grid;
+	grid-template-columns: 32px minmax(120px, 1fr) minmax(120px, 1fr) auto;
+	gap: 8px;
+	align-items: center;
+	padding: 8px;
+}
+
+.uonix-vts-admin__section-head {
+	grid-template-columns: 32px minmax(160px, 1fr) minmax(130px, 160px) auto;
+	background: #eef2f6;
+	border-bottom: 1px solid #d9e0e8;
+}
+
+.uonix-vts-admin__section-head input,
+.uonix-vts-admin__section-head select,
+.uonix-vts-admin__item input {
+	margin: 0;
+}
+
+.uonix-vts-admin__actions {
+	display: flex;
+	gap: 4px;
+	align-items: center;
+	justify-content: flex-end;
+}
+
+.uonix-vts-admin .uonix-vts-admin__icon-button {
+	display: inline-flex !important;
+	align-items: center;
+	justify-content: center;
+	min-width: 32px;
+	min-height: 32px;
+	width: 32px;
+	height: 32px;
+	padding: 0 !important;
+	line-height: 1 !important;
+}
+
+.uonix-vts-admin .uonix-vts-admin__icon-button .dashicons,
+.uonix-vts-admin .uonix-vts-admin__remove-sheet .dashicons {
+	width: 18px;
+	height: 18px;
+	font-size: 18px;
+	vertical-align: top;
+}
+
+.uonix-vts-admin .uonix-vts-admin__icon-button .dashicons {
+	line-height: 8px;
+}
+
+.uonix-vts-admin .uonix-vts-admin__remove-sheet .dashicons {
+	line-height: 1;
+}
+
+.uonix-vts-admin .uonix-vts-admin__drag-handle {
+	cursor: grab;
+	touch-action: none;
+	color: #50575e;
+}
+
+.uonix-vts-admin .uonix-vts-admin__drag-handle:active {
+	cursor: grabbing;
+}
+
+.uonix-vts-admin .uonix-vts-admin__icon-button--danger,
+.uonix-vts-admin .uonix-vts-admin__remove-sheet {
+	color: #b32d2e;
+	border-color: #dba6a7;
+}
+
+.uonix-vts-admin .uonix-vts-admin__icon-button--danger:hover,
+.uonix-vts-admin .uonix-vts-admin__icon-button--danger:focus,
+.uonix-vts-admin .uonix-vts-admin__remove-sheet:hover,
+.uonix-vts-admin .uonix-vts-admin__remove-sheet:focus {
+	color: #8a2424;
+	border-color: #b32d2e;
+}
+
+.uonix-vts-admin__section-footer {
+	display: flex;
+	justify-content: flex-end;
+	padding: 8px;
+	border-top: 1px solid #e2e8f0;
+	background: #f8fafc;
+}
+
+.uonix-vts-admin__sheet-footer {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: center;
+	justify-content: space-between;
+	margin-top: 10px;
+}
+
+.uonix-vts-admin__add-section,
+.uonix-vts-admin__add-item,
+.uonix-vts-admin__remove-sheet {
+	margin: 0;
+}
+
+.uonix-vts-admin .uonix-vts-admin__remove-sheet {
+	display: inline-flex;
+	gap: 10px;
+	align-items: center;
+}
+
+.uonix-vts-admin.has-payload-error {
+	border-color: #d63638;
+}
+
+.uonix-vts-admin.is-deleted::after {
+	display: block;
+	content: "Ficha marcada para remoção ao salvar.";
+	color: #b32d2e;
+	font-weight: 600;
+}
+
+@media (max-width: 782px) {
+	.uonix-vts-admin__copy-actions {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.uonix-vts-admin__copy-actions .uonix-vts-admin__copy {
+		width: 100%;
+	}
+
+	.uonix-vts-admin__section-head,
+	.uonix-vts-admin__item {
+		grid-template-columns: 32px minmax(0, 1fr);
+	}
+
+	.uonix-vts-admin__section-layout,
+	.uonix-vts-admin__item-value {
+		grid-column: 2;
+	}
+
+	.uonix-vts-admin__actions {
+		grid-column: 1 / -1;
+	}
+}

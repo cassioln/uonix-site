@@ -20,6 +20,7 @@ uonix_mu_require_files(
 		'18-produto-alertas-variacao.php',
 		'20-catalogo-titulos-produtos.php',
 		'21-admin-variacao-preco-padrao.php',
+		'22-ficha-tecnica-variacao.php',
 	),
 	'uonix-woocommerce'
 );
