@@ -48,14 +48,18 @@ function vts_assert_not_contains( $needle, $haystack, $message ) {
 	}
 }
 
-function vts_assert_hook( $registry, $hook, $callback, $accepted_args, $message ) {
+function vts_assert_hook( $registry, $hook, $callback, $priority, $accepted_args, $message ) {
 	++$GLOBALS['vts_assertions'];
 	foreach ( $GLOBALS[ $registry ][ $hook ] ?? array() as $registered ) {
-		if ( $registered['callback'] === $callback && $registered['accepted_args'] === $accepted_args ) {
+		if (
+			$registered['callback'] === $callback &&
+			$registered['priority'] === $priority &&
+			$registered['accepted_args'] === $accepted_args
+		) {
 			return;
 		}
 	}
-	vts_fail( $message . '; hook ou accepted_args não encontrado' );
+	vts_fail( $message . '; hook, prioridade ou accepted_args não encontrado' );
 }
 
 function vts_assert_failure_contract( $expected_code, $actual, $message ) {
@@ -111,6 +115,9 @@ $GLOBALS['vts_filters']         = array();
 $GLOBALS['vts_enqueued_styles'] = array();
 $GLOBALS['vts_escaped_html']    = array();
 $GLOBALS['vts_is_product']      = false;
+$GLOBALS['vts_editable_posts']  = array();
+$GLOBALS['vts_products']        = array();
+$GLOBALS['wc_meta_box_errors']  = array();
 $GLOBALS['vts_terms']           = array(
 	'pa_tipo'     => array( 'pesado' => 'Pesado' ),
 	'pa_material' => array( 'inox-316' => 'Inox 316' ),
@@ -138,6 +145,35 @@ function add_filter( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
 function esc_html( $text ) {
 	$GLOBALS['vts_escaped_html'][] = (string) $text;
 	return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+}
+
+function esc_attr( $text ) {
+	return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+}
+
+function absint( $value ) {
+	return abs( (int) $value );
+}
+
+function wp_unslash( $value ) {
+	if ( is_array( $value ) ) {
+		return array_map( 'wp_unslash', $value );
+	}
+	return is_string( $value ) ? stripslashes( $value ) : $value;
+}
+
+function current_user_can( $capability, $object_id = 0 ) {
+	return 'edit_post' === $capability && ! empty( $GLOBALS['vts_editable_posts'][ absint( $object_id ) ] );
+}
+
+function wc_get_product( $product_id ) {
+	return $GLOBALS['vts_products'][ absint( $product_id ) ] ?? false;
+}
+
+final class WC_Admin_Meta_Boxes {
+	public static function add_error( $message ) {
+		$GLOBALS['wc_meta_box_errors'][] = (string) $message;
+	}
 }
 
 function wc_attribute_label( $name, $product = null ) {
@@ -260,6 +296,66 @@ final class VTS_Fake_Render_Variation {
 		return $this->id;
 	}
 }
+
+final class VTS_Fake_Admin_Variation {
+	public $meta;
+	public $save_calls = 0;
+	private $attributes;
+	private $id;
+	private $parent_id;
+
+	public function __construct( $id, $parent_id, array $attributes = array(), array $meta = array() ) {
+		$this->id         = $id;
+		$this->parent_id  = $parent_id;
+		$this->attributes = $attributes;
+		$this->meta       = $meta;
+	}
+
+	public function get_id() {
+		return $this->id;
+	}
+
+	public function get_parent_id() {
+		return $this->parent_id;
+	}
+
+	public function get_attributes() {
+		return $this->attributes;
+	}
+
+	public function get_meta( $key, $single = true ) {
+		return $this->meta[ $key ] ?? '';
+	}
+
+	public function update_meta_data( $key, $value ) {
+		$this->meta[ $key ] = $value;
+	}
+
+	public function delete_meta_data( $key ) {
+		unset( $this->meta[ $key ] );
+	}
+
+	public function save() {
+		++$this->save_calls;
+	}
+}
+
+vts_assert_hook(
+	'vts_actions',
+	'woocommerce_product_after_variable_attributes',
+	array( 'Uonix_VTS_Admin', 'render_editor' ),
+	10,
+	3,
+	'editor administrativo registrado na prioridade 10 com três argumentos'
+);
+vts_assert_hook(
+	'vts_actions',
+	'woocommerce_admin_process_variation_object',
+	array( 'Uonix_VTS_Admin', 'save_variation' ),
+	10,
+	2,
+	'persistência administrativa registrada na prioridade 10 com dois argumentos'
+);
 
 $valid = Uonix_VTS_Schema::normalize_envelope(
 	wp_json_encode(
@@ -539,15 +635,17 @@ vts_assert_hook(
 	'vts_filters',
 	'woocommerce_available_variation',
 	array( 'Uonix_VTS_Renderer', 'append_to_variation_data' ),
+	10,
 	3,
-	'filtro frontend registrado com três argumentos'
+	'filtro frontend registrado na prioridade 10 com três argumentos'
 );
 vts_assert_hook(
 	'vts_actions',
 	'wp_enqueue_scripts',
 	array( 'Uonix_VTS_Renderer', 'enqueue_frontend_assets' ),
+	10,
 	0,
-	'asset frontend registrado sem argumentos'
+	'asset frontend registrado na prioridade 10 sem argumentos'
 );
 
 Uonix_VTS_Renderer::enqueue_frontend_assets();
@@ -613,6 +711,145 @@ vts_assert_same(
 	Uonix_VTS_Renderer::append_to_variation_data( $untouched, null, $invalid_variation ),
 	'meta inválido deixa todo o payload inalterado'
 );
+
+$admin_parent_id = 9900;
+$GLOBALS['vts_editable_posts'][ $admin_parent_id ] = true;
+$admin_sheet = vts_valid_sheet();
+$admin_variation = new VTS_Fake_Admin_Variation(
+	10420,
+	$admin_parent_id,
+	array(
+		'pa_material' => 'inox-316',
+		'pa_bitola'   => '5-16',
+		'pa_tipo'     => 'pesado',
+	),
+	array( Uonix_VTS_Schema::META_KEY => $admin_sheet )
+);
+$GLOBALS['vts_products'][10420] = $admin_variation;
+ob_start();
+Uonix_VTS_Admin::render_editor( 2, array(), (object) array( 'ID' => 10420 ) );
+$existing_admin_html = ob_get_clean();
+vts_assert_contains( 'class="uonix-vts-admin is-active"', $existing_admin_html, 'ficha existente ativa o editor' );
+vts_assert_contains( 'data-had-sheet="1"', $existing_admin_html, 'ficha existente é marcada no estado do editor' );
+vts_assert_contains( 'data-variation-id="10420"', $existing_admin_html, 'editor identifica a variação sem ID HTML' );
+vts_assert_contains( 'name="uonix_variation_technical_sheet[2]"', $existing_admin_html, 'payload usa índice único da variação' );
+vts_assert_contains( '&quot;action&quot;:&quot;upsert&quot;', $existing_admin_html, 'payload existente contém envelope escapado' );
+vts_assert_contains( '&quot;value&quot;:&quot;37&quot;', $existing_admin_html, 'payload existente preserva a ficha normalizada' );
+vts_assert_contains( 'value="Modelo: Pesado · Material: Inox 316 · Pol.: 5/16&quot;"', $existing_admin_html, 'readonly usa atributos oficiais escapados' );
+vts_assert_contains( 'aria-label="Título geral da ficha técnica"', $existing_admin_html, 'título geral possui nome acessível' );
+vts_assert_contains( 'aria-label="Cabeçalho automático da variação" readonly', $existing_admin_html, 'cabeçalho derivado é readonly e acessível' );
+vts_assert_contains( 'aria-label="Reordenar seção"', $existing_admin_html, 'handle de seção possui nome acessível' );
+vts_assert_contains( 'aria-label="Título opcional da seção"', $existing_admin_html, 'título opcional da seção possui nome acessível' );
+vts_assert_contains( 'aria-label="Formato da seção"', $existing_admin_html, 'formato da seção possui nome acessível' );
+vts_assert_contains( 'aria-label="Remover seção"', $existing_admin_html, 'remoção de seção possui nome acessível' );
+vts_assert_contains( 'aria-label="Reordenar item"', $existing_admin_html, 'handle de item possui nome acessível' );
+vts_assert_contains( 'aria-label="Rótulo do item"', $existing_admin_html, 'rótulo do item possui nome acessível' );
+vts_assert_contains( 'aria-label="Valor do item"', $existing_admin_html, 'valor do item possui nome acessível' );
+vts_assert_contains( 'aria-label="Remover item"', $existing_admin_html, 'remoção de item possui nome acessível' );
+vts_assert_contains( 'class="uonix-vts-admin__section-template"', $existing_admin_html, 'template de seção usa classe própria' );
+vts_assert_contains( 'class="uonix-vts-admin__item-template"', $existing_admin_html, 'template de item usa classe própria' );
+vts_assert_same( 0, preg_match_all( '/<button\\b(?![^>]*\\btype="button")/i', $existing_admin_html ), 'todos os botões administrativos têm type button' );
+vts_assert_same( 1, preg_match( '/<input[^>]*class="uonix-vts-admin__payload"[^>]*>/', $existing_admin_html, $existing_payload_tag ), 'payload existente é renderizado' );
+vts_assert_not_contains( ' disabled', $existing_payload_tag[0], 'payload existente fica habilitado' );
+
+$empty_admin_variation = new VTS_Fake_Admin_Variation( 10421, $admin_parent_id );
+$GLOBALS['vts_products'][10421] = $empty_admin_variation;
+ob_start();
+Uonix_VTS_Admin::render_editor( 3, array(), (object) array( 'ID' => 10421 ) );
+$empty_admin_html = ob_get_clean();
+vts_assert_contains( 'class="uonix-vts-admin"', $empty_admin_html, 'variação nova recebe shell inativo' );
+vts_assert_not_contains( 'class="uonix-vts-admin is-active"', $empty_admin_html, 'variação nova não começa ativa' );
+vts_assert_contains( 'data-had-sheet="0"', $empty_admin_html, 'variação nova informa ausência de ficha' );
+vts_assert_contains( 'name="uonix_variation_technical_sheet[3]"', $empty_admin_html, 'segunda variação usa outro índice' );
+vts_assert_same( 1, preg_match( '/<input[^>]*class="uonix-vts-admin__payload"[^>]*>/', $empty_admin_html, $empty_payload_tag ), 'payload vazio é renderizado' );
+vts_assert_contains( ' disabled', $empty_payload_tag[0], 'payload novo fica desabilitado' );
+vts_assert_contains( ' value=""', $empty_payload_tag[0], 'payload novo começa vazio' );
+vts_assert_same( 0, preg_match_all( '/\\sid="/i', $existing_admin_html . $empty_admin_html ), 'editores e templates não criam IDs HTML duplicáveis' );
+
+$invalid_admin_variation = new VTS_Fake_Admin_Variation(
+	10422,
+	$admin_parent_id,
+	array(),
+	array( Uonix_VTS_Schema::META_KEY => array( 'version' => 2 ) )
+);
+$GLOBALS['vts_products'][10422] = $invalid_admin_variation;
+ob_start();
+Uonix_VTS_Admin::render_editor( 4, array(), (object) array( 'ID' => 10422 ) );
+$invalid_admin_html = ob_get_clean();
+vts_assert_contains( 'data-had-sheet="0"', $invalid_admin_html, 'meta inválido não hidrata o editor' );
+vts_assert_same( 1, preg_match( '/<input[^>]*class="uonix-vts-admin__payload"[^>]*>/', $invalid_admin_html, $invalid_payload_tag ), 'meta inválido ainda produz shell seguro' );
+vts_assert_contains( ' disabled', $invalid_payload_tag[0], 'meta inválido não envia upsert vazio' );
+
+$GLOBALS['vts_editable_posts'][ $admin_parent_id ] = false;
+ob_start();
+Uonix_VTS_Admin::render_editor( 2, array(), (object) array( 'ID' => 10420 ) );
+$unauthorized_admin_html = ob_get_clean();
+vts_assert_same( '', $unauthorized_admin_html, 'usuário sem capacidade não recebe markup administrativo' );
+$GLOBALS['vts_editable_posts'][ $admin_parent_id ] = true;
+
+$save_variation = new VTS_Fake_Admin_Variation(
+	10430,
+	$admin_parent_id,
+	array(),
+	array(
+		Uonix_VTS_Schema::META_KEY => vts_valid_sheet(),
+		'_unrelated'               => 'preserve-byte-for-byte',
+	)
+);
+$before_save_meta = $save_variation->meta;
+$_POST = array();
+Uonix_VTS_Admin::save_variation( $save_variation, 0 );
+vts_assert_same( $before_save_meta, $save_variation->meta, 'campo ausente não altera meta' );
+
+$_POST = array( 'uonix_variation_technical_sheet' => 'not-an-array' );
+Uonix_VTS_Admin::save_variation( $save_variation, 0 );
+vts_assert_same( $before_save_meta, $save_variation->meta, 'campo raiz malformado não altera meta' );
+
+$_POST = array( 'uonix_variation_technical_sheet' => array( 1 => '{"action":"delete"}' ) );
+Uonix_VTS_Admin::save_variation( $save_variation, 0 );
+vts_assert_same( $before_save_meta, $save_variation->meta, 'índice ausente não altera meta' );
+
+$submitted_sheet = vts_valid_sheet();
+$submitted_sheet['title'] = '<b>Ficha sanitizada</b>';
+$submitted_sheet['sections'][0]['items'][0]['value'] = '<script>não persistir</script>42';
+$_POST = array(
+	'uonix_variation_technical_sheet' => array(
+		0 => addslashes(
+			wp_json_encode(
+				array(
+					'action' => 'upsert',
+					'sheet'  => $submitted_sheet,
+				)
+			)
+		),
+	),
+);
+Uonix_VTS_Admin::save_variation( $save_variation, 0 );
+vts_assert_same( 'Ficha sanitizada', $save_variation->meta[ Uonix_VTS_Schema::META_KEY ]['title'], 'upsert remove HTML antes de persistir' );
+vts_assert_same( '42', $save_variation->meta[ Uonix_VTS_Schema::META_KEY ]['sections'][0]['items'][0]['value'], 'upsert persiste valor sanitizado' );
+vts_assert_same( 'preserve-byte-for-byte', $save_variation->meta['_unrelated'], 'upsert preserva meta não relacionado' );
+$saved_meta = $save_variation->meta;
+
+$error_count = count( $GLOBALS['wc_meta_box_errors'] );
+$_POST = array( 'uonix_variation_technical_sheet' => array( 0 => '{invalid' ) );
+Uonix_VTS_Admin::save_variation( $save_variation, 0 );
+vts_assert_same( $saved_meta, $save_variation->meta, 'JSON inválido preserva meta anterior' );
+vts_assert_same( $error_count + 1, count( $GLOBALS['wc_meta_box_errors'] ), 'JSON inválido registra um erro administrativo' );
+vts_assert_contains( 'variação #10430 não foi salva', end( $GLOBALS['wc_meta_box_errors'] ), 'erro administrativo identifica a variação' );
+vts_assert_contains( 'A ficha técnica contém JSON inválido.', end( $GLOBALS['wc_meta_box_errors'] ), 'erro administrativo inclui o motivo específico da rejeição' );
+
+$GLOBALS['vts_editable_posts'][ $admin_parent_id ] = false;
+$_POST = array( 'uonix_variation_technical_sheet' => array( 0 => '{"action":"delete"}' ) );
+Uonix_VTS_Admin::save_variation( $save_variation, 0 );
+vts_assert_same( $saved_meta, $save_variation->meta, 'usuário sem capacidade não remove meta' );
+$GLOBALS['vts_editable_posts'][ $admin_parent_id ] = true;
+
+Uonix_VTS_Admin::save_variation( $save_variation, 0 );
+vts_assert_false( array_key_exists( Uonix_VTS_Schema::META_KEY, $save_variation->meta ), 'delete explícito remove fisicamente a chave da ficha' );
+vts_assert_same( 'preserve-byte-for-byte', $save_variation->meta['_unrelated'], 'delete explícito preserva meta não relacionado' );
+vts_assert_same( 0, $save_variation->save_calls, 'hook não chama save novamente' );
+Uonix_VTS_Admin::save_variation( null, 0 );
+$_POST = array();
 
 $frontend_css = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/ficha-tecnica-variacao.css' );
 vts_assert_contains( 'repeat(auto-fit, minmax(68px, 1fr))', $frontend_css, 'grade compacta responde à largura disponível' );
