@@ -1297,20 +1297,38 @@ vts_assert_contains( 'name="uonix_variation_technical_sheet[2]"', $existing_admi
 vts_assert_contains( '&quot;action&quot;:&quot;upsert&quot;', $existing_admin_html, 'payload existente contém envelope escapado' );
 vts_assert_contains( '&quot;value&quot;:&quot;37&quot;', $existing_admin_html, 'payload existente preserva a ficha normalizada' );
 vts_assert_contains( 'value="Modelo: Pesado · Material: Inox 316 · Pol.: 5/16&quot;"', $existing_admin_html, 'readonly usa atributos oficiais escapados' );
-vts_assert_contains( 'aria-label="Título geral da ficha técnica"', $existing_admin_html, 'título geral possui nome acessível' );
-vts_assert_contains( 'aria-label="Cabeçalho automático da variação" readonly', $existing_admin_html, 'cabeçalho derivado é readonly e acessível' );
 vts_assert_contains( 'class="uonix-vts-admin__copy-control"', $existing_admin_html, 'controle de cópia possui label real' );
 vts_assert_contains( 'class="uonix-vts-admin__copy-source" aria-label="Variação de origem"', $existing_admin_html, 'origem da cópia possui nome acessível' );
 vts_assert_contains( 'type="button" class="button uonix-vts-admin__copy"', $existing_admin_html, 'ação de cópia é botão explícito' );
 vts_assert_same( 1, substr_count( $existing_admin_html, 'class="uonix-vts-admin__copy-source"' ), 'cada editor possui um único seletor de origem' );
-vts_assert_contains( 'aria-label="Reordenar seção"', $existing_admin_html, 'handle de seção possui nome acessível' );
-vts_assert_contains( 'aria-label="Título opcional da seção"', $existing_admin_html, 'título opcional da seção possui nome acessível' );
-vts_assert_contains( 'aria-label="Formato da seção"', $existing_admin_html, 'formato da seção possui nome acessível' );
-vts_assert_contains( 'aria-label="Remover seção"', $existing_admin_html, 'remoção de seção possui nome acessível' );
-vts_assert_contains( 'aria-label="Reordenar item"', $existing_admin_html, 'handle de item possui nome acessível' );
-vts_assert_contains( 'aria-label="Rótulo do item"', $existing_admin_html, 'rótulo do item possui nome acessível' );
-vts_assert_contains( 'aria-label="Valor do item"', $existing_admin_html, 'valor do item possui nome acessível' );
-vts_assert_contains( 'aria-label="Remover item"', $existing_admin_html, 'remoção de item possui nome acessível' );
+$expected_admin_aria_labels = array(
+	'Arrastar para reordenar item',
+	'Arrastar para reordenar seção',
+	'Ações da seção',
+	'Ações do item',
+	'Cabeçalho automático da variação',
+	'Formato da seção',
+	'Mover item para baixo',
+	'Mover item para cima',
+	'Mover seção para baixo',
+	'Mover seção para cima',
+	'Remover item',
+	'Remover seção',
+	'Rótulo do item',
+	'Título geral da ficha técnica',
+	'Título opcional da seção',
+	'Valor do item',
+	'Variação de origem',
+);
+preg_match_all( '/\baria-label="([^"]+)"/', $existing_admin_html, $admin_aria_matches );
+$actual_admin_aria_labels = $admin_aria_matches[1];
+sort( $expected_admin_aria_labels );
+sort( $actual_admin_aria_labels );
+vts_assert_same( $expected_admin_aria_labels, $actual_admin_aria_labels, 'editor expõe exatamente os nomes acessíveis aprovados' );
+vts_assert_contains( 'aria-label="Cabeçalho automático da variação" readonly', $existing_admin_html, 'cabeçalho derivado é readonly e acessível' );
+vts_assert_not_contains( '>↕</button>', $existing_admin_html, 'interface não usa seta literal como ícone' );
+vts_assert_not_contains( '>×</button>', $existing_admin_html, 'interface não usa xis literal como ícone' );
+vts_assert_same( 9, substr_count( $existing_admin_html, 'aria-hidden="true"' ), 'ícones são decorativos para leitores de tela' );
 vts_assert_contains( 'class="uonix-vts-admin__section-template"', $existing_admin_html, 'template de seção usa classe própria' );
 vts_assert_contains( 'class="uonix-vts-admin__item-template"', $existing_admin_html, 'template de item usa classe própria' );
 vts_assert_same( 0, preg_match_all( '/<button\\b(?![^>]*\\btype="button")/i', $existing_admin_html ), 'todos os botões administrativos têm type button' );
@@ -1435,14 +1453,41 @@ vts_assert_contains( "hasClass('ui-sortable')", $admin_js, 'reinicialização de
 vts_assert_contains( "sortable('destroy')", $admin_js, 'sortable existente é destruído antes de reinicializar' );
 vts_assert_contains( "handle: '.uonix-vts-admin__section-handle'", $admin_js, 'seções usam alça própria de reordenação' );
 vts_assert_contains( "handle: '.uonix-vts-admin__item-handle'", $admin_js, 'itens usam alça própria de reordenação' );
+vts_assert_same( 2, substr_count( $admin_js, "cancel: 'input, textarea, select, option'" ), 'sortables permitem o botão-alça sem iniciar drag nos campos' );
 vts_assert_contains( 'connectWith: false', $admin_js, 'itens não atravessam seções ao reordenar' );
-vts_assert_contains( "on('input change', '.uonix-vts-admin input, .uonix-vts-admin select'", $admin_js, 'edições usam evento delegado no markup próprio' );
+vts_assert_contains( 'function syncAndMarkChanged($root)', $admin_js, 'ações sem campo possuem sincronização que marca a variação como alterada' );
+vts_assert_contains( "\$root.find('.uonix-vts-admin__payload').trigger('change');", $admin_js, 'payload avisa o salvamento nativo do WooCommerce após ações do usuário' );
+vts_assert_same( 10, substr_count( $admin_js, 'syncAndMarkChanged($root);' ), 'dez caminhos de mutação sem campo habilitam o salvamento' );
+vts_assert_contains( 'function refreshMoveButtons($root)', $admin_js, 'limites de movimento possuem atualizador próprio' );
+vts_assert_contains( 'function moveRelative($element, direction, selector)', $admin_js, 'movimento por clique possui primitiva própria' );
+vts_assert_contains( 'function moveFromButton(button, elementSelector, direction)', $admin_js, 'botões compartilham movimento determinístico' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__move-item-up'", $admin_js, 'item sobe por evento delegado' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__move-item-down'", $admin_js, 'item desce por evento delegado' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__move-section-up'", $admin_js, 'seção sobe por evento delegado' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__move-section-down'", $admin_js, 'seção desce por evento delegado' );
+$move_from_button_start = strpos( $admin_js, 'function moveFromButton(button, elementSelector, direction)' );
+$move_from_button_end   = strpos( $admin_js, 'function resetSortable($list, options)', $move_from_button_start );
+vts_assert_true( false !== $move_from_button_start && false !== $move_from_button_end, 'bloco de movimento por botão é localizável' );
+$move_from_button_block = substr( $admin_js, $move_from_button_start, $move_from_button_end - $move_from_button_start );
+vts_assert_same( 1, substr_count( $move_from_button_block, 'refreshMoveButtons($root);' ), 'movimento atualiza limites uma vez' );
+vts_assert_same( 1, substr_count( $move_from_button_block, 'syncAndMarkChanged($root);' ), 'movimento sincroniza payload e habilita salvamento uma vez' );
+vts_assert_same( 1, substr_count( $move_from_button_block, 'const $focusTarget = $button.prop(\'disabled\')' ), 'movimento escolhe fallback quando a ação fica desabilitada' );
+vts_assert_same( 1, substr_count( $move_from_button_block, '$focusTarget.trigger(\'focus\');' ), 'foco acompanha o elemento movido uma vez' );
+vts_assert_contains( "on('input change', '.uonix-vts-admin input:not(.uonix-vts-admin__payload), .uonix-vts-admin select'", $admin_js, 'edições usam evento delegado sem ressincronizar o aviso do payload' );
 vts_assert_contains( "on('click', '.uonix-vts-admin__add-section'", $admin_js, 'adição de seção funciona por evento delegado' );
 vts_assert_contains( "on('click', '.uonix-vts-admin__add-item'", $admin_js, 'adição de item funciona por evento delegado' );
+vts_assert_contains( '$(this).closest(\'.uonix-vts-admin__section\').children(\'.uonix-vts-admin__items\')', $admin_js, 'adição de item encontra a lista após o novo rodapé' );
+vts_assert_not_contains( '$(this).siblings(\'.uonix-vts-admin__items\')', $admin_js, 'adição não depende mais de irmandade direta com a lista' );
 vts_assert_contains( "on('click', '.uonix-vts-admin__remove-sheet'", $admin_js, 'remoção da ficha funciona por evento delegado' );
 vts_assert_same( 2, substr_count( $admin_js, 'config.strings.removeConfirm' ), 'confirmação usa a string localizada tanto na guarda quanto no valor' );
 vts_assert_same( 2, substr_count( $admin_js, 'config.strings.payloadError' ), 'erro de hidratação usa a string localizada tanto na guarda quanto no valor' );
 vts_assert_contains( 'woocommerce_variations_loaded woocommerce_variations_added', $admin_js, 'editor reinicializa após ciclos AJAX de variações' );
+$init_all_start = strpos( $admin_js, 'function initAll()' );
+$init_all_end   = strpos( $admin_js, 'function reconcileSaved()', $init_all_start );
+vts_assert_true( false !== $init_all_start && false !== $init_all_end, 'bloco de hidratação inicial é localizável' );
+$init_all_block = substr( $admin_js, $init_all_start, $init_all_end - $init_all_start );
+vts_assert_same( 1, substr_count( $init_all_block, 'sync($root);' ), 'hidratação sincroniza sem marcar a variação como alterada' );
+vts_assert_same( 0, substr_count( $init_all_block, 'syncAndMarkChanged($root);' ), 'hidratação inicial não habilita salvamento sem edição' );
 vts_assert_contains( 'function reconcileSaved()', $admin_js, 'salvamento AJAX reconcilia o estado persistido do editor' );
 vts_assert_contains( "if (\$payload.prop('disabled'))", $admin_js, 'reconciliação ignora variação sem payload submetido' );
 vts_assert_contains( "JSON.parse(\$payload.val() || '')", $admin_js, 'reconciliação interpreta somente o envelope efetivamente submetido' );
@@ -1489,7 +1534,7 @@ vts_assert_true(
 	'validação da resposta precede qualquer alteração do editor'
 );
 vts_assert_contains( 'renderSheetIntoEditor($root, response.data.sheet)', $admin_js, 'cópia reutiliza o renderer preservando ordem' );
-vts_assert_contains( "renderSheetIntoEditor(\$root, response.data.sheet);\n\t\t\t\t\$root.addClass('is-active').removeClass('is-deleted has-payload-error');\n\t\t\t\tsync(\$root);", $admin_js, 'resposta válida aplica render, estado e payload na mesma sequência' );
+vts_assert_contains( "renderSheetIntoEditor(\$root, response.data.sheet);\n\t\t\t\t\$root.addClass('is-active').removeClass('is-deleted has-payload-error');\n\t\t\t\tsyncAndMarkChanged(\$root);", $admin_js, 'resposta válida aplica render, estado, payload e habilita salvamento na mesma sequência' );
 vts_assert_contains( "removeClass('is-deleted has-payload-error')", $admin_js, 'resposta válida substitui estado removido ou payload inválido' );
 vts_assert_contains( '.fail(showCopyError)', $admin_js, 'falha de transporte mostra erro controlado' );
 vts_assert_not_contains( "trigger('woocommerce_variations_save')", $admin_js, 'cópia não salva automaticamente' );
@@ -2007,9 +2052,32 @@ vts_assert_contains( 'color: #8c8f94', $admin_css, 'placeholder usa cor aprovada
 vts_assert_contains( ".uonix-vts-admin__editor {\n\tdisplay: none;\n}", $admin_css, 'editor começa recolhido sem ficha' );
 vts_assert_contains( '.uonix-vts-admin.is-active .uonix-vts-admin__editor', $admin_css, 'estado ativo exibe o editor' );
 vts_assert_contains( '.uonix-vts-admin.is-deleted::after', $admin_css, 'remoção pendente possui aviso visual' );
-vts_assert_contains( 'grid-template-columns: 28px minmax(160px, 1fr) 150px 32px', $admin_css, 'cabeçalho da seção usa colunas legíveis' );
+vts_assert_contains( 'grid-template-columns: minmax(0, 1fr) auto', $admin_css, 'cópia alinha select e botão' );
+vts_assert_contains( '.uonix-vts-admin__copy-actions .uonix-vts-admin__copy-control,', $admin_css, 'controle de cópia neutraliza a margem global com especificidade suficiente' );
+vts_assert_contains( 'grid-template-columns: 32px minmax(160px, 1fr) minmax(130px, 160px) auto', $admin_css, 'cabeçalho da seção usa colunas legíveis' );
+vts_assert_contains( '.uonix-vts-admin__actions', $admin_css, 'ações repetidas permanecem agrupadas' );
+vts_assert_contains( 'min-width: 32px', $admin_css, 'controles possuem largura mínima aprovada' );
+vts_assert_contains( 'min-height: 32px', $admin_css, 'controles neutralizam a altura mínima do WordPress' );
+vts_assert_same(
+	1,
+	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__icon-button \.dashicons\s*\{[^}]*line-height:\s*18px;[^}]*\}~s', $admin_css ),
+	'ícones dos botões quadrados vencem o line-height global do WordPress'
+);
+vts_assert_same(
+	1,
+	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__remove-sheet \.dashicons\s*\{[^}]*line-height:\s*2;[^}]*\}~s', $admin_css ),
+	'lixeira da remoção possui alinhamento vertical próprio'
+);
+vts_assert_same(
+	1,
+	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__remove-sheet\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*16px;[^}]*align-items:\s*center;[^}]*\}~s', $admin_css ),
+	'botão remover ficha aplica espaço real entre ícone e texto'
+);
+vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__icon-button--danger,', $admin_css, 'ações destrutivas vencem a cor nativa do botão' );
+vts_assert_contains( '.uonix-vts-admin__section-footer', $admin_css, 'adição de item possui rodapé próprio' );
+vts_assert_contains( '.uonix-vts-admin__sheet-footer', $admin_css, 'ações da ficha possuem rodapé próprio' );
 vts_assert_contains( '@media (max-width: 782px)', $admin_css, 'editor administrativo adapta-se ao breakpoint do WordPress' );
-vts_assert_contains( 'grid-template-columns: 28px 1fr 32px', $admin_css, 'campos empilham em tela estreita' );
+vts_assert_contains( 'grid-template-columns: 32px minmax(0, 1fr)', $admin_css, 'campos empilham em tela estreita' );
 
 $frontend_css = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/ficha-tecnica-variacao.css' );
 vts_assert_contains( 'repeat(auto-fit, minmax(68px, 1fr))', $frontend_css, 'grade compacta responde à largura disponível' );

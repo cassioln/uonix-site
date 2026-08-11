@@ -87,6 +87,56 @@
 		}));
 	}
 
+	function syncAndMarkChanged($root) {
+		sync($root);
+		$root.find('.uonix-vts-admin__payload').trigger('change');
+	}
+
+	function refreshMoveButtons($root) {
+		const $sections = $root.find('.uonix-vts-admin__sections').children('.uonix-vts-admin__section');
+		$sections.each(function (sectionIndex) {
+			const $section = $(this);
+			const $head = $section.children('.uonix-vts-admin__section-head');
+			$head.find('.uonix-vts-admin__move-section-up').prop('disabled', sectionIndex === 0);
+			$head.find('.uonix-vts-admin__move-section-down').prop('disabled', sectionIndex === $sections.length - 1);
+			const $items = $section.children('.uonix-vts-admin__items').children('.uonix-vts-admin__item');
+			$items.each(function (itemIndex) {
+				const $item = $(this);
+				$item.find('.uonix-vts-admin__move-item-up').prop('disabled', itemIndex === 0);
+				$item.find('.uonix-vts-admin__move-item-down').prop('disabled', itemIndex === $items.length - 1);
+			});
+		});
+	}
+
+	function moveRelative($element, direction, selector) {
+		const $sibling = direction === 'up' ? $element.prev(selector) : $element.next(selector);
+		if (!$sibling.length) {
+			return false;
+		}
+		if (direction === 'up') {
+			$element.insertBefore($sibling);
+		} else {
+			$element.insertAfter($sibling);
+		}
+		return true;
+	}
+
+	function moveFromButton(button, elementSelector, direction) {
+		const $button = $(button);
+		const $root = $button.closest('.uonix-vts-admin');
+		if (!moveRelative($button.closest(elementSelector), direction, elementSelector)) {
+			return;
+		}
+		refreshMoveButtons($root);
+		syncAndMarkChanged($root);
+		const $focusTarget = $button.prop('disabled')
+			? (direction === 'up'
+				? $button.nextAll('.uonix-vts-admin__icon-button:not(:disabled)').first()
+				: $button.prevAll('.uonix-vts-admin__icon-button:not(:disabled)').first())
+			: $button;
+		$focusTarget.trigger('focus');
+	}
+
 	function resetSortable($list, options) {
 		if ($list.hasClass('ui-sortable')) {
 			$list.sortable('destroy');
@@ -97,21 +147,26 @@
 	function initSortable($root) {
 		resetSortable($root.find('.uonix-vts-admin__sections'), {
 			handle: '.uonix-vts-admin__section-handle',
+			cancel: 'input, textarea, select, option',
 			items: '> .uonix-vts-admin__section',
 			update: function () {
-				sync($root);
+				refreshMoveButtons($root);
+				syncAndMarkChanged($root);
 			}
 		});
 		$root.find('.uonix-vts-admin__items').each(function () {
 			resetSortable($(this), {
 				handle: '.uonix-vts-admin__item-handle',
+				cancel: 'input, textarea, select, option',
 				items: '> .uonix-vts-admin__item',
 				connectWith: false,
 				update: function () {
-					sync($root);
+					refreshMoveButtons($root);
+					syncAndMarkChanged($root);
 				}
 			});
 		});
+		refreshMoveButtons($root);
 	}
 
 	function appendItem($root, $items, item) {
@@ -247,14 +302,14 @@
 	}
 
 	$(document)
-		.on('input change', '.uonix-vts-admin input, .uonix-vts-admin select', function () {
+		.on('input change', '.uonix-vts-admin input:not(.uonix-vts-admin__payload), .uonix-vts-admin select', function () {
 			sync($(this).closest('.uonix-vts-admin'));
 		})
 		.on('click', '.uonix-vts-admin__add', function () {
 			const $root = $(this).closest('.uonix-vts-admin');
 			$root.addClass('is-active').removeClass('is-deleted');
 			$root.find('.uonix-vts-admin__sheet-title').val('Ficha técnica');
-			sync($root);
+			syncAndMarkChanged($root);
 		})
 		.on('click', '.uonix-vts-admin__add-section', function () {
 			const $root = $(this).closest('.uonix-vts-admin');
@@ -264,23 +319,41 @@
 				items: [{ label: '', value: '' }]
 			});
 			initSortable($root);
-			sync($root);
+			syncAndMarkChanged($root);
 		})
 		.on('click', '.uonix-vts-admin__add-item', function () {
 			const $root = $(this).closest('.uonix-vts-admin');
-			appendItem($root, $(this).siblings('.uonix-vts-admin__items'), { label: '', value: '' });
+			appendItem(
+				$root,
+				$(this).closest('.uonix-vts-admin__section').children('.uonix-vts-admin__items'),
+				{ label: '', value: '' }
+			);
 			initSortable($root);
-			sync($root);
+			syncAndMarkChanged($root);
+		})
+		.on('click', '.uonix-vts-admin__move-section-up', function () {
+			moveFromButton(this, '.uonix-vts-admin__section', 'up');
+		})
+		.on('click', '.uonix-vts-admin__move-section-down', function () {
+			moveFromButton(this, '.uonix-vts-admin__section', 'down');
+		})
+		.on('click', '.uonix-vts-admin__move-item-up', function () {
+			moveFromButton(this, '.uonix-vts-admin__item', 'up');
+		})
+		.on('click', '.uonix-vts-admin__move-item-down', function () {
+			moveFromButton(this, '.uonix-vts-admin__item', 'down');
 		})
 		.on('click', '.uonix-vts-admin__remove-item', function () {
 			const $root = $(this).closest('.uonix-vts-admin');
 			$(this).closest('.uonix-vts-admin__item').remove();
-			sync($root);
+			refreshMoveButtons($root);
+			syncAndMarkChanged($root);
 		})
 		.on('click', '.uonix-vts-admin__remove-section', function () {
 			const $root = $(this).closest('.uonix-vts-admin');
 			$(this).closest('.uonix-vts-admin__section').remove();
-			sync($root);
+			refreshMoveButtons($root);
+			syncAndMarkChanged($root);
 		})
 		.on('click', '.uonix-vts-admin__copy', function () {
 			const $root = $(this).closest('.uonix-vts-admin');
@@ -309,7 +382,7 @@
 				}
 				renderSheetIntoEditor($root, response.data.sheet);
 				$root.addClass('is-active').removeClass('is-deleted has-payload-error');
-				sync($root);
+				syncAndMarkChanged($root);
 			}).fail(showCopyError);
 		})
 		.on('click', '.uonix-vts-admin__remove-sheet', function () {
@@ -325,7 +398,7 @@
 			} else {
 				$root.removeClass('is-active is-deleted');
 			}
-			sync($root);
+			syncAndMarkChanged($root);
 		});
 
 	$('#woocommerce-product-data')

@@ -273,30 +273,42 @@ final class Uonix_VTS_Admin {
 				<label>Título geral<input type="text" class="uonix-vts-admin__sheet-title" aria-label="Título geral da ficha técnica"></label>
 				<label>Cabeçalho automático<input type="text" class="uonix-vts-admin__subtitle" aria-label="Cabeçalho automático da variação" readonly value="<?php echo esc_attr( implode( ' · ', $subtitle ) ); ?>"></label>
 				<div class="uonix-vts-admin__sections"></div>
-				<button type="button" class="button uonix-vts-admin__add-section">Adicionar seção</button>
-				<button type="button" class="button-link-delete uonix-vts-admin__remove-sheet">Remover ficha</button>
+				<div class="uonix-vts-admin__sheet-footer">
+					<button type="button" class="button uonix-vts-admin__add-section">Adicionar seção</button>
+					<button type="button" class="button uonix-vts-admin__remove-sheet"><span class="dashicons dashicons-trash" aria-hidden="true"></span><span>Remover ficha</span></button>
+				</div>
 			</div>
 			<template class="uonix-vts-admin__section-template">
 				<section class="uonix-vts-admin__section">
 					<div class="uonix-vts-admin__section-head">
-						<button type="button" class="button-link uonix-vts-admin__section-handle" aria-label="Reordenar seção">↕</button>
+						<button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__drag-handle uonix-vts-admin__section-handle" aria-label="Arrastar para reordenar seção"><span class="dashicons dashicons-move" aria-hidden="true"></span></button>
 						<input type="text" class="uonix-vts-admin__section-title" aria-label="Título opcional da seção" placeholder="Título opcional">
 						<select class="uonix-vts-admin__section-layout" aria-label="Formato da seção">
 							<option value="compact">Compacta</option>
 							<option value="detailed">Detalhada</option>
 						</select>
-						<button type="button" class="button-link uonix-vts-admin__remove-section" aria-label="Remover seção">×</button>
+						<div class="uonix-vts-admin__actions" role="group" aria-label="Ações da seção">
+							<button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__move-section-up" aria-label="Mover seção para cima"><span class="dashicons dashicons-arrow-up-alt2" aria-hidden="true"></span></button>
+							<button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__move-section-down" aria-label="Mover seção para baixo"><span class="dashicons dashicons-arrow-down-alt2" aria-hidden="true"></span></button>
+							<button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__icon-button--danger uonix-vts-admin__remove-section" aria-label="Remover seção"><span class="dashicons dashicons-trash" aria-hidden="true"></span></button>
+						</div>
 					</div>
 					<div class="uonix-vts-admin__items"></div>
-					<button type="button" class="button uonix-vts-admin__add-item">Adicionar item</button>
+					<div class="uonix-vts-admin__section-footer">
+						<button type="button" class="button uonix-vts-admin__add-item">Adicionar item</button>
+					</div>
 				</section>
 			</template>
 			<template class="uonix-vts-admin__item-template">
 				<div class="uonix-vts-admin__item">
-					<button type="button" class="button-link uonix-vts-admin__item-handle" aria-label="Reordenar item">↕</button>
+					<button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__drag-handle uonix-vts-admin__item-handle" aria-label="Arrastar para reordenar item"><span class="dashicons dashicons-move" aria-hidden="true"></span></button>
 					<input type="text" class="uonix-vts-admin__item-label" aria-label="Rótulo do item" placeholder="Rótulo">
 					<input type="text" class="uonix-vts-admin__item-value" aria-label="Valor do item" placeholder="Valor">
-					<button type="button" class="button-link uonix-vts-admin__remove-item" aria-label="Remover item">×</button>
+					<div class="uonix-vts-admin__actions" role="group" aria-label="Ações do item">
+						<button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__move-item-up" aria-label="Mover item para cima"><span class="dashicons dashicons-arrow-up-alt2" aria-hidden="true"></span></button>
+						<button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__move-item-down" aria-label="Mover item para baixo"><span class="dashicons dashicons-arrow-down-alt2" aria-hidden="true"></span></button>
+						<button type="button" class="button uonix-vts-admin__icon-button uonix-vts-admin__icon-button--danger uonix-vts-admin__remove-item" aria-label="Remover item"><span class="dashicons dashicons-trash" aria-hidden="true"></span></button>
+					</div>
 				</div>
 			</template>
 		</div>
