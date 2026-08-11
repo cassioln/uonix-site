@@ -66,6 +66,9 @@ jobs:
       - name: Test variation technical sheet
         run: php scripts/tests/test-variation-technical-sheet.php
 
+      - name: Validate variation technical sheet admin script
+        run: node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
+
       - name: Test clone administration panel
         run: php scripts/tests/test-clone-admin.php
 

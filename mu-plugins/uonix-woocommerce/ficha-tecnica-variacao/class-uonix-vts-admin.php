@@ -14,6 +14,50 @@ final class Uonix_VTS_Admin {
 	public static function register_hooks() {
 		add_action( 'woocommerce_product_after_variable_attributes', array( __CLASS__, 'render_editor' ), 10, 3 );
 		add_action( 'woocommerce_admin_process_variation_object', array( __CLASS__, 'save_variation' ), 10, 2 );
+		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ), 10, 1 );
+	}
+
+	/**
+	 * Carrega o editor somente nas telas de produto.
+	 *
+	 * @param mixed $hook_suffix Identificador da tela administrativa.
+	 */
+	public static function enqueue_assets( $hook_suffix ) {
+		if ( ! in_array( $hook_suffix, array( 'post.php', 'post-new.php' ), true ) || ! function_exists( 'get_current_screen' ) ) {
+			return;
+		}
+
+		$screen = get_current_screen();
+		if ( ! is_object( $screen ) || ! isset( $screen->post_type ) || 'product' !== $screen->post_type ) {
+			return;
+		}
+
+		$script_relative = 'uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js';
+		$style_relative  = 'uonix-woocommerce/assets/css/admin-ficha-tecnica-variacao.css';
+		wp_enqueue_script(
+			'uonix-vts-admin',
+			UONIX_MU_URL . $script_relative,
+			array( 'jquery', 'jquery-ui-sortable' ),
+			(string) filemtime( UONIX_MU_PATH . $script_relative ),
+			true
+		);
+		wp_enqueue_style(
+			'uonix-vts-admin',
+			UONIX_MU_URL . $style_relative,
+			array(),
+			(string) filemtime( UONIX_MU_PATH . $style_relative )
+		);
+		wp_localize_script(
+			'uonix-vts-admin',
+			'uonixVtsAdmin',
+			array(
+				'parentId' => function_exists( 'get_the_ID' ) ? absint( get_the_ID() ) : 0,
+				'strings'  => array(
+					'removeConfirm' => 'Remover a ficha técnica desta variação ao salvar?',
+					'payloadError'  => 'Não foi possível carregar a ficha técnica salva.',
+				),
+			)
+		);
 	}
 
 	/**

@@ -110,11 +110,15 @@ function sanitize_text_field( $text ) {
 	return trim( (string) $text );
 }
 
-$GLOBALS['vts_actions']         = array();
-$GLOBALS['vts_filters']         = array();
-$GLOBALS['vts_enqueued_styles'] = array();
-$GLOBALS['vts_escaped_html']    = array();
-$GLOBALS['vts_is_product']      = false;
+$GLOBALS['vts_actions']           = array();
+$GLOBALS['vts_filters']           = array();
+$GLOBALS['vts_enqueued_styles']   = array();
+$GLOBALS['vts_enqueued_scripts']  = array();
+$GLOBALS['vts_localized_scripts'] = array();
+$GLOBALS['vts_current_screen']    = null;
+$GLOBALS['vts_current_post_id']   = 0;
+$GLOBALS['vts_escaped_html']      = array();
+$GLOBALS['vts_is_product']        = false;
 $GLOBALS['vts_editable_posts']  = array();
 $GLOBALS['vts_products']        = array();
 $GLOBALS['wc_meta_box_errors']  = array();
@@ -214,6 +218,33 @@ function wp_enqueue_style( $handle, $source = '', $dependencies = array(), $vers
 		'version'      => $version,
 		'media'        => $media,
 	);
+}
+
+function wp_enqueue_script( $handle, $source = '', $dependencies = array(), $version = false, $in_footer = false ) {
+	$GLOBALS['vts_enqueued_scripts'][] = array(
+		'handle'       => $handle,
+		'source'       => $source,
+		'dependencies' => $dependencies,
+		'version'      => $version,
+		'in_footer'    => $in_footer,
+	);
+}
+
+function wp_localize_script( $handle, $object_name, $data ) {
+	$GLOBALS['vts_localized_scripts'][] = array(
+		'handle'      => $handle,
+		'object_name' => $object_name,
+		'data'        => $data,
+	);
+	return true;
+}
+
+function get_current_screen() {
+	return $GLOBALS['vts_current_screen'];
+}
+
+function get_the_ID() {
+	return $GLOBALS['vts_current_post_id'];
 }
 
 $GLOBALS['vts_capture_loader'] = false;
@@ -356,6 +387,60 @@ vts_assert_hook(
 	2,
 	'persistência administrativa registrada na prioridade 10 com dois argumentos'
 );
+vts_assert_hook(
+	'vts_actions',
+	'admin_enqueue_scripts',
+	array( 'Uonix_VTS_Admin', 'enqueue_assets' ),
+	10,
+	1,
+	'assets administrativos registrados na prioridade 10 com um argumento'
+);
+
+$GLOBALS['vts_current_screen']  = (object) array( 'post_type' => 'product' );
+$GLOBALS['vts_current_post_id'] = 10382;
+Uonix_VTS_Admin::enqueue_assets( 'plugins.php' );
+vts_assert_same( array(), $GLOBALS['vts_enqueued_scripts'], 'script não carrega fora de post.php e post-new.php' );
+vts_assert_same( array(), $GLOBALS['vts_enqueued_styles'], 'CSS administrativo não carrega fora de post.php e post-new.php' );
+
+$GLOBALS['vts_current_screen'] = (object) array( 'post_type' => 'post' );
+Uonix_VTS_Admin::enqueue_assets( 'post.php' );
+vts_assert_same( array(), $GLOBALS['vts_enqueued_scripts'], 'script não carrega em outro post type' );
+vts_assert_same( array(), $GLOBALS['vts_localized_scripts'], 'configuração não é exposta em outro post type' );
+
+$GLOBALS['vts_current_screen'] = null;
+Uonix_VTS_Admin::enqueue_assets( 'post.php' );
+vts_assert_same( array(), $GLOBALS['vts_enqueued_scripts'], 'script não carrega sem tela administrativa válida' );
+
+$GLOBALS['vts_current_screen'] = (object) array( 'post_type' => 'product' );
+Uonix_VTS_Admin::enqueue_assets( 'post.php' );
+vts_assert_same( 1, count( $GLOBALS['vts_enqueued_scripts'] ), 'script administrativo carrega uma vez na edição de produto' );
+vts_assert_same( 1, count( $GLOBALS['vts_enqueued_styles'] ), 'CSS administrativo carrega uma vez na edição de produto' );
+vts_assert_same( 1, count( $GLOBALS['vts_localized_scripts'] ), 'configuração administrativa é localizada uma única vez' );
+$admin_script = $GLOBALS['vts_enqueued_scripts'][0];
+$admin_style  = $GLOBALS['vts_enqueued_styles'][0];
+$admin_config = $GLOBALS['vts_localized_scripts'][0];
+vts_assert_same( 'uonix-vts-admin', $admin_script['handle'], 'handle do script administrativo é estável' );
+vts_assert_contains( 'uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js', $admin_script['source'], 'URL do script aponta para o asset próprio' );
+vts_assert_same( array( 'jquery', 'jquery-ui-sortable' ), $admin_script['dependencies'], 'script declara jQuery e sortable como dependências' );
+vts_assert_same( true, $admin_script['in_footer'], 'script administrativo carrega no rodapé' );
+vts_assert_same( (string) filemtime( UONIX_MU_PATH . 'uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js' ), $admin_script['version'], 'script usa filemtime como versão' );
+vts_assert_same( 'uonix-vts-admin', $admin_style['handle'], 'handle do CSS administrativo é estável' );
+vts_assert_contains( 'uonix-woocommerce/assets/css/admin-ficha-tecnica-variacao.css', $admin_style['source'], 'URL do CSS aponta para o asset próprio' );
+vts_assert_same( (string) filemtime( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/admin-ficha-tecnica-variacao.css' ), $admin_style['version'], 'CSS administrativo usa filemtime como versão' );
+vts_assert_same( 'uonix-vts-admin', $admin_config['handle'], 'configuração é associada ao script correto' );
+vts_assert_same( 'uonixVtsAdmin', $admin_config['object_name'], 'objeto JavaScript global tem nome fixo' );
+vts_assert_same( 10382, $admin_config['data']['parentId'], 'configuração inclui o produto pai atual' );
+vts_assert_same( 'Remover a ficha técnica desta variação ao salvar?', $admin_config['data']['strings']['removeConfirm'], 'confirmação de remoção é localizada' );
+vts_assert_same( 'Não foi possível carregar a ficha técnica salva.', $admin_config['data']['strings']['payloadError'], 'erro de hidratação é localizado' );
+
+$GLOBALS['vts_enqueued_scripts']  = array();
+$GLOBALS['vts_enqueued_styles']   = array();
+$GLOBALS['vts_localized_scripts'] = array();
+Uonix_VTS_Admin::enqueue_assets( 'post-new.php' );
+vts_assert_same( 1, count( $GLOBALS['vts_enqueued_scripts'] ), 'script também carrega na criação de produto' );
+$GLOBALS['vts_enqueued_scripts']  = array();
+$GLOBALS['vts_enqueued_styles']   = array();
+$GLOBALS['vts_localized_scripts'] = array();
 
 $valid = Uonix_VTS_Schema::normalize_envelope(
 	wp_json_encode(
@@ -851,6 +936,63 @@ vts_assert_same( 0, $save_variation->save_calls, 'hook não chama save novamente
 Uonix_VTS_Admin::save_variation( null, 0 );
 $_POST = array();
 
+$admin_js = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js' );
+vts_assert_contains( "(function ($) {\n\t'use strict';", $admin_js, 'script usa IIFE estrita' );
+vts_assert_contains( 'const config = window.uonixVtsAdmin || {};', $admin_js, 'script consome somente o objeto localizado' );
+vts_assert_not_contains( 'window.uonixVtsAdmin =', $admin_js, 'script não expõe outro estado global' );
+vts_assert_contains( 'function collectSheet($root)', $admin_js, 'editor coleta estado estruturado' );
+vts_assert_contains( 'version: 1', $admin_js, 'serialização fixa a versão do esquema' );
+vts_assert_contains( "action: 'delete'", $admin_js, 'estado removido serializa delete explícito' );
+vts_assert_contains( "\$payload.prop('disabled', true).val('');", $admin_js, 'estado inativo desabilita o payload' );
+vts_assert_contains( "action: 'upsert'", $admin_js, 'estado ativo serializa upsert explícito' );
+vts_assert_same( 2, substr_count( $admin_js, 'JSON.stringify(' ), 'delete e upsert são serializados separadamente como JSON' );
+vts_assert_same( 2, substr_count( $admin_js, '.content.cloneNode(true)' ), 'seções e itens são clonados de templates próprios' );
+vts_assert_contains( 'JSON.parse(raw)', $admin_js, 'ficha salva é hidratada do envelope' );
+vts_assert_contains( 'renderSheetIntoEditor($root, envelope.sheet)', $admin_js, 'hidratação reutiliza o renderer do editor' );
+vts_assert_contains( "hasClass('has-payload-error')", $admin_js, 'erro de payload bloqueia sincronização destrutiva' );
+vts_assert_contains( "addClass('has-payload-error')", $admin_js, 'falha de hidratação fica visível no estado do editor' );
+vts_assert_contains( "hasClass('ui-sortable')", $admin_js, 'reinicialização detecta sortable existente' );
+vts_assert_contains( "sortable('destroy')", $admin_js, 'sortable existente é destruído antes de reinicializar' );
+vts_assert_contains( "handle: '.uonix-vts-admin__section-handle'", $admin_js, 'seções usam alça própria de reordenação' );
+vts_assert_contains( "handle: '.uonix-vts-admin__item-handle'", $admin_js, 'itens usam alça própria de reordenação' );
+vts_assert_contains( 'connectWith: false', $admin_js, 'itens não atravessam seções ao reordenar' );
+vts_assert_contains( "on('input change', '.uonix-vts-admin input, .uonix-vts-admin select'", $admin_js, 'edições usam evento delegado no markup próprio' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__add-section'", $admin_js, 'adição de seção funciona por evento delegado' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__add-item'", $admin_js, 'adição de item funciona por evento delegado' );
+vts_assert_contains( "on('click', '.uonix-vts-admin__remove-sheet'", $admin_js, 'remoção da ficha funciona por evento delegado' );
+vts_assert_same( 2, substr_count( $admin_js, 'config.strings.removeConfirm' ), 'confirmação usa a string localizada tanto na guarda quanto no valor' );
+vts_assert_same( 2, substr_count( $admin_js, 'config.strings.payloadError' ), 'erro de hidratação usa a string localizada tanto na guarda quanto no valor' );
+vts_assert_contains( 'woocommerce_variations_loaded woocommerce_variations_added', $admin_js, 'editor reinicializa após ciclos AJAX de variações' );
+vts_assert_contains( 'function reconcileSaved()', $admin_js, 'salvamento AJAX reconcilia o estado persistido do editor' );
+vts_assert_contains( "if (\$payload.prop('disabled'))", $admin_js, 'reconciliação ignora variação sem payload submetido' );
+vts_assert_contains( "JSON.parse(\$payload.val() || '')", $admin_js, 'reconciliação interpreta somente o envelope efetivamente submetido' );
+vts_assert_contains( "'woocommerce_variations_saved',", $admin_js, 'editor observa o sucesso do salvamento AJAX nativo' );
+vts_assert_contains( "if ('upsert' === envelope.action)", $admin_js, 'upsert salvo possui ramo explícito de reconciliação' );
+vts_assert_contains( "\$root.attr('data-had-sheet', '1');", $admin_js, 'upsert salvo passa a ser tratado como ficha persistida' );
+vts_assert_contains( "if ('delete' === envelope.action)", $admin_js, 'delete salvo possui ramo explícito de reconciliação' );
+vts_assert_contains( "\$root.attr('data-had-sheet', '0');", $admin_js, 'delete salvo deixa de ser tratado como ficha persistida' );
+vts_assert_same( 2, substr_count( $admin_js, "\$root.removeClass('is-active is-deleted');" ), 'remoção local e delete salvo recolhem o editor separadamente' );
+vts_assert_same( 2, substr_count( $admin_js, "\$payload.prop('disabled', true).val('');" ), 'estado inativo e delete confirmado desabilitam o payload separadamente' );
+vts_assert_not_contains( 'variable_description', $admin_js, 'script não depende de IDs internos de descrição' );
+
+$admin_css = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/admin-ficha-tecnica-variacao.css' );
+vts_assert_contains( '.uonix-vts-admin {', $admin_css, 'CSS administrativo é escopado no componente próprio' );
+vts_assert_contains( 'border: 1px solid #c9d5e6', $admin_css, 'editor usa a borda aprovada' );
+vts_assert_contains( 'background: #f8fafc', $admin_css, 'editor usa o fundo aprovado' );
+vts_assert_contains( '.uonix-vts-admin input[type="text"],', $admin_css, 'campos editáveis têm regra explícita' );
+vts_assert_contains( 'color: #2c3338 !important', $admin_css, 'texto editável e selects usam contraste aprovado' );
+vts_assert_contains( '.uonix-vts-admin input[readonly]', $admin_css, 'campo readonly tem regra distinta' );
+vts_assert_contains( 'color: #50575e !important', $admin_css, 'readonly usa contraste aprovado' );
+vts_assert_contains( 'background: #f0f2f4', $admin_css, 'readonly usa fundo aprovado' );
+vts_assert_contains( '.uonix-vts-admin input::placeholder', $admin_css, 'placeholder tem regra explícita' );
+vts_assert_contains( 'color: #8c8f94', $admin_css, 'placeholder usa cor aprovada' );
+vts_assert_contains( ".uonix-vts-admin__editor {\n\tdisplay: none;\n}", $admin_css, 'editor começa recolhido sem ficha' );
+vts_assert_contains( '.uonix-vts-admin.is-active .uonix-vts-admin__editor', $admin_css, 'estado ativo exibe o editor' );
+vts_assert_contains( '.uonix-vts-admin.is-deleted::after', $admin_css, 'remoção pendente possui aviso visual' );
+vts_assert_contains( 'grid-template-columns: 28px minmax(160px, 1fr) 150px 32px', $admin_css, 'cabeçalho da seção usa colunas legíveis' );
+vts_assert_contains( '@media (max-width: 782px)', $admin_css, 'editor administrativo adapta-se ao breakpoint do WordPress' );
+vts_assert_contains( 'grid-template-columns: 28px 1fr 32px', $admin_css, 'campos empilham em tela estreita' );
+
 $frontend_css = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/ficha-tecnica-variacao.css' );
 vts_assert_contains( 'repeat(auto-fit, minmax(68px, 1fr))', $frontend_css, 'grade compacta responde à largura disponível' );
 vts_assert_contains( 'repeat(auto-fit, minmax(150px, 1fr))', $frontend_css, 'grade detalhada responde à largura disponível' );
@@ -858,5 +1000,9 @@ vts_assert_contains( '@media (max-width: 600px)', $frontend_css, 'cabeçalho pos
 vts_assert_not_contains( 'repeat(6, 1fr)', $frontend_css, 'CSS não fixa seis colunas' );
 vts_assert_not_contains( 'repeat(4, 1fr)', $frontend_css, 'CSS não fixa quatro colunas' );
 vts_assert_not_contains( '.uonix-ficha-', $frontend_css, 'CSS não reutiliza classes legadas' );
+
+$validation_workflow = file_get_contents( $repo_root . '/.github/workflows/validate.yml' );
+vts_assert_contains( '- name: Validate variation technical sheet admin script', $validation_workflow, 'workflow nomeia o gate do JavaScript administrativo' );
+vts_assert_contains( 'node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js', $validation_workflow, 'workflow valida a sintaxe do editor administrativo' );
 
 printf( "PASS: contratos da ficha técnica por variação. (%d asserções)\n", $GLOBALS['vts_assertions'] );
