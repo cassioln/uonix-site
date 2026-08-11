@@ -114,11 +114,11 @@
 }
 
 .uonix-vts-admin .uonix-vts-admin__icon-button .dashicons {
-	line-height: 18px;
+	line-height: 8px;
 }
 
 .uonix-vts-admin .uonix-vts-admin__remove-sheet .dashicons {
-	line-height: 2;
+	line-height: 1;
 }
 
 .uonix-vts-admin .uonix-vts-admin__drag-handle {
@@ -170,7 +170,7 @@
 
 .uonix-vts-admin .uonix-vts-admin__remove-sheet {
 	display: inline-flex;
-	gap: 16px;
+	gap: 10px;
 	align-items: center;
 }
 
