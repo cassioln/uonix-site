@@ -2015,6 +2015,16 @@ $frontend_css = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/css
 vts_assert_contains( 'repeat(auto-fit, minmax(68px, 1fr))', $frontend_css, 'grade compacta responde à largura disponível' );
 vts_assert_contains( 'repeat(auto-fit, minmax(150px, 1fr))', $frontend_css, 'grade detalhada responde à largura disponível' );
 vts_assert_contains( '@media (max-width: 600px)', $frontend_css, 'cabeçalho possui adaptação móvel' );
+vts_assert_contains(
+	'.uonix-vts__section + .uonix-vts__section { border-top: 6px solid #f1f5f9; }',
+	$frontend_css,
+	'divisor aparece somente entre seções adjacentes'
+);
+vts_assert_same(
+	1,
+	substr_count( $frontend_css, 'border-top: 6px solid #f1f5f9' ),
+	'divisor é declarado uma única vez'
+);
 vts_assert_not_contains( 'repeat(6, 1fr)', $frontend_css, 'CSS não fixa seis colunas' );
 vts_assert_not_contains( 'repeat(4, 1fr)', $frontend_css, 'CSS não fixa quatro colunas' );
 vts_assert_not_contains( '.uonix-ficha-', $frontend_css, 'CSS não reutiliza classes legadas' );
