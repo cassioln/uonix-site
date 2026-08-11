@@ -8,6 +8,9 @@
 if ( ! defined( 'ABSPATH' ) ) {
 	define( 'ABSPATH', __DIR__ . '/wordpress/' );
 }
+if ( ! defined( 'WP_CLI' ) ) {
+	define( 'WP_CLI', true );
+}
 
 $GLOBALS['vts_assertions'] = 0;
 
@@ -126,6 +129,17 @@ $GLOBALS['vts_nonce_checks']     = array();
 $GLOBALS['vts_created_nonces']   = array();
 $GLOBALS['vts_json_response']    = null;
 $GLOBALS['vts_formatted_calls']  = array();
+$GLOBALS['vts_cli_commands']     = array();
+$GLOBALS['vts_cli_logs']         = array();
+$GLOBALS['vts_cli_errors']       = array();
+$GLOBALS['vts_get_posts_calls']  = array();
+$GLOBALS['vts_current_time_calls'] = array();
+$GLOBALS['vts_metadata_exists_calls'] = array();
+$GLOBALS['vts_current_time']     = '2026-08-11 12:00:00';
+$GLOBALS['vts_migration_store']  = array();
+$GLOBALS['vts_store_writes']     = 0;
+$GLOBALS['vts_save_fail_once']   = array();
+$GLOBALS['vts_save_corrupt_once'] = array();
 $GLOBALS['wc_meta_box_errors']   = array();
 $GLOBALS['vts_terms']           = array(
 	'pa_tipo'     => array( 'pesado' => 'Pesado' ),
@@ -176,7 +190,53 @@ function current_user_can( $capability, $object_id = 0 ) {
 }
 
 function wc_get_product( $product_id ) {
-	return $GLOBALS['vts_products'][ absint( $product_id ) ] ?? false;
+	$product_id = absint( $product_id );
+	if ( array_key_exists( $product_id, $GLOBALS['vts_migration_store'] ) ) {
+		return new VTS_Fake_Migration_Variation( $product_id );
+	}
+	return $GLOBALS['vts_products'][ $product_id ] ?? false;
+}
+
+function get_posts( $args = array() ) {
+	$GLOBALS['vts_get_posts_calls'][] = $args;
+	$query = isset( $args['meta_query'][0] ) && is_array( $args['meta_query'][0] )
+		? $args['meta_query'][0]
+		: array();
+	$key     = isset( $query['key'] ) ? $query['key'] : '';
+	$value   = isset( $query['value'] ) ? (string) $query['value'] : '';
+	$compare = isset( $query['compare'] ) ? strtoupper( (string) $query['compare'] ) : '';
+	$ids     = array();
+	foreach ( $GLOBALS['vts_migration_store'] as $variation_id => $record ) {
+		if (
+			'_variation_description' === $key &&
+			'LIKE' === $compare &&
+			false !== strpos( $record['description'], $value )
+		) {
+			$ids[] = (int) $variation_id;
+		}
+		if (
+			class_exists( 'Uonix_VTS_Schema' ) &&
+			Uonix_VTS_Schema::BACKUP_META_KEY === $key &&
+			'EXISTS' === $compare &&
+			array_key_exists( Uonix_VTS_Schema::BACKUP_META_KEY, $record['meta'] )
+		) {
+			$ids[] = (int) $variation_id;
+		}
+	}
+	sort( $ids, SORT_NUMERIC );
+	return $ids;
+}
+
+function current_time( $type, $gmt = 0 ) {
+	$GLOBALS['vts_current_time_calls'][] = array( $type, $gmt );
+	return $GLOBALS['vts_current_time'];
+}
+
+function metadata_exists( $meta_type, $object_id, $meta_key ) {
+	$GLOBALS['vts_metadata_exists_calls'][] = array( $meta_type, absint( $object_id ), $meta_key );
+	return 'post' === $meta_type &&
+		isset( $GLOBALS['vts_migration_store'][ absint( $object_id ) ] ) &&
+		array_key_exists( $meta_key, $GLOBALS['vts_migration_store'][ absint( $object_id ) ]['meta'] );
 }
 
 function wc_get_formatted_variation( $variation, $flat = false, $include_names = true, $skip_attributes_in_name = false ) {
@@ -200,6 +260,26 @@ function check_ajax_referer( $action = -1, $query_arg = false, $stop = true ) {
 		'stop'      => $stop,
 	);
 	return $GLOBALS['vts_nonce_valid'] ? 1 : false;
+}
+
+final class VTS_CLI_Error extends RuntimeException {}
+
+class WP_CLI {
+	public static function add_command( $name, $callable ) {
+		$GLOBALS['vts_cli_commands'][] = array(
+			'name'     => $name,
+			'callable' => $callable,
+		);
+	}
+
+	public static function log( $message ) {
+		$GLOBALS['vts_cli_logs'][] = (string) $message;
+	}
+
+	public static function error( $message ) {
+		$GLOBALS['vts_cli_errors'][] = (string) $message;
+		throw new VTS_CLI_Error( (string) $message );
+	}
 }
 
 final class VTS_Json_Response_Exception extends RuntimeException {}
@@ -453,6 +533,188 @@ final class VTS_Fake_Admin_Variation {
 	public function save() {
 		++$this->save_calls;
 	}
+}
+
+final class VTS_Fake_Migration_Variation {
+	private $description;
+	private $id;
+	private $meta;
+
+	public function __construct( $id ) {
+		$this->id          = absint( $id );
+		$record            = $GLOBALS['vts_migration_store'][ $this->id ];
+		$this->description = $record['description'];
+		$this->meta        = $record['meta'];
+	}
+
+	public function get_id() {
+		return $this->id;
+	}
+
+	public function get_type() {
+		return 'variation';
+	}
+
+	public function get_description( $context = 'view' ) {
+		return $this->description;
+	}
+
+	public function set_description( $description ) {
+		$this->description = (string) $description;
+	}
+
+	public function get_meta( $key, $single = true ) {
+		return $this->meta[ $key ] ?? '';
+	}
+
+	public function update_meta_data( $key, $value ) {
+		$this->meta[ $key ] = $value;
+	}
+
+	public function delete_meta_data( $key ) {
+		unset( $this->meta[ $key ] );
+	}
+
+	public function save() {
+		++$GLOBALS['vts_store_writes'];
+		$GLOBALS['vts_save_calls_by_id'][ $this->id ] = 1 + ( $GLOBALS['vts_save_calls_by_id'][ $this->id ] ?? 0 );
+		$call_number = $GLOBALS['vts_save_calls_by_id'][ $this->id ];
+		if ( in_array( $call_number, $GLOBALS['vts_save_fail_before_on_call'][ $this->id ] ?? array(), true ) ) {
+			throw new RuntimeException( 'falha anterior à persistência simulada #' . $this->id );
+		}
+		$GLOBALS['vts_migration_store'][ $this->id ]['description'] = $this->description;
+		$GLOBALS['vts_migration_store'][ $this->id ]['meta']        = $this->meta;
+		if ( ! empty( $GLOBALS['vts_save_corrupt_once'][ $this->id ] ) ) {
+			unset( $GLOBALS['vts_save_corrupt_once'][ $this->id ] );
+			$GLOBALS['vts_migration_store'][ $this->id ]['description'] .= '<!--corrompido-->';
+		}
+		if ( ! empty( $GLOBALS['vts_save_reinsert_empty_sheet_once'][ $this->id ] ) ) {
+			unset( $GLOBALS['vts_save_reinsert_empty_sheet_once'][ $this->id ] );
+			$GLOBALS['vts_migration_store'][ $this->id ]['meta'][ Uonix_VTS_Schema::META_KEY ] = '';
+		}
+		if ( ! empty( $GLOBALS['vts_save_fail_once'][ $this->id ] ) ) {
+			unset( $GLOBALS['vts_save_fail_once'][ $this->id ] );
+			throw new RuntimeException( 'falha de save simulada #' . $this->id );
+		}
+		return $this->id;
+	}
+}
+
+function vts_legacy_inventory_fixture() {
+	return array(
+		10410 => '<div class="uonix-fichas-compactas"><div class="uonix-ficha-compacta"><div class="uonix-ficha-header"><strong>Dimensões (mm)</strong><span>Modelo: Leve · Material: Inox · Pol.: 3/8"</span></div><div class="uonix-medidas-grid"><div><strong>A</strong><span>45</span></div><div><strong>B</strong><span>33</span></div><div><strong>C</strong><span>12</span></div><div><strong>D</strong><span>8</span></div><div><strong>E</strong><span>17</span></div><div><strong>F</strong><span>18</span></div></div><div class="uonix-info-grid"><div><strong>Espaço mín.</strong><span>57 mm</span></div><div><strong>Torque</strong><span>14 N·m</span></div><div><strong>Torque</strong><span>1,4 Kgf·m</span></div><div><strong>Peso</strong><span>0,059 Kg</span></div></div></div></div>',
+		10411 => '<div class="uonix-fichas-compactas"><div class="uonix-ficha-compacta"><div class="uonix-ficha-header"><strong>Dimensões (mm)</strong><span>Modelo: Pesado · Material: Inox · Pol.: 5/16"</span></div><div class="uonix-medidas-grid"><div><strong>A</strong><span>37</span></div><div><strong>B</strong><span>28</span></div><div><strong>C</strong><span>10</span></div><div><strong>D</strong><span>6</span></div><div><strong>E</strong><span>14</span></div><div><strong>F</strong><span>14</span></div></div><div class="uonix-info-grid"><div><strong>Espaço mín.</strong><span>48 mm</span></div><div><strong>Torque</strong><span>8 N·m</span></div><div><strong>Torque</strong><span>0,8 Kgf·m</span></div><div><strong>Peso</strong><span>0,03 Kg</span></div></div></div></div>',
+		10460 => '<div class="uonix-fichas-compactas"><div class="uonix-ficha-compacta"><div class="uonix-ficha-header"><strong>Dimensões (mm)</strong><span>Modelo: Pesado · Material: Inox · Pol.: 3/8"</span></div><div class="uonix-medidas-grid"><div><strong>A</strong><span>45</span></div><div><strong>B</strong><span>33</span></div><div><strong>C</strong><span>12</span></div><div><strong>D</strong><span>8</span></div><div><strong>E</strong><span>17</span></div><div><strong>F</strong><span>18</span></div></div><div class="uonix-info-grid"><div><strong>Espaço mín.</strong><span>57 mm</span></div><div><strong>Torque</strong><span>14 N·m</span></div><div><strong>Torque</strong><span>1,4 Kgf·m</span></div><div><strong>Peso</strong><span>0,05 Kg</span></div></div></div></div>',
+		10461 => '<div class="uonix-fichas-compactas"><div class="uonix-ficha-compacta"><div class="uonix-ficha-header"><strong>Dimensões (mm)</strong><span>Modelo: Pesado · Material: Galvan · Pol.: 5/16"</span></div><div class="uonix-medidas-grid"><div><strong>A</strong><span>42</span></div><div><strong>B</strong><span>43</span></div><div><strong>C</strong><span>14</span></div><div><strong>D</strong><span>9</span></div><div><strong>E</strong><span>20</span></div><div><strong>F</strong><span>34</span></div></div><div class="uonix-info-grid"><div><strong>Espaço mín.</strong><span>48 mm</span></div><div><strong>Torque</strong><span>25,1 N·m</span></div><div><strong>Torque</strong><span>2,5 Kgf·m</span></div><div><strong>Peso</strong><span>0,13 Kg</span></div></div></div></div>',
+		10462 => '<div class="uonix-fichas-compactas"><div class="uonix-ficha-compacta"><div class="uonix-ficha-header"><strong>Dimensões (mm)</strong><span>Modelo: Pesado · Material: Galvan · Pol.: 3/8"</span></div><div class="uonix-medidas-grid"><div><strong>A</strong><span>50</span></div><div><strong>B</strong><span>50</span></div><div><strong>C</strong><span>16</span></div><div><strong>D</strong><span>11</span></div><div><strong>E</strong><span>22</span></div><div><strong>F</strong><span>40</span></div></div><div class="uonix-info-grid"><div><strong>Espaço mín.</strong><span>57 mm</span></div><div><strong>Torque</strong><span>33,9 N·m</span></div><div><strong>Torque</strong><span>3,4 Kgf·m</span></div><div><strong>Peso</strong><span>0,2 Kg</span></div></div></div></div>',
+	);
+}
+
+function vts_reset_migration_store( $descriptions = null ) {
+	$descriptions = null === $descriptions ? vts_legacy_inventory_fixture() : $descriptions;
+	$GLOBALS['vts_migration_store']    = array();
+	$GLOBALS['vts_store_writes']       = 0;
+	$GLOBALS['vts_save_fail_once']                = array();
+	$GLOBALS['vts_save_corrupt_once']             = array();
+	$GLOBALS['vts_save_reinsert_empty_sheet_once'] = array();
+	$GLOBALS['vts_save_calls_by_id']              = array();
+	$GLOBALS['vts_save_fail_before_on_call'] = array();
+	$GLOBALS['vts_cli_logs']           = array();
+	$GLOBALS['vts_cli_errors']         = array();
+	$GLOBALS['vts_get_posts_calls']    = array();
+	$GLOBALS['vts_current_time_calls'] = array();
+	$GLOBALS['vts_metadata_exists_calls'] = array();
+	foreach ( $descriptions as $variation_id => $description ) {
+		$GLOBALS['vts_migration_store'][ $variation_id ] = array(
+			'description' => $description,
+			'meta'        => array(),
+		);
+	}
+}
+
+function vts_store_snapshot() {
+	$snapshot = $GLOBALS['vts_migration_store'];
+	ksort( $snapshot, SORT_NUMERIC );
+	foreach ( $snapshot as &$record ) {
+		ksort( $record['meta'], SORT_STRING );
+	}
+	unset( $record );
+	return $snapshot;
+}
+
+function vts_count_verified_backups() {
+	$count = 0;
+	foreach ( $GLOBALS['vts_migration_store'] as $record ) {
+		if ( ! array_key_exists( Uonix_VTS_Schema::BACKUP_META_KEY, $record['meta'] ) ) {
+			continue;
+		}
+		$backup = $record['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ];
+		if (
+			! is_array( $backup ) ||
+			array_keys( $backup ) !== array(
+				'original_description',
+				'source_hash',
+				'remaining_description',
+				'remaining_description_hash',
+				'sheet',
+				'sheet_hash',
+				'migrated_at_gmt',
+				'version',
+			) ||
+			1 !== $backup['version'] ||
+			$backup['source_hash'] !== hash( 'sha256', $backup['original_description'] ) ||
+			$backup['remaining_description_hash'] !== hash( 'sha256', $backup['remaining_description'] ) ||
+			$backup['sheet_hash'] !== hash( 'sha256', wp_json_encode( $backup['sheet'] ) ) ||
+			! is_string( $backup['migrated_at_gmt'] ) ||
+			'' === $backup['migrated_at_gmt']
+		) {
+			continue;
+		}
+		++$count;
+	}
+	return $count;
+}
+
+function vts_count_legacy_wrappers() {
+	$count = 0;
+	foreach ( $GLOBALS['vts_migration_store'] as $record ) {
+		if ( false !== strpos( $record['description'], 'uonix-fichas-compactas' ) ) {
+			++$count;
+		}
+	}
+	return $count;
+}
+
+function vts_count_structured_sheets() {
+	$count = 0;
+	foreach ( $GLOBALS['vts_migration_store'] as $record ) {
+		if ( array_key_exists( Uonix_VTS_Schema::META_KEY, $record['meta'] ) ) {
+			++$count;
+		}
+	}
+	return $count;
+}
+
+function vts_mutate_post_migration_sheet( $variation_id ) {
+	$GLOBALS['vts_post_migration_sheet_before'][ $variation_id ] = $GLOBALS['vts_migration_store'][ $variation_id ]['meta'][ Uonix_VTS_Schema::META_KEY ];
+	$GLOBALS['vts_migration_store'][ $variation_id ]['meta'][ Uonix_VTS_Schema::META_KEY ]['sections'][0]['items'][0]['value'] = 'EDITADO DEPOIS';
+}
+
+function vts_restore_post_migration_sheet( $variation_id ) {
+	$GLOBALS['vts_migration_store'][ $variation_id ]['meta'][ Uonix_VTS_Schema::META_KEY ] = $GLOBALS['vts_post_migration_sheet_before'][ $variation_id ];
+	unset( $GLOBALS['vts_post_migration_sheet_before'][ $variation_id ] );
+}
+
+function vts_expect_cli_error( $callback, $message_fragment = '' ) {
+	try {
+		$callback();
+	} catch ( VTS_CLI_Error $exception ) {
+		if ( '' !== $message_fragment ) {
+			vts_assert_contains( $message_fragment, $exception->getMessage(), 'erro WP-CLI possui diagnóstico esperado' );
+		}
+		return $exception->getMessage();
+	}
+	vts_fail( 'era esperado um erro WP-CLI fail-closed' );
 }
 
 $copy_sheet = vts_valid_sheet();
@@ -1232,6 +1494,504 @@ vts_assert_contains( "removeClass('is-deleted has-payload-error')", $admin_js, '
 vts_assert_contains( '.fail(showCopyError)', $admin_js, 'falha de transporte mostra erro controlado' );
 vts_assert_not_contains( "trigger('woocommerce_variations_save')", $admin_js, 'cópia não salva automaticamente' );
 vts_assert_not_contains( 'variable_description', $admin_js, 'script não depende de IDs internos de descrição' );
+
+$legacy_wrapper = '<div class="uonix-fichas-compactas"><div class="uonix-ficha-compacta"><div class="uonix-ficha-header"><strong>Dimensões (mm)</strong><span>Modelo: Pesado · Material: Galvan · Pol.: 5/16"</span></div><div class="uonix-medidas-grid"><div><strong>A</strong><span>42</span></div><div><strong>B</strong><span>43</span></div><div><strong>C</strong><span>14</span></div><div><strong>D</strong><span>9</span></div><div><strong>E</strong><span>20</span></div><div><strong>F</strong><span>34</span></div></div><div class="uonix-info-grid"><div><strong>Espaço mín.</strong><span>48 mm</span></div><div><strong>Torque</strong><span>25,1 N·m</span></div><div><strong>Torque</strong><span>2,5 Kgf·m</span></div><div><strong>Peso</strong><span>0,13 Kg</span></div></div></div></div>';
+$legacy_description = '<p>Antes</p>' . $legacy_wrapper . '<p>Depois</p>';
+
+vts_assert_true( class_exists( 'Uonix_VTS_Migration_Command' ), 'classe de migração legada é carregada pelo bootstrap' );
+$migration_source = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/ficha-tecnica-variacao/class-uonix-vts-migration-command.php' );
+vts_assert_contains( "if ( ! defined( 'WP_CLI' ) || ! WP_CLI || ! class_exists( 'WP_CLI' ) )", $migration_source, 'registro WP-CLI possui guarda fail-closed completa' );
+vts_assert_contains( 'LIBXML_NONET', $migration_source, 'parser DOM bloqueia acesso de rede' );
+vts_assert_contains( "metadata_exists( 'post', \$variation_id, \$meta_key )", $migration_source, 'migração distingue meta ausente de valor vazio' );
+foreach ( array( '10410', '10411', '10460', '10461', '10462' ) as $inventory_id ) {
+	vts_assert_not_contains( $inventory_id, $migration_source, 'produção não fixa ID do inventário #' . $inventory_id );
+}
+$execute_method_start = strpos( $migration_source, 'private static function execute_candidates' );
+$execute_catch_start  = strpos( $migration_source, '} catch ( Throwable $exception )', $execute_method_start );
+$rollback_method_start = strpos( $migration_source, 'private static function rollback_candidates' );
+$rollback_catch_start  = strpos( $migration_source, '} catch ( Throwable $exception )', $rollback_method_start );
+vts_assert_true( false !== $execute_method_start && false !== $execute_catch_start, 'bloco transacional de execute é localizável' );
+vts_assert_true( false !== $rollback_method_start && false !== $rollback_catch_start, 'bloco transacional de rollback é localizável' );
+vts_assert_not_contains( 'WP_CLI::error(', substr( $migration_source, $execute_method_start, $execute_catch_start - $execute_method_start ), 'execute não encerra WP-CLI antes da compensação' );
+vts_assert_not_contains( 'WP_CLI::error(', substr( $migration_source, $rollback_method_start, $rollback_catch_start - $rollback_method_start ), 'rollback não encerra WP-CLI antes da compensação' );
+$parsed_legacy = Uonix_VTS_Migration_Command::parse_legacy_description( $legacy_description );
+vts_assert_same( array( 'ok', 'code', 'message', 'sheet', 'remaining_description' ), array_keys( $parsed_legacy ), 'parser possui contrato estável' );
+vts_assert_same( true, $parsed_legacy['ok'], 'wrapper legado reconhecido' );
+vts_assert_same( 'Dimensões (mm)', $parsed_legacy['sheet']['title'], 'título extraído' );
+vts_assert_same( 'compact', $parsed_legacy['sheet']['sections'][0]['layout'], 'medidas viram seção compacta' );
+vts_assert_same( '', $parsed_legacy['sheet']['sections'][0]['title'], 'seção compacta permanece sem título próprio' );
+vts_assert_same( 6, count( $parsed_legacy['sheet']['sections'][0]['items'] ), 'seis medidas extraídas' );
+vts_assert_same( 'A', $parsed_legacy['sheet']['sections'][0]['items'][0]['label'], 'primeiro rótulo compacto preservado' );
+vts_assert_same( '42', $parsed_legacy['sheet']['sections'][0]['items'][0]['value'], 'primeiro valor compacto preservado' );
+vts_assert_same( 'detailed', $parsed_legacy['sheet']['sections'][1]['layout'], 'informações viram seção detalhada' );
+vts_assert_same( '', $parsed_legacy['sheet']['sections'][1]['title'], 'seção detalhada permanece sem título próprio' );
+vts_assert_same( 4, count( $parsed_legacy['sheet']['sections'][1]['items'] ), 'quatro detalhes extraídos' );
+vts_assert_same( 'Peso', $parsed_legacy['sheet']['sections'][1]['items'][3]['label'], 'último rótulo detalhado preservado' );
+vts_assert_same( '0,13 Kg', $parsed_legacy['sheet']['sections'][1]['items'][3]['value'], 'último valor detalhado preservado' );
+vts_assert_same( '<p>Antes</p><p>Depois</p>', $parsed_legacy['remaining_description'], 'texto livre preservado byte a byte' );
+vts_assert_not_contains( 'Galvan', wp_json_encode( $parsed_legacy['sheet'] ), 'subtítulo legado não é migrado' );
+
+$expected_legacy_hashes = array(
+	10410 => 'c955e33d7574cb357e902ff71b91444e309b8b4a3103be233392084daaae9fad',
+	10411 => '2df1eadc77a5acff66e1daf7522023e907a998df045333ddcd49a70fb43c60ad',
+	10460 => '226cb89957865b48d9396d25025776b1d0a0e47bc0ba9548025360a45c2e88d0',
+	10461 => 'adec338b0d83452f59aa208df70604c4d45e240dedcdcd4da9af279045a18dff',
+	10462 => '3208a9a199c68bda5e95d6f33ac22fdc53bff1825004f90f9191574d77426ed0',
+);
+foreach ( vts_legacy_inventory_fixture() as $variation_id => $description ) {
+	vts_assert_same( $expected_legacy_hashes[ $variation_id ], hash( 'sha256', $description ), 'fixture legado permanece byte a byte congelado #' . $variation_id );
+}
+
+$legacy_five_measures = str_replace( '<div><strong>F</strong><span>34</span></div>', '', $legacy_description );
+$legacy_three_details = str_replace( '<div><strong>Peso</strong><span>0,13 Kg</span></div>', '', $legacy_description );
+$legacy_unbalanced    = '<p>Antes</p>' . substr( $legacy_wrapper, 0, -6 ) . '<p>Depois</p>';
+$legacy_duplicate     = '<p>Antes</p>' . $legacy_wrapper . $legacy_wrapper . '<p>Depois</p>';
+$legacy_wrong_token   = str_replace( 'uonix-fichas-compactas', 'uonix-fichas-compactas-extra', $legacy_description );
+$legacy_overlong_value = str_replace( '<span>42</span>', '<span>' . str_repeat( 'x', 501 ) . '</span>', $legacy_description );
+$legacy_direct_sheet_text = str_replace( '</span></div><div class="uonix-medidas-grid">', '</span></div>TEXTO NÃO MIGRADO<div class="uonix-medidas-grid">', $legacy_description );
+$legacy_direct_wrapper_text = str_replace( '<div class="uonix-fichas-compactas"><div class="uonix-ficha-compacta">', '<div class="uonix-fichas-compactas">TEXTO WRAPPER<div class="uonix-ficha-compacta">', $legacy_description );
+$legacy_direct_header_text = str_replace( '<strong>Dimensões (mm)</strong><span>', '<strong>Dimensões (mm)</strong>TEXTO HEADER<span>', $legacy_description );
+$legacy_direct_grid_text = str_replace( '<span>42</span></div><div><strong>B</strong>', '<span>42</span></div>TEXTO GRID<div><strong>B</strong>', $legacy_description );
+$legacy_direct_pair_text = str_replace( '<strong>A</strong><span>42</span>', '<strong>A</strong>TEXTO PAR<span>42</span>', $legacy_description );
+$legacy_missing_span_close = str_replace( 'Pol.: 5/16"</span></div>', 'Pol.: 5/16"</div>', $legacy_description );
+$legacy_duplicate_attribute = str_replace( '<div class="uonix-ficha-header">', '<div class="uonix-ficha-header" class="duplicada">', $legacy_description );
+foreach (
+	array(
+		'cinco medidas'      => $legacy_five_measures,
+		'três detalhes'      => $legacy_three_details,
+		'wrapper desbalanceado' => $legacy_unbalanced,
+		'wrapper duplicado'  => $legacy_duplicate,
+		'token de classe parcial' => $legacy_wrong_token,
+		'valor acima do schema' => $legacy_overlong_value,
+		'texto direto inesperado na ficha' => $legacy_direct_sheet_text,
+		'texto direto inesperado no wrapper' => $legacy_direct_wrapper_text,
+		'texto direto inesperado no cabeçalho' => $legacy_direct_header_text,
+		'texto direto inesperado na grade' => $legacy_direct_grid_text,
+		'texto direto inesperado no par' => $legacy_direct_pair_text,
+		'span sem fechamento reparado pelo DOM' => $legacy_missing_span_close,
+		'atributo duplicado reportado pelo DOM' => $legacy_duplicate_attribute,
+	) as $case_name => $invalid_legacy
+) {
+	$invalid_parsed = Uonix_VTS_Migration_Command::parse_legacy_description( $invalid_legacy );
+	vts_assert_same( false, $invalid_parsed['ok'], 'parser recusa ' . $case_name );
+	vts_assert_true( is_string( $invalid_parsed['code'] ) && '' !== $invalid_parsed['code'], 'falha identifica ' . $case_name );
+	vts_assert_same( null, $invalid_parsed['sheet'], 'falha não expõe ficha parcial em ' . $case_name );
+	vts_assert_same( null, $invalid_parsed['remaining_description'], 'falha não produz descrição parcial em ' . $case_name );
+}
+
+vts_assert_same(
+	array( array( 'name' => 'uonix ficha-tecnica', 'callable' => 'Uonix_VTS_Migration_Command' ) ),
+	$GLOBALS['vts_cli_commands'],
+	'bootstrap registra o comando WP-CLI uma única vez'
+);
+vts_assert_true( method_exists( 'Uonix_VTS_Migration_Command', 'migrate' ), 'comando expõe operação migrate' );
+
+vts_reset_migration_store();
+$migration_command = new Uonix_VTS_Migration_Command();
+$migration_command->migrate( array(), array( 'dry-run' => true ) );
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'dry-run não grava' );
+vts_assert_same( array( array( 'mysql', true ) ), $GLOBALS['vts_current_time_calls'], 'preflight usa um timestamp GMT determinístico' );
+vts_assert_same( 6, count( $GLOBALS['vts_cli_logs'] ), 'dry-run relata cinco fontes e um resumo' );
+foreach ( vts_legacy_inventory_fixture() as $variation_id => $description ) {
+	$report_line = null;
+	foreach ( $GLOBALS['vts_cli_logs'] as $line ) {
+		if ( false !== strpos( $line, '#' . $variation_id . ':' ) ) {
+			$report_line = $line;
+			break;
+		}
+	}
+	vts_assert_true( is_string( $report_line ), 'dry-run relata a variação #' . $variation_id );
+	vts_assert_contains( hash( 'sha256', $description ), $report_line, 'dry-run relata hash da origem #' . $variation_id );
+	vts_assert_contains( 'compacta=6', $report_line, 'dry-run relata seis medidas #' . $variation_id );
+	vts_assert_contains( 'detalhada=4', $report_line, 'dry-run relata quatro detalhes #' . $variation_id );
+}
+vts_assert_same(
+	'DRY-RUN OK: 5 fichas legadas reconhecidas; nenhuma alteração realizada.',
+	$GLOBALS['vts_cli_logs'][5],
+	'dry-run encerra com resumo normativo'
+);
+vts_assert_same(
+	array(
+		'post_type'      => 'product_variation',
+		'post_status'    => 'any',
+		'numberposts'    => -1,
+		'fields'         => 'ids',
+		'no_found_rows'  => true,
+		'orderby'        => 'ID',
+		'order'          => 'ASC',
+		'meta_query'     => array(
+			array(
+				'key'     => '_variation_description',
+				'value'   => 'uonix-fichas-compactas',
+				'compare' => 'LIKE',
+			),
+		),
+	),
+	$GLOBALS['vts_get_posts_calls'][0],
+	'preflight consulta descrições de variações pelo meta real do WooCommerce'
+);
+
+vts_reset_migration_store();
+$migration_command->migrate( array(), array() );
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'ausência de modo também é dry-run' );
+vts_assert_same( 'DRY-RUN OK: 5 fichas legadas reconhecidas; nenhuma alteração realizada.', $GLOBALS['vts_cli_logs'][5], 'modo padrão permanece seguro' );
+
+vts_reset_migration_store();
+$GLOBALS['vts_current_time'] = '2026-02-30 12:00:00';
+$invalid_time_snapshot = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'dry-run' => true ) );
+	},
+	'horário GMT válido'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'timestamp GMT inválido falha antes de gravar' );
+vts_assert_same( $invalid_time_snapshot, vts_store_snapshot(), 'timestamp GMT inválido preserva o store' );
+$GLOBALS['vts_current_time'] = '2026-08-11 12:00:00';
+
+vts_reset_migration_store();
+$before_invalid_mode = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true, 'rollback' => true ) );
+	},
+	'Escolha somente'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'modos conflitantes não gravam' );
+vts_assert_same( array(), $GLOBALS['vts_get_posts_calls'], 'modos conflitantes falham antes de consultar dados' );
+vts_assert_same( $before_invalid_mode, vts_store_snapshot(), 'modos conflitantes preservam todo o store' );
+
+$four_legacy = vts_legacy_inventory_fixture();
+unset( $four_legacy[10462] );
+vts_reset_migration_store( $four_legacy );
+$four_snapshot = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'dry-run' => true ) );
+	},
+	'exatamente 5'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'contagem divergente falha sem gravar' );
+vts_assert_same( $four_snapshot, vts_store_snapshot(), 'contagem divergente preserva todo o store' );
+
+$invalid_five = vts_legacy_inventory_fixture();
+$invalid_five[10460] = str_replace( '<div><strong>F</strong><span>18</span></div>', '', $invalid_five[10460] );
+vts_reset_migration_store( $invalid_five );
+$invalid_snapshot = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'dry-run' => true ) );
+	},
+	'#10460'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'parser divergente falha antes de qualquer gravação' );
+vts_assert_same( $invalid_snapshot, vts_store_snapshot(), 'parser divergente preserva todas as cinco variações' );
+
+vts_reset_migration_store();
+$original_inventory = vts_legacy_inventory_fixture();
+$migration_command->migrate( array(), array( 'execute' => true ) );
+vts_assert_same( 5, $GLOBALS['vts_store_writes'], 'execute grava exatamente as cinco variações' );
+vts_assert_same( 5, vts_count_verified_backups(), 'execute cria cinco backups integrais verificados' );
+vts_assert_same( 0, vts_count_legacy_wrappers(), 'execute remove os cinco wrappers reconhecidos' );
+vts_assert_same( 5, vts_count_structured_sheets(), 'execute cria cinco fichas estruturadas' );
+vts_assert_same( array( 'EXECUTE OK: 5 fichas migradas; 5 backups verificados.' ), $GLOBALS['vts_cli_logs'], 'execute relata sucesso normativo' );
+foreach ( $original_inventory as $variation_id => $original_description ) {
+	$record = $GLOBALS['vts_migration_store'][ $variation_id ];
+	$backup = $record['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ];
+	vts_assert_same( '', $record['description'], 'descrição composta apenas pelo wrapper fica vazia #' . $variation_id );
+	vts_assert_same( $original_description, $backup['original_description'], 'backup preserva descrição original byte a byte #' . $variation_id );
+	vts_assert_same( hash( 'sha256', $original_description ), $backup['source_hash'], 'backup preserva hash da origem #' . $variation_id );
+	vts_assert_same( '', $backup['remaining_description'], 'backup registra descrição remanescente #' . $variation_id );
+	vts_assert_same( hash( 'sha256', '' ), $backup['remaining_description_hash'], 'backup registra hash remanescente #' . $variation_id );
+	vts_assert_same( $backup['sheet'], $record['meta'][ Uonix_VTS_Schema::META_KEY ], 'meta salvo equivale à ficha verificada #' . $variation_id );
+	vts_assert_same( hash( 'sha256', wp_json_encode( $backup['sheet'] ) ), $backup['sheet_hash'], 'backup registra hash da ficha #' . $variation_id );
+	vts_assert_same( '2026-08-11 12:00:00', $backup['migrated_at_gmt'], 'backup registra timestamp GMT #' . $variation_id );
+	vts_assert_same( 1, $backup['version'], 'backup registra versão da migração #' . $variation_id );
+}
+
+$after_first_execute = vts_store_snapshot();
+$writes_after_execute = $GLOBALS['vts_store_writes'];
+$GLOBALS['vts_cli_logs'] = array();
+$GLOBALS['vts_get_posts_calls'] = array();
+$GLOBALS['vts_current_time_calls'] = array();
+$migration_command->migrate( array(), array( 'execute' => true ) );
+vts_assert_same( $writes_after_execute, $GLOBALS['vts_store_writes'], 'segunda execução é idempotente' );
+vts_assert_same( $after_first_execute, vts_store_snapshot(), 'segunda execução não altera bytes nem metas' );
+vts_assert_same( array( 'NO-CHANGE: 5 fichas já migradas e verificadas.' ), $GLOBALS['vts_cli_logs'], 'segunda execução relata estado verificado' );
+vts_assert_same( array(), $GLOBALS['vts_current_time_calls'], 'idempotência não fabrica novo timestamp' );
+vts_assert_same( 2, count( $GLOBALS['vts_get_posts_calls'] ), 'idempotência consulta wrappers e backups' );
+vts_assert_same( Uonix_VTS_Schema::BACKUP_META_KEY, $GLOBALS['vts_get_posts_calls'][1]['meta_query'][0]['key'], 'idempotência busca backups pela chave própria' );
+vts_assert_same( 'EXISTS', $GLOBALS['vts_get_posts_calls'][1]['meta_query'][0]['compare'], 'idempotência exige backup existente' );
+
+vts_mutate_post_migration_sheet( 10410 );
+$idempotent_sheet_edit_snapshot = vts_store_snapshot();
+$writes_before_idempotent_sheet_edit = $GLOBALS['vts_store_writes'];
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'divergiu'
+);
+vts_assert_same( $writes_before_idempotent_sheet_edit, $GLOBALS['vts_store_writes'], 'idempotência recusa ficha editada sem gravar' );
+vts_assert_same( $idempotent_sheet_edit_snapshot, vts_store_snapshot(), 'idempotência preserva ficha editada ao recusar' );
+vts_restore_post_migration_sheet( 10410 );
+
+$GLOBALS['vts_migration_store'][10410]['description'] = '<p>Descrição posterior</p>';
+$idempotent_description_edit_snapshot = vts_store_snapshot();
+$writes_before_idempotent_description_edit = $GLOBALS['vts_store_writes'];
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'divergiu'
+);
+vts_assert_same( $writes_before_idempotent_description_edit, $GLOBALS['vts_store_writes'], 'idempotência recusa descrição editada sem gravar' );
+vts_assert_same( $idempotent_description_edit_snapshot, vts_store_snapshot(), 'idempotência preserva descrição editada ao recusar' );
+
+$GLOBALS['vts_migration_store'][10410]['description'] = '';
+$edited_backup =& $GLOBALS['vts_migration_store'][10410]['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ];
+$edited_backup['sheet']['sections'][0]['items'][0]['value'] = '999';
+$edited_backup['sheet_hash'] = hash( 'sha256', wp_json_encode( $edited_backup['sheet'] ) );
+unset( $edited_backup );
+$idempotent_backup_edit_snapshot = vts_store_snapshot();
+$writes_before_idempotent_backup_edit = $GLOBALS['vts_store_writes'];
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'divergiu'
+);
+vts_assert_same( $writes_before_idempotent_backup_edit, $GLOBALS['vts_store_writes'], 'idempotência recusa backup editado sem gravar' );
+vts_assert_same( $idempotent_backup_edit_snapshot, vts_store_snapshot(), 'idempotência preserva backup editado ao recusar' );
+
+vts_reset_migration_store();
+$GLOBALS['vts_migration_store'][10410]['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ] = array(
+	'version'              => 1,
+	'source_hash'          => str_repeat( '0', 64 ),
+	'original_description' => $GLOBALS['vts_migration_store'][10410]['description'],
+);
+$backup_conflict_snapshot = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'backup'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'backup divergente aborta antes de gravar' );
+vts_assert_same( $backup_conflict_snapshot, vts_store_snapshot(), 'backup divergente nunca é sobrescrito' );
+
+$valid_backup_mutators = array(
+	'origem divergente' => function ( &$backup ) {
+		$backup['original_description'] .= '<p>origem adulterada</p>';
+		$backup['source_hash']           = hash( 'sha256', $backup['original_description'] );
+	},
+	'versão desconhecida' => function ( &$backup ) {
+		$backup['version'] = 2;
+	},
+	'timestamp inválido' => function ( &$backup ) {
+		$backup['migrated_at_gmt'] = 'ontem';
+	},
+);
+foreach ( $valid_backup_mutators as $case_name => $mutate_backup ) {
+	vts_reset_migration_store();
+	$migration_command->migrate( array(), array( 'execute' => true ) );
+	$migration_command->migrate( array(), array( 'rollback' => true ) );
+	$mutated_backup =& $GLOBALS['vts_migration_store'][10410]['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ];
+	$mutate_backup( $mutated_backup );
+	unset( $mutated_backup );
+	$mutated_backup_snapshot          = vts_store_snapshot();
+	$GLOBALS['vts_store_writes']      = 0;
+	$GLOBALS['vts_cli_logs']          = array();
+	$GLOBALS['vts_get_posts_calls']   = array();
+	$GLOBALS['vts_current_time_calls'] = array();
+	vts_expect_cli_error(
+		function () use ( $migration_command ) {
+			$migration_command->migrate( array(), array( 'execute' => true ) );
+		},
+		'backup legado divergente'
+	);
+	vts_assert_same( 0, $GLOBALS['vts_store_writes'], $case_name . ' aborta antes de gravar' );
+	vts_assert_same( $mutated_backup_snapshot, vts_store_snapshot(), $case_name . ' nunca é sobrescrito' );
+}
+
+vts_reset_migration_store();
+$GLOBALS['vts_migration_store'][10410]['meta'][ Uonix_VTS_Schema::META_KEY ] = vts_valid_sheet();
+$sheet_conflict_snapshot = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'ficha estruturada'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'ficha preexistente aborta antes de gravar' );
+vts_assert_same( $sheet_conflict_snapshot, vts_store_snapshot(), 'ficha preexistente é preservada' );
+
+vts_reset_migration_store();
+$GLOBALS['vts_migration_store'][99999] = array(
+	'description' => '<p>Variação sem wrapper legado</p>',
+	'meta'        => array( Uonix_VTS_Schema::BACKUP_META_KEY => array( 'stale' => true ) ),
+);
+$orphan_backup_snapshot = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'backup fora das cinco candidatas'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'backup órfão aborta antes de gravar' );
+vts_assert_same( $orphan_backup_snapshot, vts_store_snapshot(), 'backup órfão e candidatas permanecem intactos' );
+
+vts_reset_migration_store();
+$GLOBALS['vts_migration_store'][10410]['meta'][ Uonix_VTS_Schema::META_KEY ] = '';
+$empty_sheet_conflict_snapshot = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'ficha estruturada'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'meta estruturado vazio ainda é conflito físico' );
+vts_assert_same( $empty_sheet_conflict_snapshot, vts_store_snapshot(), 'meta estruturado vazio nunca é sobrescrito' );
+
+vts_reset_migration_store();
+$GLOBALS['vts_migration_store'][10410]['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ] = '';
+$empty_backup_conflict_snapshot = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'backup'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'backup vazio ainda é backup físico divergente' );
+vts_assert_same( $empty_backup_conflict_snapshot, vts_store_snapshot(), 'backup vazio nunca é sobrescrito' );
+
+vts_reset_migration_store();
+$rollback_without_backup_snapshot = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'rollback' => true ) );
+	},
+	'cinco backups'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'rollback sem backups não grava' );
+vts_assert_same( $rollback_without_backup_snapshot, vts_store_snapshot(), 'rollback sem backups preserva o store' );
+
+vts_reset_migration_store();
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$backups_before_rollback = array();
+foreach ( array_keys( vts_legacy_inventory_fixture() ) as $variation_id ) {
+	$backups_before_rollback[ $variation_id ] = $GLOBALS['vts_migration_store'][ $variation_id ]['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ];
+}
+vts_mutate_post_migration_sheet( 10410 );
+$post_edit_snapshot = vts_store_snapshot();
+$writes_before_refused_rollback = $GLOBALS['vts_store_writes'];
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'rollback' => true ) );
+	},
+	'edição posterior'
+);
+vts_assert_same( $writes_before_refused_rollback, $GLOBALS['vts_store_writes'], 'rollback após edição posterior não grava' );
+vts_assert_same( $post_edit_snapshot, vts_store_snapshot(), 'rollback após edição posterior preserva todo o store' );
+
+vts_restore_post_migration_sheet( 10410 );
+$GLOBALS['vts_cli_logs'] = array();
+$migration_command->migrate( array(), array( 'rollback' => true ) );
+vts_assert_same( 10, $GLOBALS['vts_store_writes'], 'rollback válido grava exatamente as cinco restaurações' );
+vts_assert_same( 5, vts_count_legacy_wrappers(), 'rollback restaura as cinco descrições legadas' );
+vts_assert_same( 0, vts_count_structured_sheets(), 'rollback remove os cinco metas estruturados' );
+vts_assert_same( 5, vts_count_verified_backups(), 'rollback preserva os cinco backups verificados' );
+vts_assert_same( array( 'ROLLBACK OK: 5 descrições restauradas; backups preservados.' ), $GLOBALS['vts_cli_logs'], 'rollback relata sucesso normativo' );
+foreach ( vts_legacy_inventory_fixture() as $variation_id => $original_description ) {
+	$record = $GLOBALS['vts_migration_store'][ $variation_id ];
+	vts_assert_same( $original_description, $record['description'], 'rollback restaura bytes originais #' . $variation_id );
+	vts_assert_false( array_key_exists( Uonix_VTS_Schema::META_KEY, $record['meta'] ), 'rollback remove fisicamente o meta estruturado #' . $variation_id );
+	vts_assert_same( $backups_before_rollback[ $variation_id ], $record['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ], 'rollback não reescreve o backup #' . $variation_id );
+}
+
+$GLOBALS['vts_current_time']       = '2026-08-12 09:30:00';
+$GLOBALS['vts_current_time_calls'] = array();
+$GLOBALS['vts_cli_logs']           = array();
+$writes_before_reexecute           = $GLOBALS['vts_store_writes'];
+$migration_command->migrate( array(), array( 'execute' => true ) );
+vts_assert_same( $writes_before_reexecute + 5, $GLOBALS['vts_store_writes'], 'execute após rollback migra novamente as cinco variações' );
+vts_assert_same( array(), $GLOBALS['vts_current_time_calls'], 'execute após rollback reutiliza timestamps dos backups' );
+vts_assert_same( array( 'EXECUTE OK: 5 fichas migradas; 5 backups verificados.' ), $GLOBALS['vts_cli_logs'], 'nova execução após rollback relata sucesso' );
+foreach ( $backups_before_rollback as $variation_id => $backup_before ) {
+	vts_assert_same( $backup_before, $GLOBALS['vts_migration_store'][ $variation_id ]['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ], 'nova execução reutiliza backup sem sobrescrever #' . $variation_id );
+}
+$GLOBALS['vts_current_time'] = '2026-08-11 12:00:00';
+
+vts_reset_migration_store();
+$before_execute_failure = vts_store_snapshot();
+$GLOBALS['vts_save_fail_once'][10460] = true;
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'restauradas'
+);
+vts_assert_same( $before_execute_failure, vts_store_snapshot(), 'falha de save restaura todos os registros alterados no execute' );
+vts_assert_same( 6, $GLOBALS['vts_store_writes'], 'falha no terceiro save restaura as três tentativas' );
+vts_assert_same( 0, vts_count_verified_backups(), 'falha de execute remove backups criados na tentativa' );
+
+vts_reset_migration_store();
+$before_verify_failure = vts_store_snapshot();
+$GLOBALS['vts_save_corrupt_once'][10411] = true;
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'restauradas'
+);
+vts_assert_same( $before_verify_failure, vts_store_snapshot(), 'mismatch após releitura restaura todos os registros alterados' );
+vts_assert_same( 4, $GLOBALS['vts_store_writes'], 'mismatch no segundo registro restaura duas tentativas' );
+
+vts_reset_migration_store();
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$migrated_before_rollback_failure = vts_store_snapshot();
+$GLOBALS['vts_store_writes'] = 0;
+$GLOBALS['vts_save_fail_once'][10411] = true;
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'rollback' => true ) );
+	},
+	'restauradas'
+);
+vts_assert_same( $migrated_before_rollback_failure, vts_store_snapshot(), 'falha de save no rollback restaura o estado pós-migração' );
+vts_assert_same( 4, $GLOBALS['vts_store_writes'], 'falha no segundo rollback restaura duas tentativas' );
+
+vts_reset_migration_store();
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$migrated_before_rollback_mismatch = vts_store_snapshot();
+$GLOBALS['vts_store_writes'] = 0;
+$GLOBALS['vts_save_reinsert_empty_sheet_once'][10411] = true;
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'rollback' => true ) );
+	},
+	'restauradas'
+);
+vts_assert_same( $migrated_before_rollback_mismatch, vts_store_snapshot(), 'meta vazio reaparecido após save aciona compensação do rollback' );
+vts_assert_same( 4, $GLOBALS['vts_store_writes'], 'mismatch físico no segundo rollback restaura duas tentativas' );
+
+vts_reset_migration_store();
+$before_incomplete_restore = vts_store_snapshot();
+$GLOBALS['vts_save_corrupt_once'][10460]         = true;
+$GLOBALS['vts_save_fail_before_on_call'][10460] = array( 2 );
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'restauração incompleta'
+);
+$after_incomplete_restore = vts_store_snapshot();
+vts_assert_same( $before_incomplete_restore[10410], $after_incomplete_restore[10410], 'compensação continua e restaura #10410 após falha em outro ID' );
+vts_assert_same( $before_incomplete_restore[10411], $after_incomplete_restore[10411], 'compensação continua e restaura #10411 após falha em outro ID' );
+vts_assert_true( $before_incomplete_restore[10460] !== $after_incomplete_restore[10460], 'ID cuja própria restauração falhou permanece detectavelmente divergente' );
+vts_assert_same( 2, $GLOBALS['vts_save_calls_by_id'][10410], 'compensação ainda tenta #10410' );
+vts_assert_same( 2, $GLOBALS['vts_save_calls_by_id'][10411], 'compensação ainda tenta #10411' );
+vts_assert_same( 2, $GLOBALS['vts_save_calls_by_id'][10460], 'compensação registra a tentativa falha de #10460' );
 
 $admin_css = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/admin-ficha-tecnica-variacao.css' );
 vts_assert_contains( '.uonix-vts-admin {', $admin_css, 'CSS administrativo é escopado no componente próprio' );

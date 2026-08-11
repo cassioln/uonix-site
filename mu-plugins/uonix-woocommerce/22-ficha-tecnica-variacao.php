@@ -13,6 +13,7 @@ uonix_mu_require_files(
 		'class-uonix-vts-schema.php',
 		'class-uonix-vts-renderer.php',
 		'class-uonix-vts-admin.php',
+		'class-uonix-vts-migration-command.php',
 	),
 	'uonix-woocommerce/ficha-tecnica-variacao'
 );
@@ -23,4 +24,8 @@ if ( class_exists( 'Uonix_VTS_Renderer' ) ) {
 
 if ( class_exists( 'Uonix_VTS_Admin' ) ) {
 	Uonix_VTS_Admin::register_hooks();
+}
+
+if ( class_exists( 'Uonix_VTS_Migration_Command' ) ) {
+	Uonix_VTS_Migration_Command::register();
 }
