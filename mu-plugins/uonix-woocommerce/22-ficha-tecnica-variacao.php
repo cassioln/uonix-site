@@ -9,6 +9,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 uonix_mu_require_files(
 	__DIR__ . '/ficha-tecnica-variacao',
-	array( 'class-uonix-vts-schema.php' ),
+	array(
+		'class-uonix-vts-schema.php',
+		'class-uonix-vts-renderer.php',
+	),
 	'uonix-woocommerce/ficha-tecnica-variacao'
 );
+
+if ( class_exists( 'Uonix_VTS_Renderer' ) ) {
+	Uonix_VTS_Renderer::register_hooks();
+}

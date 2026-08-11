@@ -41,6 +41,23 @@ function vts_assert_contains( $needle, $haystack, $message ) {
 	}
 }
 
+function vts_assert_not_contains( $needle, $haystack, $message ) {
+	++$GLOBALS['vts_assertions'];
+	if ( false !== strpos( (string) $haystack, (string) $needle ) ) {
+		vts_fail( $message . '; trecho inesperado: ' . var_export( $needle, true ) );
+	}
+}
+
+function vts_assert_hook( $registry, $hook, $callback, $accepted_args, $message ) {
+	++$GLOBALS['vts_assertions'];
+	foreach ( $GLOBALS[ $registry ][ $hook ] ?? array() as $registered ) {
+		if ( $registered['callback'] === $callback && $registered['accepted_args'] === $accepted_args ) {
+			return;
+		}
+	}
+	vts_fail( $message . '; hook ou accepted_args não encontrado' );
+}
+
 function vts_assert_failure_contract( $expected_code, $actual, $message ) {
 	vts_assert_same(
 		array( 'ok', 'code', 'message', 'action', 'sheet' ),
@@ -89,6 +106,80 @@ function sanitize_text_field( $text ) {
 	return trim( (string) $text );
 }
 
+$GLOBALS['vts_actions']         = array();
+$GLOBALS['vts_filters']         = array();
+$GLOBALS['vts_enqueued_styles'] = array();
+$GLOBALS['vts_escaped_html']    = array();
+$GLOBALS['vts_is_product']      = false;
+$GLOBALS['vts_terms']           = array(
+	'pa_tipo'     => array( 'pesado' => 'Pesado' ),
+	'pa_material' => array( 'inox-316' => 'Inox 316' ),
+	'pa_bitola'   => array( '5-16' => '5/16"' ),
+);
+
+function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
+	$GLOBALS['vts_actions'][ $hook ][] = array(
+		'callback'      => $callback,
+		'priority'      => $priority,
+		'accepted_args' => $accepted_args,
+	);
+	return true;
+}
+
+function add_filter( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
+	$GLOBALS['vts_filters'][ $hook ][] = array(
+		'callback'      => $callback,
+		'priority'      => $priority,
+		'accepted_args' => $accepted_args,
+	);
+	return true;
+}
+
+function esc_html( $text ) {
+	$GLOBALS['vts_escaped_html'][] = (string) $text;
+	return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+}
+
+function wc_attribute_label( $name, $product = null ) {
+	$labels = array(
+		'pa_tipo'             => 'Tipo',
+		'pa_material'         => 'Material',
+		'pa_bitola'           => 'Bitola',
+		'acabamento'          => 'Acabamento',
+		'acabamento-especial' => 'Acabamento & brilho',
+	);
+	return $labels[ $name ] ?? ucfirst( str_replace( array( 'pa_', '-', '_' ), array( '', ' ', ' ' ), $name ) );
+}
+
+function taxonomy_exists( $taxonomy ) {
+	return isset( $GLOBALS['vts_terms'][ $taxonomy ] );
+}
+
+function get_term_by( $field, $value, $taxonomy ) {
+	if ( 'slug' !== $field || ! isset( $GLOBALS['vts_terms'][ $taxonomy ][ $value ] ) ) {
+		return false;
+	}
+	return (object) array( 'name' => $GLOBALS['vts_terms'][ $taxonomy ][ $value ] );
+}
+
+function is_wp_error( $value ) {
+	return false;
+}
+
+function is_product() {
+	return $GLOBALS['vts_is_product'];
+}
+
+function wp_enqueue_style( $handle, $source = '', $dependencies = array(), $version = false, $media = 'all' ) {
+	$GLOBALS['vts_enqueued_styles'][] = array(
+		'handle'       => $handle,
+		'source'       => $source,
+		'dependencies' => $dependencies,
+		'version'      => $version,
+		'media'        => $media,
+	);
+}
+
 $GLOBALS['vts_capture_loader'] = false;
 $GLOBALS['vts_loader_calls']   = array();
 
@@ -108,6 +199,8 @@ function uonix_mu_require_files( $base_dir, $files, $scope ) {
 }
 
 $repo_root = dirname( __DIR__, 2 );
+define( 'UONIX_MU_PATH', $repo_root . '/mu-plugins/' );
+define( 'UONIX_MU_URL', 'https://example.test/wp-content/mu-plugins/' );
 
 $GLOBALS['vts_capture_loader'] = true;
 require $repo_root . '/mu-plugins/uonix-woocommerce/module.php';
@@ -142,6 +235,30 @@ function vts_valid_sheet() {
 			),
 		),
 	);
+}
+
+final class VTS_Fake_Render_Variation {
+	private $attributes;
+	private $meta;
+	private $id;
+
+	public function __construct( $id, array $attributes, $sheet = null ) {
+		$this->id         = $id;
+		$this->attributes = $attributes;
+		$this->meta       = null === $sheet ? array() : array( Uonix_VTS_Schema::META_KEY => $sheet );
+	}
+
+	public function get_attributes() {
+		return $this->attributes;
+	}
+
+	public function get_meta( $key, $single = true ) {
+		return $this->meta[ $key ] ?? '';
+	}
+
+	public function get_id() {
+		return $this->id;
+	}
 }
 
 $valid = Uonix_VTS_Schema::normalize_envelope(
@@ -341,5 +458,168 @@ vts_assert_same( '4 2', $normalized['sheet']['sections'][0]['items'][1]['value']
 $partial_reverse                                        = vts_valid_sheet();
 $partial_reverse['sections'][0]['items'][0]['label']    = '';
 vts_assert_same( 'partial_item', Uonix_VTS_Schema::normalize_sheet( $partial_reverse )['code'], 'item parcial sem rótulo recusado' );
+
+$render_sheet = vts_valid_sheet();
+$render_sheet['sections'][] = array(
+	'title'  => 'Informações',
+	'layout' => 'detailed',
+	'items'  => array(
+		array( 'label' => 'Peso', 'value' => '0,059 Kg' ),
+	),
+);
+$variation = new VTS_Fake_Render_Variation(
+	10410,
+	array(
+		'pa_material' => 'inox-316',
+		'pa_bitola'   => '5-16',
+		'pa_tipo'     => 'pesado',
+	),
+	$render_sheet
+);
+
+$pairs = Uonix_VTS_Renderer::attribute_pairs( $variation );
+vts_assert_same(
+	array(
+		array( 'label' => 'Modelo', 'value' => 'Pesado' ),
+		array( 'label' => 'Material', 'value' => 'Inox 316' ),
+		array( 'label' => 'Pol.', 'value' => '5/16"' ),
+	),
+	$pairs,
+	'subtítulo usa aliases e valores oficiais'
+);
+
+$html = Uonix_VTS_Renderer::render( $render_sheet, $variation );
+vts_assert_contains( 'class="uonix-vts"', $html, 'wrapper novo presente' );
+vts_assert_contains( 'Dimensões (mm)', $html, 'título renderizado' );
+vts_assert_contains( 'Modelo: Pesado · Material: Inox 316 · Pol.: 5/16&quot;', $html, 'subtítulo oficial' );
+vts_assert_contains( 'uonix-vts__grid--compact', $html, 'seção compacta renderizada' );
+vts_assert_contains( 'uonix-vts__grid--detailed', $html, 'seção detalhada renderizada' );
+vts_assert_contains( 'uonix-vts__section-title">Informações', $html, 'título preenchido renderizado' );
+vts_assert_same( 1, substr_count( $html, 'uonix-vts__section-title' ), 'título vazio não cria marcação extra' );
+$escaped_counts = array_count_values( $GLOBALS['vts_escaped_html'] );
+vts_assert_same( 2, $escaped_counts['compact'] ?? 0, 'layout compacto passa por esc_html nos dois atributos de classe' );
+vts_assert_same( 2, $escaped_counts['detailed'] ?? 0, 'layout detalhado passa por esc_html nos dois atributos de classe' );
+
+$xss_sheet = vts_valid_sheet();
+$xss_sheet['title'] = 'Ficha <script>alert(1)</script>';
+$xss_sheet['sections'][0]['items'][0]['value'] = '<script>alert(2)</script>37';
+vts_assert_not_contains( '<script>', Uonix_VTS_Renderer::render( $xss_sheet, $variation ), 'script nunca executável' );
+
+$escaped_sheet                                        = vts_valid_sheet();
+$escaped_sheet['title']                               = 'Ficha & "geral"';
+$escaped_sheet['sections'][0]['title']                = 'Seção & "detalhes"';
+$escaped_sheet['sections'][0]['items'][0]['label']    = 'A & "B"';
+$escaped_sheet['sections'][0]['items'][0]['value']    = '37 & "38"';
+$escaped_sheet_html                                   = Uonix_VTS_Renderer::render( $escaped_sheet, $variation );
+vts_assert_contains( 'Ficha &amp; &quot;geral&quot;', $escaped_sheet_html, 'título persistido é escapado no sink' );
+vts_assert_contains( 'Seção &amp; &quot;detalhes&quot;', $escaped_sheet_html, 'título de seção persistido é escapado no sink' );
+vts_assert_contains( 'A &amp; &quot;B&quot;', $escaped_sheet_html, 'rótulo persistido é escapado no sink' );
+vts_assert_contains( '37 &amp; &quot;38&quot;', $escaped_sheet_html, 'valor persistido é escapado no sink' );
+
+$data = Uonix_VTS_Renderer::append_to_variation_data(
+	array( 'variation_description' => '<p>Descrição livre</p>' ),
+	null,
+	$variation
+);
+vts_assert_contains( '<p>Descrição livre</p>', $data['variation_description'], 'descrição livre preservada' );
+vts_assert_true(
+	strpos( $data['variation_description'], '<p>Descrição livre</p>' ) < strpos( $data['variation_description'], 'uonix-vts' ),
+	'ficha anexada depois da descrição'
+);
+
+$without_sheet = new VTS_Fake_Render_Variation( 10411, array( 'pa_tipo' => 'pesado' ) );
+$untouched     = array( 'variation_description' => '<p>Sem ficha</p>', 'custom' => 'byte-for-byte' );
+vts_assert_same(
+	$untouched,
+	Uonix_VTS_Renderer::append_to_variation_data( $untouched, null, $without_sheet ),
+	'meta ausente deixa todo o payload inalterado'
+);
+
+vts_assert_hook(
+	'vts_filters',
+	'woocommerce_available_variation',
+	array( 'Uonix_VTS_Renderer', 'append_to_variation_data' ),
+	3,
+	'filtro frontend registrado com três argumentos'
+);
+vts_assert_hook(
+	'vts_actions',
+	'wp_enqueue_scripts',
+	array( 'Uonix_VTS_Renderer', 'enqueue_frontend_assets' ),
+	0,
+	'asset frontend registrado sem argumentos'
+);
+
+Uonix_VTS_Renderer::enqueue_frontend_assets();
+vts_assert_same( array(), $GLOBALS['vts_enqueued_styles'], 'CSS não carrega fora de produto' );
+$GLOBALS['vts_is_product'] = true;
+Uonix_VTS_Renderer::enqueue_frontend_assets();
+vts_assert_same( 1, count( $GLOBALS['vts_enqueued_styles'] ), 'CSS carrega uma vez em produto' );
+vts_assert_same( 'uonix-vts', $GLOBALS['vts_enqueued_styles'][0]['handle'], 'handle do CSS é estável' );
+vts_assert_contains( 'uonix-woocommerce/assets/css/ficha-tecnica-variacao.css', $GLOBALS['vts_enqueued_styles'][0]['source'], 'URL aponta para asset versionado' );
+vts_assert_same(
+	(string) filemtime( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/ficha-tecnica-variacao.css' ),
+	$GLOBALS['vts_enqueued_styles'][0]['version'],
+	'versão do CSS usa filemtime'
+);
+
+$extra_variation = new VTS_Fake_Render_Variation(
+	10412,
+	array(
+		'acabamento'  => 'Escovado',
+		'pa_material' => 'inox-316',
+		'pa_tipo'     => 'pesado',
+	)
+);
+$extra_pairs = Uonix_VTS_Renderer::attribute_pairs( $extra_variation );
+vts_assert_same( 'Modelo', $extra_pairs[0]['label'], 'alias conhecido mantém precedência' );
+vts_assert_same( 'Material', $extra_pairs[1]['label'], 'segundo alias mantém precedência' );
+vts_assert_same( array( 'label' => 'Acabamento', 'value' => 'Escovado' ), $extra_pairs[2], 'atributo restante é anexado depois dos aliases' );
+
+$empty_attribute_variation = new VTS_Fake_Render_Variation(
+	10415,
+	array(
+		'pa_tipo'     => 'pesado',
+		'pa_material' => '',
+		'pa_bitola'   => '',
+		'acabamento'  => '',
+	)
+);
+vts_assert_same(
+	array( array( 'label' => 'Modelo', 'value' => 'Pesado' ) ),
+	Uonix_VTS_Renderer::attribute_pairs( $empty_attribute_variation ),
+	'atributos oficiais e adicionais vazios são omitidos'
+);
+
+$escaped_attribute_variation = new VTS_Fake_Render_Variation(
+	10416,
+	array( 'acabamento-especial' => 'Escovado & polido' )
+);
+$escaped_attribute_html = Uonix_VTS_Renderer::render( vts_valid_sheet(), $escaped_attribute_variation );
+vts_assert_contains(
+	'Acabamento &amp; brilho: Escovado &amp; polido',
+	$escaped_attribute_html,
+	'rótulo e valor de atributo são escapados nos sinks'
+);
+
+$hostile_variation = new VTS_Fake_Render_Variation( 10413, array( 'acabamento' => '<script>alert(3)</script>' ) );
+$hostile_html      = Uonix_VTS_Renderer::render( vts_valid_sheet(), $hostile_variation );
+vts_assert_not_contains( '<script>', $hostile_html, 'atributo hostil nunca vira marcação executável' );
+vts_assert_contains( 'Acabamento: &lt;script&gt;alert(3)&lt;/script&gt;', $hostile_html, 'atributo hostil é escapado como texto' );
+
+$invalid_variation = new VTS_Fake_Render_Variation( 10414, array(), array( 'version' => 2 ) );
+vts_assert_same(
+	$untouched,
+	Uonix_VTS_Renderer::append_to_variation_data( $untouched, null, $invalid_variation ),
+	'meta inválido deixa todo o payload inalterado'
+);
+
+$frontend_css = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/ficha-tecnica-variacao.css' );
+vts_assert_contains( 'repeat(auto-fit, minmax(68px, 1fr))', $frontend_css, 'grade compacta responde à largura disponível' );
+vts_assert_contains( 'repeat(auto-fit, minmax(150px, 1fr))', $frontend_css, 'grade detalhada responde à largura disponível' );
+vts_assert_contains( '@media (max-width: 600px)', $frontend_css, 'cabeçalho possui adaptação móvel' );
+vts_assert_not_contains( 'repeat(6, 1fr)', $frontend_css, 'CSS não fixa seis colunas' );
+vts_assert_not_contains( 'repeat(4, 1fr)', $frontend_css, 'CSS não fixa quatro colunas' );
+vts_assert_not_contains( '.uonix-ficha-', $frontend_css, 'CSS não reutiliza classes legadas' );
 
 printf( "PASS: contratos da ficha técnica por variação. (%d asserções)\n", $GLOBALS['vts_assertions'] );
