@@ -32,6 +32,9 @@ services:
       WORDPRESS_DB_NAME: uonix_db
       WORDPRESS_TABLE_PREFIX: wpis_
       WORDPRESS_DEBUG: 1
+      # Token lido do .env do host (fora do Git). O painel de clone usa a
+      # constante UONIX_GITHUB_TOKEN para disparar o workflow no GitHub.
+      UONIX_GITHUB_TOKEN: ${UONIX_GITHUB_TOKEN:-}
       WORDPRESS_CONFIG_EXTRA: |
         define( 'WP_HOME', 'http://localhost:8080' );
         define( 'WP_SITEURL', 'http://localhost:8080' );
@@ -44,6 +47,9 @@ services:
         define( 'FS_METHOD', 'direct' );
         define( 'WP_MEMORY_LIMIT', '256M' );
         define( 'WP_MAX_MEMORY_LIMIT', '512M' );
+        if ( false !== getenv( 'UONIX_GITHUB_TOKEN' ) && '' !== getenv( 'UONIX_GITHUB_TOKEN' ) ) {
+            define( 'UONIX_GITHUB_TOKEN', getenv( 'UONIX_GITHUB_TOKEN' ) );
+        }
         @ini_set( 'display_errors', 0 );
     volumes:
       - wordpress_core:/var/www/html:z
@@ -77,6 +83,7 @@ services:
       WORDPRESS_DB_PASSWORD: uonix_pass
       WORDPRESS_DB_NAME: uonix_db
       WORDPRESS_TABLE_PREFIX: wpis_
+      UONIX_GITHUB_TOKEN: ${UONIX_GITHUB_TOKEN:-}
       WORDPRESS_CONFIG_EXTRA: |
         define( 'WP_HOME', 'http://localhost:8080' );
         define( 'WP_SITEURL', 'http://localhost:8080' );
@@ -89,6 +96,9 @@ services:
         define( 'FS_METHOD', 'direct' );
         define( 'WP_MEMORY_LIMIT', '256M' );
         define( 'WP_MAX_MEMORY_LIMIT', '512M' );
+        if ( false !== getenv( 'UONIX_GITHUB_TOKEN' ) && '' !== getenv( 'UONIX_GITHUB_TOKEN' ) ) {
+            define( 'UONIX_GITHUB_TOKEN', getenv( 'UONIX_GITHUB_TOKEN' ) );
+        }
         @ini_set( 'display_errors', 0 );
     volumes:
       - wordpress_core:/var/www/html:z
