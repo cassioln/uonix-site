@@ -7,6 +7,11 @@ on:
         description: Digite PUBLICAR <SHA> EM SITE.UONIX.COM.BR
         required: true
         type: string
+      migrate_variation_technical_sheet:
+        description: Executar dry-run e migração das fichas legadas por variação
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -24,6 +29,7 @@ jobs:
       UONIX_PRODUCTION_CONFIRMATION: ${{ inputs.confirmation }}
       UONIX_REQUEST_SHA: ${{ github.sha }}
       UONIX_REQUEST_REF: ${{ github.ref }}
+      UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET: ${{ inputs.migrate_variation_technical_sheet }}
       LOCAWEB_SSH_HOST: ${{ vars.LOCAWEB_SSH_HOST }}
       LOCAWEB_SSH_PORT: ${{ vars.LOCAWEB_SSH_PORT }}
       LOCAWEB_SSH_USER: ${{ vars.LOCAWEB_SSH_USER }}
@@ -42,6 +48,7 @@ jobs:
           [ "${#UONIX_REQUEST_SHA}" -eq 40 ]
           expected_confirmation="PUBLICAR ${UONIX_REQUEST_SHA} EM SITE.UONIX.COM.BR"
           [ "$UONIX_PRODUCTION_CONFIRMATION" = "$expected_confirmation" ]
+          case "$UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET" in true|false) ;; *) exit 1 ;; esac
           [ "$LOCAWEB_SSH_HOST" = 'ftp.site.uonix.com.br' ]
           [ "$LOCAWEB_SSH_PORT" = '22' ]
           [ "$LOCAWEB_SSH_USER" = 'siteuonix1' ]
@@ -463,6 +470,71 @@ jobs:
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noindex'
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*nofollow'
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noarchive'
+
+      - name: Migrate legacy variation technical sheets
+        if: ${{ inputs.migrate_variation_technical_sheet }}
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"
+          php_bin="$2"
+          wp_bin="$3"
+          cli() {
+            "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" "$@"
+          }
+
+          test -f "$document_root/wp-content/mu-plugins/uonix-woocommerce/22-ficha-tecnica-variacao.php"
+          lock_path="$document_root/.uonix-vts-migration.lock"
+          if ! mkdir -- "$lock_path"; then
+            printf 'migração da ficha já está bloqueada: %s\n' "$lock_path" >&2
+            exit 2
+          fi
+          cleanup() { rmdir -- "$lock_path"; }
+          trap cleanup EXIT
+
+          legacy_count="$(cli eval '
+            $ids = get_posts(array(
+              "post_type" => "product_variation",
+              "numberposts" => -1,
+              "fields" => "ids",
+              "meta_query" => array(array(
+                "key" => "_variation_description",
+                "value" => "uonix-fichas-compactas",
+                "compare" => "LIKE",
+              )),
+            ));
+            echo count($ids);
+          ')"
+          case "$legacy_count" in
+            0)
+              printf 'migração: nenhuma ficha legada; verificando estado idempotente\n'
+              ;;
+            5)
+              printf 'migração: dry-run de cinco fichas legadas\n'
+              cli uonix ficha-tecnica migrate --dry-run
+              ;;
+            *)
+              printf 'migração recusada: esperadas zero ou cinco fichas legadas, encontradas %s\n' "$legacy_count" >&2
+              exit 3
+              ;;
+          esac
+
+          printf 'migração: execute\n'
+          cli uonix ficha-tecnica migrate --execute
+          printf 'migração: verificação idempotente\n'
+          cli uonix ficha-tecnica migrate --execute
+          REMOTE
 
       - name: Roll back managed code after failure
         if: ${{ failure() }}

@@ -60,7 +60,18 @@ trigger_block = production.split('\npermissions:', 1)[0]
 forbid(trigger_block, r'^\s+push:\s*$', 'produção ainda dispara por push')
 require(trigger_block, r'^\s+workflow_dispatch:\s*\n\s+inputs:\s*\n\s+confirmation:', 'produção precisa de confirmação manual')
 require(trigger_block, r'confirmation:.*?required:\s*true.*?type:\s*string', 'confirmação de produção precisa ser string obrigatória')
+require(
+    trigger_block,
+    r'migrate_variation_technical_sheet:.*?required:\s*true.*?default:\s*false.*?type:\s*boolean',
+    'migração da ficha em produção precisa ser input booleano explícito e desligado por padrão',
+)
 require(production, r'^concurrency:\s*\n\s+group:\s*uonix-environment-prod\s*$', 'produção precisa compartilhar o lock lógico do destino prod')
+require(production, r'inputs\.migrate_variation_technical_sheet', 'migração da ficha precisa depender do input explícito')
+require(production, r'- name: Migrate legacy variation technical sheets', 'etapa versionada de migração da ficha ausente')
+require(production, r'--dry-run.*?--execute', 'produção precisa executar dry-run antes da migração efetiva')
+require(production, r'NO-CHANGE: 5 fichas já migradas e verificadas|migrate --execute', 'migração de produção precisa ser idempotente')
+if production.index('- name: Back up the production database') > production.index('- name: Migrate legacy variation technical sheets'):
+    raise AssertionError('migração da ficha deve ocorrer depois do backup do banco')
 require(production, r'cancel-in-progress:\s*false', 'produção não pode cancelar uma operação mutável em andamento')
 require(production, r'^\s{2}authorize:\s*$', 'job de autorização local ausente')
 require(production, r'environment:\s*production-locaweb', 'Environment protegido de produção ausente')
@@ -167,6 +178,7 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
         'UONIX_PRODUCTION_CONFIRMATION': f'PUBLICAR {sha} EM SITE.UONIX.COM.BR',
         'UONIX_REQUEST_SHA': sha,
         'UONIX_REQUEST_REF': 'refs/heads/master',
+        'UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET': 'false',
         'LOCAWEB_SSH_HOST': 'ftp.site.uonix.com.br',
         'LOCAWEB_SSH_PORT': '22',
         'LOCAWEB_SSH_USER': 'siteuonix1',
