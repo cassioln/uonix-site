@@ -63,6 +63,9 @@ jobs:
       - name: Test WooCommerce-optional callbacks
         run: php scripts/tests/test-woocommerce-optional-plugin.php
 
+      - name: Test product excerpt editor enqueue
+        run: php scripts/tests/test-product-excerpt-editor.php
+
       - name: Test variation technical sheet
         run: php scripts/tests/test-variation-technical-sheet.php
 
@@ -113,6 +116,9 @@ jobs:
           while IFS= read -r -d '' file; do
             bash -n "$file"
           done < <(find scripts -type f -name '*.sh' -print0)
+
+      - name: Test product excerpt editor lifecycle
+        run: node --test scripts/tests/test-product-excerpt-editor.mjs
 
       - name: Run ShellCheck
         run: find scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck -x
