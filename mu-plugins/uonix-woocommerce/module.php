@@ -21,6 +21,7 @@ uonix_mu_require_files(
 		'20-catalogo-titulos-produtos.php',
 		'22-ficha-tecnica-variacao.php',
 		'23-rfq-produto-padrao.php',
+		'24-admin-resumo-editor-estavel.php',
 	),
 	'uonix-woocommerce'
 );
