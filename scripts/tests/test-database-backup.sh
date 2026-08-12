@@ -299,53 +299,44 @@ backup_line="$(grep -n 'backup-remote-database.sh' "$workflow" | head -1 | cut -
 [ "$backup_line" -lt "$publish_line" ] \
   || fail 'backup de banco ocorre DEPOIS da publicação (inútil como rollback)'
 
-# --- Caso 8: o rollback tem de restaurar o banco, não apenas arquivos ---------
-# Um backup de banco que o rollback ignora é decoração: o deploy falha, o
-# rollback declara sucesso e o schema segue divergente.
+# --- Caso 8: rollback automático é seletivo; dump é contingência manual ------
 rollback_body="$(sed -n "/Roll back managed code after failure/,/Release exclusive production lock/p" "$workflow")"
-printf '%s' "$rollback_body" | grep -q "db-\*.sql.gz" \
-  || fail 'rollback não localiza o dump de banco'
-printf '%s' "$rollback_body" | grep -q 'gzip -t' \
-  || fail 'rollback não valida a integridade do dump antes de restaurar'
-printf '%s' "$rollback_body" | grep -q 'MYSQL_PWD=' \
-  || fail 'rollback não restaura o banco por cliente mysql'
+printf '%s' "$rollback_body" | grep -q -- '--rollback' \
+  || fail 'rollback seletivo das cinco fichas não é invocado'
+# shellcheck disable=SC2016
+printf '%s' "$rollback_body" | grep -q -- '--mutation-marker="$db_mutation_marker"' \
+  || fail 'rollback seletivo não está vinculado ao marcador da execução'
+# shellcheck disable=SC2016
+printf '%s' "$rollback_body" | grep -q -- '--migration-lock="$migration_lock"' \
+  || fail 'rollback seletivo não adquire o lock do próprio processo'
+for forbidden_restore in 'db-\*.sql.gz' 'gzip -dc' 'mysql --no-defaults' 'MYSQL_PWD='; do
+  if printf '%s' "$rollback_body" | grep -q "$forbidden_restore"; then
+    fail "rollback ainda importa dump integral automaticamente: $forbidden_restore"
+  fi
+done
 
-# A restauração do banco precisa vir ANTES da troca de arquivos: restaurar
-# arquivos sobre um schema divergente passa no smoke e mente sobre o conteúdo.
-restore_offset="$(printf '%s' "$rollback_body" | grep -n 'MYSQL_PWD=' | head -1 | cut -d: -f1)"
-# O padrão é literal de propósito: procuramos o texto do workflow, não o valor
-# de uma variável local.
+# Se o banco não voltou ao estado original, reinstalar código antigo pode criar
+# incompatibilidade ainda maior. A saída fail-closed deve preceder qualquer troca.
 # shellcheck disable=SC2016
 files_offset="$(printf '%s' "$rollback_body" | grep -n 'rm -rf -- "\$document_root/wp-content/themes/kadence-child"' | head -1 | cut -d: -f1)"
-[ -n "$restore_offset" ] && [ -n "$files_offset" ] \
-  || fail 'não foi possível ordenar restauração de banco e de arquivos'
-[ "$restore_offset" -lt "$files_offset" ] \
-  || fail 'rollback restaura arquivos antes do banco'
-
-# Um dump presente mas corrompido marca o rollback como incompleto, preserva o
-# lock e AINDA tenta restaurar o código para reduzir a divergência. Abortar antes
-# dos arquivos deixaria os dois domínios quebrados quando um deles é recuperável.
-printf '%s' "$rollback_body" | grep -q 'dump de banco corrompido; rollback incompleto' \
-  || fail 'rollback não diagnostica dump corrompido como incompleto'
+failed_exit_offset="$(printf '%s' "$rollback_body" | grep -n 'código, lock e marcadores serão preservados' | head -1 | cut -d: -f1)"
+[ -n "$files_offset" ] && [ -n "$failed_exit_offset" ] \
+  || fail 'não foi possível ordenar falha seletiva e restauração de arquivos'
+[ "$failed_exit_offset" -lt "$files_offset" ] \
+  || fail 'rollback troca código antes de abortar após falha seletiva'
+printf '%s' "$rollback_body" | grep -q 'dump integral NÃO será importado automaticamente' \
+  || fail 'falha seletiva não informa que o dump exige intervenção manual'
 printf '%s' "$rollback_body" | grep -q 'rollback_failed=1' \
-  || fail 'falha do dump não preserva o estado de rollback incompleto'
-corrupt_offset="$(printf '%s' "$rollback_body" | grep -n 'dump de banco corrompido; rollback incompleto' | head -1 | cut -d: -f1)"
-[ -n "$corrupt_offset" ] && [ "$corrupt_offset" -lt "$files_offset" ] \
-  || fail 'dump corrompido impede a tentativa posterior de restaurar arquivos'
+  || fail 'falha seletiva não preserva o estado fail-closed'
 
-# --- Caso 9: a retenção precisa alcançar o dump ------------------------------
-# O dump mora dentro do diretório do backup, então a retenção existente já o
-# remove junto. Se alguém mover o dump para fora, esta assertiva quebra.
-# O padrão é literal: casa o texto do workflow, não expande $BACKUP_DIR aqui.
+# --- Caso 9: housekeeping não pode apagar a fonte durante o deploy ------------
+# O dump continua no diretório auditável do run, mas a poda sai do caminho crítico.
 # shellcheck disable=SC2016
 grep -q 'output-dir="\$BACKUP_DIR"' "$workflow" \
-  || fail 'dump não é gravado dentro do diretório de backup coberto pela retenção'
-
-# A retenção precisa ser generosa o suficiente para valer a pena: medido no host,
-# cada dump comprimido ocupa ~1,3 MB, então 30 backups somam ~39 MB contra 737 GB
-# livres. Reter cinco descartaria histórico sem economizar nada.
-grep -q 'tail -n +31' "$workflow" \
-  || fail 'retenção não mantém 30 backups'
+  || fail 'dump não é gravado dentro do diretório auditável do run'
+if grep -q 'tail -n +31\|Retain .*backups' "$workflow"; then
+  fail 'deploy ainda apaga backups antes de encerrar rollback/release'
+fi
 
 # --- Caso 10: nenhuma etapa pode resolver $HOME por ${{ }} -------------------
 # O contexto `env` do Actions NÃO conhece HOME: `${{ env.HOME }}` resolve para
@@ -366,4 +357,4 @@ printf '%s' "$backup_step" | grep -q 'LOCAWEB_SSH_KNOWN_HOSTS_FILE' \
 printf '%s' "$backup_step" | grep -q 'LOCAWEB_SSH_PASSWORD_FILE' \
   || fail 'passo de backup não define LOCAWEB_SSH_PASSWORD_FILE'
 
-printf 'PASS: backup de banco valida integridade, falha fechado, precede a publicação e o rollback o restaura.\n'
+printf 'PASS: backup de banco valida integridade, precede a publicação e fica reservado à contingência manual; rollback automático é seletivo e fail-closed.\n'
