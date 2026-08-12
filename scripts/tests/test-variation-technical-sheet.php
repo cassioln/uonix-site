@@ -2795,6 +2795,19 @@ vts_assert_contains( 'FROM wp_postmeta', $GLOBALS['vts_database_queries'][2] ?? 
 vts_assert_contains( 'FOR UPDATE', $GLOBALS['vts_database_queries'][2] ?? '', 'lock dos metadados é exclusivo até o commit' );
 vts_assert_same( 'COMMIT', $GLOBALS['vts_database_queries'][3] ?? null, 'rollback só confirma depois das cinco releituras pós-save' );
 
+vts_reset_migration_store();
+$commit_failure_before = vts_store_snapshot();
+$GLOBALS['vts_database_fail_exact'] = array( 'COMMIT' );
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'transação foi revertida integralmente',
+	'COMMIT_FAILURE_FAIL_CLOSED'
+);
+vts_assert_same( $commit_failure_before, vts_store_snapshot(), 'falha do COMMIT reverte as cinco gravações da migração' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'falha do COMMIT encerra com ROLLBACK' );
+
 $admin_css = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/admin-ficha-tecnica-variacao.css' );
 vts_assert_contains( '.uonix-vts-admin {', $admin_css, 'CSS administrativo é escopado no componente próprio' );
 vts_assert_contains( 'border: 1px solid #c9d5e6', $admin_css, 'editor usa a borda aprovada' );

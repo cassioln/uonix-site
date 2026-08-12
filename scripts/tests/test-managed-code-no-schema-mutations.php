@@ -333,6 +333,10 @@ function schema_forbidden_calls(): array {
 function schema_query_sinks(): array {
     return array(
         'query' => 0,
+        'get_results' => 0,
+        'get_var' => 0,
+        'get_row' => 0,
+        'get_col' => 0,
         'exec' => 0,
         'mysql_query' => 0,
         'mysqli_query' => 1,
@@ -579,6 +583,10 @@ foreach ($forbidden_call_cases as $callable => $source) {
 
 $query_sink_cases = array(
     'query' => "<?php \$wpdb->query('ALTER TABLE wp_example ADD COLUMN unsafe int');",
+    'get_results' => "<?php \$wpdb->get_results('ALTER TABLE wp_example ADD COLUMN unsafe int');",
+    'get_var' => "<?php \$wpdb->get_var('ALTER TABLE wp_example ADD COLUMN unsafe int');",
+    'get_row' => "<?php \$wpdb->get_row('ALTER TABLE wp_example ADD COLUMN unsafe int');",
+    'get_col' => "<?php \$wpdb->get_col('ALTER TABLE wp_example ADD COLUMN unsafe int');",
     'exec' => "<?php \$pdo->exec('ALTER TABLE wp_example ADD COLUMN unsafe int');",
     'mysql_query' => "<?php mysql_query('ALTER TABLE wp_example ADD COLUMN unsafe int');",
     'mysqli_query' => "<?php mysqli_query(\$connection, 'ALTER TABLE wp_example ADD COLUMN unsafe int');",
@@ -587,6 +595,19 @@ foreach ($query_sink_cases as $sink => $source) {
     contract_assert(
         1 === count(schema_mutation_findings($source, 'sink-' . $sink . '.php')),
         'sink SQL permanece coberto com o argumento correto: ' . $sink
+    );
+}
+
+$benign_wpdb_read_sink_cases = array(
+    'get_results' => "<?php \$wpdb->get_results('SELECT ID FROM wp_posts');",
+    'get_var' => "<?php \$wpdb->get_var('SELECT COUNT(*) FROM wp_posts');",
+    'get_row' => "<?php \$wpdb->get_row('SELECT ID FROM wp_posts LIMIT 1');",
+    'get_col' => "<?php \$wpdb->get_col('SELECT ID FROM wp_posts');",
+);
+foreach ($benign_wpdb_read_sink_cases as $sink => $source) {
+    contract_assert(
+        array() === schema_mutation_findings($source, 'benign-sink-' . $sink . '.php'),
+        'sink wpdb de leitura não produz falso positivo para SELECT: ' . $sink
     );
 }
 
