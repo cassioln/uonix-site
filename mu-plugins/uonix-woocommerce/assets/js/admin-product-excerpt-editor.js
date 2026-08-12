@@ -1,7 +1,7 @@
 ( function( window, document, $ ) {
 	'use strict';
 
-	if ( ! $ || ! window.tinymce ) {
+	if ( ! $ ) {
 		return;
 	}
 
@@ -17,12 +17,15 @@
 	function prepareEditorForMove() {
 		var editor;
 		var restoreVisual;
+		var textarea;
+		var codeContent;
+		var tinymce = window.tinymce;
 
-		if ( moveState ) {
+		if ( moveState || ! tinymce ) {
 			return;
 		}
 
-		editor = window.tinymce.get( editorId );
+		editor = tinymce.get( editorId );
 		if ( ! editor ) {
 			return;
 		}
@@ -32,14 +35,22 @@
 
 		if ( restoreVisual ) {
 			editor.save();
+		} else {
+			textarea = document.getElementById( editorId );
+			codeContent = textarea && textarea.value;
 		}
 
 		editor.remove();
+
+		if ( ! restoreVisual && textarea ) {
+			textarea.value = codeContent;
+		}
 	}
 
 	function restoreEditorAfterMove() {
 		var state = moveState;
 		var init;
+		var tinymce = window.tinymce;
 
 		moveState = null;
 
@@ -51,8 +62,8 @@
 			window.tinyMCEPreInit.mceInit &&
 			window.tinyMCEPreInit.mceInit[ editorId ];
 
-		if ( init ) {
-			window.tinymce.init( init );
+		if ( init && tinymce ) {
+			tinymce.init( init );
 		}
 	}
 

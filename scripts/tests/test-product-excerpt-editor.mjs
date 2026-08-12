@@ -14,22 +14,37 @@ const scriptPath = path.join(
   'admin-product-excerpt-editor.js'
 );
 
-function createHarness({ hidden = false } = {}) {
+function createHarness({
+  hidden = false,
+  tinymceReady = true,
+  textareaValue = 'texto digitado no modo Código',
+  visualContent = '<p>conteúdo Visual anterior</p>',
+} = {}) {
   const calls = [];
   const jqueryHandlers = new Map();
   const nativeHandlers = new Map();
   const timers = [];
   const editorSettings = { selector: '#excerpt', plugins: 'wordpress' };
+  const textarea = { nodeName: 'TEXTAREA', value: textareaValue };
 
   const editor = {
     isHidden: () => hidden,
-    save: () => calls.push('save'),
-    remove: () => calls.push('remove'),
+    save() {
+      calls.push('save');
+      textarea.value = visualContent;
+    },
+    remove() {
+      calls.push('remove');
+      textarea.value = visualContent;
+    },
   };
 
   const document = {
     addEventListener(type, handler, capture) {
       nativeHandlers.set(`${type}:${Boolean(capture)}`, handler);
+    },
+    getElementById(id) {
+      return id === 'excerpt' ? textarea : null;
     },
   };
 
@@ -47,6 +62,17 @@ function createHarness({ hidden = false } = {}) {
     };
   }
 
+  const tinymce = {
+    get(id) {
+      assert.equal(id, 'excerpt');
+      return editor;
+    },
+    init(settings) {
+      calls.push('init');
+      assert.equal(settings, editorSettings);
+    },
+  };
+
   const window = {
     document,
     jQuery,
@@ -54,16 +80,7 @@ function createHarness({ hidden = false } = {}) {
       timers.push(callback);
       return timers.length;
     },
-    tinymce: {
-      get(id) {
-        assert.equal(id, 'excerpt');
-        return editor;
-      },
-      init(settings) {
-        calls.push('init');
-        assert.equal(settings, editorSettings);
-      },
-    },
+    tinymce: tinymceReady ? tinymce : undefined,
     tinyMCEPreInit: {
       mceInit: {
         excerpt: editorSettings,
@@ -97,6 +114,12 @@ function createHarness({ hidden = false } = {}) {
   return {
     calls,
     context: vm.createContext({ window, document, jQuery, console }),
+    makeTinymceReady() {
+      window.tinymce = tinymce;
+    },
+    textareaValue() {
+      return textarea.value;
+    },
     triggerSort(type, id = 'postexcerpt') {
       const handler = jqueryHandlers.get(type);
       assert.equal(typeof handler, 'function', `handler ${type} registrado`);
@@ -120,6 +143,17 @@ async function loadProduction(harness) {
   vm.runInContext(source, harness.context, { filename: scriptPath });
 }
 
+test('registra handlers antes do TinyMCE e o resolve somente no movimento', async () => {
+  const harness = createHarness({ hidden: false, tinymceReady: false });
+  await loadProduction(harness);
+
+  harness.makeTinymceReady();
+  harness.triggerSort('sortstart');
+  harness.triggerSort('sortstop');
+
+  assert.deepEqual(harness.calls, ['save', 'remove', 'init']);
+});
+
 test('arraste salva e remove o Visual antes de reinicializar depois do movimento', async () => {
   const harness = createHarness({ hidden: false });
   await loadProduction(harness);
@@ -133,13 +167,15 @@ test('arraste salva e remove o Visual antes de reinicializar depois do movimento
 });
 
 test('modo Código remove iframe sem sobrescrever textarea nem reinicializar', async () => {
-  const harness = createHarness({ hidden: true });
+  const codeContent = '<strong>alteração feita no modo Código</strong>';
+  const harness = createHarness({ hidden: true, textareaValue: codeContent });
   await loadProduction(harness);
 
   harness.triggerSort('sortstart');
   harness.triggerSort('sortstop');
 
   assert.deepEqual(harness.calls, ['remove']);
+  assert.equal(harness.textareaValue(), codeContent);
 });
 
 test('setas de ordem preparam no capture e restauram depois do handler do core', async () => {
