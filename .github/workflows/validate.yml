@@ -69,6 +69,12 @@ jobs:
       - name: Test product excerpt editor enqueue
         run: php scripts/tests/test-product-excerpt-editor.php
 
+      - name: Test fixed product short description layout
+        run: php scripts/tests/test-product-short-description-layout.php
+
+      - name: Test fixed product short description without block editor API
+        run: php scripts/tests/test-product-short-description-no-block-api.php
+
       - name: Test variation technical sheet
         run: php scripts/tests/test-variation-technical-sheet.php
 

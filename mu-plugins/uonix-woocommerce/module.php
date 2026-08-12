@@ -22,6 +22,7 @@ uonix_mu_require_files(
 		'22-ficha-tecnica-variacao.php',
 		'23-rfq-produto-padrao.php',
 		'24-admin-resumo-editor-estavel.php',
+		'25-admin-resumo-fixo.php',
 	),
 	'uonix-woocommerce'
 );
