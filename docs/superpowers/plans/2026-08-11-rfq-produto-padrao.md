@@ -37,6 +37,7 @@
 - Create: `mu-plugins/uonix-woocommerce/23-rfq-produto-padrao.php`
 - Modify: `mu-plugins/uonix-woocommerce/module.php:20-24`
 - Modify: `.github/workflows/validate.yml:60-70`
+- Modify: `docs/superpowers/plans/2026-08-11-rfq-produto-padrao.md` — manter o test double alinhado ao HTML real do WordPress.
 
 **Interfaces:**
 - Consumes: filtro WordPress `default_post_metadata( mixed $value, int $object_id, string $meta_key, bool $single, string $meta_type )`.
@@ -140,7 +141,7 @@ function get_post_meta( $post_id, $meta_key, $single = false ) {
 }
 
 function checked( $checked, $current = true, $display = true ) {
-	$result = ( (string) $checked === (string) $current ) ? 'checked="checked"' : '';
+	$result = ( (string) $checked === (string) $current ) ? " checked='checked'" : '';
 
 	if ( $display ) {
 		echo $result;
@@ -190,8 +191,8 @@ $disabled_html = sprintf(
 	checked( get_post_meta( 101, $key, true ), 'yes', false )
 );
 
-rfq_assert_contains( 'checked="checked"', $product_html, 'checkbox fica marcado para yes' );
-rfq_assert_not_contains( 'checked="checked"', $disabled_html, 'checkbox respeita no explícito' );
+rfq_assert_contains( 'checked=', $product_html, 'checkbox fica marcado para yes' );
+rfq_assert_not_contains( 'checked=', $disabled_html, 'checkbox respeita no explícito' );
 
 $loader = file_get_contents( $repo_root . '/mu-plugins/uonix-woocommerce/module.php' );
 rfq_assert_contains( "'23-rfq-produto-padrao.php'", $loader, 'loader inclui o módulo RFQ' );
@@ -347,6 +348,7 @@ Expected: PASS com 14 asserções.
 ```bash
 git add \
   .github/workflows/validate.yml \
+  docs/superpowers/plans/2026-08-11-rfq-produto-padrao.md \
   mu-plugins/uonix-woocommerce/module.php \
   mu-plugins/uonix-woocommerce/23-rfq-produto-padrao.php \
   scripts/tests/test-rfq-product-default.php
@@ -354,7 +356,7 @@ git diff --cached --check
 git commit -m "feat(woocommerce): habilita RFQ por padrao"
 ```
 
-Expected: commit com exatamente quatro arquivos alterados e nenhuma mudança no RFQ Toolkit.
+Expected: commit com exatamente cinco arquivos alterados e nenhuma mudança no RFQ Toolkit.
 
 ---
 
@@ -434,7 +436,7 @@ try {
         "label" => "Enable RFQ for this product.",
     ));
     $enabled_html = ob_get_clean();
-    if (!str_contains($enabled_html, "checked=\"checked\"")) {
+    if (!str_contains($enabled_html, "checked=")) {
         throw new RuntimeException("checkbox não ficou marcado para default yes");
     }
     update_post_meta($product_id, $key, "no");
@@ -447,7 +449,7 @@ try {
         "label" => "Enable RFQ for this product.",
     ));
     $disabled_html = ob_get_clean();
-    if (str_contains($disabled_html, "checked=\"checked\"")) {
+    if (str_contains($disabled_html, "checked=")) {
         throw new RuntimeException("checkbox ignorou no explícito");
     }
     echo "PASS: integração real RFQ default yes e no explícito.\n";
