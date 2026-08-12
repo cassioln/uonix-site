@@ -380,6 +380,64 @@ def test_backup_manifest(script: pathlib.Path, temp: pathlib.Path) -> None:
     if stat.S_IMODE(manifest.stat().st_mode) != 0o600:
         fail("manifesto do backup não possui permissão 0600")
 
+    race_root = temp / "backup-manifest-entry-symlink-race"
+    race_document = race_root / "document-root"
+    race_backup = race_root / "backup"
+    race_theme = race_document / "wp-content/themes/kadence-child"
+    race_mu = race_document / "wp-content/mu-plugins"
+    race_theme.mkdir(parents=True)
+    race_mu.mkdir(parents=True)
+    (race_theme / "theme.txt").write_text("theme\n", encoding="utf-8")
+    (race_mu / "uonix-core.php").write_text("core\n", encoding="utf-8")
+    outside_race_file = race_root / "outside-race-file"
+    outside_race_file.write_text("outside must not be hashed\n", encoding="utf-8")
+    outside_race_file.chmod(0o640)
+    race_done = race_root / "race-done"
+    raced_backup_file = race_backup / "managed/themes/kadence-child/theme.txt"
+    race_bin = race_root / "bin"
+    race_bin.mkdir()
+    write_executable(
+        race_bin / "sort",
+        """#!/usr/bin/env bash
+/usr/bin/sort "$@" || exit $?
+if [ ! -e "$MOCK_BACKUP_MANIFEST_RACE_DONE" ]; then
+  rm -f -- "$MOCK_BACKUP_MANIFEST_RACE_FILE"
+  ln -s -- "$MOCK_BACKUP_MANIFEST_RACE_OUTSIDE" "$MOCK_BACKUP_MANIFEST_RACE_FILE"
+  : > "$MOCK_BACKUP_MANIFEST_RACE_DONE"
+fi
+""",
+    )
+    race_env = os.environ.copy()
+    race_env.update(
+        {
+            "PATH": f"{race_bin}:{race_env['PATH']}",
+            "MOCK_BACKUP_MANIFEST_RACE_DONE": str(race_done),
+            "MOCK_BACKUP_MANIFEST_RACE_FILE": str(raced_backup_file),
+            "MOCK_BACKUP_MANIFEST_RACE_OUTSIDE": str(outside_race_file),
+        }
+    )
+    result = subprocess.run(
+        ["bash", str(script), str(race_document), str(race_backup)],
+        env=race_env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if not race_done.is_file():
+        fail("fixture não armou corrida após enumerar as entradas do manifesto de backup")
+    if result.returncode == 0:
+        fail("backup aceitou entrada trocada por symlink entre enumeração e hash")
+    if not raced_backup_file.is_symlink():
+        fail("fixture não preservou a entrada symlink concorrente para auditoria")
+    if outside_race_file.read_text(encoding="utf-8") != "outside must not be hashed\n":
+        fail("backup alterou o alvo externo da entrada trocada por symlink")
+    if stat.S_IMODE(outside_race_file.stat().st_mode) != 0o640:
+        fail("backup alterou o modo do alvo externo da entrada trocada por symlink")
+    race_manifest = race_backup / "manifest.backup.sha256"
+    outside_digest = hashlib.sha256(outside_race_file.read_bytes()).hexdigest()
+    if race_manifest.exists() and outside_digest in race_manifest.read_text(encoding="utf-8"):
+        fail("backup incorporou ao manifesto o hash de um alvo externo concorrente")
+
     preexisting_root = temp / "backup-preexisting-manifest-symlink"
     preexisting_document = preexisting_root / "document-root"
     preexisting_backup = preexisting_root / "backup"
