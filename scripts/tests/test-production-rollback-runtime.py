@@ -80,6 +80,9 @@ class RollbackFixture:
         code_owner: str | None,
         rollback_status: int = 0,
         active_migration_owner: str | None = None,
+        release_migration_lock_on_sleep: bool = False,
+        rollback_marker_owner_after: str | None = None,
+        manifest_entry_symlink_race: bool = False,
         corrupt_backup_manifest: bool = False,
         corrupt_restored_code: bool = False,
     ) -> None:
@@ -89,6 +92,9 @@ class RollbackFixture:
         self.bin_dir = root / "bin"
         self.php_log = root / "php.log"
         self.mysql_log = root / "mysql.log"
+        self.sleep_log = root / "sleep.log"
+        self.manifest_race_done = root / "manifest-race.done"
+        self.manifest_race_outside = root / "manifest-race-outside.txt"
         self.operation_lock = self.document_root / ".uonix-operation.lock"
         self.migration_lock = self.document_root / ".uonix-vts-migration.lock"
         self.root.mkdir(parents=True)
@@ -127,6 +133,7 @@ class RollbackFixture:
         (old_theme / "old.txt").write_text("old\n", encoding="utf-8")
         (old_module / "old.txt").write_text("old\n", encoding="utf-8")
         (self.backup_dir / "managed/mu-plugins/uonix-core.php").write_text("old core\n", encoding="utf-8")
+        self.manifest_race_outside.write_text("old\n", encoding="utf-8")
         manifest_entries = []
         for relative in sorted(
             (
@@ -155,14 +162,41 @@ printf '<%s>' "$@" >> "$MOCK_PHP_LOG"
 printf '\n' >> "$MOCK_PHP_LOG"
 joined=" $* "
 case "$joined" in
-  *' uonix ficha-tecnica migrate --rollback '*) exit "${MOCK_ROLLBACK_STATUS:-0}" ;;
+  *' uonix ficha-tecnica migrate --rollback '*)
+    if [ -n "${MOCK_ROLLBACK_MARKER_OWNER_AFTER:-}" ]; then
+      printf '%s\n' "$MOCK_ROLLBACK_MARKER_OWNER_AFTER" > "$MOCK_DB_MARKER"
+      chmod 600 "$MOCK_DB_MARKER"
+    fi
+    exit "${MOCK_ROLLBACK_STATUS:-0}"
+    ;;
   *' option get home '*|*' option get siteurl '*) printf '%s\n' "$MOCK_TARGET_URL"; exit 0 ;;
   *' eval '*UONIX_ENV*) printf 'production\n'; exit 0 ;;
 esac
 exit 0
 """,
         )
-        write_executable(self.bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
+        write_executable(
+            self.bin_dir / "sleep",
+            """#!/usr/bin/env bash
+printf 'sleep\n' >> "$MOCK_SLEEP_LOG"
+if [ "${MOCK_RELEASE_MIGRATION_LOCK_ON_SLEEP:-0}" = 1 ] && [ -d "$MOCK_MIGRATION_LOCK" ]; then
+  rm -f -- "$MOCK_MIGRATION_LOCK/owner"
+  rmdir -- "$MOCK_MIGRATION_LOCK"
+fi
+exit 0
+""",
+        )
+        write_executable(
+            self.bin_dir / "sort",
+            """#!/usr/bin/env bash
+/usr/bin/sort "$@" || exit $?
+if [ "${MOCK_MANIFEST_ENTRY_SYMLINK_RACE:-0}" = 1 ] && [ ! -e "$MOCK_MANIFEST_RACE_DONE" ]; then
+  rm -f -- "$MOCK_MANIFEST_RACE_FILE"
+  ln -s -- "$MOCK_MANIFEST_RACE_OUTSIDE" "$MOCK_MANIFEST_RACE_FILE"
+  : > "$MOCK_MANIFEST_RACE_DONE"
+fi
+""",
+        )
         write_executable(
             self.bin_dir / "cp",
             """#!/usr/bin/env bash
@@ -189,6 +223,15 @@ fi
                 "MOCK_PHP_LOG": str(self.php_log),
                 "MOCK_MYSQL_LOG": str(self.mysql_log),
                 "MOCK_ROLLBACK_STATUS": str(rollback_status),
+                "MOCK_ROLLBACK_MARKER_OWNER_AFTER": rollback_marker_owner_after or "",
+                "MOCK_DB_MARKER": str(self.operation_lock / "db-mutation-started"),
+                "MOCK_RELEASE_MIGRATION_LOCK_ON_SLEEP": "1" if release_migration_lock_on_sleep else "0",
+                "MOCK_MIGRATION_LOCK": str(self.migration_lock),
+                "MOCK_SLEEP_LOG": str(self.sleep_log),
+                "MOCK_MANIFEST_ENTRY_SYMLINK_RACE": "1" if manifest_entry_symlink_race else "0",
+                "MOCK_MANIFEST_RACE_DONE": str(self.manifest_race_done),
+                "MOCK_MANIFEST_RACE_FILE": str(self.backup_dir / "managed/themes/kadence-child/old.txt"),
+                "MOCK_MANIFEST_RACE_OUTSIDE": str(self.manifest_race_outside),
                 "MOCK_TARGET_URL": TARGET_URL,
                 "MOCK_CORRUPT_RESTORED_CODE": "1" if corrupt_restored_code else "0",
                 "MOCK_CORRUPT_ONCE": str(root / "corrupt-once"),
@@ -336,6 +379,64 @@ def test_backup_manifest(script: pathlib.Path, temp: pathlib.Path) -> None:
         fail("manifesto do backup não representa conjunto exato e hashes copiados")
     if stat.S_IMODE(manifest.stat().st_mode) != 0o600:
         fail("manifesto do backup não possui permissão 0600")
+
+    race_root = temp / "backup-manifest-entry-symlink-race"
+    race_document = race_root / "document-root"
+    race_backup = race_root / "backup"
+    race_theme = race_document / "wp-content/themes/kadence-child"
+    race_mu = race_document / "wp-content/mu-plugins"
+    race_theme.mkdir(parents=True)
+    race_mu.mkdir(parents=True)
+    (race_theme / "theme.txt").write_text("theme\n", encoding="utf-8")
+    (race_mu / "uonix-core.php").write_text("core\n", encoding="utf-8")
+    outside_race_file = race_root / "outside-race-file"
+    outside_race_file.write_text("outside must not be hashed\n", encoding="utf-8")
+    outside_race_file.chmod(0o640)
+    race_done = race_root / "race-done"
+    raced_backup_file = race_backup / "managed/themes/kadence-child/theme.txt"
+    race_bin = race_root / "bin"
+    race_bin.mkdir()
+    write_executable(
+        race_bin / "sort",
+        """#!/usr/bin/env bash
+/usr/bin/sort "$@" || exit $?
+if [ ! -e "$MOCK_BACKUP_MANIFEST_RACE_DONE" ]; then
+  rm -f -- "$MOCK_BACKUP_MANIFEST_RACE_FILE"
+  ln -s -- "$MOCK_BACKUP_MANIFEST_RACE_OUTSIDE" "$MOCK_BACKUP_MANIFEST_RACE_FILE"
+  : > "$MOCK_BACKUP_MANIFEST_RACE_DONE"
+fi
+""",
+    )
+    race_env = os.environ.copy()
+    race_env.update(
+        {
+            "PATH": f"{race_bin}:{race_env['PATH']}",
+            "MOCK_BACKUP_MANIFEST_RACE_DONE": str(race_done),
+            "MOCK_BACKUP_MANIFEST_RACE_FILE": str(raced_backup_file),
+            "MOCK_BACKUP_MANIFEST_RACE_OUTSIDE": str(outside_race_file),
+        }
+    )
+    result = subprocess.run(
+        ["bash", str(script), str(race_document), str(race_backup)],
+        env=race_env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if not race_done.is_file():
+        fail("fixture não armou corrida após enumerar as entradas do manifesto de backup")
+    if result.returncode == 0:
+        fail("backup aceitou entrada trocada por symlink entre enumeração e hash")
+    if not raced_backup_file.is_symlink():
+        fail("fixture não preservou a entrada symlink concorrente para auditoria")
+    if outside_race_file.read_text(encoding="utf-8") != "outside must not be hashed\n":
+        fail("backup alterou o alvo externo da entrada trocada por symlink")
+    if stat.S_IMODE(outside_race_file.stat().st_mode) != 0o640:
+        fail("backup alterou o modo do alvo externo da entrada trocada por symlink")
+    race_manifest = race_backup / "manifest.backup.sha256"
+    outside_digest = hashlib.sha256(outside_race_file.read_bytes()).hexdigest()
+    if race_manifest.exists() and outside_digest in race_manifest.read_text(encoding="utf-8"):
+        fail("backup incorporou ao manifesto o hash de um alvo externo concorrente")
 
     preexisting_root = temp / "backup-preexisting-manifest-symlink"
     preexisting_document = preexisting_root / "document-root"
@@ -1025,6 +1126,26 @@ def test_rollback(rollback_script: pathlib.Path, cleanup_script: pathlib.Path, t
             fail(f"falha seletiva removeu marcador fail-closed: {marker}")
     assert_no_mysql(failed, "failed")
 
+    changed_owner_after_rollback = RollbackFixture(
+        temp / "changed-owner-after-rollback",
+        db_owner=RUN_ID,
+        code_owner=RUN_ID,
+        rollback_marker_owner_after="other-run",
+    )
+    result = changed_owner_after_rollback.run(rollback_script)
+    changed_marker = changed_owner_after_rollback.operation_lock / "db-mutation-started"
+    if result.returncode == 0:
+        fail("rollback aceitou troca concorrente do owner depois do WP-CLI")
+    if not changed_owner_after_rollback.code_is_new() or changed_owner_after_rollback.code_is_old():
+        fail("troca concorrente do owner permitiu restaurar código sobre banco inconclusivo")
+    if not changed_marker.is_file() or changed_marker.read_text(encoding="utf-8") != "other-run\n":
+        fail("rollback removeu ou alterou marcador que trocou de owner depois do WP-CLI")
+    if not (changed_owner_after_rollback.operation_lock / "owner").is_file():
+        fail("troca concorrente do owner liberou o lock da operação")
+    if "marcador mudou de owner" not in result.stderr:
+        fail("troca concorrente do owner não produziu diagnóstico fail-closed")
+    assert_no_mysql(changed_owner_after_rollback, "changed-owner-after-rollback")
+
     corrupt_backup = RollbackFixture(
         temp / "corrupt-backup",
         db_owner=None,
@@ -1075,6 +1196,26 @@ def test_rollback(rollback_script: pathlib.Path, cleanup_script: pathlib.Path, t
         fail("rollback alterou alvo externo do symlink no backup")
     assert_no_mysql(symlink_backup_entry, "symlink-backup-entry")
 
+    manifest_entry_race = RollbackFixture(
+        temp / "manifest-entry-race",
+        db_owner=None,
+        code_owner=RUN_ID,
+        manifest_entry_symlink_race=True,
+    )
+    result = manifest_entry_race.run(rollback_script)
+    raced_entry = manifest_entry_race.backup_dir / "managed/themes/kadence-child/old.txt"
+    if not raced_entry.is_symlink() or not manifest_entry_race.manifest_race_done.exists():
+        fail("fixture não trocou entrada regular por symlink depois da enumeração do manifesto")
+    if result.returncode == 0:
+        fail("rollback aceitou entrada que virou symlink entre enumeração e hash")
+    if not manifest_entry_race.code_is_new() or manifest_entry_race.code_is_old():
+        fail("corrida por entrada symlink substituiu código antes de falhar fechado")
+    if manifest_entry_race.manifest_race_outside.read_text(encoding="utf-8") != "old\n":
+        fail("rollback alterou alvo externo da entrada trocada por symlink")
+    if not (manifest_entry_race.operation_lock / "code-mutation-started").exists():
+        fail("corrida no manifesto removeu marcador/lock fail-closed")
+    assert_no_mysql(manifest_entry_race, "manifest-entry-race")
+
     corrupt_restore = RollbackFixture(
         temp / "corrupt-restore",
         db_owner=None,
@@ -1102,6 +1243,22 @@ def test_rollback(rollback_script: pathlib.Path, cleanup_script: pathlib.Path, t
     if active.php_log.exists() and " --rollback " in f" {active.php_log.read_text(encoding='utf-8')} ":
         fail("rollback chamou WP-CLI apesar do lock ativo")
     assert_no_mysql(active, "active")
+
+    released_during_wait = RollbackFixture(
+        temp / "released-during-wait",
+        db_owner=RUN_ID,
+        code_owner=RUN_ID,
+        active_migration_owner=RUN_ID,
+        release_migration_lock_on_sleep=True,
+    )
+    result = released_during_wait.run(rollback_script)
+    if result.returncode != 0 or not released_during_wait.code_is_old():
+        fail(f"rollback não retomou após o lock de migração ser liberado durante a espera: {result.stderr[-300:]}")
+    if not released_during_wait.sleep_log.is_file():
+        fail("rollback não aguardou ao menos uma vez pelo lock de migração ativo")
+    if "<--rollback>" not in released_during_wait.php_log.read_text(encoding="utf-8"):
+        fail("rollback não chamou WP-CLI depois da liberação observada do lock de migração")
+    assert_no_mysql(released_during_wait, "released-during-wait")
 
     public_operation_owner = RollbackFixture(
         temp / "public-operation-owner",
@@ -1246,6 +1403,21 @@ def run_release(script: pathlib.Path, lock: pathlib.Path, status: str) -> subpro
     )
 
 
+def assert_failed_release_preserves(lock: pathlib.Path, marker_name: str) -> None:
+    if not lock.is_dir() or lock.is_symlink():
+        fail(f"release após falha não preservou diretório real do lock para {marker_name}")
+    for path, label in (
+        (lock / "owner", "owner"),
+        (lock / marker_name, marker_name),
+    ):
+        if not path.is_file() or path.is_symlink():
+            fail(f"release após falha não preservou {label} como arquivo regular")
+        if stat.S_IMODE(path.stat().st_mode) != 0o600:
+            fail(f"release após falha não preservou {label} com permissão 0600")
+        if path.read_text(encoding="utf-8") != RUN_ID + "\n":
+            fail(f"release após falha não preservou conteúdo exato em {label}")
+
+
 def test_release(release_script: pathlib.Path, temp: pathlib.Path) -> None:
     success_lock = make_release_lock(temp / "release-success", marker_owner=RUN_ID)
     result = run_release(release_script, success_lock, "success")
@@ -1302,10 +1474,20 @@ def test_release(release_script: pathlib.Path, temp: pathlib.Path) -> None:
     if linked_outside_marker.read_text(encoding="utf-8") != RUN_ID + "\n":
         fail("release alterou alvo externo do marcador symlink válido")
 
-    failed_lock = make_release_lock(temp / "release-failed", marker_owner=RUN_ID)
-    result = run_release(release_script, failed_lock, "failure")
-    if result.returncode == 0 or not failed_lock.exists():
-        fail("release após falha abriu lock apesar de marcador pendente")
+    failed_db_lock = make_release_lock(temp / "release-failed-db", marker_owner=RUN_ID)
+    result = run_release(release_script, failed_db_lock, "failure")
+    if result.returncode == 0:
+        fail("release após falha aceitou marcador de banco pendente")
+    assert_failed_release_preserves(failed_db_lock, "db-mutation-started")
+
+    failed_code_lock = make_release_lock(temp / "release-failed-code")
+    code_marker = failed_code_lock / "code-mutation-started"
+    code_marker.write_text(RUN_ID + "\n", encoding="utf-8")
+    code_marker.chmod(0o600)
+    result = run_release(release_script, failed_code_lock, "failure")
+    if result.returncode == 0:
+        fail("release após falha aceitou marcador de código pendente")
+    assert_failed_release_preserves(failed_code_lock, "code-mutation-started")
 
     clean_failed_lock = make_release_lock(temp / "release-clean")
     result = run_release(release_script, clean_failed_lock, "failure")

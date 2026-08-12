@@ -2141,6 +2141,20 @@ vts_assert_same(
 );
 
 vts_reset_migration_store();
+$start_failure_snapshot = vts_store_snapshot();
+$GLOBALS['vts_database_fail_exact'] = array( 'START TRANSACTION' );
+$start_failure_error = vts_capture_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	}
+);
+vts_assert_true( $start_failure_error instanceof VTS_CLI_Error, 'falha ao iniciar transação encerra em erro WP-CLI antes da primeira escrita' );
+vts_assert_contains( 'Não foi possível iniciar a transação', $start_failure_error->getMessage(), 'falha de START TRANSACTION preserva diagnóstico específico' );
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'falha de START TRANSACTION aborta antes de qualquer save' );
+vts_assert_same( $start_failure_snapshot, vts_store_snapshot(), 'falha de START TRANSACTION preserva integralmente as cinco candidatas' );
+vts_assert_same( array( 'START TRANSACTION' ), $GLOBALS['vts_database_queries'], 'falha de START TRANSACTION não avança para row lock nem ROLLBACK fictício' );
+
+vts_reset_migration_store();
 $partial_lock_snapshot = vts_store_snapshot();
 $GLOBALS['vts_database_post_lock_result'] = 4;
 vts_expect_cli_error(
