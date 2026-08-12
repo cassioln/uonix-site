@@ -302,7 +302,7 @@ backup_line="$(grep -n 'backup-remote-database.sh' "$workflow" | head -1 | cut -
 # --- Caso 8: o rollback tem de restaurar o banco, não apenas arquivos ---------
 # Um backup de banco que o rollback ignora é decoração: o deploy falha, o
 # rollback declara sucesso e o schema segue divergente.
-rollback_body="$(sed -n "/Roll back managed code after failure/,/Retain five code backups/p" "$workflow")"
+rollback_body="$(sed -n "/Roll back managed code after failure/,/Release exclusive production lock/p" "$workflow")"
 printf '%s' "$rollback_body" | grep -q "db-\*.sql.gz" \
   || fail 'rollback não localiza o dump de banco'
 printf '%s' "$rollback_body" | grep -q 'gzip -t' \
@@ -322,9 +322,16 @@ files_offset="$(printf '%s' "$rollback_body" | grep -n 'rm -rf -- "\$document_ro
 [ "$restore_offset" -lt "$files_offset" ] \
   || fail 'rollback restaura arquivos antes do banco'
 
-# Um dump presente mas corrompido tem de ABORTAR, não ser ignorado.
-printf '%s' "$rollback_body" | grep -q 'rollback abortado antes de escrever' \
-  || fail 'rollback não aborta diante de dump corrompido'
+# Um dump presente mas corrompido marca o rollback como incompleto, preserva o
+# lock e AINDA tenta restaurar o código para reduzir a divergência. Abortar antes
+# dos arquivos deixaria os dois domínios quebrados quando um deles é recuperável.
+printf '%s' "$rollback_body" | grep -q 'dump de banco corrompido; rollback incompleto' \
+  || fail 'rollback não diagnostica dump corrompido como incompleto'
+printf '%s' "$rollback_body" | grep -q 'rollback_failed=1' \
+  || fail 'falha do dump não preserva o estado de rollback incompleto'
+corrupt_offset="$(printf '%s' "$rollback_body" | grep -n 'dump de banco corrompido; rollback incompleto' | head -1 | cut -d: -f1)"
+[ -n "$corrupt_offset" ] && [ "$corrupt_offset" -lt "$files_offset" ] \
+  || fail 'dump corrompido impede a tentativa posterior de restaurar arquivos'
 
 # --- Caso 9: a retenção precisa alcançar o dump ------------------------------
 # O dump mora dentro do diretório do backup, então a retenção existente já o
