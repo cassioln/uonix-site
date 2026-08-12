@@ -63,8 +63,23 @@ jobs:
       - name: Test WooCommerce-optional callbacks
         run: php scripts/tests/test-woocommerce-optional-plugin.php
 
+      - name: Test RFQ product default
+        run: php scripts/tests/test-rfq-product-default.php
+
+      - name: Test product excerpt editor enqueue
+        run: php scripts/tests/test-product-excerpt-editor.php
+
+      - name: Test fixed product short description layout
+        run: php scripts/tests/test-product-short-description-layout.php
+
+      - name: Test fixed product short description without block editor API
+        run: php scripts/tests/test-product-short-description-no-block-api.php
+
       - name: Test variation technical sheet
         run: php scripts/tests/test-variation-technical-sheet.php
+
+      - name: Test managed code has no implicit schema mutations
+        run: php scripts/tests/test-managed-code-no-schema-mutations.php
 
       - name: Validate variation technical sheet admin script
         run: node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
@@ -113,6 +128,9 @@ jobs:
           while IFS= read -r -d '' file; do
             bash -n "$file"
           done < <(find scripts -type f -name '*.sh' -print0)
+
+      - name: Test product excerpt editor lifecycle
+        run: node --test scripts/tests/test-product-excerpt-editor.mjs
 
       - name: Run ShellCheck
         run: find scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck -x
@@ -195,6 +213,9 @@ jobs:
 
       - name: Test production workflow contract
         run: bash scripts/tests/test-production-workflow.sh
+
+      - name: Test production rollback runtime
+        run: python3 scripts/tests/test-production-rollback-runtime.py
 
       - name: Test clone destination lock
         run: bash scripts/tests/test-clone-lock.sh

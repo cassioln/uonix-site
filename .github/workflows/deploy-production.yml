@@ -7,6 +7,11 @@ on:
         description: Digite PUBLICAR <SHA> EM SITE.UONIX.COM.BR
         required: true
         type: string
+      migrate_variation_technical_sheet:
+        description: Executar dry-run e migração das fichas legadas por variação
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -24,6 +29,7 @@ jobs:
       UONIX_PRODUCTION_CONFIRMATION: ${{ inputs.confirmation }}
       UONIX_REQUEST_SHA: ${{ github.sha }}
       UONIX_REQUEST_REF: ${{ github.ref }}
+      UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET: ${{ inputs.migrate_variation_technical_sheet }}
       LOCAWEB_SSH_HOST: ${{ vars.LOCAWEB_SSH_HOST }}
       LOCAWEB_SSH_PORT: ${{ vars.LOCAWEB_SSH_PORT }}
       LOCAWEB_SSH_USER: ${{ vars.LOCAWEB_SSH_USER }}
@@ -42,6 +48,7 @@ jobs:
           [ "${#UONIX_REQUEST_SHA}" -eq 40 ]
           expected_confirmation="PUBLICAR ${UONIX_REQUEST_SHA} EM SITE.UONIX.COM.BR"
           [ "$UONIX_PRODUCTION_CONFIRMATION" = "$expected_confirmation" ]
+          case "$UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET" in true|false) ;; *) exit 1 ;; esac
           [ "$LOCAWEB_SSH_HOST" = 'ftp.site.uonix.com.br' ]
           [ "$LOCAWEB_SSH_PORT" = '22' ]
           [ "$LOCAWEB_SSH_USER" = 'siteuonix1' ]
@@ -176,10 +183,24 @@ jobs:
           umask 077
           lock_path="$1"
           run_id="$2"
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then
+              stat -c '%a' "$1"
+            else
+              stat -f '%Lp' "$1"
+            fi
+          }
           mkdir -- "$lock_path"
+          if ! ( set -o noclobber; umask 077; printf '%s\n' "$run_id" > "$lock_path/owner" ); then
+            rm -f -- "$lock_path/owner"
+            rmdir -- "$lock_path" 2>/dev/null || true
+            exit 1
+          fi
           if ! {
-            printf '%s\n' "$run_id" > "$lock_path/owner"
-            chmod 600 "$lock_path/owner"
+            test ! -L "$lock_path/owner"
+            test -f "$lock_path/owner"
+            test "$(file_mode "$lock_path/owner")" = 600
+            test "$(cat "$lock_path/owner")" = "$run_id"
           }; then
             rm -f -- "$lock_path/owner"
             rmdir -- "$lock_path" 2>/dev/null || true
@@ -206,18 +227,48 @@ jobs:
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
             bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$backup_dir" <<'REMOTE'
           set -euo pipefail
+          umask 077
           shopt -s nullglob
           document_root="$1"
           backup_dir="$2"
           managed="$backup_dir/managed"
-          mkdir -p "$managed/themes" "$managed/mu-plugins"
 
-          if [ -e "$document_root/wp-content/themes/kadence-child" ]; then
-            cp -a "$document_root/wp-content/themes/kadence-child" "$managed/themes/"
+          # O nome deriva da execução e o diretório deve nascer vazio. Reutilizar
+          # um diretório existente permite seguir/truncar um manifesto preexistente
+          # (inclusive symlink); falhamos em vez de reaproveitar qualquer artefato.
+          mkdir -- "$backup_dir"
+          mkdir -- "$managed" "$managed/themes" "$managed/mu-plugins"
+
+          validate_managed_root() {
+            root="$1"
+            if [ -L "$root" ]; then
+              return 1
+            fi
+            if [ -f "$root" ]; then
+              return 0
+            fi
+            if [ -d "$root" ]; then
+              nested_link="$(find "$root" -type l -print -quit)"
+              [ -z "$nested_link" ] || return 1
+              return 0
+            fi
+            [ ! -e "$root" ]
+          }
+
+          theme_root="$document_root/wp-content/themes/kadence-child"
+          core_root="$document_root/wp-content/mu-plugins/uonix-core.php"
+          validate_managed_root "$theme_root"
+          validate_managed_root "$core_root"
+          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
+            validate_managed_root "$module"
+          done
+
+          if [ -e "$theme_root" ]; then
+            cp -a "$theme_root" "$managed/themes/"
           fi
 
-          if [ -e "$document_root/wp-content/mu-plugins/uonix-core.php" ]; then
-            cp -a "$document_root/wp-content/mu-plugins/uonix-core.php" "$managed/mu-plugins/"
+          if [ -e "$core_root" ]; then
+            cp -a "$core_root" "$managed/mu-plugins/"
           fi
 
           for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
@@ -225,20 +276,66 @@ jobs:
             cp -a "$module" "$managed/mu-plugins/"
           done
 
-          find "$managed" -type f -print | LC_ALL=C sort > "$backup_dir/files.txt"
+          write_managed_manifest() {
+            base="$1"
+            output="$2"
+            roots=("$base/themes/kadence-child" "$base/mu-plugins/uonix-core.php")
+            for module in "$base"/mu-plugins/uonix-*; do
+              [ -d "$module" ] && roots+=("$module")
+            done
+
+            path_list="$(mktemp "${output}.paths.XXXXXX")"
+            sorted_list="$(mktemp "${output}.sorted.XXXXXX")"
+            : > "$path_list"
+            for root in "${roots[@]}"; do
+              if [ -L "$root" ]; then
+                rm -f -- "$path_list" "$sorted_list"
+                return 1
+              fi
+              if [ -f "$root" ]; then
+                printf '%s\n' "$root" >> "$path_list"
+              elif [ -d "$root" ]; then
+                nested_link="$(find "$root" -type l -print -quit)"
+                if [ -n "$nested_link" ]; then
+                  rm -f -- "$path_list" "$sorted_list"
+                  return 1
+                fi
+                find "$root" -type f -print >> "$path_list"
+              elif [ -e "$root" ]; then
+                rm -f -- "$path_list" "$sorted_list"
+                return 1
+              fi
+            done
+            LC_ALL=C sort -u "$path_list" > "$sorted_list"
+            if ! ( set -o noclobber; : > "$output" ); then
+              rm -f -- "$path_list" "$sorted_list"
+              return 1
+            fi
+            while IFS= read -r file; do
+              [ -n "$file" ] || continue
+              if [ -L "$file" ] || [ ! -f "$file" ]; then
+                rm -f -- "$path_list" "$sorted_list"
+                return 1
+              fi
+              relative="${file#"$base"/}"
+              checksum="$(sha256sum "$file" | cut -d ' ' -f 1)"
+              printf '%s  %s\n' "$checksum" "$relative" >> "$output"
+            done < "$sorted_list"
+            rm -f -- "$path_list" "$sorted_list"
+            chmod 600 "$output"
+          }
+
+          write_managed_manifest "$managed" "$backup_dir/manifest.backup.sha256"
+          test -s "$backup_dir/manifest.backup.sha256"
           REMOTE
 
           printf 'BACKUP_ID=%s\n' "$backup_id" >> "$GITHUB_ENV"
           printf 'BACKUP_DIR=%s\n' "$backup_dir" >> "$GITHUB_ENV"
           printf 'Backup de código criado: %s\n' "$backup_id"
 
-      # O passo acima salva apenas CÓDIGO. Sem o dump abaixo, um rollback
-      # restauraria arquivos sobre um schema não restaurado — e a mutação de
-      # banco mais provável aqui é o search-replace do cutover de domínio.
-      #
-      # Falha fechado de propósito: sem dump íntegro, nada é publicado.
-      # Não usa `wp db export`: a Locaweb desabilita proc_open de forma
-      # compilada, então o script escolhe mysqldump por capacidade do host.
+      # O snapshot precisa preceder a publicação: código novo pode alterar schema
+      # ao ser carregado. Sua existência, porém, não autoriza rebobinar o banco por
+      # uma falha somente de arquivos; o rollback exige marcador real de mutação.
       - name: Back up the production database
         env:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
@@ -252,10 +349,7 @@ jobs:
 
           # $HOME precisa ser expandido pelo SHELL, não por uma expressão de
           # template do Actions: o contexto `env` não conhece HOME e resolveria
-          # para string vazia, gerando o caminho "/.ssh/locaweb_known_hosts" e
-          # abortando o backup com "known_hosts Locaweb ausente ou vazio".
-          # Todas as outras etapas deste workflow já usam "$HOME" — esta segue o
-          # mesmo padrão.
+          # para string vazia, gerando o caminho "/.ssh/locaweb_known_hosts".
           export LOCAWEB_SSH_KNOWN_HOSTS_FILE="$HOME/.ssh/locaweb_known_hosts"
 
           scripts/backup-remote-database.sh \
@@ -275,6 +369,69 @@ jobs:
           set -euo pipefail
           remote="$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST"
           ssh_transport="sshpass -e ssh -p $LOCAWEB_SSH_PORT -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/locaweb_known_hosts"
+          operation_lock="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
+
+          # Valide integralmente o bundle antes de criar o marcador ou iniciar
+          # qualquer transferência mutável. Array vazio não pode significar
+          # "remova todos os módulos" no destino.
+          expected_modules=()
+          for module in .deploy/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            module_name="$(basename "$module")"
+            case "$module_name" in
+              uonix-*[!A-Za-z0-9._-]*|uonix-|uonix-.|uonix-..)
+                printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
+                exit 1
+                ;;
+              uonix-*) ;;
+              *)
+                printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
+                exit 1
+                ;;
+            esac
+            expected_modules+=("$module_name")
+          done
+          if [ "${#expected_modules[@]}" -eq 0 ]; then
+            printf 'ERRO: allowlist de módulos vazia; bundle inválido, nada foi publicado.\n' >&2
+            exit 1
+          fi
+
+          # O marcador remoto é criado antes do primeiro rsync. Rollback e release
+          # consultam este arquivo para não restaurar código quando nenhuma
+          # transferência mutável chegou a começar.
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$remote" \
+            bash -s -- "$operation_lock" "$DEPLOY_RUN_ID" <<'REMOTE'
+          set -euo pipefail
+          lock_path="$1"
+          run_id="$2"
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then
+              stat -c '%a' "$1"
+            else
+              stat -f '%Lp' "$1"
+            fi
+          }
+          test -f "$lock_path/owner"
+          test ! -L "$lock_path/owner"
+          test "$(file_mode "$lock_path/owner")" = 600
+          test "$(cat "$lock_path/owner")" = "$run_id"
+          marker="$lock_path/code-mutation-started"
+          test ! -e "$marker"
+          test ! -L "$marker"
+          ( set -o noclobber; umask 077; printf '%s\n' "$run_id" > "$marker" )
+          chmod 600 "$marker"
+          test -f "$marker"
+          test ! -L "$marker"
+          test "$(file_mode "$marker")" = 600
+          test "$(cat "$marker")" = "$run_id"
+          REMOTE
 
           rsync -az --delete \
             -e "$ssh_transport" \
@@ -288,14 +445,10 @@ jobs:
           # requisição. O loader tolera a ausência (is_readable + fallback), mas
           # publicar na ordem correta fecha a janela em vez de apenas sobreviver a
           # ela. Não inverta sem reler scripts/tests/test-mu-loader-resilience.sh.
-          expected_modules=()
-          for module in .deploy/mu-plugins/uonix-*; do
-            [ -d "$module" ] || continue
-            module_name="$(basename "$module")"
-            expected_modules+=("$module_name")
+          for module_name in "${expected_modules[@]}"; do
             rsync -az --delete \
               -e "$ssh_transport" \
-              "$module/" \
+              ".deploy/mu-plugins/$module_name/" \
               "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/mu-plugins/$module_name/"
           done
 
@@ -318,6 +471,24 @@ jobs:
           document_root="$1"
           shift
 
+          if [ "$#" -eq 0 ]; then
+            printf 'ERRO: allowlist vazia recebida no destino; nenhum módulo foi removido.\n' >&2
+            exit 1
+          fi
+          for expected in "$@"; do
+            case "$expected" in
+              uonix-*[!A-Za-z0-9._-]*|uonix-|uonix-.|uonix-..|'')
+                printf 'ERRO: nome de módulo inválido recebido no destino: %s\n' "$expected" >&2
+                exit 1
+                ;;
+              uonix-*) ;;
+              *)
+                printf 'ERRO: nome de módulo inválido recebido no destino: %s\n' "$expected" >&2
+                exit 1
+                ;;
+            esac
+          done
+
           for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
             [ -d "$module" ] || continue
             module_name="$(basename "$module")"
@@ -334,7 +505,41 @@ jobs:
           done
           REMOTE
 
-          rsync -az \
+          expected_manifest_checksum="$(sha256sum .deploy/manifest.sha256 | cut -d ' ' -f 1)"
+          test "${#expected_manifest_checksum}" -eq 64
+          case "$expected_manifest_checksum" in
+            *[!0-9a-f]*) exit 1 ;;
+          esac
+
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$remote" \
+            bash -s -- "$BACKUP_DIR/manifest.expected.sha256" <<'REMOTE'
+          set -euo pipefail
+          manifest="$1"
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then
+              stat -c '%a' "$1"
+            else
+              stat -f '%Lp' "$1"
+            fi
+          }
+          test ! -e "$manifest"
+          test ! -L "$manifest"
+          ( set -o noclobber; umask 077; : > "$manifest" )
+          chmod 600 "$manifest"
+          test -f "$manifest"
+          test ! -L "$manifest"
+          test ! -s "$manifest"
+          test "$(file_mode "$manifest")" = 600
+          REMOTE
+
+          rsync -az --chmod=F600 \
             -e "$ssh_transport" \
             .deploy/manifest.sha256 \
             "$remote:$BACKUP_DIR/manifest.expected.sha256"
@@ -347,30 +552,77 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$remote" \
-            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$BACKUP_DIR/manifest.expected.sha256" <<'REMOTE'
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$BACKUP_DIR/manifest.expected.sha256" "$expected_manifest_checksum" <<'REMOTE'
           set -euo pipefail
           document_root="$1"
           manifest="$2"
+          expected_manifest_checksum="$3"
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then
+              stat -c '%a' "$1"
+            else
+              stat -f '%Lp' "$1"
+            fi
+          }
+          path_has_symlink() {
+            local base="$1"
+            local remaining="$2"
+            local current="$base"
+            local component
+            [ ! -L "$current" ] || return 0
+            while [ -n "$remaining" ]; do
+              case "$remaining" in
+                */*) component="${remaining%%/*}"; remaining="${remaining#*/}" ;;
+                *) component="$remaining"; remaining='' ;;
+              esac
+              current="$current/$component"
+              [ ! -L "$current" ] || return 0
+            done
+            return 1
+          }
 
+          test -f "$manifest"
+          test ! -L "$manifest"
+          test -s "$manifest"
+          test "$(file_mode "$manifest")" = 600
+          test "${#expected_manifest_checksum}" -eq 64
+          case "$expected_manifest_checksum" in
+            *[!0-9a-f]*) exit 1 ;;
+          esac
+          actual_manifest_checksum="$(sha256sum "$manifest" | cut -d ' ' -f 1)"
+          test "$actual_manifest_checksum" = "$expected_manifest_checksum"
+          if ! tail -c 1 "$manifest" | grep -qx ''; then
+            printf 'ERRO: manifesto esperado vazio ou sem newline final\n' >&2
+            exit 1
+          fi
           while read -r checksum relative_path; do
             case "$relative_path" in
               theme/*)
-                target="$document_root/wp-content/themes/kadence-child/${relative_path#theme/}"
+                managed_prefix='wp-content/themes/kadence-child'
+                managed_relative="${relative_path#theme/}"
                 ;;
               mu-plugins/*)
-                target="$document_root/wp-content/mu-plugins/${relative_path#mu-plugins/}"
+                managed_prefix='wp-content/mu-plugins'
+                managed_relative="${relative_path#mu-plugins/}"
                 ;;
               *)
                 printf 'Path não gerenciado no manifest: %s\n' "$relative_path" >&2
                 exit 1
                 ;;
             esac
+            case "/$managed_relative/" in
+              *'/../'*|*'/./'*|*'//'*)
+                printf 'Path inseguro no manifest: %s\n' "$relative_path" >&2
+                exit 1
+                ;;
+            esac
+            target="$document_root/$managed_prefix/$managed_relative"
 
             # Sem estas mensagens, uma divergência de manifest falha com exit 1 mudo
             # e não se sabe QUAL arquivo divergiu — só o caminho é impresso, nunca
             # conteúdo. Os hashes são de arquivos versionados, não segredos.
-            if [ ! -f "$target" ]; then
-              printf 'ERRO: arquivo do manifest não chegou ao destino: %s\n' "$relative_path" >&2
+            if path_has_symlink "$document_root" "$managed_prefix/$managed_relative" || [ ! -f "$target" ]; then
+              printf 'ERRO: arquivo do manifest ausente ou inseguro no destino: %s\n' "$relative_path" >&2
               exit 1
             fi
             actual="$(sha256sum "$target" | cut -d ' ' -f 1)"
@@ -464,17 +716,29 @@ jobs:
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*nofollow'
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noarchive'
 
-      - name: Roll back managed code after failure
-        if: ${{ failure() }}
+      - name: Migrate legacy variation technical sheets
+        if: ${{ inputs.migrate_variation_technical_sheet }}
         env:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+          LOCAWEB_SSH_PASSWORD_FILE: ${{ runner.temp }}/locaweb-ssh-password-migration
         run: |
           set -euo pipefail
-          if [ -z "${BACKUP_DIR:-}" ]; then
-            echo 'Nenhum backup foi criado; não houve transferência para reverter.'
-            exit 0
-          fi
-          backup_id="${BACKUP_DIR##*/}"
+          # Mantém o snapshot pré-publicação como baseline geral e cria um segundo
+          # checkpoint imediatamente antes da mutação opcional. Se o fallback
+          # integral for inevitável, a janela de escritas concorrentes é mínima.
+          umask 077
+          printf '%s' "$SSHPASS" > "$LOCAWEB_SSH_PASSWORD_FILE"
+          chmod 600 "$LOCAWEB_SSH_PASSWORD_FILE"
+          trap 'rm -f "$LOCAWEB_SSH_PASSWORD_FILE"' EXIT
+          export LOCAWEB_SSH_KNOWN_HOSTS_FILE="$HOME/.ssh/locaweb_known_hosts"
+          scripts/backup-remote-database.sh \
+            --environment=production \
+            --output-dir="$BACKUP_DIR" \
+            --backup-id="zz-migration-${BACKUP_ID}" | tee "$RUNNER_TEMP/db-migration-backup.out"
+          migration_backup_file="$(sed -n 's/^DB_BACKUP_FILE=//p' "$RUNNER_TEMP/db-migration-backup.out")"
+          test -n "$migration_backup_file"
+          printf 'DB_BACKUP_FILE=%s\n' "$migration_backup_file" >> "$GITHUB_ENV"
+          printf 'Checkpoint de banco pré-migração: %s\n' "${migration_backup_file##*/}"
 
           sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
@@ -484,7 +748,98 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
-            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$BACKUP_DIR" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$TARGET_URL" <<'REMOTE'
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$DEPLOY_RUN_ID" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"
+          php_bin="$2"
+          wp_bin="$3"
+          run_id="$4"
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then
+              stat -c '%a' "$1"
+            else
+              stat -f '%Lp' "$1"
+            fi
+          }
+          cli() {
+            "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" "$@"
+          }
+
+          test -f "$document_root/wp-content/mu-plugins/uonix-woocommerce/22-ficha-tecnica-variacao.php"
+          operation_lock="$document_root/.uonix-operation.lock"
+          db_mutation_marker="$operation_lock/db-mutation-started"
+          test -f "$operation_lock/owner"
+          test ! -L "$operation_lock/owner"
+          test "$(file_mode "$operation_lock/owner")" = 600
+          test "$(cat "$operation_lock/owner")" = "$run_id"
+
+          migration_lock="$document_root/.uonix-vts-migration.lock"
+          legacy_count="$(cli eval '
+            $ids = get_posts(array(
+              "post_type" => "product_variation",
+              "numberposts" => -1,
+              "fields" => "ids",
+              "meta_query" => array(array(
+                "key" => "_variation_description",
+                "value" => "uonix-fichas-compactas",
+                "compare" => "LIKE",
+              )),
+            ));
+            echo count($ids);
+          ')"
+          case "$legacy_count" in
+            0)
+              printf 'migração: nenhuma ficha legada; execute fará verificação idempotente\n'
+              ;;
+            5)
+              printf 'migração: dry-run de cinco fichas legadas\n'
+              cli uonix ficha-tecnica migrate --dry-run
+              ;;
+            *)
+              printf 'migração recusada: esperadas zero ou cinco fichas legadas, encontradas %s\n' "$legacy_count" >&2
+              exit 3
+              ;;
+          esac
+
+          # O próprio processo PHP adquire o lock e cria o marcador, com owner,
+          # depois do preflight interno e imediatamente antes do primeiro save().
+          # Se o SSH morrer mas o PHP sobreviver, o lock continua existindo.
+          migration_args=(
+            --execute
+            --mutation-marker="$db_mutation_marker"
+            --mutation-owner="$run_id"
+            --migration-lock="$migration_lock"
+          )
+          printf 'migração: execute protegido\n'
+          cli uonix ficha-tecnica migrate "${migration_args[@]}"
+          printf 'migração: verificação idempotente protegida\n'
+          cli uonix ficha-tecnica migrate "${migration_args[@]}"
+          REMOTE
+
+      # Deve ser o último step potencialmente mutável antes do release. Assim,
+      # falha ou cancelamento em qualquer etapa anterior ainda passa por rollback.
+      - name: Roll back managed code after failure
+        if: ${{ failure() || cancelled() }}
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKUP_DIR:-}" ]; then
+            echo 'Nenhum backup foi criado; não houve transferência para reverter.'
+            exit 0
+          fi
+          backup_id="${BACKUP_DIR##*/}"
+          operation_lock="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
+
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$BACKUP_DIR" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$TARGET_URL" "$DEPLOY_RUN_ID" <<'REMOTE'
           set -euo pipefail
           shopt -s nullglob
           document_root="$1"
@@ -492,55 +847,195 @@ jobs:
           php_bin="$3"
           wp_bin="$4"
           target_url="$5"
+          run_id="$6"
           managed="$backup_dir/managed"
+          operation_lock="$document_root/.uonix-operation.lock"
+          code_mutation_marker="$operation_lock/code-mutation-started"
+          db_mutation_marker="$operation_lock/db-mutation-started"
+          migration_lock="$document_root/.uonix-vts-migration.lock"
+          rollback_failed=0
 
-          # O banco vem PRIMEIRO: restaurar arquivos sobre um schema divergente
-          # produz um estado que passa no smoke de arquivos e mente sobre o
-          # conteúdo. Se houver dump neste backup, ele é obrigatório — um dump
-          # presente mas inválido aborta o rollback em vez de ser ignorado.
-          db_dump="$(find "$backup_dir" -maxdepth 1 -name 'db-*.sql.gz' -print | LC_ALL=C sort | tail -1)"
-          if [ -n "$db_dump" ]; then
-            printf 'rollback: restaurando banco a partir de %s\n' "${db_dump##*/}"
-            if ! gzip -t "$db_dump" 2>/dev/null; then
-              printf 'dump de banco corrompido; rollback abortado antes de escrever\n' >&2
-              exit 1
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then
+              stat -c '%a' "$1"
+            else
+              stat -f '%Lp' "$1"
             fi
-            if command -v mysql >/dev/null 2>&1; then
-              credentials="$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval \
-                'echo DB_NAME . "\t" . DB_USER . "\t" . DB_HOST;')"
-              db_name="$(printf '%s' "$credentials" | cut -f1)"
-              db_user="$(printf '%s' "$credentials" | cut -f2)"
-              db_host="$(printf '%s' "$credentials" | cut -f3)"
-              if ! MYSQL_PWD="$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'echo DB_PASSWORD;')" \
-                  gzip -dc "$db_dump" | mysql --default-character-set=utf8mb4 \
-                    -h "$db_host" -u "$db_user" "$db_name"; then
-                printf 'restauração do banco falhou; rollback incompleto\n' >&2
-                exit 1
+          }
+
+          write_managed_manifest() {
+            base="$1"
+            output="$2"
+            roots=("$base/themes/kadence-child" "$base/mu-plugins/uonix-core.php")
+            for module in "$base"/mu-plugins/uonix-*; do
+              [ -d "$module" ] && roots+=("$module")
+            done
+
+            path_list="$(mktemp "${output}.paths.XXXXXX")"
+            sorted_list="$(mktemp "${output}.sorted.XXXXXX")"
+            : > "$path_list"
+            for root in "${roots[@]}"; do
+              if [ -L "$root" ]; then
+                rm -f -- "$path_list" "$sorted_list"
+                return 1
+              fi
+              if [ -f "$root" ]; then
+                printf '%s\n' "$root" >> "$path_list"
+              elif [ -d "$root" ]; then
+                nested_link="$(find "$root" -type l -print -quit)"
+                if [ -n "$nested_link" ]; then
+                  rm -f -- "$path_list" "$sorted_list"
+                  return 1
+                fi
+                find "$root" -type f -print >> "$path_list"
+              elif [ -e "$root" ]; then
+                rm -f -- "$path_list" "$sorted_list"
+                return 1
+              fi
+            done
+            LC_ALL=C sort -u "$path_list" > "$sorted_list"
+            if ! ( set -o noclobber; : > "$output" ); then
+              rm -f -- "$path_list" "$sorted_list"
+              return 1
+            fi
+            while IFS= read -r file; do
+              [ -n "$file" ] || continue
+              if [ -L "$file" ] || [ ! -f "$file" ]; then
+                rm -f -- "$path_list" "$sorted_list"
+                return 1
+              fi
+              relative="${file#"$base"/}"
+              checksum="$(sha256sum "$file" | cut -d ' ' -f 1)"
+              printf '%s  %s\n' "$checksum" "$relative" >> "$output"
+            done < "$sorted_list"
+            rm -f -- "$path_list" "$sorted_list"
+          }
+
+          test -f "$operation_lock/owner"
+          test ! -L "$operation_lock/owner"
+          test "$(file_mode "$operation_lock/owner")" = 600
+          test "$(cat "$operation_lock/owner")" = "$run_id"
+          if [ ! -e "$code_mutation_marker" ] && [ ! -L "$code_mutation_marker" ] && [ ! -e "$db_mutation_marker" ] && [ ! -L "$db_mutation_marker" ]; then
+            printf 'rollback: nenhuma mutação foi iniciada; nada a restaurar\n'
+            exit 0
+          fi
+
+          for marker in "$code_mutation_marker" "$db_mutation_marker"; do
+            if [ -e "$marker" ] || [ -L "$marker" ]; then
+              test -f "$marker"
+              test ! -L "$marker"
+              test "$(file_mode "$marker")" = 600
+            fi
+          done
+
+          # Cancelar o SSH não prova que o WP-CLI remoto terminou. Nunca restaure
+          # banco ou código enquanto o lock da migração ainda estiver ativo.
+          waited=0
+          while [ -d "$migration_lock" ] && [ "$waited" -lt 20 ]; do
+            sleep 1
+            waited=$((waited + 1))
+          done
+          if [ -d "$migration_lock" ]; then
+            migration_owner='desconhecido'
+            if [ -f "$migration_lock/owner" ]; then
+              migration_owner="$(cat "$migration_lock/owner")"
+            fi
+            printf 'rollback recusado: migração remota ainda ativa após %ss (owner=%s); lock preservado\n' \
+              "$waited" "$migration_owner" >&2
+            exit 1
+          fi
+
+          cli() {
+            "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" "$@"
+          }
+
+          # O dump permanece disponível para análise/contingência MANUAL. O rollback
+          # automático toca apenas as cinco fichas; nunca rebobina pedidos ou outras
+          # escritas feitas depois do checkpoint.
+          if [ -f "$db_mutation_marker" ]; then
+            if [ "$(cat "$db_mutation_marker")" != "$run_id" ]; then
+              printf 'rollback recusado: marcador de banco pertence a outra execução\n' >&2
+              rollback_failed=1
+            elif cli uonix ficha-tecnica migrate \
+                --rollback \
+                --mutation-marker="$db_mutation_marker" \
+                --mutation-owner="$run_id" \
+                --migration-lock="$migration_lock"; then
+              if [ "$(cat "$db_mutation_marker")" = "$run_id" ]; then
+                rm -f -- "$db_mutation_marker"
+              else
+                printf 'rollback seletivo terminou, mas o marcador mudou de owner\n' >&2
+                rollback_failed=1
               fi
             else
-              printf 'cliente mysql ausente; não é possível restaurar o banco\n' >&2
+              printf 'rollback seletivo falhou; dump integral NÃO será importado automaticamente\n' >&2
+              rollback_failed=1
+            fi
+          else
+            printf 'rollback: banco não foi marcado como mutado; restauração ignorada\n'
+          fi
+
+          # Não reinstale código antigo sobre banco migrado/parcial. Em falha do
+          # rollback seletivo, preserve a versão nova, o lock e ambos os marcadores
+          # para diagnóstico e intervenção sem perda de pedidos.
+          if [ "$rollback_failed" -ne 0 ]; then
+            printf 'rollback incompleto; código, lock e marcadores serão preservados para intervenção\n' >&2
+            exit 1
+          fi
+
+          # O marcador de código também precisa pertencer a este run.
+          if [ -f "$code_mutation_marker" ] && [ "$(cat "$code_mutation_marker")" != "$run_id" ]; then
+            printf 'rollback recusado: marcador de código pertence a outra execução\n' >&2
+            exit 1
+          fi
+
+          # Com o banco original confirmado (ou nunca tocado), restaure os arquivos.
+          if [ -f "$code_mutation_marker" ]; then
+            backup_manifest="$backup_dir/manifest.backup.sha256"
+            test -f "$backup_manifest"
+            test ! -L "$backup_manifest"
+            test "$(file_mode "$backup_manifest")" = 600
+            test -s "$backup_manifest"
+            observed_manifest="$(mktemp)"
+            rm -f -- "$observed_manifest"
+            trap 'rm -f -- "$observed_manifest"' EXIT
+            write_managed_manifest "$managed" "$observed_manifest"
+            if ! cmp -s -- "$backup_manifest" "$observed_manifest"; then
+              printf 'rollback recusado: manifesto/hash do backup de código diverge\n' >&2
+              exit 1
+            fi
+
+            rm -rf -- "$document_root/wp-content/themes/kadence-child"
+            rm -f -- "$document_root/wp-content/mu-plugins/uonix-core.php"
+            for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
+              [ -d "$module" ] && rm -rf -- "$module"
+            done
+
+            if [ -d "$managed/themes/kadence-child" ]; then
+              cp -a "$managed/themes/kadence-child" "$document_root/wp-content/themes/"
+            fi
+            if [ -f "$managed/mu-plugins/uonix-core.php" ]; then
+              cp -a "$managed/mu-plugins/uonix-core.php" "$document_root/wp-content/mu-plugins/"
+            fi
+            for module in "$managed"/mu-plugins/uonix-*; do
+              [ -d "$module" ] || continue
+              cp -a "$module" "$document_root/wp-content/mu-plugins/"
+            done
+
+            rm -f -- "$observed_manifest"
+            write_managed_manifest "$document_root/wp-content" "$observed_manifest"
+            if ! cmp -s -- "$backup_manifest" "$observed_manifest"; then
+              printf 'rollback incompleto: código restaurado diverge do manifesto/hash do backup\n' >&2
               exit 1
             fi
           else
-            printf 'rollback: nenhum dump de banco neste backup (somente código)\n'
+            printf 'rollback: código não foi marcado como mutado; restauração ignorada\n'
           fi
 
-          rm -rf -- "$document_root/wp-content/themes/kadence-child"
-          rm -f -- "$document_root/wp-content/mu-plugins/uonix-core.php"
-          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
-            [ -d "$module" ] && rm -rf -- "$module"
-          done
-
-          if [ -d "$managed/themes/kadence-child" ]; then
-            cp -a "$managed/themes/kadence-child" "$document_root/wp-content/themes/"
+          if [ "$rollback_failed" -ne 0 ]; then
+            printf 'rollback incompleto; lock e marcadores serão preservados para intervenção\n' >&2
+            exit 1
           fi
-          if [ -f "$managed/mu-plugins/uonix-core.php" ]; then
-            cp -a "$managed/mu-plugins/uonix-core.php" "$document_root/wp-content/mu-plugins/"
-          fi
-          for module in "$managed"/mu-plugins/uonix-*; do
-            [ -d "$module" ] || continue
-            cp -a "$module" "$document_root/wp-content/mu-plugins/"
-          done
 
           speedycache="$document_root/wp-content/cache/speedycache"
           if [ -d "$speedycache" ]; then
@@ -573,21 +1068,9 @@ jobs:
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noindex'
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*nofollow'
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noarchive'
-          echo "Rollback validado a partir do backup $backup_id."
 
-      - name: Retain thirty code and database backups
-        if: ${{ success() }}
-        continue-on-error: true
-        env:
-          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
-        run: |
-          set -euo pipefail
-          # Trinta, não cinco: medido no host, cada dump comprimido ocupa ~1,3 MB,
-          # então 30 backups somam ~39 MB — irrelevante frente aos 738 GB livres.
-          # Reter só cinco descartaria histórico útil sem economizar nada.
-          # O dump mora dentro do diretório do backup, então esta poda já o cobre.
-          # Variables in this command expand on the remote host.
-          # shellcheck disable=SC2016
+          # O smoke externo também faz parte da prova. Só agora o marcador de código
+          # pode ser removido; se esta conexão falhar, o lock permanece fechado.
           sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
@@ -596,7 +1079,29 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
-            'backup_root=/home/storage/f/34/12/siteuonix1/_uonix-deploy-backups; if [ -d "$backup_root" ]; then find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print | LC_ALL=C sort -r | tail -n +31 | while IFS= read -r old_backup; do rm -rf -- "$old_backup"; done; fi'
+            bash -s -- "$operation_lock" "$DEPLOY_RUN_ID" <<'REMOTE'
+          set -euo pipefail
+          lock_path="$1"
+          run_id="$2"
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then
+              stat -c '%a' "$1"
+            else
+              stat -f '%Lp' "$1"
+            fi
+          }
+          test -f "$lock_path/owner"
+          test ! -L "$lock_path/owner"
+          test "$(file_mode "$lock_path/owner")" = 600
+          test "$(cat "$lock_path/owner")" = "$run_id"
+          marker="$lock_path/code-mutation-started"
+          test -f "$marker"
+          test ! -L "$marker"
+          test "$(file_mode "$marker")" = 600
+          test "$(cat "$marker")" = "$run_id"
+          rm -f -- "$marker"
+          REMOTE
+          echo "Rollback validado a partir do backup $backup_id."
 
       - name: Release exclusive production lock
         if: ${{ always() }}
@@ -620,14 +1125,39 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
-            bash -s -- "$lock_path" "$DEPLOY_RUN_ID" "$DEPLOY_LOCK_ACQUIRED" <<'REMOTE'
+            bash -s -- "$lock_path" "$DEPLOY_RUN_ID" "$DEPLOY_LOCK_ACQUIRED" "${{ job.status }}" <<'REMOTE'
           set -euo pipefail
           lock_path="$1"
           run_id="$2"
           lock_acquired="$3"
+          job_status="$4"
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then
+              stat -c '%a' "$1"
+            else
+              stat -f '%Lp' "$1"
+            fi
+          }
           if [ "$lock_acquired" = true ]; then
             test -f "$lock_path/owner"
+            test ! -L "$lock_path/owner"
+            test "$(file_mode "$lock_path/owner")" = 600
             test "$(cat "$lock_path/owner")" = "$run_id"
+            for marker in code-mutation-started db-mutation-started; do
+              if [ -e "$lock_path/$marker" ] || [ -L "$lock_path/$marker" ]; then
+                test -f "$lock_path/$marker"
+                test ! -L "$lock_path/$marker"
+                test "$(file_mode "$lock_path/$marker")" = 600
+                test "$(cat "$lock_path/$marker")" = "$run_id"
+              fi
+            done
+            if [ "$job_status" = success ]; then
+              rm -f -- "$lock_path/code-mutation-started" "$lock_path/db-mutation-started"
+            fi
+            # Em falha/cancelamento, somente um rollback integralmente validado
+            # remove os marcadores. Preservá-los mantém o lock fail-closed.
+            test ! -e "$lock_path/code-mutation-started"
+            test ! -e "$lock_path/db-mutation-started"
             rm -f -- "$lock_path/owner"
             rmdir -- "$lock_path"
           fi

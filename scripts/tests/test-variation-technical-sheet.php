@@ -138,6 +138,23 @@ $GLOBALS['vts_metadata_exists_calls'] = array();
 $GLOBALS['vts_current_time']     = '2026-08-11 12:00:00';
 $GLOBALS['vts_migration_store']  = array();
 $GLOBALS['vts_store_writes']     = 0;
+$GLOBALS['vts_expected_mutation_marker'] = null;
+$GLOBALS['vts_expected_migration_lock'] = null;
+$GLOBALS['vts_expected_migration_owner'] = null;
+$GLOBALS['vts_product_factory_calls'] = array();
+$GLOBALS['vts_product_cache_enabled'] = false;
+$GLOBALS['vts_product_cache'] = array();
+$GLOBALS['vts_clean_post_cache_calls'] = array();
+$GLOBALS['vts_mutate_description_on_product_call'] = array();
+$GLOBALS['vts_mutate_description_after_product_load_on_call'] = array();
+$GLOBALS['vts_post_load_mutations'] = array();
+$GLOBALS['vts_post_load_mutation_save_calls'] = array();
+$GLOBALS['vts_database_queries'] = array();
+$GLOBALS['vts_database_fail_exact'] = array();
+$GLOBALS['vts_database_post_lock_result'] = null;
+$GLOBALS['vts_database_external_before_post_lock'] = array();
+$GLOBALS['vts_database_repopulate_cache_on_commit'] = array();
+$GLOBALS['vts_clean_post_cache_fail_after_commit_once'] = array();
 $GLOBALS['vts_save_fail_once']   = array();
 $GLOBALS['vts_save_corrupt_once'] = array();
 $GLOBALS['wc_meta_box_errors']   = array();
@@ -189,10 +206,54 @@ function current_user_can( $capability, $object_id = 0 ) {
 	return 'edit_post' === $capability && ! empty( $GLOBALS['vts_editable_posts'][ absint( $object_id ) ] );
 }
 
+function clean_post_cache( $post_id ) {
+	$post_id = absint( $post_id );
+	$GLOBALS['vts_clean_post_cache_calls'][] = array(
+		'id'          => $post_id,
+		'query_count' => count( $GLOBALS['vts_database_queries'] ),
+	);
+	if (
+		'COMMIT' === end( $GLOBALS['vts_database_queries'] ) &&
+		! empty( $GLOBALS['vts_clean_post_cache_fail_after_commit_once'][ $post_id ] )
+	) {
+		unset( $GLOBALS['vts_clean_post_cache_fail_after_commit_once'][ $post_id ] );
+		throw new RuntimeException( 'falha de cache pós-COMMIT simulada #' . $post_id );
+	}
+	unset( $GLOBALS['vts_product_cache'][ $post_id ] );
+}
+
 function wc_get_product( $product_id ) {
 	$product_id = absint( $product_id );
 	if ( array_key_exists( $product_id, $GLOBALS['vts_migration_store'] ) ) {
-		return new VTS_Fake_Migration_Variation( $product_id );
+		$GLOBALS['vts_product_factory_calls'][ $product_id ] = 1 + ( $GLOBALS['vts_product_factory_calls'][ $product_id ] ?? 0 );
+		$call_number = $GLOBALS['vts_product_factory_calls'][ $product_id ];
+		if ( $call_number === ( $GLOBALS['vts_mutate_description_on_product_call'][ $product_id ] ?? null ) ) {
+			$GLOBALS['vts_migration_store'][ $product_id ]['description'] .= '<p>alteração concorrente</p>';
+		}
+		if ( $call_number === ( $GLOBALS['vts_mutate_description_after_product_load_on_call'][ $product_id ] ?? null ) ) {
+			$loaded = new VTS_Fake_Migration_Variation( $product_id );
+			$suffix = '<p>corrida entre prova e persistência</p>';
+			if (
+				isset( $GLOBALS['wpdb'] ) &&
+				$GLOBALS['wpdb'] instanceof VTS_Fake_WPDB &&
+				$GLOBALS['wpdb']->is_variation_locked( $product_id )
+			) {
+				$GLOBALS['wpdb']->queue_external_description_append( $product_id, $suffix );
+			} else {
+				$GLOBALS['vts_migration_store'][ $product_id ]['description'] .= $suffix;
+			}
+			$GLOBALS['vts_post_load_mutations'][ $product_id ] = 1 + ( $GLOBALS['vts_post_load_mutations'][ $product_id ] ?? 0 );
+			$GLOBALS['vts_post_load_mutation_save_calls'][ $product_id ] = $GLOBALS['vts_save_calls_by_id'][ $product_id ] ?? 0;
+			return $loaded;
+		}
+		if ( $GLOBALS['vts_product_cache_enabled'] && isset( $GLOBALS['vts_product_cache'][ $product_id ] ) ) {
+			return clone $GLOBALS['vts_product_cache'][ $product_id ];
+		}
+		$loaded = new VTS_Fake_Migration_Variation( $product_id );
+		if ( $GLOBALS['vts_product_cache_enabled'] ) {
+			$GLOBALS['vts_product_cache'][ $product_id ] = clone $loaded;
+		}
+		return $loaded;
 	}
 	return $GLOBALS['vts_products'][ $product_id ] ?? false;
 }
@@ -281,6 +342,132 @@ class WP_CLI {
 		throw new VTS_CLI_Error( (string) $message );
 	}
 }
+
+/**
+ * Simula a mesma conexão MySQL usada pelo WP-CLI e uma gravação externa que
+ * aguarda os row locks antes de continuar.
+ */
+final class VTS_Fake_WPDB {
+	public $posts = 'wp_posts';
+	public $postmeta = 'wp_postmeta';
+
+	private $active = false;
+	private $snapshot = array();
+	private $locked_posts = array();
+	private $locked_meta = array();
+	private $pending_description_appends = array();
+
+	public function reset() {
+		$this->active = false;
+		$this->snapshot = array();
+		$this->locked_posts = array();
+		$this->locked_meta = array();
+		$this->pending_description_appends = array();
+		$GLOBALS['vts_database_queries'] = array();
+		$GLOBALS['vts_database_fail_exact'] = array();
+	}
+
+	public function query( $sql ) {
+		$sql = trim( preg_replace( '/\s+/', ' ', (string) $sql ) );
+		$GLOBALS['vts_database_queries'][] = $sql;
+		if ( in_array( strtoupper( $sql ), $GLOBALS['vts_database_fail_exact'], true ) ) {
+			return false;
+		}
+		if ( 'START TRANSACTION' === strtoupper( $sql ) ) {
+			if ( $this->active ) {
+				return false;
+			}
+			$this->active = true;
+			$this->snapshot = $GLOBALS['vts_migration_store'];
+			return 0;
+		}
+		if ( 'COMMIT' === strtoupper( $sql ) ) {
+			if ( ! $this->active ) {
+				return false;
+			}
+			$current_store = $GLOBALS['vts_migration_store'];
+			$GLOBALS['vts_migration_store'] = $this->snapshot;
+			foreach ( $GLOBALS['vts_database_repopulate_cache_on_commit'] as $variation_id ) {
+				$variation_id = absint( $variation_id );
+				$GLOBALS['vts_product_cache'][ $variation_id ] = new VTS_Fake_Migration_Variation( $variation_id );
+			}
+			$GLOBALS['vts_migration_store'] = $current_store;
+			$this->active = false;
+			$this->apply_pending_description_appends();
+			$this->clear_transaction_state();
+			return 0;
+		}
+		if ( 'ROLLBACK' === strtoupper( $sql ) ) {
+			if ( ! $this->active ) {
+				return false;
+			}
+			$GLOBALS['vts_migration_store'] = $this->snapshot;
+			$this->active = false;
+			$this->apply_pending_description_appends();
+			$this->clear_transaction_state();
+			return 0;
+		}
+		if ( false !== stripos( $sql, ' FROM ' . $this->posts . ' ' ) && false !== stripos( $sql, ' FOR UPDATE' ) ) {
+			$ids = $this->ids_from_query( $sql );
+			foreach ( $GLOBALS['vts_database_external_before_post_lock'] as $variation_id => $suffix ) {
+				$variation_id = absint( $variation_id );
+				if ( in_array( $variation_id, $ids, true ) ) {
+					$GLOBALS['vts_migration_store'][ $variation_id ]['description'] .= (string) $suffix;
+					$this->snapshot[ $variation_id ]['description'] .= (string) $suffix;
+				}
+			}
+			$GLOBALS['vts_database_external_before_post_lock'] = array();
+			$this->locked_posts = array_fill_keys( $ids, true );
+			if ( null !== $GLOBALS['vts_database_post_lock_result'] ) {
+				return (int) $GLOBALS['vts_database_post_lock_result'];
+			}
+			return count( array_intersect( $ids, array_keys( $GLOBALS['vts_migration_store'] ) ) );
+		}
+		if ( false !== stripos( $sql, ' FROM ' . $this->postmeta . ' ' ) && false !== stripos( $sql, ' FOR UPDATE' ) ) {
+			$ids = $this->ids_from_query( $sql );
+			$this->locked_meta = array_fill_keys( $ids, true );
+			$count = 0;
+			foreach ( $ids as $variation_id ) {
+				$count += count( $GLOBALS['vts_migration_store'][ $variation_id ]['meta'] ?? array() );
+			}
+			return $count;
+		}
+		return false;
+	}
+
+	public function is_variation_locked( $variation_id ) {
+		$variation_id = absint( $variation_id );
+		return $this->active && isset( $this->locked_posts[ $variation_id ], $this->locked_meta[ $variation_id ] );
+	}
+
+	public function queue_external_description_append( $variation_id, $suffix ) {
+		$this->pending_description_appends[] = array( absint( $variation_id ), (string) $suffix );
+	}
+
+	private function ids_from_query( $sql ) {
+		if ( 1 !== preg_match( '/\bIN\s*\(([^)]+)\)/i', $sql, $matches ) ) {
+			return array();
+		}
+		$ids = array_values( array_unique( array_map( 'absint', explode( ',', $matches[1] ) ) ) );
+		sort( $ids, SORT_NUMERIC );
+		return $ids;
+	}
+
+	private function apply_pending_description_appends() {
+		foreach ( $this->pending_description_appends as $pending ) {
+			$GLOBALS['vts_migration_store'][ $pending[0] ]['description'] .= $pending[1];
+		}
+	}
+
+	private function clear_transaction_state() {
+		$this->snapshot = array();
+		$this->locked_posts = array();
+		$this->locked_meta = array();
+		$this->pending_description_appends = array();
+	}
+}
+
+$GLOBALS['wpdb'] = new VTS_Fake_WPDB();
 
 final class VTS_Json_Response_Exception extends RuntimeException {}
 
@@ -576,6 +763,22 @@ final class VTS_Fake_Migration_Variation {
 	}
 
 	public function save() {
+		$expected_marker = $GLOBALS['vts_expected_mutation_marker'] ?? null;
+		if ( is_string( $expected_marker ) && '' !== $expected_marker && ! is_file( $expected_marker ) ) {
+			throw new RuntimeException( 'marcador de mutação ausente antes da persistência #' . $this->id );
+		}
+		$expected_lock = $GLOBALS['vts_expected_migration_lock'] ?? null;
+		$expected_owner = $GLOBALS['vts_expected_migration_owner'] ?? null;
+		if (
+			is_string( $expected_lock ) && '' !== $expected_lock &&
+			(
+				! is_dir( $expected_lock ) ||
+				! is_file( $expected_lock . '/owner' ) ||
+				$expected_owner . "\n" !== file_get_contents( $expected_lock . '/owner' )
+			)
+		) {
+			throw new RuntimeException( 'lock do processo de migração ausente durante a persistência #' . $this->id );
+		}
 		++$GLOBALS['vts_store_writes'];
 		$GLOBALS['vts_save_calls_by_id'][ $this->id ] = 1 + ( $GLOBALS['vts_save_calls_by_id'][ $this->id ] ?? 0 );
 		$call_number = $GLOBALS['vts_save_calls_by_id'][ $this->id ];
@@ -584,6 +787,7 @@ final class VTS_Fake_Migration_Variation {
 		}
 		$GLOBALS['vts_migration_store'][ $this->id ]['description'] = $this->description;
 		$GLOBALS['vts_migration_store'][ $this->id ]['meta']        = $this->meta;
+		clean_post_cache( $this->id );
 		if ( ! empty( $GLOBALS['vts_save_corrupt_once'][ $this->id ] ) ) {
 			unset( $GLOBALS['vts_save_corrupt_once'][ $this->id ] );
 			$GLOBALS['vts_migration_store'][ $this->id ]['description'] .= '<!--corrompido-->';
@@ -624,6 +828,19 @@ function vts_reset_migration_store( $descriptions = null ) {
 	$GLOBALS['vts_get_posts_calls']    = array();
 	$GLOBALS['vts_current_time_calls'] = array();
 	$GLOBALS['vts_metadata_exists_calls'] = array();
+	$GLOBALS['vts_product_factory_calls'] = array();
+	$GLOBALS['vts_product_cache_enabled'] = false;
+	$GLOBALS['vts_product_cache'] = array();
+	$GLOBALS['vts_clean_post_cache_calls'] = array();
+	$GLOBALS['vts_mutate_description_on_product_call'] = array();
+	$GLOBALS['vts_mutate_description_after_product_load_on_call'] = array();
+	$GLOBALS['vts_post_load_mutations'] = array();
+	$GLOBALS['vts_post_load_mutation_save_calls'] = array();
+	$GLOBALS['vts_database_external_before_post_lock'] = array();
+	$GLOBALS['vts_database_repopulate_cache_on_commit'] = array();
+	$GLOBALS['vts_clean_post_cache_fail_after_commit_once'] = array();
+	$GLOBALS['wpdb']->reset();
+	$GLOBALS['vts_database_post_lock_result'] = null;
 	foreach ( $descriptions as $variation_id => $description ) {
 		$GLOBALS['vts_migration_store'][ $variation_id ] = array(
 			'description' => $description,
@@ -705,16 +922,25 @@ function vts_restore_post_migration_sheet( $variation_id ) {
 	unset( $GLOBALS['vts_post_migration_sheet_before'][ $variation_id ] );
 }
 
-function vts_expect_cli_error( $callback, $message_fragment = '' ) {
+function vts_capture_cli_error( $callback ) {
 	try {
 		$callback();
 	} catch ( VTS_CLI_Error $exception ) {
+		return $exception;
+	}
+	return null;
+}
+
+function vts_expect_cli_error( $callback, $message_fragment = '', $case_name = '' ) {
+	$exception = vts_capture_cli_error( $callback );
+	if ( $exception instanceof VTS_CLI_Error ) {
 		if ( '' !== $message_fragment ) {
 			vts_assert_contains( $message_fragment, $exception->getMessage(), 'erro WP-CLI possui diagnóstico esperado' );
 		}
 		return $exception->getMessage();
 	}
-	vts_fail( 'era esperado um erro WP-CLI fail-closed' );
+	$prefix = '' !== $case_name ? $case_name . ': ' : '';
+	vts_fail( $prefix . 'era esperado um erro WP-CLI fail-closed' );
 }
 
 $copy_sheet = vts_valid_sheet();
@@ -1733,8 +1959,603 @@ vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'parser divergente falha antes
 vts_assert_same( $invalid_snapshot, vts_store_snapshot(), 'parser divergente preserva todas as cinco variações' );
 
 vts_reset_migration_store();
-$original_inventory = vts_legacy_inventory_fixture();
 $migration_command->migrate( array(), array( 'execute' => true ) );
+$rollback_cache_before = vts_store_snapshot();
+$GLOBALS['vts_store_writes'] = 0;
+$GLOBALS['vts_save_calls_by_id'] = array();
+$GLOBALS['vts_product_factory_calls'] = array();
+$GLOBALS['vts_product_cache_enabled'] = true;
+$GLOBALS['vts_product_cache'] = array();
+$GLOBALS['vts_clean_post_cache_calls'] = array();
+$GLOBALS['wpdb']->reset();
+$rollback_cache_suffix = '<p>edição confirmada antes do row lock do rollback</p>';
+$rollback_cache_expected = $rollback_cache_before;
+$rollback_cache_expected[10410]['description'] .= $rollback_cache_suffix;
+$GLOBALS['vts_database_external_before_post_lock'][10410] = $rollback_cache_suffix;
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'rollback' => true ) );
+	},
+	'transação foi revertida integralmente',
+	'ROLLBACK_CACHE_TOCTOU'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'rollback invalida cache obsoleto e recusa antes de qualquer save' );
+vts_assert_same( $rollback_cache_expected, vts_store_snapshot(), 'rollback preserva edição confirmada antes de adquirir o row lock' );
+vts_assert_same(
+	array( 10410, 10411, 10460, 10461, 10462 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'id' ), 0, 5 ),
+	'rollback invalida todas as candidatas depois dos row locks'
+);
+vts_assert_same(
+	array( 3, 3, 3, 3, 3 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'query_count' ), 0, 5 ),
+	'primeira invalidação ocorre somente depois dos locks de posts e metadados'
+);
+vts_assert_same(
+	array( 10410, 10411, 10460, 10461, 10462 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'id' ), -5 ),
+	'rollback invalida novamente todas as candidatas depois de reverter o banco'
+);
+vts_assert_same(
+	array( 4, 4, 4, 4, 4 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'query_count' ), -5 ),
+	'segunda invalidação ocorre somente depois do SQL ROLLBACK'
+);
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'rollback com cache obsoleto encerra a transação sem gravar' );
+
+vts_reset_migration_store();
+$GLOBALS['vts_product_cache_enabled'] = true;
+$GLOBALS['vts_database_repopulate_cache_on_commit'] = array( 10410 );
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$post_commit_product = wc_get_product( 10410 );
+vts_assert_false(
+	false !== strpos( $post_commit_product->get_description( 'edit' ), 'uonix-fichas-compactas' ),
+	'execute invalida cache repovoado por outro processo enquanto o COMMIT ainda não era visível'
+);
+vts_assert_same(
+	array( 10410, 10411, 10460, 10461, 10462 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'id' ), -5 ),
+	'execute invalida novamente todas as candidatas depois do COMMIT'
+);
+vts_assert_same(
+	array( 4, 4, 4, 4, 4 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'query_count' ), -5 ),
+	'invalidação final do execute ocorre somente depois do SQL COMMIT'
+);
+$migration_command->migrate( array(), array( 'rollback' => true ) );
+$post_rollback_commit_product = wc_get_product( 10410 );
+vts_assert_true(
+	false !== strpos( $post_rollback_commit_product->get_description( 'edit' ), 'uonix-fichas-compactas' ),
+	'rollback invalida cache migrado repovoado enquanto seu COMMIT ainda não era visível'
+);
+vts_assert_same(
+	array( 10410, 10411, 10460, 10461, 10462 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'id' ), -5 ),
+	'rollback invalida novamente todas as candidatas depois do COMMIT'
+);
+vts_assert_same(
+	array( 8, 8, 8, 8, 8 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'query_count' ), -5 ),
+	'invalidação final do rollback ocorre somente depois do SQL COMMIT'
+);
+
+vts_reset_migration_store();
+$post_commit_execute_dir = sys_get_temp_dir() . '/uonix-vts-post-commit-execute-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $post_commit_execute_dir, 0700, true ), 'fixture cria lock de operação para falha de cache pós-COMMIT no execute' );
+file_put_contents( $post_commit_execute_dir . '/owner', "run-post-commit-execute\n" );
+chmod( $post_commit_execute_dir . '/owner', 0600 );
+$post_commit_execute_marker = $post_commit_execute_dir . '/db-mutation-started';
+$post_commit_execute_lock = $post_commit_execute_dir . '-migration-process';
+$GLOBALS['vts_clean_post_cache_fail_after_commit_once'][10410] = true;
+$post_commit_execute_error = vts_capture_cli_error(
+	function () use ( $migration_command, $post_commit_execute_marker, $post_commit_execute_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'execute'         => true,
+				'mutation-marker' => $post_commit_execute_marker,
+				'mutation-owner'  => 'run-post-commit-execute',
+				'migration-lock'  => $post_commit_execute_lock,
+			)
+		);
+	}
+);
+vts_assert_true( $post_commit_execute_error instanceof VTS_CLI_Error, 'falha de cache pós-COMMIT no execute encerra em erro WP-CLI' );
+vts_assert_contains( 'confirmada no banco', $post_commit_execute_error->getMessage(), 'execute distingue falha posterior de rollback transacional' );
+vts_assert_false( in_array( 'ROLLBACK', $GLOBALS['vts_database_queries'], true ), 'execute não emite ROLLBACK depois de COMMIT confirmado' );
+vts_assert_same( 'COMMIT', end( $GLOBALS['vts_database_queries'] ), 'execute mantém COMMIT como último comando transacional' );
+vts_assert_true( is_file( $post_commit_execute_lock . '/owner' ), 'execute preserva lock PHP após falha de cache pós-COMMIT' );
+vts_assert_same( "run-post-commit-execute\n", file_get_contents( $post_commit_execute_lock . '/owner' ), 'lock preservado do execute mantém owner exato' );
+vts_assert_true( is_file( $post_commit_execute_marker ), 'execute preserva marcador após banco confirmado e cache inconclusivo' );
+vts_assert_same( 0, vts_count_legacy_wrappers(), 'falha de cache pós-COMMIT não finge desfazer migração já confirmada' );
+vts_assert_same( 5, vts_count_structured_sheets(), 'estado migrado confirmado permanece durável após falha de cache' );
+vts_assert_true( unlink( $post_commit_execute_marker ), 'fixture remove marcador pós-COMMIT do execute' );
+vts_assert_true( unlink( $post_commit_execute_lock . '/owner' ), 'fixture remove owner do lock preservado do execute' );
+vts_assert_true( rmdir( $post_commit_execute_lock ), 'fixture remove lock preservado do execute' );
+vts_assert_true( unlink( $post_commit_execute_dir . '/owner' ), 'fixture remove owner da operação pós-COMMIT do execute' );
+vts_assert_true( rmdir( $post_commit_execute_dir ), 'fixture remove diretório da operação pós-COMMIT do execute' );
+
+vts_reset_migration_store();
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$post_commit_rollback_dir = sys_get_temp_dir() . '/uonix-vts-post-commit-rollback-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $post_commit_rollback_dir, 0700, true ), 'fixture cria lock de operação para falha de cache pós-COMMIT no rollback' );
+file_put_contents( $post_commit_rollback_dir . '/owner', "run-post-commit-rollback\n" );
+chmod( $post_commit_rollback_dir . '/owner', 0600 );
+$post_commit_rollback_marker = $post_commit_rollback_dir . '/db-mutation-started';
+file_put_contents( $post_commit_rollback_marker, "run-post-commit-rollback\n" );
+chmod( $post_commit_rollback_marker, 0600 );
+$post_commit_rollback_lock = $post_commit_rollback_dir . '-migration-process';
+$GLOBALS['vts_clean_post_cache_fail_after_commit_once'][10410] = true;
+$post_commit_rollback_error = vts_capture_cli_error(
+	function () use ( $migration_command, $post_commit_rollback_marker, $post_commit_rollback_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'rollback'        => true,
+				'mutation-marker' => $post_commit_rollback_marker,
+				'mutation-owner'  => 'run-post-commit-rollback',
+				'migration-lock'  => $post_commit_rollback_lock,
+			)
+		);
+	}
+);
+vts_assert_true( $post_commit_rollback_error instanceof VTS_CLI_Error, 'falha de cache pós-COMMIT no rollback encerra em erro WP-CLI' );
+vts_assert_contains( 'confirmado no banco', $post_commit_rollback_error->getMessage(), 'rollback distingue banco restaurado de cache inconclusivo' );
+vts_assert_false( in_array( 'ROLLBACK', $GLOBALS['vts_database_queries'], true ), 'rollback seletivo não emite novo ROLLBACK depois de COMMIT confirmado' );
+vts_assert_same( 'COMMIT', end( $GLOBALS['vts_database_queries'] ), 'rollback seletivo mantém COMMIT como último comando transacional' );
+vts_assert_true( is_file( $post_commit_rollback_lock . '/owner' ), 'rollback seletivo preserva lock PHP após falha de cache pós-COMMIT' );
+vts_assert_same( "run-post-commit-rollback\n", file_get_contents( $post_commit_rollback_lock . '/owner' ), 'lock preservado do rollback mantém owner exato' );
+vts_assert_true( is_file( $post_commit_rollback_marker ), 'rollback preserva marcador após banco restaurado e cache inconclusivo' );
+vts_assert_same( 5, vts_count_legacy_wrappers(), 'falha de cache pós-COMMIT não desfaz restauração seletiva confirmada' );
+vts_assert_same( 0, vts_count_structured_sheets(), 'estado original confirmado permanece durável após falha de cache no rollback' );
+vts_assert_true( unlink( $post_commit_rollback_marker ), 'fixture remove marcador pós-COMMIT do rollback' );
+vts_assert_true( unlink( $post_commit_rollback_lock . '/owner' ), 'fixture remove owner do lock preservado do rollback' );
+vts_assert_true( rmdir( $post_commit_rollback_lock ), 'fixture remove lock preservado do rollback' );
+vts_assert_true( unlink( $post_commit_rollback_dir . '/owner' ), 'fixture remove owner da operação pós-COMMIT do rollback' );
+vts_assert_true( rmdir( $post_commit_rollback_dir ), 'fixture remove diretório da operação pós-COMMIT do rollback' );
+
+vts_reset_migration_store();
+$GLOBALS['vts_product_cache_enabled'] = true;
+$cache_race_suffix = '<p>edição confirmada antes do row lock</p>';
+$cache_race_before = vts_store_snapshot();
+$cache_race_expected = $cache_race_before;
+$cache_race_expected[10410]['description'] .= $cache_race_suffix;
+$GLOBALS['vts_database_external_before_post_lock'][10410] = $cache_race_suffix;
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'transação foi revertida integralmente'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'cache obsoleto pós-lock é invalidado antes de qualquer save' );
+vts_assert_same( $cache_race_expected, vts_store_snapshot(), 'edição confirmada antes do row lock não é sobrescrita nem revertida' );
+vts_assert_same(
+	array( 10410, 10411, 10460, 10461, 10462 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'id' ), 0, 5 ),
+	'todas as candidatas têm caches invalidados após os locks em ordem determinística'
+);
+vts_assert_same(
+	array( 4, 4, 4, 4, 4 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'query_count' ), -5 ),
+	'falha pré-save limpa novamente os caches somente depois do SQL ROLLBACK'
+);
+
+vts_reset_migration_store();
+$start_failure_snapshot = vts_store_snapshot();
+$GLOBALS['vts_database_fail_exact'] = array( 'START TRANSACTION' );
+$start_failure_error = vts_capture_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	}
+);
+vts_assert_true( $start_failure_error instanceof VTS_CLI_Error, 'falha ao iniciar transação encerra em erro WP-CLI antes da primeira escrita' );
+vts_assert_contains( 'Não foi possível iniciar a transação', $start_failure_error->getMessage(), 'falha de START TRANSACTION preserva diagnóstico específico' );
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'falha de START TRANSACTION aborta antes de qualquer save' );
+vts_assert_same( $start_failure_snapshot, vts_store_snapshot(), 'falha de START TRANSACTION preserva integralmente as cinco candidatas' );
+vts_assert_same( array( 'START TRANSACTION' ), $GLOBALS['vts_database_queries'], 'falha de START TRANSACTION não avança para row lock nem ROLLBACK fictício' );
+
+vts_reset_migration_store();
+$partial_lock_snapshot = vts_store_snapshot();
+$GLOBALS['vts_database_post_lock_result'] = 4;
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'Nem todas as linhas de variação puderam ser bloqueadas'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'quatro de cinco row locks abortam antes do primeiro save' );
+vts_assert_same( $partial_lock_snapshot, vts_store_snapshot(), 'row lock parcial preserva todas as cinco candidatas' );
+vts_assert_same(
+	'SELECT ID FROM wp_posts WHERE ID IN (10410,10411,10460,10461,10462) ORDER BY ID FOR UPDATE',
+	$GLOBALS['vts_database_queries'][1] ?? null,
+	'row lock de posts usa ordem determinística antes do FOR UPDATE'
+);
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'row lock parcial encerra a transação com ROLLBACK' );
+
+vts_reset_migration_store();
+$lock_failure_dir = sys_get_temp_dir() . '/uonix-vts-lock-rollback-failure-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $lock_failure_dir, 0700, true ), 'fixture cria lock de operação para falha ao adquirir row locks' );
+file_put_contents( $lock_failure_dir . '/owner', "run-lock-failure-13\n" );
+chmod( $lock_failure_dir . '/owner', 0600 );
+$lock_failure_marker = $lock_failure_dir . '/db-mutation-started';
+$lock_failure_process = $lock_failure_dir . '-migration-process';
+$GLOBALS['vts_database_fail_exact'] = array(
+	'SELECT META_ID FROM WP_POSTMETA WHERE POST_ID IN (10410,10411,10460,10461,10462) ORDER BY POST_ID, META_ID FOR UPDATE',
+	'ROLLBACK',
+);
+vts_expect_cli_error(
+	function () use ( $migration_command, $lock_failure_marker, $lock_failure_process ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'execute'         => true,
+				'mutation-marker' => $lock_failure_marker,
+				'mutation-owner'  => 'run-lock-failure-13',
+				'migration-lock'  => $lock_failure_process,
+			)
+		);
+	},
+	'não foi possível bloquear as candidatas'
+);
+$lock_failure_preserved = is_dir( $lock_failure_process );
+$lock_failure_owner = is_file( $lock_failure_process . '/owner' ) ? file_get_contents( $lock_failure_process . '/owner' ) : null;
+$lock_failure_owner_mode = is_file( $lock_failure_process . '/owner' ) ? ( fileperms( $lock_failure_process . '/owner' ) & 0777 ) : null;
+vts_assert_false( file_exists( $lock_failure_marker ), 'falha antes do primeiro save não fabrica marcador de mutação' );
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'falha de row lock não executa save' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'falha do segundo row lock tenta ROLLBACK como última query' );
+if ( is_file( $lock_failure_process . '/owner' ) ) {
+	unlink( $lock_failure_process . '/owner' );
+}
+if ( is_dir( $lock_failure_process ) ) {
+	rmdir( $lock_failure_process );
+}
+unlink( $lock_failure_dir . '/owner' );
+rmdir( $lock_failure_dir );
+vts_assert_true( $lock_failure_preserved, 'falha do ROLLBACK durante aquisição preserva lock do processo' );
+vts_assert_same( "run-lock-failure-13\n", $lock_failure_owner, 'lock preservado na aquisição mantém owner exato' );
+vts_assert_same( 0600, $lock_failure_owner_mode, 'owner criado pelo WP-CLI permanece privado quando o lock é preservado' );
+
+$public_release_lock = sys_get_temp_dir() . '/uonix-vts-public-release-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $public_release_lock, 0700, true ), 'fixture cria lock de processo com owner público' );
+file_put_contents( $public_release_lock . '/owner', "run-public-release\n" );
+chmod( $public_release_lock . '/owner', 0644 );
+$release_method = new ReflectionMethod( Uonix_VTS_Migration_Command::class, 'release_migration_lock' );
+$release_method->invoke(
+	null,
+	array(
+		'path'  => $public_release_lock,
+		'owner' => 'run-public-release',
+	)
+);
+$public_release_preserved = is_dir( $public_release_lock ) && is_file( $public_release_lock . '/owner' );
+if ( is_file( $public_release_lock . '/owner' ) ) {
+	unlink( $public_release_lock . '/owner' );
+}
+if ( is_dir( $public_release_lock ) ) {
+	rmdir( $public_release_lock );
+}
+vts_assert_true( $public_release_preserved, 'liberação recusa owner do lock de processo sem permissão 0600' );
+
+vts_reset_migration_store();
+$stale_marker_dir = sys_get_temp_dir() . '/uonix-vts-stale-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $stale_marker_dir, 0700, true ), 'fixture cria lock de operação para corrida pré-save' );
+file_put_contents( $stale_marker_dir . '/owner', "run-stale-9\n" );
+chmod( $stale_marker_dir . '/owner', 0600 );
+$stale_marker = $stale_marker_dir . '/db-mutation-started';
+$stale_lock   = $stale_marker_dir . '-migration-process';
+$GLOBALS['vts_mutate_description_on_product_call'][10410] = 2;
+$stale_before = vts_store_snapshot();
+vts_expect_cli_error(
+	function () use ( $migration_command, $stale_marker, $stale_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'execute'         => true,
+				'mutation-marker' => $stale_marker,
+				'mutation-owner'  => 'run-stale-9',
+				'migration-lock'  => $stale_lock,
+			)
+		);
+	},
+	'transação foi revertida integralmente'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'corrida antes do primeiro save não persiste nada' );
+vts_assert_false( file_exists( $stale_marker ), 'corrida sem escrita não cria marcador de mutação' );
+vts_assert_false( file_exists( $stale_lock ), 'corrida sem escrita libera lock do processo' );
+vts_assert_same( $stale_before, vts_store_snapshot(), 'adulteração detectada sob lock é revertida antes de qualquer save' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'corrida antes do primeiro save encerra a transação com ROLLBACK' );
+vts_assert_same(
+	$stale_before[10411],
+	$GLOBALS['vts_migration_store'][10411],
+	'corrida antes do primeiro save não toca candidatas posteriores'
+);
+vts_assert_true( unlink( $stale_marker_dir . '/owner' ), 'fixture remove owner da corrida pré-save' );
+vts_assert_true( rmdir( $stale_marker_dir ), 'fixture remove lock de operação da corrida pré-save' );
+
+vts_reset_migration_store();
+$late_before = vts_store_snapshot();
+$late_marker_dir = sys_get_temp_dir() . '/uonix-vts-late-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $late_marker_dir, 0700, true ), 'fixture cria lock para corrida imediatamente pré-save' );
+file_put_contents( $late_marker_dir . '/owner', "run-late-10\n" );
+chmod( $late_marker_dir . '/owner', 0600 );
+$late_marker = $late_marker_dir . '/db-mutation-started';
+$late_lock   = $late_marker_dir . '-migration-process';
+$GLOBALS['vts_mutate_description_on_product_call'][10410] = 3;
+vts_expect_cli_error(
+	function () use ( $migration_command, $late_marker, $late_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'execute'         => true,
+				'mutation-marker' => $late_marker,
+				'mutation-owner'  => 'run-late-10',
+				'migration-lock'  => $late_lock,
+			)
+		);
+	},
+	'transação foi revertida integralmente'
+);
+vts_assert_same( 1, $GLOBALS['vts_store_writes'], 'adulteração na releitura pós-save registra somente a tentativa original' );
+vts_assert_same( $late_before, vts_store_snapshot(), 'ROLLBACK transacional desfaz save e adulteração da própria conexão' );
+vts_assert_true( is_file( $late_marker ), 'marcador permanece porque uma escrita chegou a ser tentada' );
+vts_assert_false( file_exists( $late_lock ), 'corrida pós-save libera lock do processo após ROLLBACK bem-sucedido' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'adulteração pós-save encerra com ROLLBACK do banco' );
+vts_assert_true( unlink( $late_marker ), 'fixture remove marcador da corrida pós-save' );
+vts_assert_true( unlink( $late_marker_dir . '/owner' ), 'fixture remove owner da corrida imediatamente pré-save' );
+vts_assert_true( rmdir( $late_marker_dir ), 'fixture remove lock da corrida imediatamente pré-save' );
+
+vts_reset_migration_store();
+$second_marker_dir = sys_get_temp_dir() . '/uonix-vts-second-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $second_marker_dir, 0700, true ), 'fixture cria lock para corrida na segunda candidata' );
+file_put_contents( $second_marker_dir . '/owner', "run-second-11\n" );
+chmod( $second_marker_dir . '/owner', 0600 );
+$second_marker = $second_marker_dir . '/db-mutation-started';
+$second_lock   = $second_marker_dir . '-migration-process';
+$second_before = vts_store_snapshot();
+$GLOBALS['vts_mutate_description_on_product_call'][10411] = 3;
+vts_expect_cli_error(
+	function () use ( $migration_command, $second_marker, $second_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'execute'         => true,
+				'mutation-marker' => $second_marker,
+				'mutation-owner'  => 'run-second-11',
+				'migration-lock'  => $second_lock,
+			)
+		);
+	},
+	'transação foi revertida integralmente'
+);
+vts_assert_same( 1, $GLOBALS['vts_save_calls_by_id'][10410] ?? 0, 'primeira candidata não recebe save compensatório' );
+vts_assert_same( 1, $GLOBALS['vts_save_calls_by_id'][10411] ?? 0, 'segunda candidata registra somente o save original' );
+vts_assert_same( $second_before, vts_store_snapshot(), 'ROLLBACK transacional restaura todas as candidatas e a adulteração interna' );
+vts_assert_true( is_file( $second_marker ), 'marcador permanece porque a primeira candidata chegou a ser gravada' );
+vts_assert_same( "run-second-11\n", file_get_contents( $second_marker ), 'marcador da corrida na segunda mantém owner exato' );
+vts_assert_false( file_exists( $second_lock ), 'corrida na segunda candidata libera lock do processo após ROLLBACK bem-sucedido' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'adulteração na segunda candidata encerra com ROLLBACK do banco' );
+vts_assert_true( unlink( $second_marker ), 'fixture remove marcador da corrida na segunda candidata' );
+vts_assert_true( unlink( $second_marker_dir . '/owner' ), 'fixture remove owner da corrida na segunda candidata' );
+vts_assert_true( rmdir( $second_marker_dir ), 'fixture remove lock da corrida na segunda candidata' );
+
+vts_reset_migration_store();
+$GLOBALS['vts_product_factory_calls'] = array();
+$GLOBALS['vts_mutate_description_after_product_load_on_call'][10411] = 2;
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$execute_race_backup = $GLOBALS['vts_migration_store'][10411]['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ];
+vts_assert_same( 1, $GLOBALS['vts_post_load_mutations'][10411] ?? 0, 'fixture injeta edição externa depois da carga usada pelo execute' );
+vts_assert_same( 0, $GLOBALS['vts_post_load_mutation_save_calls'][10411] ?? -1, 'edição externa do execute ocorre antes da primeira persistência da candidata' );
+vts_assert_same(
+	$execute_race_backup['remaining_description'] . '<p>corrida entre prova e persistência</p>',
+	$GLOBALS['vts_migration_store'][10411]['description'],
+	'execute não sobrescreve edição externa criada depois da carga usada no save'
+);
+vts_assert_same( $execute_race_backup['sheet'], $GLOBALS['vts_migration_store'][10411]['meta'][ Uonix_VTS_Schema::META_KEY ], 'execute concorrente preserva a ficha migrada' );
+vts_assert_same( $execute_race_backup, $GLOBALS['vts_migration_store'][10411]['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ], 'execute concorrente preserva o backup verificado' );
+
+vts_reset_migration_store();
+$coordinated_dir = sys_get_temp_dir() . '/uonix-vts-coordinated-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $coordinated_dir, 0700, true ), 'fixture cria lock de operação para rollback coordenado' );
+file_put_contents( $coordinated_dir . '/owner', "run-rollback-7\n" );
+chmod( $coordinated_dir . '/owner', 0600 );
+$coordinated_marker = $coordinated_dir . '/db-mutation-started';
+$coordinated_lock   = $coordinated_dir . '-migration-process';
+$GLOBALS['vts_expected_mutation_marker'] = $coordinated_marker;
+$GLOBALS['vts_expected_migration_lock'] = $coordinated_lock;
+$GLOBALS['vts_expected_migration_owner'] = 'run-rollback-7';
+$migration_command->migrate(
+	array(),
+	array(
+		'execute'         => true,
+		'mutation-marker' => $coordinated_marker,
+		'mutation-owner'  => 'run-rollback-7',
+		'migration-lock'  => $coordinated_lock,
+	)
+);
+$migration_command->migrate(
+	array(),
+	array(
+		'rollback'        => true,
+		'mutation-marker' => $coordinated_marker,
+		'mutation-owner'  => 'run-rollback-7',
+		'migration-lock'  => $coordinated_lock,
+	)
+);
+$GLOBALS['vts_expected_mutation_marker'] = null;
+$GLOBALS['vts_expected_migration_lock'] = null;
+$GLOBALS['vts_expected_migration_owner'] = null;
+vts_assert_same( 5, vts_count_legacy_wrappers(), 'rollback coordenado restaura as cinco fichas sob lock do processo' );
+vts_assert_false( file_exists( $coordinated_lock ), 'rollback coordenado libera o lock quando o processo termina' );
+vts_assert_true( unlink( $coordinated_marker ), 'fixture remove marcador coordenado' );
+vts_assert_true( unlink( $coordinated_dir . '/owner' ), 'fixture remove owner coordenado' );
+vts_assert_true( rmdir( $coordinated_dir ), 'fixture remove lock de operação coordenado' );
+
+vts_reset_migration_store();
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$public_operation_dir = sys_get_temp_dir() . '/uonix-vts-public-operation-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+mkdir( $public_operation_dir, 0700, true );
+file_put_contents( $public_operation_dir . '/owner', "run-public-owner\n" );
+chmod( $public_operation_dir . '/owner', 0644 );
+$public_operation_marker = $public_operation_dir . '/db-mutation-started';
+$public_operation_lock = $public_operation_dir . '-migration-process';
+$public_operation_error = vts_capture_cli_error(
+	function () use ( $migration_command, $public_operation_marker, $public_operation_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'execute'         => true,
+				'mutation-marker' => $public_operation_marker,
+				'mutation-owner'  => 'run-public-owner',
+				'migration-lock'  => $public_operation_lock,
+			)
+		);
+	}
+);
+if ( is_file( $public_operation_marker ) ) {
+	unlink( $public_operation_marker );
+}
+if ( is_file( $public_operation_lock . '/owner' ) ) {
+	unlink( $public_operation_lock . '/owner' );
+}
+if ( is_dir( $public_operation_lock ) ) {
+	rmdir( $public_operation_lock );
+}
+unlink( $public_operation_dir . '/owner' );
+rmdir( $public_operation_dir );
+vts_reset_migration_store();
+vts_assert_true( $public_operation_error instanceof VTS_CLI_Error, 'execute recusa owner da operação sem permissão 0600' );
+
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$foreign_operation_dir = sys_get_temp_dir() . '/uonix-vts-foreign-operation-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+mkdir( $foreign_operation_dir, 0700, true );
+file_put_contents( $foreign_operation_dir . '/owner', "other-run\n" );
+chmod( $foreign_operation_dir . '/owner', 0600 );
+$foreign_operation_marker = $foreign_operation_dir . '/db-mutation-started';
+$foreign_operation_lock = $foreign_operation_dir . '-migration-process';
+$foreign_operation_error = vts_capture_cli_error(
+	function () use ( $migration_command, $foreign_operation_marker, $foreign_operation_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'execute'         => true,
+				'mutation-marker' => $foreign_operation_marker,
+				'mutation-owner'  => 'run-expected-owner',
+				'migration-lock'  => $foreign_operation_lock,
+			)
+		);
+	}
+);
+if ( is_file( $foreign_operation_marker ) ) {
+	unlink( $foreign_operation_marker );
+}
+if ( is_file( $foreign_operation_lock . '/owner' ) ) {
+	unlink( $foreign_operation_lock . '/owner' );
+}
+if ( is_dir( $foreign_operation_lock ) ) {
+	rmdir( $foreign_operation_lock );
+}
+unlink( $foreign_operation_dir . '/owner' );
+rmdir( $foreign_operation_dir );
+vts_reset_migration_store();
+vts_assert_true( $foreign_operation_error instanceof VTS_CLI_Error, 'execute recusa owner da operação pertencente a outra execução' );
+
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$public_marker_dir = sys_get_temp_dir() . '/uonix-vts-public-marker-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+mkdir( $public_marker_dir, 0700, true );
+file_put_contents( $public_marker_dir . '/owner', "run-public-marker\n" );
+chmod( $public_marker_dir . '/owner', 0600 );
+$public_rollback_marker = $public_marker_dir . '/db-mutation-started';
+$public_rollback_lock = $public_marker_dir . '-migration-process';
+file_put_contents( $public_rollback_marker, "run-public-marker\n" );
+chmod( $public_rollback_marker, 0644 );
+$public_marker_error = vts_capture_cli_error(
+	function () use ( $migration_command, $public_rollback_marker, $public_rollback_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'rollback'        => true,
+				'mutation-marker' => $public_rollback_marker,
+				'mutation-owner'  => 'run-public-marker',
+				'migration-lock'  => $public_rollback_lock,
+			)
+		);
+	}
+);
+if ( is_file( $public_rollback_lock . '/owner' ) ) {
+	unlink( $public_rollback_lock . '/owner' );
+}
+if ( is_dir( $public_rollback_lock ) ) {
+	rmdir( $public_rollback_lock );
+}
+unlink( $public_rollback_marker );
+unlink( $public_marker_dir . '/owner' );
+rmdir( $public_marker_dir );
+vts_reset_migration_store();
+vts_assert_true( $public_marker_error instanceof VTS_CLI_Error, 'rollback recusa marcador sem permissão 0600' );
+
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$symlink_marker_dir = sys_get_temp_dir() . '/uonix-vts-symlink-marker-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+mkdir( $symlink_marker_dir, 0700, true );
+file_put_contents( $symlink_marker_dir . '/owner', "run-symlink-marker\n" );
+chmod( $symlink_marker_dir . '/owner', 0600 );
+$symlink_rollback_marker = $symlink_marker_dir . '/db-mutation-started';
+$symlink_rollback_target = $symlink_marker_dir . '/outside-marker';
+$symlink_rollback_lock = $symlink_marker_dir . '-migration-process';
+file_put_contents( $symlink_rollback_target, "run-symlink-marker\n" );
+chmod( $symlink_rollback_target, 0600 );
+symlink( $symlink_rollback_target, $symlink_rollback_marker );
+$symlink_marker_error = vts_capture_cli_error(
+	function () use ( $migration_command, $symlink_rollback_marker, $symlink_rollback_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'rollback'        => true,
+				'mutation-marker' => $symlink_rollback_marker,
+				'mutation-owner'  => 'run-symlink-marker',
+				'migration-lock'  => $symlink_rollback_lock,
+			)
+		);
+	}
+);
+if ( is_file( $symlink_rollback_lock . '/owner' ) ) {
+	unlink( $symlink_rollback_lock . '/owner' );
+}
+if ( is_dir( $symlink_rollback_lock ) ) {
+	rmdir( $symlink_rollback_lock );
+}
+unlink( $symlink_rollback_marker );
+unlink( $symlink_rollback_target );
+unlink( $symlink_marker_dir . '/owner' );
+rmdir( $symlink_marker_dir );
+vts_reset_migration_store();
+vts_assert_true( $symlink_marker_error instanceof VTS_CLI_Error, 'rollback recusa marcador como symlink mesmo com conteúdo correto' );
+
+$original_inventory = vts_legacy_inventory_fixture();
+$mutation_marker_dir = sys_get_temp_dir() . '/uonix-vts-marker-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $mutation_marker_dir, 0700, true ), 'fixture cria diretório privado para marcador de mutação' );
+$mutation_marker = $mutation_marker_dir . '/db-mutation-started';
+$migration_process_lock = $mutation_marker_dir . '-migration-process';
+file_put_contents( $mutation_marker_dir . '/owner', "run-test-42\n" );
+chmod( $mutation_marker_dir . '/owner', 0600 );
+$GLOBALS['vts_expected_mutation_marker'] = $mutation_marker;
+$GLOBALS['vts_expected_migration_lock'] = $migration_process_lock;
+$GLOBALS['vts_expected_migration_owner'] = 'run-test-42';
+$migration_command->migrate(
+	array(),
+	array(
+		'execute'         => true,
+		'mutation-marker' => $mutation_marker,
+		'mutation-owner'  => 'run-test-42',
+		'migration-lock'  => $migration_process_lock,
+	)
+);
+$GLOBALS['vts_expected_mutation_marker'] = null;
+$GLOBALS['vts_expected_migration_lock'] = null;
+$GLOBALS['vts_expected_migration_owner'] = null;
+vts_assert_true( is_file( $mutation_marker ), 'execute protegido cria marcador antes da primeira persistência' );
+vts_assert_same( "run-test-42\n", file_get_contents( $mutation_marker ), 'marcador identifica exatamente a execução que iniciou a escrita' );
+vts_assert_same( 0600, fileperms( $mutation_marker ) & 0777, 'marcador de mutação é privado' );
+vts_assert_false( file_exists( $migration_process_lock ), 'lock de migração é removido depois que o processo termina normalmente' );
 vts_assert_same( 5, $GLOBALS['vts_store_writes'], 'execute grava exatamente as cinco variações' );
 vts_assert_same( 5, vts_count_verified_backups(), 'execute cria cinco backups integrais verificados' );
 vts_assert_same( 0, vts_count_legacy_wrappers(), 'execute remove os cinco wrappers reconhecidos' );
@@ -1756,10 +2577,23 @@ foreach ( $original_inventory as $variation_id => $original_description ) {
 
 $after_first_execute = vts_store_snapshot();
 $writes_after_execute = $GLOBALS['vts_store_writes'];
+vts_assert_true( unlink( $mutation_marker ), 'fixture remove marcador da primeira execução' );
 $GLOBALS['vts_cli_logs'] = array();
 $GLOBALS['vts_get_posts_calls'] = array();
 $GLOBALS['vts_current_time_calls'] = array();
-$migration_command->migrate( array(), array( 'execute' => true ) );
+$migration_command->migrate(
+	array(),
+	array(
+		'execute'         => true,
+		'mutation-marker' => $mutation_marker,
+		'mutation-owner'  => 'run-test-42',
+		'migration-lock'  => $migration_process_lock,
+	)
+);
+vts_assert_false( file_exists( $mutation_marker ), 'execute idempotente sem escrita não cria marcador de mutação' );
+vts_assert_false( file_exists( $migration_process_lock ), 'execute idempotente libera o lock do próprio processo' );
+vts_assert_true( unlink( $mutation_marker_dir . '/owner' ), 'fixture remove owner da execução' );
+vts_assert_true( rmdir( $mutation_marker_dir ), 'fixture remove diretório do marcador' );
 vts_assert_same( $writes_after_execute, $GLOBALS['vts_store_writes'], 'segunda execução é idempotente' );
 vts_assert_same( $after_first_execute, vts_store_snapshot(), 'segunda execução não altera bytes nem metas' );
 vts_assert_same( array( 'NO-CHANGE: 5 fichas já migradas e verificadas.' ), $GLOBALS['vts_cli_logs'], 'segunda execução relata estado verificado' );
@@ -1974,23 +2808,37 @@ vts_expect_cli_error(
 	function () use ( $migration_command ) {
 		$migration_command->migrate( array(), array( 'execute' => true ) );
 	},
-	'restauradas'
+	'transação foi revertida integralmente'
 );
-vts_assert_same( $before_execute_failure, vts_store_snapshot(), 'falha de save restaura todos os registros alterados no execute' );
-vts_assert_same( 6, $GLOBALS['vts_store_writes'], 'falha no terceiro save restaura as três tentativas' );
+vts_assert_same( $before_execute_failure, vts_store_snapshot(), 'falha de save reverte todos os registros alterados no execute' );
+vts_assert_same( 3, $GLOBALS['vts_store_writes'], 'falha no terceiro save registra só as três tentativas originais' );
 vts_assert_same( 0, vts_count_verified_backups(), 'falha de execute remove backups criados na tentativa' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'falha de save no execute encerra com ROLLBACK do banco' );
 
 vts_reset_migration_store();
 $before_verify_failure = vts_store_snapshot();
+$GLOBALS['vts_product_cache_enabled'] = true;
 $GLOBALS['vts_save_corrupt_once'][10411] = true;
 vts_expect_cli_error(
 	function () use ( $migration_command ) {
 		$migration_command->migrate( array(), array( 'execute' => true ) );
 	},
-	'restauradas'
+	'transação foi revertida integralmente'
 );
-vts_assert_same( $before_verify_failure, vts_store_snapshot(), 'mismatch após releitura restaura todos os registros alterados' );
-vts_assert_same( 4, $GLOBALS['vts_store_writes'], 'mismatch no segundo registro restaura duas tentativas' );
+vts_assert_same( $before_verify_failure, vts_store_snapshot(), 'mismatch após releitura reverte todos os registros alterados' );
+vts_assert_same( 2, $GLOBALS['vts_store_writes'], 'mismatch no segundo registro não produz saves compensatórios' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'mismatch no execute encerra com ROLLBACK do banco' );
+$rollback_cache_reloaded = wc_get_product( 10411 );
+vts_assert_same(
+	$before_verify_failure[10411]['description'],
+	$rollback_cache_reloaded->get_description( 'edit' ),
+	'ROLLBACK invalida a instância não confirmada antes da próxima releitura'
+);
+vts_assert_same(
+	array( 10410, 10411, 10460, 10461, 10462 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'id' ), -5 ),
+	'ROLLBACK bem-sucedido invalida novamente todas as candidatas em ordem'
+);
 
 vts_reset_migration_store();
 $migration_command->migrate( array(), array( 'execute' => true ) );
@@ -2001,10 +2849,11 @@ vts_expect_cli_error(
 	function () use ( $migration_command ) {
 		$migration_command->migrate( array(), array( 'rollback' => true ) );
 	},
-	'restauradas'
+	'transação foi revertida integralmente'
 );
-vts_assert_same( $migrated_before_rollback_failure, vts_store_snapshot(), 'falha de save no rollback restaura o estado pós-migração' );
-vts_assert_same( 4, $GLOBALS['vts_store_writes'], 'falha no segundo rollback restaura duas tentativas' );
+vts_assert_same( $migrated_before_rollback_failure, vts_store_snapshot(), 'falha de save no rollback reverte o estado pós-migração atomicamente' );
+vts_assert_same( 2, $GLOBALS['vts_store_writes'], 'falha no segundo rollback não produz saves compensatórios' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'falha no rollback encerra com ROLLBACK do banco' );
 
 vts_reset_migration_store();
 $migration_command->migrate( array(), array( 'execute' => true ) );
@@ -2015,28 +2864,92 @@ vts_expect_cli_error(
 	function () use ( $migration_command ) {
 		$migration_command->migrate( array(), array( 'rollback' => true ) );
 	},
-	'restauradas'
+	'transação foi revertida integralmente'
 );
-vts_assert_same( $migrated_before_rollback_mismatch, vts_store_snapshot(), 'meta vazio reaparecido após save aciona compensação do rollback' );
-vts_assert_same( 4, $GLOBALS['vts_store_writes'], 'mismatch físico no segundo rollback restaura duas tentativas' );
+vts_assert_same( $migrated_before_rollback_mismatch, vts_store_snapshot(), 'meta vazio reaparecido após save reverte o rollback atomicamente' );
+vts_assert_same( 2, $GLOBALS['vts_store_writes'], 'mismatch físico no segundo rollback não produz saves compensatórios' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'mismatch pós-save encerra com ROLLBACK do banco' );
 
 vts_reset_migration_store();
-$before_incomplete_restore = vts_store_snapshot();
-$GLOBALS['vts_save_corrupt_once'][10460]         = true;
-$GLOBALS['vts_save_fail_before_on_call'][10460] = array( 2 );
+$rollback_failure_dir = sys_get_temp_dir() . '/uonix-vts-rollback-failure-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $rollback_failure_dir, 0700, true ), 'fixture cria lock de operação para falha do ROLLBACK SQL' );
+file_put_contents( $rollback_failure_dir . '/owner', "run-rollback-failure-12\n" );
+chmod( $rollback_failure_dir . '/owner', 0600 );
+$rollback_failure_marker = $rollback_failure_dir . '/db-mutation-started';
+$rollback_failure_lock   = $rollback_failure_dir . '-migration-process';
+$GLOBALS['vts_expected_mutation_marker'] = $rollback_failure_marker;
+$GLOBALS['vts_expected_migration_lock']  = $rollback_failure_lock;
+$GLOBALS['vts_expected_migration_owner'] = 'run-rollback-failure-12';
+$GLOBALS['vts_save_corrupt_once'][10460] = true;
+$GLOBALS['vts_database_fail_exact']      = array( 'ROLLBACK' );
+vts_expect_cli_error(
+	function () use ( $migration_command, $rollback_failure_marker, $rollback_failure_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'execute'         => true,
+				'mutation-marker' => $rollback_failure_marker,
+				'mutation-owner'  => 'run-rollback-failure-12',
+				'migration-lock'  => $rollback_failure_lock,
+			)
+		);
+	},
+	'transação não pôde ser revertida'
+);
+vts_assert_same( 3, $GLOBALS['vts_store_writes'], 'falha do ROLLBACK ocorre depois das três tentativas originais, sem compensação' );
+vts_assert_true( is_file( $rollback_failure_marker ), 'falha do ROLLBACK preserva marcador da execução corrente' );
+vts_assert_same( "run-rollback-failure-12\n", file_get_contents( $rollback_failure_marker ), 'marcador preservado mantém owner exato' );
+vts_assert_true( is_dir( $rollback_failure_lock ), 'falha do ROLLBACK preserva lock do processo para resolução manual' );
+vts_assert_same( "run-rollback-failure-12\n", file_get_contents( $rollback_failure_lock . '/owner' ), 'lock preservado mantém owner exato' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'falha transacional deixa ROLLBACK como última query tentada' );
+$GLOBALS['vts_expected_mutation_marker'] = null;
+$GLOBALS['vts_expected_migration_lock']  = null;
+$GLOBALS['vts_expected_migration_owner'] = null;
+vts_assert_true( unlink( $rollback_failure_marker ), 'fixture remove marcador preservado após validar falha' );
+vts_assert_true( unlink( $rollback_failure_lock . '/owner' ), 'fixture remove owner do lock preservado' );
+vts_assert_true( rmdir( $rollback_failure_lock ), 'fixture remove lock preservado' );
+vts_assert_true( unlink( $rollback_failure_dir . '/owner' ), 'fixture remove owner da operação com falha' );
+vts_assert_true( rmdir( $rollback_failure_dir ), 'fixture remove lock da operação com falha' );
+
+vts_reset_migration_store();
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$rollback_race_before = vts_store_snapshot();
+$GLOBALS['vts_store_writes'] = 0;
+$GLOBALS['vts_save_calls_by_id'] = array();
+$GLOBALS['vts_product_factory_calls'] = array();
+$GLOBALS['vts_database_queries'] = array();
+$GLOBALS['vts_mutate_description_after_product_load_on_call'][10411] = 3;
+$migration_command->migrate( array(), array( 'rollback' => true ) );
+$rollback_race_backup = $rollback_race_before[10411]['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ];
+vts_assert_same( 1, $GLOBALS['vts_post_load_mutations'][10411] ?? 0, 'fixture injeta uma edição concorrente na janela do rollback atual' );
+vts_assert_same( 0, $GLOBALS['vts_post_load_mutation_save_calls'][10411] ?? -1, 'edição concorrente ocorre antes da primeira persistência da candidata' );
+vts_assert_same(
+	$rollback_race_backup['original_description'] . '<p>corrida entre prova e persistência</p>',
+	$GLOBALS['vts_migration_store'][10411]['description'],
+	'rollback não sobrescreve edição concorrente criada após a persistência'
+);
+vts_assert_false( array_key_exists( Uonix_VTS_Schema::META_KEY, $GLOBALS['vts_migration_store'][10411]['meta'] ), 'rollback concorrente remove a ficha estruturada antes da edição posterior' );
+vts_assert_same( $rollback_race_backup, $GLOBALS['vts_migration_store'][10411]['meta'][ Uonix_VTS_Schema::BACKUP_META_KEY ], 'rollback concorrente preserva o backup verificado' );
+vts_assert_same( 5, $GLOBALS['vts_store_writes'], 'rollback concorrente grava cada candidata uma única vez sem compensação destrutiva' );
+vts_assert_same( 'START TRANSACTION', $GLOBALS['vts_database_queries'][0] ?? null, 'rollback inicia transação antes de bloquear candidatas' );
+vts_assert_contains( 'FROM wp_posts', $GLOBALS['vts_database_queries'][1] ?? '', 'rollback bloqueia as cinco linhas de variação' );
+vts_assert_contains( 'FOR UPDATE', $GLOBALS['vts_database_queries'][1] ?? '', 'lock das variações é exclusivo até o commit' );
+vts_assert_contains( 'FROM wp_postmeta', $GLOBALS['vts_database_queries'][2] ?? '', 'rollback bloqueia os metadados das cinco variações' );
+vts_assert_contains( 'FOR UPDATE', $GLOBALS['vts_database_queries'][2] ?? '', 'lock dos metadados é exclusivo até o commit' );
+vts_assert_same( 'COMMIT', $GLOBALS['vts_database_queries'][3] ?? null, 'rollback só confirma depois das cinco releituras pós-save' );
+
+vts_reset_migration_store();
+$commit_failure_before = vts_store_snapshot();
+$GLOBALS['vts_database_fail_exact'] = array( 'COMMIT' );
 vts_expect_cli_error(
 	function () use ( $migration_command ) {
 		$migration_command->migrate( array(), array( 'execute' => true ) );
 	},
-	'restauração incompleta'
+	'transação foi revertida integralmente',
+	'COMMIT_FAILURE_FAIL_CLOSED'
 );
-$after_incomplete_restore = vts_store_snapshot();
-vts_assert_same( $before_incomplete_restore[10410], $after_incomplete_restore[10410], 'compensação continua e restaura #10410 após falha em outro ID' );
-vts_assert_same( $before_incomplete_restore[10411], $after_incomplete_restore[10411], 'compensação continua e restaura #10411 após falha em outro ID' );
-vts_assert_true( $before_incomplete_restore[10460] !== $after_incomplete_restore[10460], 'ID cuja própria restauração falhou permanece detectavelmente divergente' );
-vts_assert_same( 2, $GLOBALS['vts_save_calls_by_id'][10410], 'compensação ainda tenta #10410' );
-vts_assert_same( 2, $GLOBALS['vts_save_calls_by_id'][10411], 'compensação ainda tenta #10411' );
-vts_assert_same( 2, $GLOBALS['vts_save_calls_by_id'][10460], 'compensação registra a tentativa falha de #10460' );
+vts_assert_same( $commit_failure_before, vts_store_snapshot(), 'falha do COMMIT reverte as cinco gravações da migração' );
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'falha do COMMIT encerra com ROLLBACK' );
 
 $admin_css = file_get_contents( UONIX_MU_PATH . 'uonix-woocommerce/assets/css/admin-ficha-tecnica-variacao.css' );
 vts_assert_contains( '.uonix-vts-admin {', $admin_css, 'CSS administrativo é escopado no componente próprio' );

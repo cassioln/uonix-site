@@ -14,6 +14,9 @@ final class Uonix_VTS_Migration_Command {
 	private const LEGACY_MEASURES_CLASS = 'uonix-medidas-grid';
 	private const LEGACY_INFO_CLASS     = 'uonix-info-grid';
 
+	/** @var array<string, true> Locks que exigem resolução manual. */
+	private static $preserved_migration_locks = array();
+
 	/**
 	 * Registra o comando apenas no runtime WP-CLI.
 	 */
@@ -42,24 +45,54 @@ final class Uonix_VTS_Migration_Command {
 		}
 
 		if ( $rollback ) {
-			$rollback_candidates = self::preflight_rollback();
-			self::rollback_candidates( $rollback_candidates );
-			WP_CLI::log( 'ROLLBACK OK: 5 descrições restauradas; backups preservados.' );
-			return;
-		}
-
-		$candidates = self::preflight_legacy_candidates( $execute );
-		if ( $execute ) {
-			if ( empty( $candidates ) ) {
-				self::verify_migrated_state();
-				WP_CLI::log( 'NO-CHANGE: 5 fichas já migradas e verificadas.' );
+			$migration_lock = self::acquire_migration_lock(
+				$assoc_args['migration-lock'] ?? null,
+				$assoc_args['mutation-owner'] ?? null,
+				$assoc_args['mutation-marker'] ?? null
+			);
+			try {
+				if ( null !== $migration_lock ) {
+					self::assert_mutation_marker_owner(
+						$assoc_args['mutation-marker'],
+						$assoc_args['mutation-owner']
+					);
+				}
+				$rollback_candidates = self::preflight_rollback();
+				self::rollback_candidates( $rollback_candidates, $migration_lock );
+				WP_CLI::log( 'ROLLBACK OK: 5 descrições restauradas; backups preservados.' );
 				return;
+			} finally {
+				self::release_migration_lock( $migration_lock );
 			}
-			self::execute_candidates( $candidates );
-			WP_CLI::log( 'EXECUTE OK: 5 fichas migradas; 5 backups verificados.' );
-			return;
 		}
 
+		if ( $execute ) {
+			$migration_lock = self::acquire_migration_lock(
+				$assoc_args['migration-lock'] ?? null,
+				$assoc_args['mutation-owner'] ?? null,
+				$assoc_args['mutation-marker'] ?? null
+			);
+			try {
+				$candidates = self::preflight_legacy_candidates( true );
+				if ( empty( $candidates ) ) {
+					self::verify_migrated_state();
+					WP_CLI::log( 'NO-CHANGE: 5 fichas já migradas e verificadas.' );
+					return;
+				}
+				self::execute_candidates(
+					$candidates,
+					$assoc_args['mutation-marker'] ?? null,
+					$assoc_args['mutation-owner'] ?? null,
+					$migration_lock
+				);
+				WP_CLI::log( 'EXECUTE OK: 5 fichas migradas; 5 backups verificados.' );
+				return;
+			} finally {
+				self::release_migration_lock( $migration_lock );
+			}
+		}
+
+		$candidates = self::preflight_legacy_candidates( false );
 		if ( $dry_run ) {
 			foreach ( $candidates as $candidate ) {
 				WP_CLI::log(
@@ -287,41 +320,23 @@ final class Uonix_VTS_Migration_Command {
 	/**
 	 * @param array<int, array<string, mixed>> $candidates Candidatas validadas.
 	 */
-	private static function execute_candidates( $candidates ) {
-		$changed   = array();
-		$snapshots = array();
-		foreach ( $candidates as $candidate ) {
-			$snapshots[ $candidate['id'] ] = array(
-				'description'   => $candidate['backup']['original_description'],
-				'sheet_exists'  => false,
-				'sheet'         => null,
-				'backup_exists' => $candidate['backup_existed'],
-				'backup'        => $candidate['backup_existed'] ? $candidate['backup'] : null,
-			);
+	private static function execute_candidates( $candidates, $mutation_marker = null, $mutation_owner = null, $migration_lock = null ) {
+		try {
+			self::begin_candidate_transaction( $candidates, $migration_lock );
+		} catch ( Throwable $exception ) {
+			WP_CLI::error( 'Migração abortada antes da primeira escrita; não foi possível bloquear as candidatas. Motivo: ' . $exception->getMessage() );
 		}
 
+		$validated_variations = array();
 		try {
 			foreach ( $candidates as $candidate ) {
-				$variation = wc_get_product( $candidate['id'] );
-				if ( ! self::is_variation_object( $variation, $candidate['id'] ) ) {
-					throw new RuntimeException( sprintf( '#%d deixou de ser uma variação válida durante a execução.', $candidate['id'] ) );
-				}
-				if (
-					$candidate['backup']['source_hash'] !== hash( 'sha256', $variation->get_description( 'edit' ) ) ||
-					self::meta_exists( $candidate['id'], Uonix_VTS_Schema::META_KEY )
-				) {
-					throw new RuntimeException( sprintf( '#%d mudou depois do preflight.', $candidate['id'] ) );
-				}
-				$current_backup        = $variation->get_meta( Uonix_VTS_Schema::BACKUP_META_KEY, true );
-				$current_backup_exists = self::meta_exists( $candidate['id'], Uonix_VTS_Schema::BACKUP_META_KEY );
-				if (
-					$candidate['backup_existed'] !== $current_backup_exists ||
-					( $current_backup_exists && $current_backup !== $candidate['backup'] )
-				) {
-					throw new RuntimeException( sprintf( '#%d teve o backup alterado depois do preflight.', $candidate['id'] ) );
-				}
+				$validated_variations[ $candidate['id'] ] = self::load_unchanged_candidate( $candidate );
+			}
 
-				$changed[] = $candidate['id'];
+			self::create_mutation_marker( $mutation_marker, $mutation_owner );
+
+			foreach ( $candidates as $candidate ) {
+				$variation = $validated_variations[ $candidate['id'] ];
 				$variation->set_description( $candidate['backup']['remaining_description'] );
 				$variation->update_meta_data( Uonix_VTS_Schema::META_KEY, $candidate['backup']['sheet'] );
 				if ( ! $candidate['backup_existed'] ) {
@@ -332,12 +347,210 @@ final class Uonix_VTS_Migration_Command {
 					throw new RuntimeException( sprintf( '#%d divergiu dos hashes esperados após a migração.', $candidate['id'] ) );
 				}
 			}
+			$committed_ids = self::commit_candidate_transaction( $candidates );
 		} catch ( Throwable $exception ) {
-			$restored = self::restore_snapshots( $changed, $snapshots );
-			if ( ! $restored ) {
-				WP_CLI::error( 'Migração abortada e restauração incompleta; interrompa novas escritas e faça resolução manual.' );
+			if ( ! self::rollback_candidate_transaction( $candidates ) ) {
+				self::preserve_migration_lock( $migration_lock );
+				WP_CLI::error( 'Migração abortada e a transação não pôde ser revertida; preserve lock e marcador para resolução manual.' );
 			}
-			WP_CLI::error( 'Migração abortada; todas as alterações da tentativa foram restauradas. Motivo: ' . $exception->getMessage() );
+			WP_CLI::error( 'Migração abortada; a transação foi revertida integralmente. Motivo: ' . $exception->getMessage() );
+		}
+		self::invalidate_candidate_caches_after_commit(
+			$committed_ids,
+			$migration_lock,
+			'Migração confirmada no banco, mas a invalidação pós-commit falhou; preserve lock e marcador para resolução manual.'
+		);
+	}
+
+	/**
+	 * Relê e valida uma candidata sem produzir efeitos persistentes.
+	 *
+	 * @param array<string, mixed> $candidate Candidata criada pelo preflight.
+	 * @return object
+	 */
+	private static function load_unchanged_candidate( $candidate ) {
+		$variation = wc_get_product( $candidate['id'] );
+		if ( ! self::is_variation_object( $variation, $candidate['id'] ) ) {
+			throw new RuntimeException( sprintf( '#%d deixou de ser uma variação válida durante a execução.', $candidate['id'] ) );
+		}
+		if (
+			$candidate['backup']['source_hash'] !== hash( 'sha256', $variation->get_description( 'edit' ) ) ||
+			self::meta_exists( $candidate['id'], Uonix_VTS_Schema::META_KEY )
+		) {
+			throw new RuntimeException( sprintf( '#%d mudou depois do preflight.', $candidate['id'] ) );
+		}
+		$current_backup        = $variation->get_meta( Uonix_VTS_Schema::BACKUP_META_KEY, true );
+		$current_backup_exists = self::meta_exists( $candidate['id'], Uonix_VTS_Schema::BACKUP_META_KEY );
+		if (
+			$candidate['backup_existed'] !== $current_backup_exists ||
+			( $current_backup_exists && $current_backup !== $candidate['backup'] )
+		) {
+			throw new RuntimeException( sprintf( '#%d teve o backup alterado depois do preflight.', $candidate['id'] ) );
+		}
+		return $variation;
+	}
+
+	/**
+	 * Confirma que um rollback só consome o marcador da própria execução.
+	 *
+	 * @param mixed $marker_path Caminho do marcador.
+	 * @param mixed $owner       Identidade esperada.
+	 */
+	private static function assert_mutation_marker_owner( $marker_path, $owner ) {
+		if ( is_string( $marker_path ) && '' !== $marker_path ) {
+			clearstatcache( true, $marker_path );
+		}
+		if (
+			! is_string( $marker_path ) ||
+			! is_string( $owner ) ||
+			is_link( $marker_path ) ||
+			! is_file( $marker_path ) ||
+			0600 !== ( fileperms( $marker_path ) & 0777 ) ||
+			$owner . "\n" !== file_get_contents( $marker_path )
+		) {
+			WP_CLI::error( 'O marcador privado de mutação não pertence à execução de rollback.' );
+		}
+	}
+
+	/**
+	 * Mantém um lock que pertence ao processo PHP, não ao wrapper SSH.
+	 *
+	 * @param mixed $lock_path   Caminho fornecido por --migration-lock.
+	 * @param mixed $owner       Identidade da execução.
+	 * @param mixed $marker_path Caminho do marcador dentro do lock de operação.
+	 * @return array<string, string>|null
+	 */
+	private static function acquire_migration_lock( $lock_path, $owner, $marker_path ) {
+		if ( null === $lock_path && null === $owner && null === $marker_path ) {
+			return null;
+		}
+		if (
+			! is_string( $lock_path ) || '' === $lock_path || '/' !== $lock_path[0] ||
+			! is_string( $marker_path ) || '' === $marker_path || '/' !== $marker_path[0] ||
+			! is_string( $owner ) || 1 !== preg_match( '/\A[A-Za-z0-9._-]+\z/D', $owner )
+		) {
+			WP_CLI::error( '--migration-lock, --mutation-marker e --mutation-owner devem ser fornecidos juntos e ser válidos.' );
+		}
+		$operation_owner = dirname( $marker_path ) . '/owner';
+		clearstatcache( true, $operation_owner );
+		if ( is_link( $operation_owner ) || ! is_file( $operation_owner ) || 0600 !== ( fileperms( $operation_owner ) & 0777 ) || $owner . "\n" !== file_get_contents( $operation_owner ) ) {
+			WP_CLI::error( 'O owner da migração não corresponde ao lock privado da operação.' );
+		}
+		$lock_parent = dirname( $lock_path );
+		if ( ! is_dir( $lock_parent ) || is_link( $lock_parent ) || ! @mkdir( $lock_path, 0700 ) ) {
+			WP_CLI::error( 'A migração já está ativa ou seu lock não pôde ser adquirido.' );
+		}
+		$owner_path = $lock_path . '/owner';
+		$handle     = @fopen( $owner_path, 'x' );
+		$payload    = $owner . "\n";
+		$written    = false;
+		if ( false !== $handle ) {
+			$written = strlen( $payload ) === fwrite( $handle, $payload ) && fflush( $handle );
+			if ( $written && function_exists( 'fsync' ) ) {
+				$written = fsync( $handle );
+			}
+			$written = $written && @chmod( $owner_path, 0600 );
+			fclose( $handle );
+		}
+		clearstatcache( true, $owner_path );
+		if ( ! $written || is_link( $lock_path ) || ! is_dir( $lock_path ) || is_link( $owner_path ) || ! is_file( $owner_path ) || 0600 !== ( fileperms( $owner_path ) & 0777 ) || $payload !== file_get_contents( $owner_path ) ) {
+			WP_CLI::error( 'O lock do processo de migração ficou incompleto; intervenção manual necessária.' );
+		}
+
+		$token = array(
+			'path'  => $lock_path,
+			'owner' => $owner,
+		);
+		register_shutdown_function(
+			static function () use ( $token ) {
+				self::release_migration_lock( $token );
+			}
+		);
+		return $token;
+	}
+
+	/**
+	 * Libera somente o lock que ainda pertence a esta execução.
+	 *
+	 * @param array<string, string>|null $token Token retornado na aquisição.
+	 */
+	private static function release_migration_lock( $token ) {
+		if ( ! is_array( $token ) || self::is_migration_lock_preserved( $token ) ) {
+			return;
+		}
+		$path       = $token['path'];
+		$owner_path = $path . '/owner';
+		clearstatcache( true, $owner_path );
+		if ( ! is_dir( $path ) || is_link( $path ) || is_link( $owner_path ) || ! is_file( $owner_path ) || 0600 !== ( fileperms( $owner_path ) & 0777 ) ) {
+			return;
+		}
+		if ( $token['owner'] . "\n" !== file_get_contents( $owner_path ) ) {
+			return;
+		}
+		@unlink( $owner_path );
+		@rmdir( $path );
+	}
+
+	/**
+	 * @param array<string, string>|null $token Lock adquirido pela execução.
+	 */
+	private static function preserve_migration_lock( $token ) {
+		if ( ! is_array( $token ) || ! isset( $token['path'], $token['owner'] ) ) {
+			return;
+		}
+		self::$preserved_migration_locks[ hash( 'sha256', $token['path'] . "\0" . $token['owner'] ) ] = true;
+	}
+
+	/**
+	 * @param array<string, string> $token Lock possivelmente preservado.
+	 */
+	private static function is_migration_lock_preserved( $token ) {
+		if ( ! isset( $token['path'], $token['owner'] ) ) {
+			return false;
+		}
+		$key = hash( 'sha256', $token['path'] . "\0" . $token['owner'] );
+		return isset( self::$preserved_migration_locks[ $key ] );
+	}
+
+	/**
+	 * Cria, sem sobrescrever, a prova de que esta chamada está prestes a gravar.
+	 *
+	 * @param mixed $marker_path Caminho fornecido por --mutation-marker.
+	 * @param mixed $owner       Identidade fornecida por --mutation-owner.
+	 */
+	private static function create_mutation_marker( $marker_path, $owner ) {
+		if ( null === $marker_path ) {
+			return;
+		}
+		if ( ! is_string( $marker_path ) || '' === $marker_path || '/' !== $marker_path[0] ) {
+			WP_CLI::error( 'O caminho de --mutation-marker deve ser absoluto e não vazio.' );
+		}
+		if ( ! is_string( $owner ) || 1 !== preg_match( '/\A[A-Za-z0-9._-]+\z/D', $owner ) ) {
+			WP_CLI::error( 'O --mutation-owner é obrigatório e possui formato inválido.' );
+		}
+		$parent = dirname( $marker_path );
+		if ( ! is_dir( $parent ) || is_link( $parent ) ) {
+			WP_CLI::error( 'O diretório do marcador de mutação não é seguro ou não existe.' );
+		}
+		$owner_path = $parent . '/owner';
+		clearstatcache( true, $owner_path );
+		if ( is_link( $owner_path ) || ! is_file( $owner_path ) || 0600 !== ( fileperms( $owner_path ) & 0777 ) || $owner . "\n" !== file_get_contents( $owner_path ) ) {
+			WP_CLI::error( 'O owner do marcador não corresponde ao lock privado da operação.' );
+		}
+
+		$handle = @fopen( $marker_path, 'x' );
+		if ( false === $handle ) {
+			WP_CLI::error( 'Não foi possível criar exclusivamente o marcador de mutação.' );
+		}
+		$payload_ok = strlen( $owner ) + 1 === fwrite( $handle, $owner . "\n" ) && fflush( $handle );
+		if ( $payload_ok && function_exists( 'fsync' ) ) {
+			$payload_ok = fsync( $handle );
+		}
+		$mode_ok = @chmod( $marker_path, 0600 );
+		$closed  = fclose( $handle );
+		clearstatcache( true, $marker_path );
+		if ( ! $payload_ok || ! $closed || ! $mode_ok || is_link( $marker_path ) || ! is_file( $marker_path ) || 0600 !== ( fileperms( $marker_path ) & 0777 ) || $owner . "\n" !== file_get_contents( $marker_path ) ) {
+			WP_CLI::error( 'O marcador de mutação não pôde ser confirmado como arquivo privado.' );
 		}
 	}
 
@@ -376,17 +589,11 @@ final class Uonix_VTS_Migration_Command {
 	/**
 	 * @param array<int, array<string, mixed>> $candidates Backups validados.
 	 */
-	private static function rollback_candidates( $candidates ) {
-		$changed   = array();
-		$snapshots = array();
-		foreach ( $candidates as $candidate ) {
-			$snapshots[ $candidate['id'] ] = array(
-				'description'   => $candidate['backup']['remaining_description'],
-				'sheet_exists'  => true,
-				'sheet'         => $candidate['backup']['sheet'],
-				'backup_exists' => true,
-				'backup'        => $candidate['backup'],
-			);
+	private static function rollback_candidates( $candidates, $migration_lock = null ) {
+		try {
+			self::begin_candidate_transaction( $candidates, $migration_lock );
+		} catch ( Throwable $exception ) {
+			WP_CLI::error( 'Rollback abortado antes da primeira escrita; não foi possível bloquear as candidatas. Motivo: ' . $exception->getMessage() );
 		}
 
 		try {
@@ -395,7 +602,9 @@ final class Uonix_VTS_Migration_Command {
 					throw new RuntimeException( sprintf( '#%d mudou depois do preflight de rollback.', $candidate['id'] ) );
 				}
 				$variation = wc_get_product( $candidate['id'] );
-				$changed[] = $candidate['id'];
+				if ( ! self::is_variation_object( $variation, $candidate['id'] ) ) {
+					throw new RuntimeException( sprintf( '#%d deixou de ser uma variação válida durante o rollback.', $candidate['id'] ) );
+				}
 				$variation->set_description( $candidate['backup']['original_description'] );
 				$variation->delete_meta_data( Uonix_VTS_Schema::META_KEY );
 				$variation->save();
@@ -403,73 +612,148 @@ final class Uonix_VTS_Migration_Command {
 					throw new RuntimeException( sprintf( '#%d divergiu após a restauração.', $candidate['id'] ) );
 				}
 			}
+			$committed_ids = self::commit_candidate_transaction( $candidates );
 		} catch ( Throwable $exception ) {
-			$restored = self::restore_snapshots( $changed, $snapshots );
-			if ( ! $restored ) {
-				WP_CLI::error( 'Rollback abortado e restauração incompleta; interrompa novas escritas e faça resolução manual.' );
+			if ( ! self::rollback_candidate_transaction( $candidates ) ) {
+				self::preserve_migration_lock( $migration_lock );
+				WP_CLI::error( 'Rollback abortado e a transação não pôde ser revertida; preserve lock e marcadores para resolução manual.' );
 			}
-			WP_CLI::error( 'Rollback abortado; todas as alterações da tentativa foram restauradas. Motivo: ' . $exception->getMessage() );
+			WP_CLI::error( 'Rollback abortado; a transação foi revertida integralmente. Motivo: ' . $exception->getMessage() );
 		}
+		self::invalidate_candidate_caches_after_commit(
+			$committed_ids,
+			$migration_lock,
+			'Rollback confirmado no banco, mas a invalidação pós-commit falhou; preserve lock e marcadores para resolução manual.'
+		);
 	}
 
 	/**
-	 * Restaura snapshots em ordem inversa e verifica a releitura.
+	 * Inicia uma transação e bloqueia, em ordem determinística, as linhas de posts
+	 * e postmeta que serão relidas e gravadas pelo comando.
 	 *
-	 * @param array<int, int>                  $changed IDs possivelmente alterados.
-	 * @param array<int, array<string, mixed>> $snapshots Estado anterior por ID.
+	 * @param array<int, array<string, mixed>> $candidates     Candidatas validadas.
+	 * @param array<string, string>|null        $migration_lock Lock do processo corrente.
 	 */
-	private static function restore_snapshots( $changed, $snapshots ) {
-		$all_restored = true;
-		foreach ( array_reverse( $changed ) as $variation_id ) {
-			try {
-				if ( ! isset( $snapshots[ $variation_id ] ) ) {
-					$all_restored = false;
-					continue;
-				}
-				$snapshot  = $snapshots[ $variation_id ];
-				$variation = wc_get_product( $variation_id );
-				if ( ! self::is_variation_object( $variation, $variation_id ) ) {
-					$all_restored = false;
-					continue;
-				}
-				$variation->set_description( $snapshot['description'] );
-				if ( $snapshot['sheet_exists'] ) {
-					$variation->update_meta_data( Uonix_VTS_Schema::META_KEY, $snapshot['sheet'] );
-				} else {
-					$variation->delete_meta_data( Uonix_VTS_Schema::META_KEY );
-				}
-				if ( $snapshot['backup_exists'] ) {
-					$variation->update_meta_data( Uonix_VTS_Schema::BACKUP_META_KEY, $snapshot['backup'] );
-				} else {
-					$variation->delete_meta_data( Uonix_VTS_Schema::BACKUP_META_KEY );
-				}
-				$variation->save();
-				if ( ! self::snapshot_matches( $variation_id, $snapshot ) ) {
-					$all_restored = false;
-				}
-			} catch ( Throwable $exception ) {
-				$all_restored = false;
-			}
+	private static function begin_candidate_transaction( $candidates, $migration_lock = null ) {
+		global $wpdb;
+		if ( ! is_object( $wpdb ) || ! method_exists( $wpdb, 'query' ) || ! isset( $wpdb->posts, $wpdb->postmeta ) ) {
+			throw new RuntimeException( 'Conexão WordPress indisponível para transação.' );
 		}
-		return $all_restored;
+		$ids = array();
+		foreach ( $candidates as $candidate ) {
+			$variation_id = isset( $candidate['id'] ) ? absint( $candidate['id'] ) : 0;
+			if ( 0 === $variation_id ) {
+				throw new RuntimeException( 'Candidata inválida para bloqueio transacional.' );
+			}
+			$ids[] = $variation_id;
+		}
+		$ids = array_values( array_unique( $ids ) );
+		sort( $ids, SORT_NUMERIC );
+		if ( 5 !== count( $ids ) ) {
+			throw new RuntimeException( 'A transação exige exatamente cinco IDs únicos.' );
+		}
+		$id_list = implode( ',', $ids );
+		if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+			throw new RuntimeException( 'Não foi possível iniciar a transação.' );
+		}
+		try {
+			$locked_posts = $wpdb->query( "SELECT ID FROM {$wpdb->posts} WHERE ID IN ({$id_list}) ORDER BY ID FOR UPDATE" );
+			if ( 5 !== (int) $locked_posts ) {
+				throw new RuntimeException( 'Nem todas as linhas de variação puderam ser bloqueadas.' );
+			}
+			if ( false === $wpdb->query( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id IN ({$id_list}) ORDER BY post_id, meta_id FOR UPDATE" ) ) {
+				throw new RuntimeException( 'Os metadados das variações não puderam ser bloqueados.' );
+			}
+			foreach ( $ids as $variation_id ) {
+				clean_post_cache( $variation_id );
+			}
+		} catch ( Throwable $exception ) {
+			if ( false === $wpdb->query( 'ROLLBACK' ) ) {
+				self::preserve_migration_lock( $migration_lock );
+				throw new RuntimeException( 'A aquisição falhou e a transação não pôde ser revertida; preserve lock para resolução manual.', 0, $exception );
+			}
+			throw $exception;
+		}
 	}
 
 	/**
-	 * @param int                  $variation_id ID relido.
-	 * @param array<string, mixed> $snapshot Estado esperado.
+	 * Confirma a transação somente depois de todas as releituras pós-save.
+	 *
+	 * @return array<int, int> IDs validados para invalidação pós-commit.
 	 */
-	private static function snapshot_matches( $variation_id, $snapshot ) {
-		$variation = wc_get_product( $variation_id );
-		if ( ! self::is_variation_object( $variation, $variation_id ) || $snapshot['description'] !== $variation->get_description( 'edit' ) ) {
+	private static function commit_candidate_transaction( $candidates ) {
+		global $wpdb;
+		$ids = array();
+		foreach ( $candidates as $candidate ) {
+			$variation_id = isset( $candidate['id'] ) ? absint( $candidate['id'] ) : 0;
+			if ( 0 === $variation_id ) {
+				throw new RuntimeException( 'Candidata inválida antes da confirmação transacional.' );
+			}
+			$ids[] = $variation_id;
+		}
+		$ids = array_values( array_unique( $ids ) );
+		sort( $ids, SORT_NUMERIC );
+		if ( 5 !== count( $ids ) ) {
+			throw new RuntimeException( 'A confirmação transacional exige exatamente cinco IDs únicos.' );
+		}
+		if ( ! is_object( $wpdb ) || ! method_exists( $wpdb, 'query' ) || false === $wpdb->query( 'COMMIT' ) ) {
+			throw new RuntimeException( 'Não foi possível confirmar a transação.' );
+		}
+		return $ids;
+	}
+
+	/**
+	 * Limpa caches somente depois que o COMMIT ficou visível. Uma falha aqui não
+	 * pode executar ROLLBACK fictício sobre uma transação já encerrada.
+	 *
+	 * @param array<int, int>               $ids            IDs confirmados.
+	 * @param array<string, string>|null    $migration_lock Lock do processo.
+	 * @param string                        $failure_message Diagnóstico específico.
+	 */
+	private static function invalidate_candidate_caches_after_commit( $ids, $migration_lock, $failure_message ) {
+		try {
+			foreach ( $ids as $variation_id ) {
+				clean_post_cache( $variation_id );
+			}
+		} catch ( Throwable $exception ) {
+			self::preserve_migration_lock( $migration_lock );
+			WP_CLI::error( $failure_message . ' Motivo: ' . $exception->getMessage() );
+		}
+	}
+
+	/**
+	 * Reverte a transação e descarta qualquer instância/meta de produto que tenha
+	 * sido carregada com dados ainda não confirmados durante a tentativa.
+	 *
+	 * @param array<int, array<string, mixed>> $candidates Candidatas da transação.
+	 * @return bool
+	 */
+	private static function rollback_candidate_transaction( $candidates ) {
+		global $wpdb;
+		if ( ! is_object( $wpdb ) || ! method_exists( $wpdb, 'query' ) || false === $wpdb->query( 'ROLLBACK' ) ) {
 			return false;
 		}
-		$sheet_exists  = self::meta_exists( $variation_id, Uonix_VTS_Schema::META_KEY );
-		$backup_exists = self::meta_exists( $variation_id, Uonix_VTS_Schema::BACKUP_META_KEY );
-		$sheet_matches = $snapshot['sheet_exists'] === $sheet_exists &&
-			( ! $sheet_exists || $snapshot['sheet'] === $variation->get_meta( Uonix_VTS_Schema::META_KEY, true ) );
-		$backup_matches = $snapshot['backup_exists'] === $backup_exists &&
-			( ! $backup_exists || $snapshot['backup'] === $variation->get_meta( Uonix_VTS_Schema::BACKUP_META_KEY, true ) );
-		return $sheet_matches && $backup_matches;
+		try {
+			$ids = array();
+			foreach ( $candidates as $candidate ) {
+				$variation_id = isset( $candidate['id'] ) ? absint( $candidate['id'] ) : 0;
+				if ( 0 === $variation_id ) {
+					return false;
+				}
+				$ids[] = $variation_id;
+			}
+			$ids = array_values( array_unique( $ids ) );
+			sort( $ids, SORT_NUMERIC );
+			if ( 5 !== count( $ids ) ) {
+				return false;
+			}
+			foreach ( $ids as $variation_id ) {
+				clean_post_cache( $variation_id );
+			}
+		} catch ( Throwable $exception ) {
+			return false;
+		}
+		return true;
 	}
 
 	/**
