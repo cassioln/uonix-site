@@ -153,6 +153,8 @@ $GLOBALS['vts_database_queries'] = array();
 $GLOBALS['vts_database_fail_exact'] = array();
 $GLOBALS['vts_database_post_lock_result'] = null;
 $GLOBALS['vts_database_external_before_post_lock'] = array();
+$GLOBALS['vts_database_repopulate_cache_on_commit'] = array();
+$GLOBALS['vts_clean_post_cache_fail_after_commit_once'] = array();
 $GLOBALS['vts_save_fail_once']   = array();
 $GLOBALS['vts_save_corrupt_once'] = array();
 $GLOBALS['wc_meta_box_errors']   = array();
@@ -210,6 +212,13 @@ function clean_post_cache( $post_id ) {
 		'id'          => $post_id,
 		'query_count' => count( $GLOBALS['vts_database_queries'] ),
 	);
+	if (
+		'COMMIT' === end( $GLOBALS['vts_database_queries'] ) &&
+		! empty( $GLOBALS['vts_clean_post_cache_fail_after_commit_once'][ $post_id ] )
+	) {
+		unset( $GLOBALS['vts_clean_post_cache_fail_after_commit_once'][ $post_id ] );
+		throw new RuntimeException( 'falha de cache pós-COMMIT simulada #' . $post_id );
+	}
 	unset( $GLOBALS['vts_product_cache'][ $post_id ] );
 }
 
@@ -376,6 +385,13 @@ final class VTS_Fake_WPDB {
 			if ( ! $this->active ) {
 				return false;
 			}
+			$current_store = $GLOBALS['vts_migration_store'];
+			$GLOBALS['vts_migration_store'] = $this->snapshot;
+			foreach ( $GLOBALS['vts_database_repopulate_cache_on_commit'] as $variation_id ) {
+				$variation_id = absint( $variation_id );
+				$GLOBALS['vts_product_cache'][ $variation_id ] = new VTS_Fake_Migration_Variation( $variation_id );
+			}
+			$GLOBALS['vts_migration_store'] = $current_store;
 			$this->active = false;
 			$this->apply_pending_description_appends();
 			$this->clear_transaction_state();
@@ -821,6 +837,8 @@ function vts_reset_migration_store( $descriptions = null ) {
 	$GLOBALS['vts_post_load_mutations'] = array();
 	$GLOBALS['vts_post_load_mutation_save_calls'] = array();
 	$GLOBALS['vts_database_external_before_post_lock'] = array();
+	$GLOBALS['vts_database_repopulate_cache_on_commit'] = array();
+	$GLOBALS['vts_clean_post_cache_fail_after_commit_once'] = array();
 	$GLOBALS['wpdb']->reset();
 	$GLOBALS['vts_database_post_lock_result'] = null;
 	foreach ( $descriptions as $variation_id => $description ) {
@@ -1984,6 +2002,117 @@ vts_assert_same(
 	'segunda invalidação ocorre somente depois do SQL ROLLBACK'
 );
 vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'rollback com cache obsoleto encerra a transação sem gravar' );
+
+vts_reset_migration_store();
+$GLOBALS['vts_product_cache_enabled'] = true;
+$GLOBALS['vts_database_repopulate_cache_on_commit'] = array( 10410 );
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$post_commit_product = wc_get_product( 10410 );
+vts_assert_false(
+	false !== strpos( $post_commit_product->get_description( 'edit' ), 'uonix-fichas-compactas' ),
+	'execute invalida cache repovoado por outro processo enquanto o COMMIT ainda não era visível'
+);
+vts_assert_same(
+	array( 10410, 10411, 10460, 10461, 10462 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'id' ), -5 ),
+	'execute invalida novamente todas as candidatas depois do COMMIT'
+);
+vts_assert_same(
+	array( 4, 4, 4, 4, 4 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'query_count' ), -5 ),
+	'invalidação final do execute ocorre somente depois do SQL COMMIT'
+);
+$migration_command->migrate( array(), array( 'rollback' => true ) );
+$post_rollback_commit_product = wc_get_product( 10410 );
+vts_assert_true(
+	false !== strpos( $post_rollback_commit_product->get_description( 'edit' ), 'uonix-fichas-compactas' ),
+	'rollback invalida cache migrado repovoado enquanto seu COMMIT ainda não era visível'
+);
+vts_assert_same(
+	array( 10410, 10411, 10460, 10461, 10462 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'id' ), -5 ),
+	'rollback invalida novamente todas as candidatas depois do COMMIT'
+);
+vts_assert_same(
+	array( 8, 8, 8, 8, 8 ),
+	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'query_count' ), -5 ),
+	'invalidação final do rollback ocorre somente depois do SQL COMMIT'
+);
+
+vts_reset_migration_store();
+$post_commit_execute_dir = sys_get_temp_dir() . '/uonix-vts-post-commit-execute-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $post_commit_execute_dir, 0700, true ), 'fixture cria lock de operação para falha de cache pós-COMMIT no execute' );
+file_put_contents( $post_commit_execute_dir . '/owner', "run-post-commit-execute\n" );
+chmod( $post_commit_execute_dir . '/owner', 0600 );
+$post_commit_execute_marker = $post_commit_execute_dir . '/db-mutation-started';
+$post_commit_execute_lock = $post_commit_execute_dir . '-migration-process';
+$GLOBALS['vts_clean_post_cache_fail_after_commit_once'][10410] = true;
+$post_commit_execute_error = vts_capture_cli_error(
+	function () use ( $migration_command, $post_commit_execute_marker, $post_commit_execute_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'execute'         => true,
+				'mutation-marker' => $post_commit_execute_marker,
+				'mutation-owner'  => 'run-post-commit-execute',
+				'migration-lock'  => $post_commit_execute_lock,
+			)
+		);
+	}
+);
+vts_assert_true( $post_commit_execute_error instanceof VTS_CLI_Error, 'falha de cache pós-COMMIT no execute encerra em erro WP-CLI' );
+vts_assert_contains( 'confirmada no banco', $post_commit_execute_error->getMessage(), 'execute distingue falha posterior de rollback transacional' );
+vts_assert_false( in_array( 'ROLLBACK', $GLOBALS['vts_database_queries'], true ), 'execute não emite ROLLBACK depois de COMMIT confirmado' );
+vts_assert_same( 'COMMIT', end( $GLOBALS['vts_database_queries'] ), 'execute mantém COMMIT como último comando transacional' );
+vts_assert_true( is_file( $post_commit_execute_lock . '/owner' ), 'execute preserva lock PHP após falha de cache pós-COMMIT' );
+vts_assert_same( "run-post-commit-execute\n", file_get_contents( $post_commit_execute_lock . '/owner' ), 'lock preservado do execute mantém owner exato' );
+vts_assert_true( is_file( $post_commit_execute_marker ), 'execute preserva marcador após banco confirmado e cache inconclusivo' );
+vts_assert_same( 0, vts_count_legacy_wrappers(), 'falha de cache pós-COMMIT não finge desfazer migração já confirmada' );
+vts_assert_same( 5, vts_count_structured_sheets(), 'estado migrado confirmado permanece durável após falha de cache' );
+vts_assert_true( unlink( $post_commit_execute_marker ), 'fixture remove marcador pós-COMMIT do execute' );
+vts_assert_true( unlink( $post_commit_execute_lock . '/owner' ), 'fixture remove owner do lock preservado do execute' );
+vts_assert_true( rmdir( $post_commit_execute_lock ), 'fixture remove lock preservado do execute' );
+vts_assert_true( unlink( $post_commit_execute_dir . '/owner' ), 'fixture remove owner da operação pós-COMMIT do execute' );
+vts_assert_true( rmdir( $post_commit_execute_dir ), 'fixture remove diretório da operação pós-COMMIT do execute' );
+
+vts_reset_migration_store();
+$migration_command->migrate( array(), array( 'execute' => true ) );
+$post_commit_rollback_dir = sys_get_temp_dir() . '/uonix-vts-post-commit-rollback-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );
+vts_assert_true( mkdir( $post_commit_rollback_dir, 0700, true ), 'fixture cria lock de operação para falha de cache pós-COMMIT no rollback' );
+file_put_contents( $post_commit_rollback_dir . '/owner', "run-post-commit-rollback\n" );
+chmod( $post_commit_rollback_dir . '/owner', 0600 );
+$post_commit_rollback_marker = $post_commit_rollback_dir . '/db-mutation-started';
+file_put_contents( $post_commit_rollback_marker, "run-post-commit-rollback\n" );
+chmod( $post_commit_rollback_marker, 0600 );
+$post_commit_rollback_lock = $post_commit_rollback_dir . '-migration-process';
+$GLOBALS['vts_clean_post_cache_fail_after_commit_once'][10410] = true;
+$post_commit_rollback_error = vts_capture_cli_error(
+	function () use ( $migration_command, $post_commit_rollback_marker, $post_commit_rollback_lock ) {
+		$migration_command->migrate(
+			array(),
+			array(
+				'rollback'        => true,
+				'mutation-marker' => $post_commit_rollback_marker,
+				'mutation-owner'  => 'run-post-commit-rollback',
+				'migration-lock'  => $post_commit_rollback_lock,
+			)
+		);
+	}
+);
+vts_assert_true( $post_commit_rollback_error instanceof VTS_CLI_Error, 'falha de cache pós-COMMIT no rollback encerra em erro WP-CLI' );
+vts_assert_contains( 'confirmado no banco', $post_commit_rollback_error->getMessage(), 'rollback distingue banco restaurado de cache inconclusivo' );
+vts_assert_false( in_array( 'ROLLBACK', $GLOBALS['vts_database_queries'], true ), 'rollback seletivo não emite novo ROLLBACK depois de COMMIT confirmado' );
+vts_assert_same( 'COMMIT', end( $GLOBALS['vts_database_queries'] ), 'rollback seletivo mantém COMMIT como último comando transacional' );
+vts_assert_true( is_file( $post_commit_rollback_lock . '/owner' ), 'rollback seletivo preserva lock PHP após falha de cache pós-COMMIT' );
+vts_assert_same( "run-post-commit-rollback\n", file_get_contents( $post_commit_rollback_lock . '/owner' ), 'lock preservado do rollback mantém owner exato' );
+vts_assert_true( is_file( $post_commit_rollback_marker ), 'rollback preserva marcador após banco restaurado e cache inconclusivo' );
+vts_assert_same( 5, vts_count_legacy_wrappers(), 'falha de cache pós-COMMIT não desfaz restauração seletiva confirmada' );
+vts_assert_same( 0, vts_count_structured_sheets(), 'estado original confirmado permanece durável após falha de cache no rollback' );
+vts_assert_true( unlink( $post_commit_rollback_marker ), 'fixture remove marcador pós-COMMIT do rollback' );
+vts_assert_true( unlink( $post_commit_rollback_lock . '/owner' ), 'fixture remove owner do lock preservado do rollback' );
+vts_assert_true( rmdir( $post_commit_rollback_lock ), 'fixture remove lock preservado do rollback' );
+vts_assert_true( unlink( $post_commit_rollback_dir . '/owner' ), 'fixture remove owner da operação pós-COMMIT do rollback' );
+vts_assert_true( rmdir( $post_commit_rollback_dir ), 'fixture remove diretório da operação pós-COMMIT do rollback' );
 
 vts_reset_migration_store();
 $GLOBALS['vts_product_cache_enabled'] = true;

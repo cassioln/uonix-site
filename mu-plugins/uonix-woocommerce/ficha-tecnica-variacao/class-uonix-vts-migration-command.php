@@ -347,7 +347,7 @@ final class Uonix_VTS_Migration_Command {
 					throw new RuntimeException( sprintf( '#%d divergiu dos hashes esperados após a migração.', $candidate['id'] ) );
 				}
 			}
-			self::commit_candidate_transaction();
+			$committed_ids = self::commit_candidate_transaction( $candidates );
 		} catch ( Throwable $exception ) {
 			if ( ! self::rollback_candidate_transaction( $candidates ) ) {
 				self::preserve_migration_lock( $migration_lock );
@@ -355,6 +355,11 @@ final class Uonix_VTS_Migration_Command {
 			}
 			WP_CLI::error( 'Migração abortada; a transação foi revertida integralmente. Motivo: ' . $exception->getMessage() );
 		}
+		self::invalidate_candidate_caches_after_commit(
+			$committed_ids,
+			$migration_lock,
+			'Migração confirmada no banco, mas a invalidação pós-commit falhou; preserve lock e marcador para resolução manual.'
+		);
 	}
 
 	/**
@@ -607,7 +612,7 @@ final class Uonix_VTS_Migration_Command {
 					throw new RuntimeException( sprintf( '#%d divergiu após a restauração.', $candidate['id'] ) );
 				}
 			}
-			self::commit_candidate_transaction();
+			$committed_ids = self::commit_candidate_transaction( $candidates );
 		} catch ( Throwable $exception ) {
 			if ( ! self::rollback_candidate_transaction( $candidates ) ) {
 				self::preserve_migration_lock( $migration_lock );
@@ -615,6 +620,11 @@ final class Uonix_VTS_Migration_Command {
 			}
 			WP_CLI::error( 'Rollback abortado; a transação foi revertida integralmente. Motivo: ' . $exception->getMessage() );
 		}
+		self::invalidate_candidate_caches_after_commit(
+			$committed_ids,
+			$migration_lock,
+			'Rollback confirmado no banco, mas a invalidação pós-commit falhou; preserve lock e marcadores para resolução manual.'
+		);
 	}
 
 	/**
@@ -668,11 +678,46 @@ final class Uonix_VTS_Migration_Command {
 
 	/**
 	 * Confirma a transação somente depois de todas as releituras pós-save.
+	 *
+	 * @return array<int, int> IDs validados para invalidação pós-commit.
 	 */
-	private static function commit_candidate_transaction() {
+	private static function commit_candidate_transaction( $candidates ) {
 		global $wpdb;
+		$ids = array();
+		foreach ( $candidates as $candidate ) {
+			$variation_id = isset( $candidate['id'] ) ? absint( $candidate['id'] ) : 0;
+			if ( 0 === $variation_id ) {
+				throw new RuntimeException( 'Candidata inválida antes da confirmação transacional.' );
+			}
+			$ids[] = $variation_id;
+		}
+		$ids = array_values( array_unique( $ids ) );
+		sort( $ids, SORT_NUMERIC );
+		if ( 5 !== count( $ids ) ) {
+			throw new RuntimeException( 'A confirmação transacional exige exatamente cinco IDs únicos.' );
+		}
 		if ( ! is_object( $wpdb ) || ! method_exists( $wpdb, 'query' ) || false === $wpdb->query( 'COMMIT' ) ) {
 			throw new RuntimeException( 'Não foi possível confirmar a transação.' );
+		}
+		return $ids;
+	}
+
+	/**
+	 * Limpa caches somente depois que o COMMIT ficou visível. Uma falha aqui não
+	 * pode executar ROLLBACK fictício sobre uma transação já encerrada.
+	 *
+	 * @param array<int, int>               $ids            IDs confirmados.
+	 * @param array<string, string>|null    $migration_lock Lock do processo.
+	 * @param string                        $failure_message Diagnóstico específico.
+	 */
+	private static function invalidate_candidate_caches_after_commit( $ids, $migration_lock, $failure_message ) {
+		try {
+			foreach ( $ids as $variation_id ) {
+				clean_post_cache( $variation_id );
+			}
+		} catch ( Throwable $exception ) {
+			self::preserve_migration_lock( $migration_lock );
+			WP_CLI::error( $failure_message . ' Motivo: ' . $exception->getMessage() );
 		}
 	}
 

@@ -255,6 +255,45 @@ def test_acquire_lock(script: pathlib.Path, temp: pathlib.Path) -> None:
     if result.returncode == 0 or foreign_owner.read_text(encoding="utf-8") != "other-run\n":
         fail("aquisição sobrescreveu lock/owner de outra execução")
 
+    race_root = temp / "acquire-owner-race"
+    race_root.mkdir()
+    race_lock = race_root / ".uonix-operation.lock"
+    outside_owner = race_root / "outside-owner"
+    outside_owner.write_text("do-not-overwrite\n", encoding="utf-8")
+    outside_owner.chmod(0o644)
+    bash_env = race_root / "race-bash-env"
+    bash_env.write_text(
+        """mkdir() {
+  command mkdir "$@" || return
+  ln -s "$RACE_OUTSIDE_OWNER" "$RACE_LOCK/owner"
+}
+""",
+        encoding="utf-8",
+    )
+    race_env = os.environ.copy()
+    race_env.update(
+        {
+            "BASH_ENV": str(bash_env),
+            "RACE_LOCK": str(race_lock),
+            "RACE_OUTSIDE_OWNER": str(outside_owner),
+        }
+    )
+    result = subprocess.run(
+        ["bash", str(script), str(race_lock), RUN_ID],
+        env=race_env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if outside_owner.read_text(encoding="utf-8") != "do-not-overwrite\n":
+        fail("aquisição seguiu owner symlink concorrente e sobrescreveu alvo externo")
+    if stat.S_IMODE(outside_owner.stat().st_mode) != 0o644:
+        fail("aquisição seguiu owner symlink concorrente e alterou modo do alvo externo")
+    if result.returncode == 0:
+        fail("aquisição aceitou owner plantado entre mkdir e criação exclusiva")
+    if race_lock.exists() or race_lock.is_symlink():
+        fail("aquisição falha deixou lock plantado após limpar owner com segurança")
+
 
 def manifest_for(base: pathlib.Path, relative_files: tuple[str, ...]) -> str:
     entries: list[str] = []

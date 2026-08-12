@@ -191,11 +191,14 @@ jobs:
             fi
           }
           mkdir -- "$lock_path"
+          if ! ( set -o noclobber; umask 077; printf '%s\n' "$run_id" > "$lock_path/owner" ); then
+            rm -f -- "$lock_path/owner"
+            rmdir -- "$lock_path" 2>/dev/null || true
+            exit 1
+          fi
           if ! {
-            printf '%s\n' "$run_id" > "$lock_path/owner"
-            chmod 600 "$lock_path/owner"
-            test -f "$lock_path/owner"
             test ! -L "$lock_path/owner"
+            test -f "$lock_path/owner"
             test "$(file_mode "$lock_path/owner")" = 600
             test "$(cat "$lock_path/owner")" = "$run_id"
           }; then
