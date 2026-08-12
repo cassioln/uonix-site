@@ -52,6 +52,20 @@ def remote_blocks(run_body: str) -> list[str]:
     return [block + "\n" for block in blocks]
 
 
+def publish_allowlist_prelude(run_body: str) -> str:
+    start_token = "expected_modules=()\n"
+    end_token = "# O marcador remoto é criado antes do primeiro rsync."
+    start = run_body.find(start_token)
+    end = run_body.find(end_token, start)
+    if start < 0 or end < 0:
+        fail("não foi possível extrair a pré-validação da allowlist de produção")
+    return (
+        "set -euo pipefail\n"
+        + run_body[start:end]
+        + "printf 'ALLOWLIST_MODULE=%s\\n' \"${expected_modules[@]}\"\n"
+    )
+
+
 def write_executable(path: pathlib.Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
@@ -504,6 +518,103 @@ def test_publish_marker(script: pathlib.Path, temp: pathlib.Path) -> None:
     )
     if result.returncode == 0 or race_marker.read_text(encoding="utf-8") != "racer-run\n":
         fail("corrida entre checagem e gravação sobrescreveu marcador concorrente")
+
+
+def module_directories(document_root: pathlib.Path) -> list[str]:
+    modules_root = document_root / "wp-content/mu-plugins"
+    return sorted(path.name for path in modules_root.glob("uonix-*") if path.is_dir())
+
+
+def make_module_prune_fixture(root: pathlib.Path) -> pathlib.Path:
+    document_root = root / "document-root"
+    modules_root = document_root / "wp-content/mu-plugins"
+    modules_root.mkdir(parents=True)
+    for name in ("uonix-alpha", "uonix-beta", "uonix-shared"):
+        module = modules_root / name
+        module.mkdir()
+        (module / "keep.php").write_text("<?php\n", encoding="utf-8")
+    return document_root
+
+
+def test_module_prune_allowlist(script: pathlib.Path, temp: pathlib.Path) -> None:
+    empty_root = make_module_prune_fixture(temp / "publish-modules-empty")
+    before = module_directories(empty_root)
+    result = subprocess.run(
+        ["bash", str(script), str(empty_root)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode == 0 or module_directories(empty_root) != before:
+        fail("poda de módulos aceitou allowlist vazia ou alterou o destino antes de falhar")
+
+    invalid_root = make_module_prune_fixture(temp / "publish-modules-invalid")
+    before = module_directories(invalid_root)
+    result = subprocess.run(
+        ["bash", str(script), str(invalid_root), "uonix-alpha", "uonix-bad;command"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode == 0 or module_directories(invalid_root) != before:
+        fail("poda de módulos aceitou nome inválido ou alterou o destino antes de falhar")
+
+    valid_root = make_module_prune_fixture(temp / "publish-modules-valid")
+    result = subprocess.run(
+        ["bash", str(script), str(valid_root), "uonix-alpha", "uonix-shared"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        fail(f"poda com allowlist válida falhou: {result.stderr[-300:]}")
+    if module_directories(valid_root) != ["uonix-alpha", "uonix-shared"]:
+        fail("poda com allowlist válida não convergiu exatamente os módulos esperados")
+
+
+def run_allowlist_prelude(script: pathlib.Path, root: pathlib.Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(script)],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_publish_allowlist_prelude(script: pathlib.Path, temp: pathlib.Path) -> None:
+    empty_root = temp / "publish-allowlist-empty"
+    (empty_root / ".deploy/mu-plugins").mkdir(parents=True)
+    result = run_allowlist_prelude(script, empty_root)
+    if result.returncode == 0:
+        fail("runner aceitou bundle sem nenhum módulo uonix-*")
+    if "allowlist de módulos vazia" not in result.stderr:
+        fail("runner não executou seu guard explícito de allowlist vazia no Bash corrente")
+
+    invalid_root = temp / "publish-allowlist-invalid"
+    invalid_modules = invalid_root / ".deploy/mu-plugins"
+    invalid_modules.mkdir(parents=True)
+    (invalid_modules / "uonix-valid").mkdir()
+    (invalid_modules / "uonix-bad;command").mkdir()
+    result = run_allowlist_prelude(script, invalid_root)
+    if result.returncode == 0 or "nome de módulo inválido" not in result.stderr:
+        fail("runner aceitou nome de módulo inválido antes da primeira mutação")
+
+    valid_root = temp / "publish-allowlist-valid"
+    valid_modules = valid_root / ".deploy/mu-plugins"
+    valid_modules.mkdir(parents=True)
+    (valid_modules / "uonix-alpha").mkdir()
+    (valid_modules / "uonix-shared").mkdir()
+    result = run_allowlist_prelude(script, valid_root)
+    if result.returncode != 0:
+        fail(f"runner rejeitou allowlist válida: {result.stderr[-300:]}")
+    reported = sorted(
+        line.removeprefix("ALLOWLIST_MODULE=")
+        for line in result.stdout.splitlines()
+        if line.startswith("ALLOWLIST_MODULE=")
+    )
+    if reported != ["uonix-alpha", "uonix-shared"]:
+        fail(f"runner não derivou allowlist exata do bundle: {reported!r}")
 
 
 def run_expected_manifest_verifier(
@@ -1167,7 +1278,9 @@ def main() -> None:
     document = WORKFLOW.read_text(encoding="utf-8")
     acquire_blocks = remote_blocks(named_step_run(document, "Acquire exclusive production lock"))
     backup_blocks = remote_blocks(named_step_run(document, "Back up managed remote paths"))
-    publish_blocks = remote_blocks(named_step_run(document, "Publish only managed paths and verify manifest"))
+    publish_run = named_step_run(document, "Publish only managed paths and verify manifest")
+    publish_blocks = remote_blocks(publish_run)
+    allowlist_prelude = publish_allowlist_prelude(publish_run)
     rollback_blocks = remote_blocks(named_step_run(document, "Roll back managed code after failure"))
     release_blocks = remote_blocks(named_step_run(document, "Release exclusive production lock"))
     if len(acquire_blocks) != 1:
@@ -1189,11 +1302,15 @@ def main() -> None:
         cleanup_script = temp / "cleanup.sh"
         release_script = temp / "release.sh"
         publish_marker_script = temp / "publish-marker.sh"
+        publish_allowlist_script = temp / "publish-allowlist.sh"
+        publish_module_prune_script = temp / "publish-module-prune.sh"
         expected_manifest_reservation_script = temp / "expected-manifest-reservation.sh"
         expected_manifest_script = temp / "expected-manifest.sh"
         write_executable(acquire_script, acquire_blocks[0])
         write_executable(backup_script, backup_blocks[0])
         write_executable(publish_marker_script, publish_blocks[0])
+        write_executable(publish_allowlist_script, allowlist_prelude)
+        write_executable(publish_module_prune_script, publish_blocks[1])
         write_executable(expected_manifest_reservation_script, publish_blocks[2])
         write_executable(expected_manifest_script, publish_blocks[3])
         write_executable(rollback_script, rollback_blocks[0])
@@ -1201,7 +1318,9 @@ def main() -> None:
         write_executable(release_script, release_blocks[0])
         test_acquire_lock(acquire_script, temp)
         test_backup_manifest(backup_script, temp)
+        test_publish_allowlist_prelude(publish_allowlist_script, temp)
         test_publish_marker(publish_marker_script, temp)
+        test_module_prune_allowlist(publish_module_prune_script, temp)
         test_expected_manifest_reservation(expected_manifest_reservation_script, temp)
         test_expected_manifest_verification(expected_manifest_script, temp)
         test_rollback(rollback_script, cleanup_script, temp)

@@ -128,6 +128,24 @@ publish_code = '\n'.join(
     line for line in production_publish_step.splitlines()
     if line.strip() and not line.lstrip().startswith('#')
 )
+for token, message in (
+    ('expected_modules=()', 'publicação de produção não inicializa a allowlist de módulos'),
+    ('${#expected_modules[@]}" -eq 0', 'publicação de produção não rejeita allowlist vazia'),
+    ('uonix-*[!A-Za-z0-9._-]*', 'publicação de produção não valida nomes de módulos'),
+    ('for module_name in "${expected_modules[@]}"', 'publicação de produção não publica a allowlist já validada'),
+    ('if [ "$#" -eq 0 ]; then', 'destino de produção não rejeita argv sem módulos'),
+):
+    if token not in publish_code:
+        raise AssertionError(message)
+allowlist_index = publish_code.index('expected_modules=()')
+name_guard_index = publish_code.index('uonix-*[!A-Za-z0-9._-]*')
+empty_gate_index = publish_code.index('${#expected_modules[@]}" -eq 0')
+marker_index = publish_code.index('bash -s -- "$operation_lock" "$DEPLOY_RUN_ID"')
+first_rsync_index = publish_code.index('rsync -az')
+if not allowlist_index < name_guard_index < empty_gate_index < marker_index < first_rsync_index:
+    raise AssertionError(
+        'allowlist de produção precisa ser validada antes do marcador e do primeiro rsync mutável'
+    )
 require(
     publish_code,
     r'\(\s*set -o noclobber;\s*umask 077;\s*printf\s+\x27%s\\n\x27\s+"\$run_id"\s+>\s+"\$marker"\s*\)',

@@ -151,6 +151,7 @@ $GLOBALS['vts_post_load_mutations'] = array();
 $GLOBALS['vts_post_load_mutation_save_calls'] = array();
 $GLOBALS['vts_database_queries'] = array();
 $GLOBALS['vts_database_fail_exact'] = array();
+$GLOBALS['vts_database_post_lock_result'] = null;
 $GLOBALS['vts_database_external_before_post_lock'] = array();
 $GLOBALS['vts_save_fail_once']   = array();
 $GLOBALS['vts_save_corrupt_once'] = array();
@@ -401,6 +402,9 @@ final class VTS_Fake_WPDB {
 			}
 			$GLOBALS['vts_database_external_before_post_lock'] = array();
 			$this->locked_posts = array_fill_keys( $ids, true );
+			if ( null !== $GLOBALS['vts_database_post_lock_result'] ) {
+				return (int) $GLOBALS['vts_database_post_lock_result'];
+			}
 			return count( array_intersect( $ids, array_keys( $GLOBALS['vts_migration_store'] ) ) );
 		}
 		if ( false !== stripos( $sql, ' FROM ' . $this->postmeta . ' ' ) && false !== stripos( $sql, ' FOR UPDATE' ) ) {
@@ -818,6 +822,7 @@ function vts_reset_migration_store( $descriptions = null ) {
 	$GLOBALS['vts_post_load_mutation_save_calls'] = array();
 	$GLOBALS['vts_database_external_before_post_lock'] = array();
 	$GLOBALS['wpdb']->reset();
+	$GLOBALS['vts_database_post_lock_result'] = null;
 	foreach ( $descriptions as $variation_id => $description ) {
 		$GLOBALS['vts_migration_store'][ $variation_id ] = array(
 			'description' => $description,
@@ -2005,6 +2010,24 @@ vts_assert_same(
 	array_slice( array_column( $GLOBALS['vts_clean_post_cache_calls'], 'query_count' ), -5 ),
 	'falha pré-save limpa novamente os caches somente depois do SQL ROLLBACK'
 );
+
+vts_reset_migration_store();
+$partial_lock_snapshot = vts_store_snapshot();
+$GLOBALS['vts_database_post_lock_result'] = 4;
+vts_expect_cli_error(
+	function () use ( $migration_command ) {
+		$migration_command->migrate( array(), array( 'execute' => true ) );
+	},
+	'Nem todas as linhas de variação puderam ser bloqueadas'
+);
+vts_assert_same( 0, $GLOBALS['vts_store_writes'], 'quatro de cinco row locks abortam antes do primeiro save' );
+vts_assert_same( $partial_lock_snapshot, vts_store_snapshot(), 'row lock parcial preserva todas as cinco candidatas' );
+vts_assert_same(
+	'SELECT ID FROM wp_posts WHERE ID IN (10410,10411,10460,10461,10462) ORDER BY ID FOR UPDATE',
+	$GLOBALS['vts_database_queries'][1] ?? null,
+	'row lock de posts usa ordem determinística antes do FOR UPDATE'
+);
+vts_assert_same( 'ROLLBACK', end( $GLOBALS['vts_database_queries'] ), 'row lock parcial encerra a transação com ROLLBACK' );
 
 vts_reset_migration_store();
 $lock_failure_dir = sys_get_temp_dir() . '/uonix-vts-lock-rollback-failure-' . getmypid() . '-' . bin2hex( random_bytes( 4 ) );

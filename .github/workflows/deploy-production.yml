@@ -368,6 +368,31 @@ jobs:
           ssh_transport="sshpass -e ssh -p $LOCAWEB_SSH_PORT -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/locaweb_known_hosts"
           operation_lock="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
 
+          # Valide integralmente o bundle antes de criar o marcador ou iniciar
+          # qualquer transferência mutável. Array vazio não pode significar
+          # "remova todos os módulos" no destino.
+          expected_modules=()
+          for module in .deploy/mu-plugins/uonix-*; do
+            [ -d "$module" ] || continue
+            module_name="$(basename "$module")"
+            case "$module_name" in
+              uonix-*[!A-Za-z0-9._-]*|uonix-|uonix-.|uonix-..)
+                printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
+                exit 1
+                ;;
+              uonix-*) ;;
+              *)
+                printf 'ERRO: nome de módulo inválido no bundle: %s\n' "$module_name" >&2
+                exit 1
+                ;;
+            esac
+            expected_modules+=("$module_name")
+          done
+          if [ "${#expected_modules[@]}" -eq 0 ]; then
+            printf 'ERRO: allowlist de módulos vazia; bundle inválido, nada foi publicado.\n' >&2
+            exit 1
+          fi
+
           # O marcador remoto é criado antes do primeiro rsync. Rollback e release
           # consultam este arquivo para não restaurar código quando nenhuma
           # transferência mutável chegou a começar.
@@ -417,14 +442,10 @@ jobs:
           # requisição. O loader tolera a ausência (is_readable + fallback), mas
           # publicar na ordem correta fecha a janela em vez de apenas sobreviver a
           # ela. Não inverta sem reler scripts/tests/test-mu-loader-resilience.sh.
-          expected_modules=()
-          for module in .deploy/mu-plugins/uonix-*; do
-            [ -d "$module" ] || continue
-            module_name="$(basename "$module")"
-            expected_modules+=("$module_name")
+          for module_name in "${expected_modules[@]}"; do
             rsync -az --delete \
               -e "$ssh_transport" \
-              "$module/" \
+              ".deploy/mu-plugins/$module_name/" \
               "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/mu-plugins/$module_name/"
           done
 
@@ -446,6 +467,24 @@ jobs:
           shopt -s nullglob
           document_root="$1"
           shift
+
+          if [ "$#" -eq 0 ]; then
+            printf 'ERRO: allowlist vazia recebida no destino; nenhum módulo foi removido.\n' >&2
+            exit 1
+          fi
+          for expected in "$@"; do
+            case "$expected" in
+              uonix-*[!A-Za-z0-9._-]*|uonix-|uonix-.|uonix-..|'')
+                printf 'ERRO: nome de módulo inválido recebido no destino: %s\n' "$expected" >&2
+                exit 1
+                ;;
+              uonix-*) ;;
+              *)
+                printf 'ERRO: nome de módulo inválido recebido no destino: %s\n' "$expected" >&2
+                exit 1
+                ;;
+            esac
+          done
 
           for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
             [ -d "$module" ] || continue
