@@ -70,9 +70,103 @@ require(production, r'inputs\.migrate_variation_technical_sheet', 'migração da
 require(production, r'- name: Migrate legacy variation technical sheets', 'etapa versionada de migração da ficha ausente')
 require(production, r'--dry-run.*?--execute', 'produção precisa executar dry-run antes da migração efetiva')
 require(production, r'NO-CHANGE: 5 fichas já migradas e verificadas|migrate --execute', 'migração de produção precisa ser idempotente')
-if production.index('- name: Back up the production database') > production.index('- name: Migrate legacy variation technical sheets'):
-    raise AssertionError('migração da ficha deve ocorrer depois do backup do banco')
 require(production, r'cancel-in-progress:\s*false', 'produção não pode cancelar uma operação mutável em andamento')
+
+# T66 — o backup integral é contingência da migração, não licença para rebobinar
+# pedidos por qualquer falha de código. Ele deve ser criado o mais perto possível
+# da escrita no banco, e o rollback precisa saber quais domínios foram alterados.
+production_publish_step = named_step_run(production, 'Publish only managed paths and verify manifest')
+production_migration_step = named_step_run(production, 'Migrate legacy variation technical sheets')
+production_rollback_step = named_step_run(production, 'Roll back managed code after failure')
+production_release_step = named_step_run(production, 'Release exclusive production lock')
+publish_index = production.index('- name: Publish only managed paths and verify manifest')
+smoke_index = production.index('- name: Clear cache and run smoke tests')
+db_backup_index = production.index('- name: Back up the production database')
+migration_index = production.index('- name: Migrate legacy variation technical sheets')
+retention_index = production.index('- name: Retain thirty code and database backups')
+rollback_index = production.index('- name: Roll back managed code after failure')
+release_index = production.index('- name: Release exclusive production lock')
+if not db_backup_index < publish_index < smoke_index < migration_index:
+    raise AssertionError('snapshot do banco deve preceder publicação, smoke e migração')
+if not migration_index < retention_index < rollback_index < release_index:
+    raise AssertionError('rollback deve ser o último gate antes da liberação do lock')
+require(
+    production,
+    r'- name: Roll back managed code after failure\s*\n\s+if:\s*\$\{\{\s*failure\(\)\s*\|\|\s*cancelled\(\)\s*\}\}',
+    'cancelamento durante a migração também precisa entrar no rollback',
+)
+for marker in ('code-mutation-started', 'db-mutation-started'):
+    if marker not in production:
+        raise AssertionError(f'marcador remoto de mutação ausente: {marker}')
+if production_publish_step.index('code-mutation-started') > production_publish_step.index('rsync -az --delete'):
+    raise AssertionError('marcador de código precisa existir antes do primeiro rsync mutável')
+db_marker_write = ': > "$db_mutation_marker"'
+checkpoint_token = '--backup-id="zz-migration-${BACKUP_ID}"'
+if production_migration_step.index(checkpoint_token) > production_migration_step.index('--dry-run'):
+    raise AssertionError('checkpoint fresco do banco precisa preceder dry-run e mutação')
+if production_migration_step.index('--dry-run') > production_migration_step.index(db_marker_write):
+    raise AssertionError('marcador de banco só pode ser gravado depois do dry-run aprovado')
+if production_migration_step.index(db_marker_write) > production_migration_step.index('migrate --execute'):
+    raise AssertionError('marcador de banco precisa ser gravado antes da primeira escrita da migração')
+require(
+    production_migration_step,
+    r'printf .*?"\$run_id" > "\$lock_path/owner".*?chmod 600 "\$lock_path/owner"',
+    'lock da migração precisa registrar o run que o possui',
+)
+require(
+    production_rollback_step,
+    r'while \[ -d "\$migration_lock" \].*?sleep 1.*?rollback recusado: migração remota ainda ativa',
+    'rollback precisa aguardar e recusar escrita concorrente com migração remota',
+)
+if production_rollback_step.index('while [ -d "$migration_lock" ]') > production_rollback_step.index('if [ -f "$db_mutation_marker" ]'):
+    raise AssertionError('espera do lock remoto precisa preceder qualquer restauração de banco')
+rollback_executable = '\n'.join(
+    line for line in production_rollback_step.splitlines()
+    if line.strip() and not line.lstrip().startswith('#')
+)
+rollback_lines = rollback_executable.splitlines()
+gzip_index = next(
+    index for index, line in enumerate(rollback_lines)
+    if 'gzip -dc "$db_dump"' in line
+)
+restore_end = gzip_index
+while restore_end < len(rollback_lines) and '; then' not in rollback_lines[restore_end]:
+    restore_end += 1
+if restore_end >= len(rollback_lines):
+    raise AssertionError('pipeline de restauração do banco não pôde ser delimitado')
+restore_pipeline = '\n'.join(rollback_lines[gzip_index:restore_end + 1])
+if restore_pipeline.count('|') != 1:
+    raise AssertionError('pipeline de restauração precisa ter um produtor e um consumidor')
+restore_producer, restore_consumer = restore_pipeline.split('|', 1)
+if 'MYSQL_PWD=' in restore_producer:
+    raise AssertionError('MYSQL_PWD está aplicado ao produtor gzip')
+if (
+    'MYSQL_PWD=' not in restore_consumer
+    or 'mysql --no-defaults' not in restore_consumer
+    or restore_consumer.index('MYSQL_PWD=') > restore_consumer.index('mysql --no-defaults')
+):
+    raise AssertionError('MYSQL_PWD precisa ser aplicado diretamente ao consumidor mysql')
+require(
+    rollback_executable,
+    r'if \[ -f "\$db_mutation_marker" \].*?migrate --rollback.*?gzip -dc "\$db_dump"',
+    'rollback deve tentar restauração seletiva antes do dump integral',
+)
+require(
+    rollback_executable,
+    r'mysql --no-defaults.*?restored_state.*?5:0:0\|5:5:0.*?db_rollback_ok=true',
+    'fallback integral precisa verificar o estado restaurado antes de remover o marcador',
+)
+require(
+    production_rollback_step,
+    r'rollback_failed=0.*?restauração do banco falhou.*?rollback_failed=1.*?rm -rf -- "\$document_root/wp-content/themes/kadence-child"',
+    'falha do banco não pode impedir a tentativa de restauração do código',
+)
+for marker in ('code-mutation-started', 'db-mutation-started'):
+    require(
+        production_release_step,
+        rf'test ! -e "\$lock_path/{marker}"',
+        f'lock de produção não pode ser liberado com marcador pendente: {marker}',
+    )
 require(production, r'^\s{2}authorize:\s*$', 'job de autorização local ausente')
 require(production, r'environment:\s*production-locaweb', 'Environment protegido de produção ausente')
 require(production, r'ENABLE_DEPLOY_PRODUCTION', 'guard persistente de produção ausente')

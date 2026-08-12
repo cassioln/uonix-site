@@ -239,13 +239,9 @@ jobs:
           printf 'BACKUP_DIR=%s\n' "$backup_dir" >> "$GITHUB_ENV"
           printf 'Backup de código criado: %s\n' "$backup_id"
 
-      # O passo acima salva apenas CÓDIGO. Sem o dump abaixo, um rollback
-      # restauraria arquivos sobre um schema não restaurado — e a mutação de
-      # banco mais provável aqui é o search-replace do cutover de domínio.
-      #
-      # Falha fechado de propósito: sem dump íntegro, nada é publicado.
-      # Não usa `wp db export`: a Locaweb desabilita proc_open de forma
-      # compilada, então o script escolhe mysqldump por capacidade do host.
+      # O snapshot precisa preceder a publicação: código novo pode alterar schema
+      # ao ser carregado. Sua existência, porém, não autoriza rebobinar o banco por
+      # uma falha somente de arquivos; o rollback exige marcador real de mutação.
       - name: Back up the production database
         env:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
@@ -259,10 +255,7 @@ jobs:
 
           # $HOME precisa ser expandido pelo SHELL, não por uma expressão de
           # template do Actions: o contexto `env` não conhece HOME e resolveria
-          # para string vazia, gerando o caminho "/.ssh/locaweb_known_hosts" e
-          # abortando o backup com "known_hosts Locaweb ausente ou vazio".
-          # Todas as outras etapas deste workflow já usam "$HOME" — esta segue o
-          # mesmo padrão.
+          # para string vazia, gerando o caminho "/.ssh/locaweb_known_hosts".
           export LOCAWEB_SSH_KNOWN_HOSTS_FILE="$HOME/.ssh/locaweb_known_hosts"
 
           scripts/backup-remote-database.sh \
@@ -282,6 +275,28 @@ jobs:
           set -euo pipefail
           remote="$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST"
           ssh_transport="sshpass -e ssh -p $LOCAWEB_SSH_PORT -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/locaweb_known_hosts"
+          operation_lock="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
+
+          # O marcador remoto é criado antes do primeiro rsync. Rollback e release
+          # consultam este arquivo para não restaurar código quando nenhuma
+          # transferência mutável chegou a começar.
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$remote" \
+            bash -s -- "$operation_lock" "$DEPLOY_RUN_ID" <<'REMOTE'
+          set -euo pipefail
+          lock_path="$1"
+          run_id="$2"
+          test -f "$lock_path/owner"
+          test "$(cat "$lock_path/owner")" = "$run_id"
+          : > "$lock_path/code-mutation-started"
+          chmod 600 "$lock_path/code-mutation-started"
+          REMOTE
 
           rsync -az --delete \
             -e "$ssh_transport" \
@@ -475,8 +490,26 @@ jobs:
         if: ${{ inputs.migrate_variation_technical_sheet }}
         env:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+          LOCAWEB_SSH_PASSWORD_FILE: ${{ runner.temp }}/locaweb-ssh-password-migration
         run: |
           set -euo pipefail
+          # Mantém o snapshot pré-publicação como baseline geral e cria um segundo
+          # checkpoint imediatamente antes da mutação opcional. Se o fallback
+          # integral for inevitável, a janela de escritas concorrentes é mínima.
+          umask 077
+          printf '%s' "$SSHPASS" > "$LOCAWEB_SSH_PASSWORD_FILE"
+          chmod 600 "$LOCAWEB_SSH_PASSWORD_FILE"
+          trap 'rm -f "$LOCAWEB_SSH_PASSWORD_FILE"' EXIT
+          export LOCAWEB_SSH_KNOWN_HOSTS_FILE="$HOME/.ssh/locaweb_known_hosts"
+          scripts/backup-remote-database.sh \
+            --environment=production \
+            --output-dir="$BACKUP_DIR" \
+            --backup-id="zz-migration-${BACKUP_ID}" | tee "$RUNNER_TEMP/db-migration-backup.out"
+          migration_backup_file="$(sed -n 's/^DB_BACKUP_FILE=//p' "$RUNNER_TEMP/db-migration-backup.out")"
+          test -n "$migration_backup_file"
+          printf 'DB_BACKUP_FILE=%s\n' "$migration_backup_file" >> "$GITHUB_ENV"
+          printf 'Checkpoint de banco pré-migração: %s\n' "${migration_backup_file##*/}"
+
           sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
@@ -485,23 +518,34 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
-            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" <<'REMOTE'
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$DEPLOY_RUN_ID" <<'REMOTE'
           set -euo pipefail
           document_root="$1"
           php_bin="$2"
           wp_bin="$3"
+          run_id="$4"
           cli() {
             "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" "$@"
           }
 
           test -f "$document_root/wp-content/mu-plugins/uonix-woocommerce/22-ficha-tecnica-variacao.php"
+          operation_lock="$document_root/.uonix-operation.lock"
+          db_mutation_marker="$operation_lock/db-mutation-started"
+          test -f "$operation_lock/owner"
+          test "$(cat "$operation_lock/owner")" = "$run_id"
+
           lock_path="$document_root/.uonix-vts-migration.lock"
           if ! mkdir -- "$lock_path"; then
             printf 'migração da ficha já está bloqueada: %s\n' "$lock_path" >&2
             exit 2
           fi
-          cleanup() { rmdir -- "$lock_path"; }
+          cleanup() {
+            rm -f -- "$lock_path/owner"
+            rmdir -- "$lock_path"
+          }
           trap cleanup EXIT
+          printf '%s\n' "$run_id" > "$lock_path/owner"
+          chmod 600 "$lock_path/owner"
 
           legacy_count="$(cli eval '
             $ids = get_posts(array(
@@ -523,6 +567,10 @@ jobs:
             5)
               printf 'migração: dry-run de cinco fichas legadas\n'
               cli uonix ficha-tecnica migrate --dry-run
+              # Só depois do preflight normativo o banco passa a ser considerado
+              # mutável. Se o processo for interrompido, o rollback verá o marcador.
+              : > "$db_mutation_marker"
+              chmod 600 "$db_mutation_marker"
               ;;
             *)
               printf 'migração recusada: esperadas zero ou cinco fichas legadas, encontradas %s\n' "$legacy_count" >&2
@@ -536,8 +584,33 @@ jobs:
           cli uonix ficha-tecnica migrate --execute
           REMOTE
 
+      - name: Retain thirty code and database backups
+        if: ${{ success() }}
+        continue-on-error: true
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Trinta, não cinco: medido no host, cada dump comprimido ocupa ~1,3 MB,
+          # então 30 backups somam ~39 MB — irrelevante frente aos 738 GB livres.
+          # Reter só cinco descartaria histórico útil sem economizar nada.
+          # O dump mora dentro do diretório do backup, então esta poda já o cobre.
+          # Variables in this command expand on the remote host.
+          # shellcheck disable=SC2016
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
+            'backup_root=/home/storage/f/34/12/siteuonix1/_uonix-deploy-backups; if [ -d "$backup_root" ]; then find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print | LC_ALL=C sort -r | tail -n +31 | while IFS= read -r old_backup; do rm -rf -- "$old_backup"; done; fi'
+
+      # Deve ser o último step potencialmente mutável antes do release. Assim,
+      # falha ou cancelamento em qualquer etapa anterior ainda passa por rollback.
       - name: Roll back managed code after failure
-        if: ${{ failure() }}
+        if: ${{ failure() || cancelled() }}
         env:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
         run: |
@@ -547,6 +620,7 @@ jobs:
             exit 0
           fi
           backup_id="${BACKUP_DIR##*/}"
+          operation_lock="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
 
           sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
@@ -556,7 +630,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
-            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$BACKUP_DIR" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$TARGET_URL" <<'REMOTE'
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$BACKUP_DIR" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$TARGET_URL" "$DEPLOY_RUN_ID" <<'REMOTE'
           set -euo pipefail
           shopt -s nullglob
           document_root="$1"
@@ -564,55 +638,177 @@ jobs:
           php_bin="$3"
           wp_bin="$4"
           target_url="$5"
+          run_id="$6"
           managed="$backup_dir/managed"
+          operation_lock="$document_root/.uonix-operation.lock"
+          code_mutation_marker="$operation_lock/code-mutation-started"
+          db_mutation_marker="$operation_lock/db-mutation-started"
+          migration_lock="$document_root/.uonix-vts-migration.lock"
+          rollback_failed=0
 
-          # O banco vem PRIMEIRO: restaurar arquivos sobre um schema divergente
-          # produz um estado que passa no smoke de arquivos e mente sobre o
-          # conteúdo. Se houver dump neste backup, ele é obrigatório — um dump
-          # presente mas inválido aborta o rollback em vez de ser ignorado.
-          db_dump="$(find "$backup_dir" -maxdepth 1 -name 'db-*.sql.gz' -print | LC_ALL=C sort | tail -1)"
-          if [ -n "$db_dump" ]; then
-            printf 'rollback: restaurando banco a partir de %s\n' "${db_dump##*/}"
-            if ! gzip -t "$db_dump" 2>/dev/null; then
-              printf 'dump de banco corrompido; rollback abortado antes de escrever\n' >&2
-              exit 1
+          test -f "$operation_lock/owner"
+          test "$(cat "$operation_lock/owner")" = "$run_id"
+          if [ ! -f "$code_mutation_marker" ] && [ ! -f "$db_mutation_marker" ]; then
+            printf 'rollback: nenhuma mutação foi iniciada; nada a restaurar\n'
+            exit 0
+          fi
+
+          # Cancelar o SSH não prova que o WP-CLI remoto terminou. Nunca restaure
+          # banco ou código enquanto o lock da migração ainda estiver ativo.
+          waited=0
+          while [ -d "$migration_lock" ] && [ "$waited" -lt 20 ]; do
+            sleep 1
+            waited=$((waited + 1))
+          done
+          if [ -d "$migration_lock" ]; then
+            migration_owner='desconhecido'
+            if [ -f "$migration_lock/owner" ]; then
+              migration_owner="$(cat "$migration_lock/owner")"
             fi
-            if command -v mysql >/dev/null 2>&1; then
-              credentials="$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval \
-                'echo DB_NAME . "\t" . DB_USER . "\t" . DB_HOST;')"
-              db_name="$(printf '%s' "$credentials" | cut -f1)"
-              db_user="$(printf '%s' "$credentials" | cut -f2)"
-              db_host="$(printf '%s' "$credentials" | cut -f3)"
-              if ! MYSQL_PWD="$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'echo DB_PASSWORD;')" \
-                  gzip -dc "$db_dump" | mysql --default-character-set=utf8mb4 \
-                    -h "$db_host" -u "$db_user" "$db_name"; then
-                printf 'restauração do banco falhou; rollback incompleto\n' >&2
-                exit 1
+            printf 'rollback recusado: migração remota ainda ativa após %ss (owner=%s); lock preservado\n' \
+              "$waited" "$migration_owner" >&2
+            exit 1
+          fi
+
+          cli() {
+            "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" "$@"
+          }
+          migration_state_value() {
+            cli eval '
+              $legacy = get_posts(array(
+                "post_type" => "product_variation",
+                "numberposts" => -1,
+                "fields" => "ids",
+                "meta_query" => array(array(
+                  "key" => "_variation_description",
+                  "value" => "uonix-fichas-compactas",
+                  "compare" => "LIKE",
+                )),
+              ));
+              $backups = get_posts(array(
+                "post_type" => "product_variation",
+                "numberposts" => -1,
+                "fields" => "ids",
+                "meta_query" => array(array(
+                  "key" => "_uonix_variation_technical_sheet_legacy_backup_v1",
+                  "compare" => "EXISTS",
+                )),
+              ));
+              $structured_on_legacy = 0;
+              foreach ($legacy as $variation_id) {
+                if (metadata_exists("post", $variation_id, "_uonix_variation_technical_sheet")) {
+                  $structured_on_legacy++;
+                }
+              }
+              echo count($legacy) . ":" . count($backups) . ":" . $structured_on_legacy;
+            '
+          }
+
+          # O banco só é tocado quando o marcador foi criado depois do dry-run.
+          # Primeiro tenta o rollback seletivo das cinco variações, preservando
+          # pedidos e outras escritas concorrentes. O dump integral é fallback
+          # apenas para interrupção no meio da escrita ou estado inconsistente.
+          if [ -f "$db_mutation_marker" ]; then
+            db_rollback_ok=false
+            migration_state='unknown'
+            if current_state="$(migration_state_value 2>/dev/null)"; then
+              migration_state="$current_state"
+            fi
+
+            case "$migration_state" in
+              5:0:0|5:5:0)
+                printf 'rollback: migração já estava no estado original verificado (%s)\n' "$migration_state"
+                db_rollback_ok=true
+                ;;
+              *)
+                printf 'rollback: tentando restauração seletiva das fichas (%s)\n' "$migration_state"
+                if cli uonix ficha-tecnica migrate --rollback; then
+                  db_rollback_ok=true
+                else
+                  printf 'rollback: restauração seletiva indisponível; usando dump integral de contingência\n' >&2
+                fi
+                ;;
+            esac
+
+            if [ "$db_rollback_ok" != true ]; then
+              db_dump="$(find "$backup_dir" -maxdepth 1 -name 'db-*.sql.gz' -print | LC_ALL=C sort | tail -1)"
+              if [ -z "$db_dump" ]; then
+                printf 'backup de banco ausente; rollback incompleto\n' >&2
+              elif ! gzip -t "$db_dump" 2>/dev/null; then
+                printf 'dump de banco corrompido; rollback incompleto\n' >&2
+              elif ! command -v mysql >/dev/null 2>&1; then
+                printf 'cliente mysql ausente; rollback incompleto\n' >&2
+              elif ! credentials="$(cli eval 'echo DB_NAME . "\t" . DB_USER . "\t" . DB_HOST;')"; then
+                printf 'credenciais do banco indisponíveis; rollback incompleto\n' >&2
+              else
+                db_name="$(printf '%s' "$credentials" | cut -f1)"
+                db_user="$(printf '%s' "$credentials" | cut -f2)"
+                db_host="$(printf '%s' "$credentials" | cut -f3)"
+                db_password=''
+                if [ -z "$db_name" ] || [ -z "$db_user" ] || [ -z "$db_host" ]; then
+                  printf 'credenciais do banco incompletas; rollback incompleto\n' >&2
+                elif ! db_password="$(cli eval 'echo DB_PASSWORD;')"; then
+                  printf 'senha do banco indisponível; rollback incompleto\n' >&2
+                elif gzip -dc "$db_dump" | MYSQL_PWD="$db_password" mysql --no-defaults \
+                    --default-character-set=utf8mb4 -h "$db_host" -u "$db_user" "$db_name"; then
+                  restored_state='unknown'
+                  if verified_state="$(migration_state_value 2>/dev/null)"; then
+                    restored_state="$verified_state"
+                  fi
+                  case "$restored_state" in
+                    5:0:0|5:5:0)
+                      printf 'rollback: dump integral restaurado e verificado (%s) a partir de %s\n' \
+                        "$restored_state" "${db_dump##*/}"
+                      db_rollback_ok=true
+                      ;;
+                    *)
+                      printf 'dump integral importado, mas estado pós-restore é inválido (%s); rollback incompleto\n' \
+                        "$restored_state" >&2
+                      ;;
+                  esac
+                else
+                  printf 'restauração do banco falhou; rollback incompleto\n' >&2
+                fi
+                unset db_password
               fi
+            fi
+
+            if [ "$db_rollback_ok" = true ]; then
+              rm -f -- "$db_mutation_marker"
             else
-              printf 'cliente mysql ausente; não é possível restaurar o banco\n' >&2
-              exit 1
+              rollback_failed=1
             fi
           else
-            printf 'rollback: nenhum dump de banco neste backup (somente código)\n'
+            printf 'rollback: banco não foi marcado como mutado; restauração ignorada\n'
           fi
 
-          rm -rf -- "$document_root/wp-content/themes/kadence-child"
-          rm -f -- "$document_root/wp-content/mu-plugins/uonix-core.php"
-          for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
-            [ -d "$module" ] && rm -rf -- "$module"
-          done
+          # Mesmo se o banco falhar, o código ainda é tentado. O marcador só é
+          # removido depois dos smokes remoto e HTTP, fora deste heredoc.
+          if [ -f "$code_mutation_marker" ]; then
+            rm -rf -- "$document_root/wp-content/themes/kadence-child"
+            rm -f -- "$document_root/wp-content/mu-plugins/uonix-core.php"
+            for module in "$document_root"/wp-content/mu-plugins/uonix-*; do
+              [ -d "$module" ] && rm -rf -- "$module"
+            done
 
-          if [ -d "$managed/themes/kadence-child" ]; then
-            cp -a "$managed/themes/kadence-child" "$document_root/wp-content/themes/"
+            if [ -d "$managed/themes/kadence-child" ]; then
+              cp -a "$managed/themes/kadence-child" "$document_root/wp-content/themes/"
+            fi
+            if [ -f "$managed/mu-plugins/uonix-core.php" ]; then
+              cp -a "$managed/mu-plugins/uonix-core.php" "$document_root/wp-content/mu-plugins/"
+            fi
+            for module in "$managed"/mu-plugins/uonix-*; do
+              [ -d "$module" ] || continue
+              cp -a "$module" "$document_root/wp-content/mu-plugins/"
+            done
+          else
+            printf 'rollback: código não foi marcado como mutado; restauração ignorada\n'
           fi
-          if [ -f "$managed/mu-plugins/uonix-core.php" ]; then
-            cp -a "$managed/mu-plugins/uonix-core.php" "$document_root/wp-content/mu-plugins/"
+
+          if [ "$rollback_failed" -ne 0 ]; then
+            printf 'rollback incompleto; lock e marcadores serão preservados para intervenção\n' >&2
+            exit 1
           fi
-          for module in "$managed"/mu-plugins/uonix-*; do
-            [ -d "$module" ] || continue
-            cp -a "$module" "$document_root/wp-content/mu-plugins/"
-          done
 
           speedycache="$document_root/wp-content/cache/speedycache"
           if [ -d "$speedycache" ]; then
@@ -645,21 +841,9 @@ jobs:
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noindex'
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*nofollow'
           tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noarchive'
-          echo "Rollback validado a partir do backup $backup_id."
 
-      - name: Retain thirty code and database backups
-        if: ${{ success() }}
-        continue-on-error: true
-        env:
-          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
-        run: |
-          set -euo pipefail
-          # Trinta, não cinco: medido no host, cada dump comprimido ocupa ~1,3 MB,
-          # então 30 backups somam ~39 MB — irrelevante frente aos 738 GB livres.
-          # Reter só cinco descartaria histórico útil sem economizar nada.
-          # O dump mora dentro do diretório do backup, então esta poda já o cobre.
-          # Variables in this command expand on the remote host.
-          # shellcheck disable=SC2016
+          # O smoke externo também faz parte da prova. Só agora o marcador de código
+          # pode ser removido; se esta conexão falhar, o lock permanece fechado.
           sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
@@ -668,7 +852,15 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
-            'backup_root=/home/storage/f/34/12/siteuonix1/_uonix-deploy-backups; if [ -d "$backup_root" ]; then find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print | LC_ALL=C sort -r | tail -n +31 | while IFS= read -r old_backup; do rm -rf -- "$old_backup"; done; fi'
+            bash -s -- "$operation_lock" "$DEPLOY_RUN_ID" <<'REMOTE'
+          set -euo pipefail
+          lock_path="$1"
+          run_id="$2"
+          test -f "$lock_path/owner"
+          test "$(cat "$lock_path/owner")" = "$run_id"
+          rm -f -- "$lock_path/code-mutation-started"
+          REMOTE
+          echo "Rollback validado a partir do backup $backup_id."
 
       - name: Release exclusive production lock
         if: ${{ always() }}
@@ -692,14 +884,22 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
             "$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST" \
-            bash -s -- "$lock_path" "$DEPLOY_RUN_ID" "$DEPLOY_LOCK_ACQUIRED" <<'REMOTE'
+            bash -s -- "$lock_path" "$DEPLOY_RUN_ID" "$DEPLOY_LOCK_ACQUIRED" "${{ job.status }}" <<'REMOTE'
           set -euo pipefail
           lock_path="$1"
           run_id="$2"
           lock_acquired="$3"
+          job_status="$4"
           if [ "$lock_acquired" = true ]; then
             test -f "$lock_path/owner"
             test "$(cat "$lock_path/owner")" = "$run_id"
+            if [ "$job_status" = success ]; then
+              rm -f -- "$lock_path/code-mutation-started" "$lock_path/db-mutation-started"
+            fi
+            # Em falha/cancelamento, somente um rollback integralmente validado
+            # remove os marcadores. Preservá-los mantém o lock fail-closed.
+            test ! -e "$lock_path/code-mutation-started"
+            test ! -e "$lock_path/db-mutation-started"
             rm -f -- "$lock_path/owner"
             rmdir -- "$lock_path"
           fi
