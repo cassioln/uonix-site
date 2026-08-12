@@ -60,8 +60,173 @@ trigger_block = production.split('\npermissions:', 1)[0]
 forbid(trigger_block, r'^\s+push:\s*$', 'produção ainda dispara por push')
 require(trigger_block, r'^\s+workflow_dispatch:\s*\n\s+inputs:\s*\n\s+confirmation:', 'produção precisa de confirmação manual')
 require(trigger_block, r'confirmation:.*?required:\s*true.*?type:\s*string', 'confirmação de produção precisa ser string obrigatória')
+require(
+    trigger_block,
+    r'migrate_variation_technical_sheet:.*?required:\s*true.*?default:\s*false.*?type:\s*boolean',
+    'migração da ficha em produção precisa ser input booleano explícito e desligado por padrão',
+)
 require(production, r'^concurrency:\s*\n\s+group:\s*uonix-environment-prod\s*$', 'produção precisa compartilhar o lock lógico do destino prod')
+require(production, r'inputs\.migrate_variation_technical_sheet', 'migração da ficha precisa depender do input explícito')
+require(production, r'- name: Migrate legacy variation technical sheets', 'etapa versionada de migração da ficha ausente')
+require(production, r'--dry-run.*?--execute', 'produção precisa executar dry-run antes da migração efetiva')
+require(production, r'migration_args=\(.*?--execute', 'migração de produção precisa usar argumentos protegidos reutilizáveis')
 require(production, r'cancel-in-progress:\s*false', 'produção não pode cancelar uma operação mutável em andamento')
+
+# T66 — o backup integral é contingência da migração, não licença para rebobinar
+# pedidos por qualquer falha de código. Ele deve ser criado o mais perto possível
+# da escrita no banco, e o rollback precisa saber quais domínios foram alterados.
+production_backup_step = named_step_run(production, 'Back up managed remote paths')
+production_publish_step = named_step_run(production, 'Publish only managed paths and verify manifest')
+production_migration_step = named_step_run(production, 'Migrate legacy variation technical sheets')
+production_rollback_step = named_step_run(production, 'Roll back managed code after failure')
+production_release_step = named_step_run(production, 'Release exclusive production lock')
+publish_index = production.index('- name: Publish only managed paths and verify manifest')
+smoke_index = production.index('- name: Clear cache and run smoke tests')
+db_backup_index = production.index('- name: Back up the production database')
+migration_index = production.index('- name: Migrate legacy variation technical sheets')
+rollback_index = production.index('- name: Roll back managed code after failure')
+release_index = production.index('- name: Release exclusive production lock')
+if not db_backup_index < publish_index < smoke_index < migration_index:
+    raise AssertionError('snapshot do banco deve preceder publicação, smoke e migração')
+backup_executable = '\n'.join(
+    line for line in production_backup_step.splitlines()
+    if line.strip() and not line.lstrip().startswith('#')
+)
+require(
+    backup_executable,
+    r'mkdir\s+--\s+"\$backup_dir"',
+    'backup por execução deve criar diretório exclusivamente, sem reutilizar artefato remoto',
+)
+forbid(
+    backup_executable,
+    r'mkdir\s+-p\s+.*\$backup_dir',
+    'backup não pode aceitar diretório preexistente que possa conter manifesto/symlink adversarial',
+)
+require(
+    backup_executable,
+    r'set -o noclobber;\s*:\s*>\s*"\$output"',
+    'manifesto de backup precisa ser criado exclusivamente, sem seguir arquivo preexistente',
+)
+if not migration_index < rollback_index < release_index:
+    raise AssertionError('rollback deve ser o último gate antes da liberação do lock')
+forbid(
+    production,
+    r'- name: Retain .*backups|tail -n \+31.*?rm -rf',
+    'poda de backups não pode apagar a fonte de rollback dentro do deploy protegido',
+)
+require(
+    production,
+    r'- name: Roll back managed code after failure\s*\n\s+if:\s*\$\{\{\s*failure\(\)\s*\|\|\s*cancelled\(\)\s*\}\}',
+    'cancelamento durante a migração também precisa entrar no rollback',
+)
+for marker in ('code-mutation-started', 'db-mutation-started'):
+    if marker not in production:
+        raise AssertionError(f'marcador remoto de mutação ausente: {marker}')
+if production_publish_step.index('code-mutation-started') > production_publish_step.index('rsync -az --delete'):
+    raise AssertionError('marcador de código precisa existir antes do primeiro rsync mutável')
+publish_code = '\n'.join(
+    line for line in production_publish_step.splitlines()
+    if line.strip() and not line.lstrip().startswith('#')
+)
+for token, message in (
+    ('expected_modules=()', 'publicação de produção não inicializa a allowlist de módulos'),
+    ('${#expected_modules[@]}" -eq 0', 'publicação de produção não rejeita allowlist vazia'),
+    ('uonix-*[!A-Za-z0-9._-]*', 'publicação de produção não valida nomes de módulos'),
+    ('for module_name in "${expected_modules[@]}"', 'publicação de produção não publica a allowlist já validada'),
+    ('if [ "$#" -eq 0 ]; then', 'destino de produção não rejeita argv sem módulos'),
+):
+    if token not in publish_code:
+        raise AssertionError(message)
+allowlist_index = publish_code.index('expected_modules=()')
+name_guard_index = publish_code.index('uonix-*[!A-Za-z0-9._-]*')
+empty_gate_index = publish_code.index('${#expected_modules[@]}" -eq 0')
+marker_index = publish_code.index('bash -s -- "$operation_lock" "$DEPLOY_RUN_ID"')
+first_rsync_index = publish_code.index('rsync -az')
+if not allowlist_index < name_guard_index < empty_gate_index < marker_index < first_rsync_index:
+    raise AssertionError(
+        'allowlist de produção precisa ser validada antes do marcador e do primeiro rsync mutável'
+    )
+require(
+    publish_code,
+    r'\(\s*set -o noclobber;\s*umask 077;\s*printf\s+\x27%s\\n\x27\s+"\$run_id"\s+>\s+"\$marker"\s*\)',
+    'marcador de código precisa ser criado exclusivamente, privado e com owner em linha executável',
+)
+require(
+    publish_code,
+    r'rsync\s+-az\s+--chmod=F600\s+\\\s+-e\s+"\$ssh_transport"\s+\\\s+\.deploy/manifest\.sha256\s+\\\s+"\$remote:\$BACKUP_DIR/manifest\.expected\.sha256"',
+    'transporte do manifesto esperado precisa publicá-lo explicitamente em modo 0600',
+)
+require(
+    publish_code,
+    r'test ! -e "\$manifest"\s+test ! -L "\$manifest"\s+\(\s*set -o noclobber;\s*umask 077;\s*:\s*>\s*"\$manifest"\s*\)\s+chmod 600 "\$manifest"\s+test -f "\$manifest"\s+test ! -L "\$manifest"\s+test ! -s "\$manifest"\s+test "\$\(file_mode "\$manifest"\)" = 600',
+    'path do manifesto esperado precisa ser reservado exclusivamente, vazio, regular e 0600 antes do rsync',
+)
+require(
+    publish_code,
+    r'expected_manifest_checksum="\$\(sha256sum \.deploy/manifest\.sha256 \| cut -d \' \' -f 1\)"',
+    'hash integral do manifesto precisa ser calculado sobre o bundle local antes do transporte',
+)
+require(
+    publish_code,
+    r'bash -s -- "\$LOCAWEB_DOCUMENT_ROOT" "\$BACKUP_DIR/manifest\.expected\.sha256" "\$expected_manifest_checksum"',
+    'consumidor remoto precisa receber o hash integral calculado no runner',
+)
+require(
+    publish_code,
+    r'actual_manifest_checksum="\$\(sha256sum "\$manifest" \| cut -d \' \' -f 1\)"\s+test "\$actual_manifest_checksum" = "\$expected_manifest_checksum"',
+    'consumidor remoto precisa comparar o manifesto recebido ao hash integral do runner',
+)
+manifest_hash_index = publish_code.index('expected_manifest_checksum="$(sha256sum .deploy/manifest.sha256')
+manifest_reserve_index = publish_code.index('bash -s -- "$BACKUP_DIR/manifest.expected.sha256"')
+manifest_rsync_index = publish_code.index('rsync -az --chmod=F600')
+manifest_compare_index = publish_code.index('test "$actual_manifest_checksum" = "$expected_manifest_checksum"')
+if not manifest_hash_index < manifest_reserve_index < manifest_rsync_index < manifest_compare_index:
+    raise AssertionError('hash local, reserva exclusiva, transporte e comparação remota estão fora de ordem')
+checkpoint_token = '--backup-id="zz-migration-${BACKUP_ID}"'
+if production_migration_step.index(checkpoint_token) > production_migration_step.index('--dry-run'):
+    raise AssertionError('checkpoint fresco do banco precisa preceder dry-run e mutação')
+forbid(production_migration_step, r':\s*>\s*"\$db_mutation_marker"', 'shell não pode antecipar o marcador antes de saber se o PHP escreverá')
+for option in ('--mutation-marker="$db_mutation_marker"', '--mutation-owner="$run_id"', '--migration-lock="$migration_lock"'):
+    if option not in production_migration_step:
+        raise AssertionError(f'execute protegido não passa {option}')
+if production_migration_step.count('cli uonix ficha-tecnica migrate "${migration_args[@]}"') != 2:
+    raise AssertionError('execute protegido e verificação idempotente precisam usar os mesmos argumentos exatamente duas vezes')
+forbid(production_migration_step, r'mkdir\s+--\s+"\$migration_lock"|trap\s+cleanup\s+EXIT', 'wrapper SSH não pode possuir/remover o lock do processo PHP')
+for option in ('--mutation-marker="$db_mutation_marker"', '--mutation-owner="$run_id"', '--migration-lock="$migration_lock"'):
+    if option not in production_rollback_step:
+        raise AssertionError(f'rollback seletivo protegido não passa {option}')
+require(
+    production_rollback_step,
+    r'while \[ -d "\$migration_lock" \].*?sleep 1.*?rollback recusado: migração remota ainda ativa',
+    'rollback precisa aguardar e recusar escrita concorrente com migração remota',
+)
+if production_rollback_step.index('while [ -d "$migration_lock" ]') > production_rollback_step.index('if [ -f "$db_mutation_marker" ]'):
+    raise AssertionError('espera do lock remoto precisa preceder qualquer restauração de banco')
+rollback_executable = '\n'.join(
+    line for line in production_rollback_step.splitlines()
+    if line.strip() and not line.lstrip().startswith('#')
+)
+forbid(
+    rollback_executable,
+    r'mysql\s+--no-defaults|gzip\s+-dc\s+"\$db_dump"|dump integral restaurado',
+    'rollback automático não pode importar dump integral e apagar pedidos/escritas concorrentes',
+)
+require(
+    rollback_executable,
+    r'if \[ -f "\$db_mutation_marker" \].*?migrate\s+\\?\s*--rollback',
+    'rollback do banco deve ser exclusivamente seletivo e condicionado ao marcador',
+)
+require(
+    production_rollback_step,
+    r'migrate\s+\\?\s*--rollback.*?rollback_failed=1.*?rollback incompleto; código, lock e marcadores serão preservados',
+    'falha seletiva precisa permanecer fail-closed sem fallback integral',
+)
+for marker in ('code-mutation-started', 'db-mutation-started'):
+    require(
+        production_release_step,
+        rf'test ! -e "\$lock_path/{marker}"',
+        f'lock de produção não pode ser liberado com marcador pendente: {marker}',
+    )
 require(production, r'^\s{2}authorize:\s*$', 'job de autorização local ausente')
 require(production, r'environment:\s*production-locaweb', 'Environment protegido de produção ausente')
 require(production, r'ENABLE_DEPLOY_PRODUCTION', 'guard persistente de produção ausente')
@@ -139,6 +304,8 @@ for document, label in ((production, 'produção'), (clone, 'clone'), (hostgator
 
 for command in (
     'bash scripts/tests/test-production-workflow.sh',
+    'python3 scripts/tests/test-production-rollback-runtime.py',
+    'php scripts/tests/test-managed-code-no-schema-mutations.php',
     'bash scripts/tests/test-clone-lock.sh',
     'php scripts/tests/test-blog-archive-optional-woocommerce.php',
     'php scripts/tests/test-woocommerce-optional-plugin.php',
@@ -167,6 +334,7 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
         'UONIX_PRODUCTION_CONFIRMATION': f'PUBLICAR {sha} EM SITE.UONIX.COM.BR',
         'UONIX_REQUEST_SHA': sha,
         'UONIX_REQUEST_REF': 'refs/heads/master',
+        'UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET': 'false',
         'LOCAWEB_SSH_HOST': 'ftp.site.uonix.com.br',
         'LOCAWEB_SSH_PORT': '22',
         'LOCAWEB_SSH_USER': 'siteuonix1',
