@@ -2,7 +2,7 @@
 
 O contrato canônico de ambientes fica em [ambientes.md](ambientes.md). A topologia vigente é:
 
-- Produção provisória: `https://site.uonix.com.br/` na branch `master` e Locaweb.
+- Produção: `https://uonix.com.br/` na branch `master` e Locaweb (cutover concluído em 2026-08-15).
 - QA: `https://uonix.ksio.dev/` na branch `qa` e HostGator.
 - DEV: `https://test.uonix.ksio.dev/` na branch `dev` e HostGator.
 - Local: `http://localhost:8080/` em Podman no Mac; não possui deploy remoto.
@@ -11,7 +11,7 @@ O contrato canônico de ambientes fica em [ambientes.md](ambientes.md). A topolo
 
 Todos os deploys são fail-closed enquanto a guarda explícita do respectivo ambiente estiver desativada. A validação do workflow pode executar em um push, mas isso não autoriza publicação de arquivos. Não habilite uma guarda, faça dispatch ou altere configurações do host sem a aprovação operacional correspondente.
 
-Produção permanece provisória e sem deploy automático autorizado. Qualquer futura publicação para `site.uonix.com.br` requer aprovação humana explícita, preflight, backup validado, smoke test e rollback disponível.
+Produção não tem deploy automático autorizado. Qualquer publicação para `uonix.com.br` requer aprovação humana explícita, preflight, backup validado, smoke test e rollback disponível.
 
 ## Workflows
 

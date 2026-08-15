@@ -18,7 +18,7 @@ themes/kadence-child/snippets/
 
 ## Ambientes
 
-Comportamentos que variam por ambiente devem usar o helper versionado em `mu-plugins/uonix-shared/environment.php`, sem duplicar hostnames em snippets visuais. O contrato canônico cobre produção provisória (`https://site.uonix.com.br/`), QA (`https://uonix.ksio.dev/`), DEV (`https://test.uonix.ksio.dev/`) e local (`http://localhost:8080/`) em [ambientes.md](ambientes.md).
+Comportamentos que variam por ambiente devem usar o helper versionado em `mu-plugins/uonix-shared/environment.php`, sem duplicar hostnames em snippets visuais. O contrato canônico cobre produção (`https://uonix.com.br/`), QA (`https://uonix.ksio.dev/`), DEV (`https://test.uonix.ksio.dev/`) e local (`http://localhost:8080/`) em [ambientes.md](ambientes.md).
 
 ## Regras
 

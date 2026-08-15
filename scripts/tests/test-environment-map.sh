@@ -13,7 +13,7 @@ if [ ! -f "$LIBRARY" ]; then
   fail 'scripts/lib/environment-map.sh ainda não existe.'
 fi
 
-export LOCAWEB_SSH_HOST='ftp.site.uonix.com.br'
+export LOCAWEB_SSH_HOST='ftp.uonix.com.br'
 export LOCAWEB_SSH_PORT='22'
 export LOCAWEB_SSH_USER='siteuonix1'
 export LOCAWEB_DOCUMENT_ROOT='/home/storage/f/34/12/siteuonix1/public_html'
@@ -25,7 +25,7 @@ export HOSTGATOR_SSH_PORT='22'
 export HOSTGATOR_SSH_USER='uonix'
 export HOSTGATOR_QA_ROOT='/home2/uonix/public_html'
 export HOSTGATOR_DEV_ROOT='/home2/uonix/dev_uonix'
-export PRODUCTION_URL='https://site.uonix.com.br'
+export PRODUCTION_URL='https://uonix.com.br'
 export QA_URL='https://uonix.ksio.dev'
 export DEVELOPMENT_URL='https://test.uonix.ksio.dev'
 
@@ -49,7 +49,7 @@ if uonix_env_canonical unknown >/dev/null 2>&1; then
   fail 'ambiente desconhecido foi aceito'
 fi
 
-assert_eq 'https://site.uonix.com.br' "$(uonix_env_url prod)" 'URL produção'
+assert_eq 'https://uonix.com.br' "$(uonix_env_url prod)" 'URL produção'
 assert_eq 'https://uonix.ksio.dev' "$(uonix_env_url qa)" 'URL QA'
 assert_eq 'https://test.uonix.ksio.dev' "$(uonix_env_url dev)" 'URL DEV'
 assert_eq 'http://localhost:8080' "$(uonix_env_url local)" 'URL local'
@@ -69,7 +69,7 @@ assert_eq hostgator-key "$(uonix_env_transport qa)" 'transporte QA'
 assert_eq hostgator-key "$(uonix_env_transport dev)" 'transporte DEV'
 assert_eq local-podman "$(uonix_env_transport local)" 'transporte local'
 
-assert_eq 'ftp.site.uonix.com.br' "$(uonix_env_host prod)" 'host produção'
+assert_eq 'ftp.uonix.com.br' "$(uonix_env_host prod)" 'host produção'
 assert_eq '108.179.252.137' "$(uonix_env_host qa)" 'host QA'
 assert_eq '108.179.252.137' "$(uonix_env_host dev)" 'host DEV'
 assert_eq '' "$(uonix_env_host local)" 'host local vazio'

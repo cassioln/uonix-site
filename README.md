@@ -25,7 +25,7 @@ Os workflows de deploy ficam fail-closed até a guarda explícita de cada ambien
 
 ## Ambientes
 
-- Produção provisória: `https://site.uonix.com.br/` (branch `master`, Locaweb).
+- Produção: `https://uonix.com.br/` (branch `master`, Locaweb).
 - QA: `https://uonix.ksio.dev/` (branch `qa`, HostGator).
 - DEV: `https://test.uonix.ksio.dev/` (branch `dev`, HostGator).
 - Local: `http://localhost:8080/` (branch `local`, Podman no Mac).

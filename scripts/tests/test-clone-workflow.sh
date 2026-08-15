@@ -201,10 +201,10 @@ clone_validation_script = named_step_run(
 )
 
 canonical_clone_topology = {
-    'PRODUCTION_URL': 'https://site.uonix.com.br',
+    'PRODUCTION_URL': 'https://uonix.com.br',
     'QA_URL': 'https://uonix.ksio.dev',
     'DEVELOPMENT_URL': 'https://test.uonix.ksio.dev',
-    'LOCAWEB_SSH_HOST': 'ftp.site.uonix.com.br',
+    'LOCAWEB_SSH_HOST': 'ftp.uonix.com.br',
     'LOCAWEB_SSH_PORT': '22',
     'LOCAWEB_SSH_USER': 'siteuonix1',
     'LOCAWEB_DOCUMENT_ROOT': '/home/storage/f/34/12/siteuonix1/public_html',

@@ -34,7 +34,7 @@ O diretório `local/wp-content/` fica fora do Git e serve apenas como runtime lo
 
 ## Topologia Operacional
 
-- Produção provisória: `https://site.uonix.com.br/` na Locaweb.
+- Produção: `https://uonix.com.br/` na Locaweb.
 - QA: `https://uonix.ksio.dev/` na HostGator.
 - DEV: `https://test.uonix.ksio.dev/` na HostGator.
 - Local: `http://localhost:8080/` em Podman no Mac.
