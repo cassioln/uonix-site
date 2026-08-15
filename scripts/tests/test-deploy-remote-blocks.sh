@@ -266,16 +266,34 @@ assert_block_structure() {
     || fail "$label: bloco remoto sem 'set -euo pipefail' (modo estrito incompleto)"
 
   # STRUCT-2: nenhuma linha com dois comandos colapsados. Heurística conservadora:
-  # atribuição simples seguida de 2+ espaços e outro token de comando na mesma
-  # linha. Não casa com `export A=1 B=2`, `var=$(cmd arg)` nem `A=1 cmd` (prefixo
-  # de ambiente com 1 espaço), que são construções legítimas.
-  if grep -nE '^\s*[A-Za-z_][A-Za-z0-9_]*="?\$[0-9]"?\s{2,}\S' "$block" > "$TMP_DIR/collapsed.out"; then
+  # atribuição de parâmetro posicional seguida de 2+ espaços e outro TOKEN DE
+  # COMANDO na mesma linha.
+  #
+  # A classe de caracteres negada no fim é o que evita falso positivo. Sem ela, a
+  # regex casaria com `var="$1"  # comentário`, que é bash perfeitamente legítimo
+  # (apontado por revisão independente do PR #105). Também exclui operadores, para
+  # não rejeitar `var="$1" && cmd`, `var="$1" || cmd`, `var="$1" ; cmd` e
+  # redirecionamentos — todos válidos.
+  #
+  # Não casa com `export A=1 B=2`, `var=$(cmd arg)` nem `A=1 cmd` (prefixo de
+  # ambiente com um espaço), verificados um a um.
+  if grep -nE '^\s*[A-Za-z_][A-Za-z0-9_]*="?\$[0-9]"?\s{2,}[^#&|;<>[:space:]]' "$block" > "$TMP_DIR/collapsed.out"; then
     fail "$label: linha com dois comandos colapsados: $(cat "$TMP_DIR/collapsed.out")"
   fi
 
   # STRUCT-3: o heredoc não pode vir vazio nem truncado por remoção acidental.
-  [ "$(wc -l < "$block" | tr -d ' ')" -ge 5 ] \
-    || fail "$label: bloco remoto suspeito de truncamento ($(wc -l < "$block" | tr -d ' ') linhas)"
+  #
+  # O limiar é 3 linhas, não um número maior, de propósito: os blocos REMOTE deste
+  # workflow variam de 6 a 64 linhas, então qualquer limiar próximo do menor bloco
+  # seria frágil — uma refatoração legítima que encurtasse o bloco menor quebraria
+  # o teste sem que nada estivesse errado (change-detector). Com 3, a asserção pega
+  # o caso que importa (bloco esvaziado ou reduzido a um resto inútil) sem acoplar
+  # ao tamanho atual. O `set -euo pipefail` do STRUCT-1 já garante 1 linha, então
+  # 3 significa "sobrou mais que o cabeçalho".
+  local block_lines
+  block_lines="$(wc -l < "$block" | tr -d ' ')"
+  [ "$block_lines" -ge 3 ] \
+    || fail "$label: bloco remoto vazio ou truncado ($block_lines linhas)"
 }
 
 assert_block_structure 'backup'   "$backup_block"
