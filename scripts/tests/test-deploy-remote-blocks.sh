@@ -238,4 +238,100 @@ fi
 grep -qiE 'inválido|invalido' "$TMP_DIR/hostile.out" \
   || fail "nome hostil rejeitado sem mensagem clara: $(cat "$TMP_DIR/hostile.out")"
 
-printf 'PASS: blocos remotos de backup, publicação e rollback executam com allowlist, preservação, reversão completa e rejeição de nome hostil.\n'
+# --- Integridade ESTRUTURAL dos blocos remotos ------------------------------
+# STRUCT-1..4: as asserções acima executam os blocos contra fixtures e validam o
+# RESULTADO. Isso deixa passar quebras que não alteram o comportamento observável
+# naquele fixture específico. Três casos reais, todos comprovados por mutação em
+# 2026-08-15 (o teste passava com o workflow quebrado):
+#
+#   a) `set -euo pipefail` -> `set -u`: só se manifesta quando um comando falha
+#      no meio de um bloco. Sem `-e`, um deploy segue após erro parcial.
+#   b) guardas `if [ "${#allowlist[@]}" -eq 0 ]` -> `if false`: só se manifesta
+#      com allowlist vazia. É proteção contra operação destrutiva sem allowlist.
+#   c) duas linhas colapsadas numa só (`var="$2"          comando`): o fixture
+#      não exercita a variável perdida, e o YAML continua válido.
+#
+# O caso (c) não é hipotético: aconteceu ao remover código morto de cache. Sete
+# suítes passaram com o bug presente; foi encontrado por leitura do diff.
+#
+# Estas asserções inspecionam o TEXTO dos blocos extraídos, não o resultado da
+# execução, e por isso pegam as três classes.
+
+assert_block_structure() {
+  local label="$1" block="$2"
+
+  # STRUCT-1: modo estrito completo. `set -u` sozinho não basta: sem `-e` o bloco
+  # continua após falha, e sem `pipefail` um erro no meio de pipe fica invisível.
+  #
+  # Escopo: apenas os heredocs REMOTE, que é o que este teste extrai (daí o nome do
+  # arquivo). O workflow tem 20 ocorrências de `set -euo pipefail`, das quais 9
+  # estão em blocos REMOTE e 11 em `run: |` do runner. Mutar um `set -euo` do
+  # runner NÃO faz este teste falhar, e isso é correto: script do runner é coberto
+  # pelo próprio GitHub Actions, que marca o step como falho. Confundir os dois
+  # levaria a concluir falsa lacuna de cobertura.
+  grep -qE '^\s*set -euo pipefail\s*$' "$block" \
+    || fail "$label: bloco remoto sem 'set -euo pipefail' (modo estrito incompleto)"
+
+  # STRUCT-2: nenhuma linha com dois comandos colapsados. Heurística conservadora:
+  # atribuição de parâmetro posicional seguida de 2+ espaços e outro TOKEN DE
+  # COMANDO na mesma linha.
+  #
+  # A classe de caracteres negada no fim é o que evita falso positivo. Sem ela, a
+  # regex casaria com `var="$1"  # comentário`, que é bash perfeitamente legítimo
+  # (apontado por revisão independente do PR #105). Também exclui operadores, para
+  # não rejeitar `var="$1" && cmd`, `var="$1" || cmd`, `var="$1" ; cmd` e
+  # redirecionamentos — todos válidos.
+  #
+  # Não casa com `export A=1 B=2`, `var=$(cmd arg)` nem `A=1 cmd` (prefixo de
+  # ambiente com um espaço), verificados um a um.
+  if grep -nE '^\s*[A-Za-z_][A-Za-z0-9_]*="?\$[0-9]"?\s{2,}[^#&|;<>[:space:]]' "$block" > "$TMP_DIR/collapsed.out"; then
+    fail "$label: linha com dois comandos colapsados: $(cat "$TMP_DIR/collapsed.out")"
+  fi
+
+  # STRUCT-3: o heredoc não pode vir vazio nem truncado por remoção acidental.
+  #
+  # O limiar é 20 linhas. Justificativa medida: os três blocos que este teste
+  # extrai têm 64 (backup), 46 (publish) e 53 (rollback) linhas. Um limiar de 3 ou
+  # 5 seria decorativo — nunca dispararia, nem se metade do bloco desaparecesse
+  # (apontado por revisão independente do PR #105, que classificou o limiar
+  # anterior como "essencialmente decorativo").
+  #
+  # 20 é menos da metade do menor bloco (46), então não é change-detector: sobra
+  # folga para refatoração legítima. Ao mesmo tempo pega o caso real — remoção
+  # acidental de um trecho grande do heredoc, que foi como os blocos de cache
+  # saíram do workflow. Se algum bloco legitimamente encurtar abaixo de 20, o
+  # ajuste do limiar é uma linha e vem acompanhado da razão no diff.
+  local block_lines
+  block_lines="$(wc -l < "$block" | tr -d ' ')"
+  [ "$block_lines" -ge 20 ] \
+    || fail "$label: bloco remoto vazio ou truncado ($block_lines linhas, mínimo 20)"
+}
+
+assert_block_structure 'backup'   "$backup_block"
+assert_block_structure 'publish'  "$publish_block"
+assert_block_structure 'rollback' "$rollback_block"
+
+# STRUCT-4: cada bloco deve CONTER a guarda de coleção vazia.
+#
+# Escopo honesto desta asserção: ela detecta a REMOÇÃO da guarda, não a sua
+# neutralização. Trocar `if [ "${#allowlist[@]}" -eq 0 ]` por `if false` some com
+# o padrão `eq 0 ]` e portanto FALHA aqui — mas trocar por
+# `if [ "${#allowlist[@]}" -eq 0 ] && false` passaria. Remoção acidental é o
+# cenário realista (foi assim que os blocos de cache saíram do workflow), então a
+# asserção cobre o caso que de fato acontece.
+#
+# O comportamento fail-closed com allowlist vazia é exercitado pelas asserções de
+# EXECUÇÃO acima (~linhas 146 e 151), para backup e publish. As duas camadas são
+# complementares: aqui é presença no texto, lá é comportamento.
+#
+# Não é possível dirigir os três blocos com uma chamada genérica: as assinaturas
+# de argumento diferem (publish recebe só o root; backup e rollback recebem root
+# + caminho de backup), e publish rejeita o caminho como nome de módulo inválido.
+for pair in "backup:$backup_block" "publish:$publish_block" "rollback:$rollback_block"; do
+  label="${pair%%:*}"
+  block="${pair#*:}"
+  grep -qE 'eq 0 \]' "$block" \
+    || fail "$label: bloco remoto sem guarda de coleção vazia (allowlist/expected_modules)"
+done
+
+printf 'PASS: blocos remotos de backup, publicação e rollback executam com allowlist, preservação, reversão completa, rejeição de nome hostil e integridade estrutural (modo estrito, linhas não colapsadas, guardas fail-closed).\n'
