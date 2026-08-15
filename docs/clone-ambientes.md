@@ -54,7 +54,7 @@ workflows de deploy.
 
 | Código | Função | Hospedagem e document root | URL e título após o clone | `WP_ENVIRONMENT_TYPE` | Transporte |
 | --- | --- | --- | --- | --- | --- |
-| `prod` | Produção provisória | Locaweb — `/home/storage/f/34/12/siteuonix1/public_html` | `https://site.uonix.com.br` — `Uônix` | `production` | SSH com senha em arquivo privado |
+| `prod` | Produção | Locaweb — `/home/storage/f/34/12/siteuonix1/public_html` | `https://uonix.com.br` — `Uônix` | `production` | SSH com senha em arquivo privado |
 | `qa` | Homologação | HostGator — `/home2/uonix/public_html` | `https://uonix.ksio.dev` — `QA - UONIX` | `staging` | SSH com chave privada |
 | `dev` | Desenvolvimento remoto | HostGator — `/home2/uonix/dev_uonix` | `https://test.uonix.ksio.dev` — `DEV - UONIX` | `development` | SSH com chave privada |
 | `local` | Desenvolvimento local | Podman — `/var/www/html`, com `local/wp-content` montado do Mac | `http://localhost:8080` — `LOCAL - UONIX` | `local` | Podman no Mac |

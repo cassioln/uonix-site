@@ -88,7 +88,7 @@ function is_admin()      { return false; }
 function is_feed()       { return false; }
 function is_embed()      { return false; }
 function is_front_page() { return true; }
-function home_url( $path = '' ) { return 'https://site.uonix.com.br' . $path; }
+function home_url( $path = '' ) { return 'https://uonix.com.br' . $path; }
 function esc_url( $value )  { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
 function esc_attr( $value ) { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }
 function esc_html( $value ) { return htmlspecialchars( (string) $value, ENT_QUOTES, 'UTF-8' ); }

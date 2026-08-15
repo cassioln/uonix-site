@@ -19,7 +19,7 @@ Não versionar neste documento `wp-config.php`, senhas, chaves, tokens, salts, v
 - O fluxo normal de promoção é `dev → qa → master` por revisão.
 - A branch `local` recebe alterações de `dev`, mas não faz merge automático de volta para `dev`.
 - O código versionado é separado do runtime WordPress. Não transportar `wp-config.php`, credenciais, caches, logs, backups, uploads de teste ou configurações específicas de host como se fossem código promovível.
-- Produção em `site.uonix.com.br` continua provisória. O cutover para o domínio oficial é uma etapa futura, separada e sujeita a aprovação explícita. Enquanto isso, a indexação de produção permanece bloqueada.
+- Produção atende em `uonix.com.br` desde o cutover de 2026-08-15. O domínio de trânsito `site.uonix.com.br` foi removido do painel e não resolve mais. A indexação está liberada (`UONIX_ALLOW_INDEXING=true`, `blog_public=1`).
 
 ## Constantes e configuração por ambiente
 
@@ -27,7 +27,7 @@ As constantes devem ser definidas na configuração privada de cada ambiente, nu
 
 | Ambiente | Constantes/políticas obrigatórias |
 |---|---|
-| Produção provisória | `WP_ENVIRONMENT_TYPE=production`; `WP_HOME` e `WP_SITEURL` apontam para `https://site.uonix.com.br`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=true`. Somente este ambiente pode receber IDs de analytics. |
+| Produção | `WP_ENVIRONMENT_TYPE=production`; `WP_HOME` e `WP_SITEURL` apontam para `https://uonix.com.br`; `UONIX_ALLOW_INDEXING=true`; `UONIX_ANALYTICS_ENABLED=true`. Somente este ambiente pode receber IDs de analytics. **`WP_HOME`/`WP_SITEURL` são constantes**: `wp option update home` NÃO tem efeito enquanto elas existirem — o valor da constante sempre vence sobre o banco. Em troca de domínio, editar `wp-config.php` primeiro e depois corrigir o banco com `UPDATE` SQL direto. |
 | QA | `WP_ENVIRONMENT_TYPE=staging`; URL canônica `https://uonix.ksio.dev`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; caixa segura não produtiva e Turnstile de teste definidos fora do repositório. |
 | DEV | `WP_ENVIRONMENT_TYPE=development`; URL canônica `https://test.uonix.ksio.dev`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; caixa segura não produtiva e Turnstile de teste definidos fora do repositório. |
 | Local | `WP_ENVIRONMENT_TYPE=local`; URL canônica `http://localhost:8080`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; Mailpit ativo e Turnstile desligado. |
