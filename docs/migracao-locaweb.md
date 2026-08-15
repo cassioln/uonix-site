@@ -239,7 +239,7 @@ Descoberto em 2026-08-03, depois de aplicar o bloco em QA e o header não aparec
 
 | Camada | Onde | Como invalidar |
 | --- | --- | --- |
-| SpeedyCache | `wp-content/cache/speedycache` | `wp cache flush` + remover arquivos |
+| ~~SpeedyCache~~ | ~~`wp-content/cache/speedycache`~~ | **EXTINTO** — plugin removido de produção. WP Rocket também foi removido em 2026-08-15. Nenhum cache de página ativo hoje; a única camada é `pods-alternative-cache` (cache de objeto do Pods). |
 | Cloudflare (borda) | fora do servidor | purga na conta, ou esperar expirar |
 | navegador/CDN cliente | — | `?query` para bypass |
 

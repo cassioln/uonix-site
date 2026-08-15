@@ -653,11 +653,6 @@ jobs:
           php_bin="$2"
           wp_bin="$3"
           target_url="$4"
-          speedycache="$document_root/wp-content/cache/speedycache"
-
-          if [ -d "$speedycache" ]; then
-            find "$speedycache" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-          fi
 
           # Rótulo antes de cada assertiva: sem isto o step só reporta "exit 1" e a
           # causa fica invisível no log, exigindo SSH para descobrir qual reprovou.
@@ -1035,11 +1030,6 @@ jobs:
           if [ "$rollback_failed" -ne 0 ]; then
             printf 'rollback incompleto; lock e marcadores serão preservados para intervenção\n' >&2
             exit 1
-          fi
-
-          speedycache="$document_root/wp-content/cache/speedycache"
-          if [ -d "$speedycache" ]; then
-            find "$speedycache" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
           fi
           # As assertivas abaixo espelham as do smoke. Um rollback que valide MENOS
           # pode declarar sucesso num estado que o smoke reprovaria — e o operador

@@ -505,10 +505,6 @@ jobs:
           set -euo pipefail
           document_root="$1"
           expected_environment="$2"
-          speedycache="$document_root/wp-content/cache/speedycache"
-          if [ -d "$speedycache" ]; then
-            find "$speedycache" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-          fi
           wp --path="$document_root" cache flush
           wp --path="$document_root" core is-installed
           test "$(wp --path="$document_root" eval 'echo defined("UONIX_ENV") ? UONIX_ENV : "";')" = "$expected_environment"
@@ -609,11 +605,6 @@ jobs:
             [ -d "$module" ] || continue
             cp -a "$module" "$document_root/wp-content/mu-plugins/"
           done
-
-          speedycache="$document_root/wp-content/cache/speedycache"
-          if [ -d "$speedycache" ]; then
-            find "$speedycache" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-          fi
           wp --path="$document_root" cache flush
           wp --path="$document_root" core is-installed
           REMOTE
