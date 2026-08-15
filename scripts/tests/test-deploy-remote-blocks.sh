@@ -283,17 +283,21 @@ assert_block_structure() {
 
   # STRUCT-3: o heredoc não pode vir vazio nem truncado por remoção acidental.
   #
-  # O limiar é 3 linhas, não um número maior, de propósito: os blocos REMOTE deste
-  # workflow variam de 6 a 64 linhas, então qualquer limiar próximo do menor bloco
-  # seria frágil — uma refatoração legítima que encurtasse o bloco menor quebraria
-  # o teste sem que nada estivesse errado (change-detector). Com 3, a asserção pega
-  # o caso que importa (bloco esvaziado ou reduzido a um resto inútil) sem acoplar
-  # ao tamanho atual. O `set -euo pipefail` do STRUCT-1 já garante 1 linha, então
-  # 3 significa "sobrou mais que o cabeçalho".
+  # O limiar é 20 linhas. Justificativa medida: os três blocos que este teste
+  # extrai têm 64 (backup), 46 (publish) e 53 (rollback) linhas. Um limiar de 3 ou
+  # 5 seria decorativo — nunca dispararia, nem se metade do bloco desaparecesse
+  # (apontado por revisão independente do PR #105, que classificou o limiar
+  # anterior como "essencialmente decorativo").
+  #
+  # 20 é menos da metade do menor bloco (46), então não é change-detector: sobra
+  # folga para refatoração legítima. Ao mesmo tempo pega o caso real — remoção
+  # acidental de um trecho grande do heredoc, que foi como os blocos de cache
+  # saíram do workflow. Se algum bloco legitimamente encurtar abaixo de 20, o
+  # ajuste do limiar é uma linha e vem acompanhado da razão no diff.
   local block_lines
   block_lines="$(wc -l < "$block" | tr -d ' ')"
-  [ "$block_lines" -ge 3 ] \
-    || fail "$label: bloco remoto vazio ou truncado ($block_lines linhas)"
+  [ "$block_lines" -ge 20 ] \
+    || fail "$label: bloco remoto vazio ou truncado ($block_lines linhas, mínimo 20)"
 }
 
 assert_block_structure 'backup'   "$backup_block"
