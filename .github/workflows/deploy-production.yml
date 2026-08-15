@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: Digite PUBLICAR <SHA> EM SITE.UONIX.COM.BR
+        description: Digite PUBLICAR <SHA> EM UONIX.COM.BR
         required: true
         type: string
 
@@ -40,16 +40,16 @@ jobs:
           [ "$UONIX_REQUEST_REF" = 'refs/heads/master' ]
           case "$UONIX_REQUEST_SHA" in *[!0-9a-f]*|'') exit 1 ;; esac
           [ "${#UONIX_REQUEST_SHA}" -eq 40 ]
-          expected_confirmation="PUBLICAR ${UONIX_REQUEST_SHA} EM SITE.UONIX.COM.BR"
+          expected_confirmation="PUBLICAR ${UONIX_REQUEST_SHA} EM UONIX.COM.BR"
           [ "$UONIX_PRODUCTION_CONFIRMATION" = "$expected_confirmation" ]
-          [ "$LOCAWEB_SSH_HOST" = 'ftp.site.uonix.com.br' ]
+          [ "$LOCAWEB_SSH_HOST" = 'ftp.uonix.com.br' ]
           [ "$LOCAWEB_SSH_PORT" = '22' ]
           [ "$LOCAWEB_SSH_USER" = 'siteuonix1' ]
           [ "$LOCAWEB_ACCOUNT_ROOT" = '/home/storage/f/34/12/siteuonix1' ]
           [ "$LOCAWEB_DOCUMENT_ROOT" = '/home/storage/f/34/12/siteuonix1/public_html' ]
           [ "$LOCAWEB_PHP_BIN" = '/usr/bin/php85' ]
           [ "$LOCAWEB_WP_BIN" = '/home/storage/f/34/12/siteuonix1/bin/wp-cli.phar' ]
-          [ "$TARGET_URL" = 'https://site.uonix.com.br' ]
+          [ "$TARGET_URL" = 'https://uonix.com.br' ]
 
   validate:
     name: Validate before production
@@ -77,14 +77,14 @@ jobs:
       - name: Validate canonical production target before credentials
         run: |
           set -euo pipefail
-          [ "$LOCAWEB_SSH_HOST" = 'ftp.site.uonix.com.br' ]
+          [ "$LOCAWEB_SSH_HOST" = 'ftp.uonix.com.br' ]
           [ "$LOCAWEB_SSH_PORT" = '22' ]
           [ "$LOCAWEB_SSH_USER" = 'siteuonix1' ]
           [ "$LOCAWEB_ACCOUNT_ROOT" = '/home/storage/f/34/12/siteuonix1' ]
           [ "$LOCAWEB_DOCUMENT_ROOT" = '/home/storage/f/34/12/siteuonix1/public_html' ]
           [ "$LOCAWEB_PHP_BIN" = '/usr/bin/php85' ]
           [ "$LOCAWEB_WP_BIN" = '/home/storage/f/34/12/siteuonix1/bin/wp-cli.phar' ]
-          [ "$TARGET_URL" = 'https://site.uonix.com.br' ]
+          [ "$TARGET_URL" = 'https://uonix.com.br' ]
           case "$DEPLOY_RUN_ID" in ''|*[!A-Za-z0-9._-]*) exit 1 ;; esac
 
       - name: Checkout repository

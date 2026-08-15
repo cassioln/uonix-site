@@ -65,17 +65,17 @@ require(production, r'cancel-in-progress:\s*false', 'produção não pode cancel
 require(production, r'^\s{2}authorize:\s*$', 'job de autorização local ausente')
 require(production, r'environment:\s*production-locaweb', 'Environment protegido de produção ausente')
 require(production, r'ENABLE_DEPLOY_PRODUCTION', 'guard persistente de produção ausente')
-require(production, r'PUBLICAR \$\{UONIX_REQUEST_SHA\} EM SITE\.UONIX\.COM\.BR', 'confirmação não está vinculada ao SHA')
+require(production, r'PUBLICAR \$\{UONIX_REQUEST_SHA\} EM UONIX\.COM\.BR', 'confirmação não está vinculada ao SHA')
 require(production, r'UONIX_REQUEST_REF.*?refs/heads/master|refs/heads/master.*?UONIX_REQUEST_REF', 'produção não restringe a ref master')
 
 canonical_values = (
-    'ftp.site.uonix.com.br',
+    'ftp.uonix.com.br',
     'siteuonix1',
     '/home/storage/f/34/12/siteuonix1',
     '/home/storage/f/34/12/siteuonix1/public_html',
     '/usr/bin/php85',
     '/home/storage/f/34/12/siteuonix1/bin/wp-cli.phar',
-    'https://site.uonix.com.br',
+    'https://uonix.com.br',
 )
 for value in canonical_values:
     if value not in production:
@@ -164,17 +164,17 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
         'PATH': f'{fake_bin}:{os.environ.get("PATH", "")}',
         'UONIX_AUTH_TRANSPORT_LOG': str(marker),
         'UONIX_ENABLE_DEPLOY_PRODUCTION': 'true',
-        'UONIX_PRODUCTION_CONFIRMATION': f'PUBLICAR {sha} EM SITE.UONIX.COM.BR',
+        'UONIX_PRODUCTION_CONFIRMATION': f'PUBLICAR {sha} EM UONIX.COM.BR',
         'UONIX_REQUEST_SHA': sha,
         'UONIX_REQUEST_REF': 'refs/heads/master',
-        'LOCAWEB_SSH_HOST': 'ftp.site.uonix.com.br',
+        'LOCAWEB_SSH_HOST': 'ftp.uonix.com.br',
         'LOCAWEB_SSH_PORT': '22',
         'LOCAWEB_SSH_USER': 'siteuonix1',
         'LOCAWEB_ACCOUNT_ROOT': '/home/storage/f/34/12/siteuonix1',
         'LOCAWEB_DOCUMENT_ROOT': '/home/storage/f/34/12/siteuonix1/public_html',
         'LOCAWEB_PHP_BIN': '/usr/bin/php85',
         'LOCAWEB_WP_BIN': '/home/storage/f/34/12/siteuonix1/bin/wp-cli.phar',
-        'TARGET_URL': 'https://site.uonix.com.br',
+        'TARGET_URL': 'https://uonix.com.br',
     }
 
     def run(overrides):
@@ -190,7 +190,9 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
         {'UONIX_PRODUCTION_CONFIRMATION': 'PUBLICAR OUTRO SHA'},
         {'UONIX_REQUEST_REF': 'refs/heads/qa'},
         {'LOCAWEB_DOCUMENT_ROOT': '/outro/site'},
-        {'TARGET_URL': 'https://uonix.com.br'},
+        # Domínio de trânsito removido no cutover de 2026-08-15: produção agora é
+        # uonix.com.br, então site.uonix.com.br passou a ser um alvo inválido.
+        {'TARGET_URL': 'https://site.uonix.com.br'},
         {'LOCAWEB_SSH_HOST': 'outro.example.invalid'},
     )
     for override in probes:

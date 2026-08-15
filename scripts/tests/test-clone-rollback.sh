@@ -13,7 +13,7 @@ fail() {
   exit 1
 }
 
-export PRODUCTION_URL='https://site.uonix.com.br'
+export PRODUCTION_URL='https://uonix.com.br'
 export QA_URL='https://uonix.ksio.dev'
 export DEVELOPMENT_URL='https://test.uonix.ksio.dev'
 export LOCAWEB_ACCOUNT_ROOT='/synthetic/locaweb'

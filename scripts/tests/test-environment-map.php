@@ -18,11 +18,16 @@ if ( ! function_exists( 'uonix_resolve_environment' ) ) {
 }
 
 $cases = array(
+	array( 'production', true, 'uonix.com.br', 'production' ),
 	array( 'production', true, 'site.uonix.com.br', 'production' ),
+	array( 'production', true, 'www.uonix.com.br', 'production' ),
 	array( 'production', true, 'uonix.ksio.dev', 'production' ),
 	array( 'staging', true, 'site.uonix.com.br', 'staging' ),
 	array( 'development', true, 'uonix.ksio.dev', 'development' ),
 	array( 'local', true, 'uonix.ksio.dev', 'local' ),
+	array( 'production', false, 'uonix.com.br', 'production' ),
+	array( 'production', false, 'www.uonix.com.br', 'production' ),
+	array( 'production', false, 'site.uonix.com.br', 'production' ),
 	array( 'production', false, 'uonix.ksio.dev', 'staging' ),
 	array( 'production', false, 'test.uonix.ksio.dev', 'development' ),
 	array( 'production', false, 'localhost', 'local' ),
