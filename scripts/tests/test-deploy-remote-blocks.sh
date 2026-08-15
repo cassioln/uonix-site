@@ -262,6 +262,13 @@ assert_block_structure() {
 
   # STRUCT-1: modo estrito completo. `set -u` sozinho não basta: sem `-e` o bloco
   # continua após falha, e sem `pipefail` um erro no meio de pipe fica invisível.
+  #
+  # Escopo: apenas os heredocs REMOTE, que é o que este teste extrai (daí o nome do
+  # arquivo). O workflow tem 20 ocorrências de `set -euo pipefail`, das quais 9
+  # estão em blocos REMOTE e 11 em `run: |` do runner. Mutar um `set -euo` do
+  # runner NÃO faz este teste falhar, e isso é correto: script do runner é coberto
+  # pelo próprio GitHub Actions, que marca o step como falho. Confundir os dois
+  # levaria a concluir falsa lacuna de cobertura.
   grep -qE '^\s*set -euo pipefail\s*$' "$block" \
     || fail "$label: bloco remoto sem 'set -euo pipefail' (modo estrito incompleto)"
 
