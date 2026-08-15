@@ -238,4 +238,63 @@ fi
 grep -qiE 'inválido|invalido' "$TMP_DIR/hostile.out" \
   || fail "nome hostil rejeitado sem mensagem clara: $(cat "$TMP_DIR/hostile.out")"
 
-printf 'PASS: blocos remotos de backup, publicação e rollback executam com allowlist, preservação, reversão completa e rejeição de nome hostil.\n'
+# --- Integridade ESTRUTURAL dos blocos remotos ------------------------------
+# STRUCT-1..4: as asserções acima executam os blocos contra fixtures e validam o
+# RESULTADO. Isso deixa passar quebras que não alteram o comportamento observável
+# naquele fixture específico. Três casos reais, todos comprovados por mutação em
+# 2026-08-15 (o teste passava com o workflow quebrado):
+#
+#   a) `set -euo pipefail` -> `set -u`: só se manifesta quando um comando falha
+#      no meio de um bloco. Sem `-e`, um deploy segue após erro parcial.
+#   b) guardas `if [ "${#allowlist[@]}" -eq 0 ]` -> `if false`: só se manifesta
+#      com allowlist vazia. É proteção contra operação destrutiva sem allowlist.
+#   c) duas linhas colapsadas numa só (`var="$2"          comando`): o fixture
+#      não exercita a variável perdida, e o YAML continua válido.
+#
+# O caso (c) não é hipotético: aconteceu ao remover código morto de cache. Sete
+# suítes passaram com o bug presente; foi encontrado por leitura do diff.
+#
+# Estas asserções inspecionam o TEXTO dos blocos extraídos, não o resultado da
+# execução, e por isso pegam as três classes.
+
+assert_block_structure() {
+  local label="$1" block="$2"
+
+  # STRUCT-1: modo estrito completo. `set -u` sozinho não basta: sem `-e` o bloco
+  # continua após falha, e sem `pipefail` um erro no meio de pipe fica invisível.
+  grep -qE '^\s*set -euo pipefail\s*$' "$block" \
+    || fail "$label: bloco remoto sem 'set -euo pipefail' (modo estrito incompleto)"
+
+  # STRUCT-2: nenhuma linha com dois comandos colapsados. Heurística conservadora:
+  # atribuição simples seguida de 2+ espaços e outro token de comando na mesma
+  # linha. Não casa com `export A=1 B=2`, `var=$(cmd arg)` nem `A=1 cmd` (prefixo
+  # de ambiente com 1 espaço), que são construções legítimas.
+  if grep -nE '^\s*[A-Za-z_][A-Za-z0-9_]*="?\$[0-9]"?\s{2,}\S' "$block" > "$TMP_DIR/collapsed.out"; then
+    fail "$label: linha com dois comandos colapsados: $(cat "$TMP_DIR/collapsed.out")"
+  fi
+
+  # STRUCT-3: o heredoc não pode vir vazio nem truncado por remoção acidental.
+  [ "$(wc -l < "$block" | tr -d ' ')" -ge 5 ] \
+    || fail "$label: bloco remoto suspeito de truncamento ($(wc -l < "$block" | tr -d ' ') linhas)"
+}
+
+assert_block_structure 'backup'   "$backup_block"
+assert_block_structure 'publish'  "$publish_block"
+assert_block_structure 'rollback' "$rollback_block"
+
+# STRUCT-4: cada bloco deve CONTER a guarda de coleção vazia. O comportamento
+# fail-closed em si já é exercitado acima (linhas ~146 e ~151, com backup e
+# publish recebendo allowlist vazia). Aqui a asserção é de presença: se alguém
+# remover a guarda de um bloco, ou trocá-la por `if false`, o texto do `if`
+# permanece — por isso a checagem de presença é complementar, não substituta,
+# da execução fail-closed. As assinaturas de argumento diferem entre os blocos
+# (publish recebe só o root; backup e rollback recebem root + caminho), então
+# não é possível dirigi-los todos com a mesma chamada genérica.
+for pair in "backup:$backup_block" "publish:$publish_block" "rollback:$rollback_block"; do
+  label="${pair%%:*}"
+  block="${pair#*:}"
+  grep -qE 'eq 0 \]' "$block" \
+    || fail "$label: bloco remoto sem guarda de coleção vazia (allowlist/expected_modules)"
+done
+
+printf 'PASS: blocos remotos de backup, publicação e rollback executam com allowlist, preservação, reversão completa, rejeição de nome hostil e integridade estrutural (modo estrito, linhas não colapsadas, guardas fail-closed).\n'
