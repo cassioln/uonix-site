@@ -300,14 +300,22 @@ assert_block_structure 'backup'   "$backup_block"
 assert_block_structure 'publish'  "$publish_block"
 assert_block_structure 'rollback' "$rollback_block"
 
-# STRUCT-4: cada bloco deve CONTER a guarda de coleção vazia. O comportamento
-# fail-closed em si já é exercitado acima (linhas ~146 e ~151, com backup e
-# publish recebendo allowlist vazia). Aqui a asserção é de presença: se alguém
-# remover a guarda de um bloco, ou trocá-la por `if false`, o texto do `if`
-# permanece — por isso a checagem de presença é complementar, não substituta,
-# da execução fail-closed. As assinaturas de argumento diferem entre os blocos
-# (publish recebe só o root; backup e rollback recebem root + caminho), então
-# não é possível dirigi-los todos com a mesma chamada genérica.
+# STRUCT-4: cada bloco deve CONTER a guarda de coleção vazia.
+#
+# Escopo honesto desta asserção: ela detecta a REMOÇÃO da guarda, não a sua
+# neutralização. Trocar `if [ "${#allowlist[@]}" -eq 0 ]` por `if false` some com
+# o padrão `eq 0 ]` e portanto FALHA aqui — mas trocar por
+# `if [ "${#allowlist[@]}" -eq 0 ] && false` passaria. Remoção acidental é o
+# cenário realista (foi assim que os blocos de cache saíram do workflow), então a
+# asserção cobre o caso que de fato acontece.
+#
+# O comportamento fail-closed com allowlist vazia é exercitado pelas asserções de
+# EXECUÇÃO acima (~linhas 146 e 151), para backup e publish. As duas camadas são
+# complementares: aqui é presença no texto, lá é comportamento.
+#
+# Não é possível dirigir os três blocos com uma chamada genérica: as assinaturas
+# de argumento diferem (publish recebe só o root; backup e rollback recebem root
+# + caminho de backup), e publish rejeita o caminho como nome de módulo inválido.
 for pair in "backup:$backup_block" "publish:$publish_block" "rollback:$rollback_block"; do
   label="${pair%%:*}"
   block="${pair#*:}"
