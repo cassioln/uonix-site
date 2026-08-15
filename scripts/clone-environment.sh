@@ -1513,40 +1513,43 @@ enforce_smtp_plugin_policy() {
 
 clear_cache() {
   local env="$1"
-  local cache_dirs=(
-    min
-    critical-css
-    background-css
-    busting
-    wp-rocket
-  )
+
+  # Não há mais diretório de cache de página a limpar.
+  #
+  # Esta lista continha `min`, `critical-css`, `background-css`, `busting` e
+  # `wp-rocket` — TODOS do WP Rocket, removido de produção em 2026-08-15 (plugin +
+  # 7 tabelas wpis_wpr_* + 18 options órfãs). O SpeedyCache, anterior, também já
+  # havia saído. Hoje nenhum plugin de cache de PÁGINA está ativo.
+  #
+  # A única camada restante é `pods-alternative-cache` (cache de OBJETO do Pods),
+  # mantida de propósito — e ela é invalidada por `cache flush`, não por remoção
+  # de diretório.
+  #
+  # Se um plugin de cache de página voltar, reintroduzir os diretórios aqui.
+  local cache_dirs=()
 
   log "Limpando cache do destino: ${env}"
 
   if is_remote_env "$env"; then
     local wp_root
-    local remote_cache_dirs
     local wp_cli
     wp_root="$(wp_path "$env")" || return $?
-    remote_cache_dirs="$(shell_join "${cache_dirs[@]}")"
     wp_cli="$(wp_cli_shell "$env")" || return $?
 
+    # `${cache_dirs[@]}` com array vazio sob `set -u` aborta o script no bash 4.3
+    # e anteriores (o Locaweb roda bash 4.2). Por isso a expansão dos diretórios
+    # foi retirada do heredoc em vez de ficar protegida por `:-` — não há nada a
+    # expandir, e manter o laço convidaria a um bug silencioso no futuro.
     remote_run "$env" "set -euo pipefail
-wp_content=$(printf '%q' "${wp_root}/wp-content")
-cache_root=\"\$wp_content/cache\"
-if [ -d \"\$cache_root\" ]; then
-  for cache_dir in ${remote_cache_dirs}; do
-    rm -rf \"\$cache_root/\$cache_dir\"
-  done
-fi
 $wp_cli --path=$(printf '%q' "$wp_root") transient delete --all || true
 $wp_cli --path=$(printf '%q' "$wp_root") cache flush || true"
   else
-    local cache_dir
-
-    for cache_dir in "${cache_dirs[@]}"; do
-      rm -rf "${LOCAL_WP_CONTENT}/cache/${cache_dir}" 2>/dev/null || true
-    done
+    if [ "${#cache_dirs[@]}" -gt 0 ]; then
+      local cache_dir
+      for cache_dir in "${cache_dirs[@]}"; do
+        rm -rf "${LOCAL_WP_CONTENT}/cache/${cache_dir}" 2>/dev/null || true
+      done
+    fi
 
     local_wp transient delete --all || true
     local_wp cache flush || true
