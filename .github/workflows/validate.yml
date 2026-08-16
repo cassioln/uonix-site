@@ -66,6 +66,9 @@ jobs:
       - name: Test RFQ product default
         run: php scripts/tests/test-rfq-product-default.php
 
+      - name: Test variation default regular price
+        run: php scripts/tests/test-variacao-preco-padrao.php
+
       - name: Test product excerpt editor enqueue
         run: php scripts/tests/test-product-excerpt-editor.php
 
