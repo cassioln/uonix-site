@@ -187,15 +187,55 @@ for (const arq of FORMS) {
   const chamadaAtiva = (trecho) =>
     trecho.split('\n').some((linha) => /^\s*clearTimeout\(tsTimer\)\s*;/.test(linha));
 
+  // E não pode estar dentro de bloco CONDICIONAL.
+  //
+  // Um revisor apontou o buraco: `if (algo) {` numa linha e `clearTimeout(tsTimer);` na
+  // seguinte satisfazia `chamadaAtiva` — a linha existe e é código ativo — mas a limpeza
+  // só aconteceria quando a condição fosse verdadeira. Com `if (false)` o timer fica
+  // pendurado e o teste passava verde.
+  //
+  // Reproduzido antes de corrigir: `if (window.__nunca) {`, `if (false) {` e `if (0) {`
+  // todos davam exit=0.
+  //
+  // O contrato é: limpar SEMPRE ao sair do ramo. Portanto a chamada tem de estar no nível
+  // do próprio ramo, não aninhada em condição. Medimos pela indentação: a chamada não pode
+  // estar mais indentada que a menor indentação de código do trecho.
+  const semGuardaCondicional = (trecho) => {
+    const linhas = trecho.split('\n').filter((l) => l.trim() !== '');
+    if (linhas.length === 0) return false;
+
+    // menor indentação do trecho = nível do próprio ramo
+    const nivelRamo = Math.min(
+      ...linhas.map((l) => l.match(/^\s*/)[0].length)
+    );
+
+    return linhas.some((l) => {
+      if (!/^\s*clearTimeout\(tsTimer\)\s*;/.test(l)) return false;
+      return l.match(/^\s*/)[0].length === nivelRamo;
+    });
+  };
+
   assert(
     chamadaAtiva(ramoThen[1]),
     `${nome}: falta clearTimeout(tsTimer) ATIVO dentro do .then() — se estiver comentado, ` +
       `o timer sobrevive ao sucesso e aborta uma requisição posterior`
   );
   assert(
+    semGuardaCondicional(ramoThen[1]),
+    `${nome}: o clearTimeout(tsTimer) do .then() está aninhado em bloco condicional. ` +
+      `A limpeza tem de acontecer SEMPRE ao sair do ramo — sob uma condição falsa o timer ` +
+      `sobrevive e aborta uma requisição posterior.`
+  );
+  assert(
     chamadaAtiva(ramoCatch[1]),
     `${nome}: falta clearTimeout(tsTimer) ATIVO dentro do .catch() — se estiver comentado, ` +
       `o timer fica pendurado após erro`
+  );
+  assert(
+    semGuardaCondicional(ramoCatch[1]),
+    `${nome}: o clearTimeout(tsTimer) do .catch() está aninhado em bloco condicional. ` +
+      `A limpeza tem de acontecer SEMPRE ao sair do ramo — sob uma condição falsa o timer ` +
+      `fica pendurado após erro.`
   );
 
   // bloqueio preventivo do Turnstile
