@@ -369,44 +369,45 @@ if grep -qF -- "--path=$WP_PATH_HOSTIL" "$REMOTO_ESC"; then
 printf '%q'. Comando emitido: $(cat "$REMOTO_ESC")"
 fi
 
-# 2. cada metacaractere precisa chegar PROTEGIDO (barra invertida antes, ou aspas em volta).
+# 2. o valor precisa chegar PROTEGIDO — mas há mais de uma forma correta de proteger.
 #
-#    Um escaper que trate só o espaço passaria no item 1 e ainda deixaria $() executável no
-#    servidor — foi exatamente a prova de conceito do revisor. Por isso verificamos um por
-#    um, com mensagem nomeando o culpado.
-# shellcheck disable=SC2016
-for meta in '$(id)' '`id`' ';y' '*' '"r'; do
-  asserts=$((asserts + 1))
-
-  # primeiro caractere do metacaractere: é ele que precisa vir precedido de barra invertida
-  primeiro=$(printf '%s' "$meta" | cut -c1)
-
-  # aparece CRU se o texto está presente e a versão escapada (\ + primeiro) não está
-  if grep -qF -- "$meta" "$REMOTO_ESC" \
-    && ! grep -qF -- "\\${primeiro}" "$REMOTO_ESC"; then
-    falhou "o metacaractere '$meta' chegou CRU ao comando remoto. Um escaper que trate \
-apenas espaço deixa isto passar, e '\$(...)' seria EXECUTADO no servidor. Use printf '%q'. \
-Comando emitido: $(cat "$REMOTO_ESC")"
-  fi
-done
-
-# 3. prova positiva: com printf '%q' o resultado é reversível.
+#    Um revisor testou `--path='$wp_root'` (aspas simples) e meu teste reprovava. Aspas
+#    simples são escaping CORRETO em bash: protegem TODOS os metacaracteres, exceto a
+#    própria aspa simples. Reprovar isso era falso positivo — o teste dizia "inseguro"
+#    sobre código seguro.
 #
-#    Em vez de adivinhar a forma exata do escaping (barra invertida, aspas simples, $'...'),
-#    perguntamos ao próprio shell: ele consegue reconstruir o caminho original a partir do
-#    que foi emitido? Se sim, o escaping está correto para QUALQUER metacaractere.
+#    Verificar a FORMA (barra invertida antes de cada metacaractere) prende o teste a uma
+#    implementação. O contrato real é: o shell remoto tem de receber o caminho ÍNTEGRO.
 #
-#    Atenção à extração: `[^ ]*` NÃO serve, porque o próprio escaping insere `\ ` e o
-#    recorte pararia no meio do valor. Pegamos do `--path=` até o fim do token real, que
-#    termina no primeiro espaço NÃO escapado — aqui isolamos pela palavra seguinte conhecida
-#    (`transient`), que é o próximo argumento do wp-cli.
+#    Por isso a verificação por forma foi trocada pela prova de REVERSIBILIDADE abaixo, que
+#    aceita qualquer escaping correto e rejeita qualquer um incompleto.
+
+# 3. prova por reversibilidade: o shell reconstrói o caminho original?
+#
+#    Em vez de adivinhar a forma do escaping (barra invertida? aspas simples? $'...'?),
+#    perguntamos ao próprio shell. Se ele reconstrói o valor exato, o escaping está correto
+#    para QUALQUER metacaractere — inclusive os que não pensei em listar. Se não reconstrói,
+#    algo se perdeu no caminho.
+#
+#    É a mesma pergunta que o servidor remoto fará ao interpretar o comando.
+#
+#    Atenção à extração: `[^ ]*` NÃO serve, porque o escaping insere `\ ` e o recorte
+#    pararia no meio do valor. Delimitamos pelo argumento seguinte do wp-cli.
 asserts=$((asserts + 1))
 trecho_path=$(sed -n 's/.*--path=\(.*\) transient delete.*/\1/p' "$REMOTO_ESC" | head -1)
-reconstruido=$(eval "printf '%s' $trecho_path" 2>/dev/null || printf '<<falhou>>')
 
-if [ "$reconstruido" != "$WP_PATH_HOSTIL" ]; then
-  falhou "o --path emitido não reconstrói o caminho original ao ser interpretado pelo \
-shell remoto. Esperado: [$WP_PATH_HOSTIL]  Obtido: [$reconstruido]  Trecho: [$trecho_path]"
+if [ -z "$trecho_path" ]; then
+  falhou "não consegui extrair o --path do comando remoto (a ordem dos argumentos do \
+wp-cli mudou?). Sem isso a prova de escaping não roda e passaria em silêncio. \
+Comando emitido: $(cat "$REMOTO_ESC")"
+else
+  reconstruido=$(eval "printf '%s' $trecho_path" 2>/dev/null || printf '<<falhou>>')
+
+  if [ "$reconstruido" != "$WP_PATH_HOSTIL" ]; then
+    falhou "o --path emitido não reconstrói o caminho original ao ser interpretado pelo \
+shell remoto — o escaping está incompleto e metacaracteres podem ser EXECUTADOS no \
+servidor. Esperado: [$WP_PATH_HOSTIL]  Obtido: [$reconstruido]  Trecho: [$trecho_path]"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
