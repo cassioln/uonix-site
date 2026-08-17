@@ -183,67 +183,23 @@ for (const arq of FORMS) {
     `${nome}: não encontrei o ramo .catch(<param> => { ... }) — a forma do callback mudou?`
   );
 
+  // A verificação de que a limpeza SEMPRE acontece mudou de arquivo.
+  //
+  // Três tentativas de provar isso por leitura estática foram furadas por revisores
+  // (if de condição falsa, corpo sem indentar, if de uma linha com return antes), e a
+  // terceira ainda produziu falsos positivos com comentário de bloco, regex e template
+  // literal multi-linha.
+  //
+  // "Esta linha sempre executa?" é análise de FLUXO, não de texto — regex não decide.
+  // Agora isso é provado por EXECUÇÃO em scripts/tests/test-watchdog-execucao-real.js, que
+  // roda o corpo do ramo num sandbox com espião em clearTimeout.
+  //
+  // Aqui fica apenas a verificação de PRESENÇA em código ativo, que é barata e pega o caso
+  // trivial da linha comentada.
+
   // linha ativa = começa com espaços e já vem clearTimeout, sem // antes
   const chamadaAtiva = (trecho) =>
     trecho.split('\n').some((linha) => /^\s*clearTimeout\(tsTimer\)\s*;/.test(linha));
-
-  // E não pode estar dentro de bloco algum.
-  //
-  // Histórico das duas tentativas anteriores, ambas furadas por revisores:
-  //
-  //   1ª: só exigia linha de código ativo -> `if (false) { clearTimeout(...); }` passava.
-  //   2ª: media INDENTAÇÃO (chamada no nível do ramo) -> um revisor mostrou que escrever o
-  //       corpo do if SEM indentar (`if (false) {` e a chamada na mesma coluna do ramo)
-  //       burlava a medida. Idem `while (false)` e `try { } catch (e) {}`.
-  //
-  // Indentação é convenção de estilo, não estrutura: qualquer verificação baseada nela é
-  // burlável por formatação. Agora contamos CHAVES — isso é estrutura de verdade.
-  //
-  // A chamada tem de estar em profundidade ZERO dentro do ramo: nenhum `{` aberto e não
-  // fechado antes dela. Assim `if`, `while`, `for`, `try`, `switch` e função aninhada são
-  // todos rejeitados, sem depender de como o autor indentou.
-  //
-  // LIMITAÇÃO CONHECIDA (medida, não suposta): a contagem não distingue chave em código de
-  // chave dentro de string. Verifiquei os casos comuns e todos ficam BALANCEADOS na mesma
-  // linha, então não afetam o resultado:
-  //
-  //   var o = { a: 1 };            delta 0
-  //   var m = `total ${x} itens`;   delta 0
-  //   var re = /a{2,3}/;           delta 0
-  //   var m = 'erro {grave}';      delta 0
-  //   /* nota {x} */               delta 0
-  //
-  // O único caso que envenenaria a conta é uma string com chave DESBALANCEADA
-  // (`var s = 'só abre {';` -> delta 1). É raro e daria falso positivo, não falso negativo:
-  // o teste reclamaria de código correto, e a mensagem aponta o ramo — quem mexer entende.
-  // Escrever um parser de JS aqui seria desproporcional para o risco.
-  const chamadaSempreExecutada = (trecho) => {
-    let profundidade = 0;
-
-    for (const linha of trecho.split('\n')) {
-      // ignora comentários de linha inteira para não contar chaves dentro deles
-      const codigo = linha.replace(/\/\/.*$/, '');
-
-      if (
-        profundidade === 0 &&
-        /^\s*clearTimeout\(tsTimer\)\s*;/.test(codigo)
-      ) {
-        return true;
-      }
-
-      // nada que interrompa o fluxo pode vir antes, no nível do ramo
-      if (profundidade === 0 && /^\s*(return\b|throw\b)/.test(codigo)) {
-        return false;
-      }
-
-      for (const ch of codigo) {
-        if (ch === '{') profundidade++;
-        else if (ch === '}') profundidade--;
-      }
-    }
-
-    return false;
-  };
 
   assert(
     chamadaAtiva(ramoThen[1]),
@@ -251,21 +207,9 @@ for (const arq of FORMS) {
       `o timer sobrevive ao sucesso e aborta uma requisição posterior`
   );
   assert(
-    chamadaSempreExecutada(ramoThen[1]),
-    `${nome}: o clearTimeout(tsTimer) do .then() está dentro de um bloco (if/while/try/for). ` +
-      `A limpeza tem de acontecer SEMPRE ao sair do ramo — sob uma condição falsa o timer ` +
-      `sobrevive e aborta uma requisição posterior.`
-  );
-  assert(
     chamadaAtiva(ramoCatch[1]),
     `${nome}: falta clearTimeout(tsTimer) ATIVO dentro do .catch() — se estiver comentado, ` +
       `o timer fica pendurado após erro`
-  );
-  assert(
-    chamadaSempreExecutada(ramoCatch[1]),
-    `${nome}: o clearTimeout(tsTimer) do .catch() está dentro de um bloco (if/while/try/for). ` +
-      `A limpeza tem de acontecer SEMPRE ao sair do ramo — sob uma condição falsa o timer ` +
-      `fica pendurado após erro.`
   );
 
   // bloqueio preventivo do Turnstile
