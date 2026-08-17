@@ -704,18 +704,42 @@ function uonix_gerar_form_trabalhe_html() {
             }
 
             const btn = document.getElementById('trab_submit_btn');
+
+            // Bloqueio preventivo do Turnstile. Vem depois da validação de campos para
+            // não competir com ela: a pessoa corrige os campos primeiro e só então é
+            // cobrada pelo desafio. Se o campo não existir no DOM, NÃO bloqueia — a
+            // validação do servidor continua sendo a barreira real.
+            const tsCampo = form.querySelector('[name="cf-turnstile-response"]');
+            if (tsCampo && !(tsCampo.value || '').trim()) {
+                feedbackError.textContent = 'Confirme a verificação de segurança para continuar.';
+                feedbackError.style.display = 'block';
+                const tsWrap = form.querySelector('.cf-turnstile, .uonix-turnstile-widget');
+                if (tsWrap && typeof tsWrap.scrollIntoView === 'function') {
+                    tsWrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                return;
+            }
+
             btn.disabled = true;
             btn.innerHTML = '<span>Enviando...</span>';
 
             const formData = new FormData(form);
             formData.append('action', 'uonix_processar_trabalhe');
 
+            // Watchdog: conexão que abre e nunca responde não dispara `.catch()`. Aqui
+            // o risco é maior que nos outros formulários porque há upload de currículo,
+            // que naturalmente demora mais — daí 30s em vez de 20s.
+            const tsAbort = new AbortController();
+            const tsTimer = setTimeout(function () { tsAbort.abort(); }, 30000);
+
             fetch(ajaxUrl, {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: tsAbort.signal
             })
             .then(response => response.json())
             .then(data => {
+                clearTimeout(tsTimer);
                 if (data.success) {
                     document.getElementById('trab_form_fields').style.display = 'none';
                     document.getElementById('trab_success_state').style.display = 'flex';
@@ -728,8 +752,11 @@ function uonix_gerar_form_trabalhe_html() {
                 }
             })
 	            .catch(error => {
+	                clearTimeout(tsTimer);
 	                feedbackError.style.display = 'block';
-	                feedbackError.innerHTML = '⚠ Falha na conexão. Tente novamente.';
+	                feedbackError.innerHTML = error && error.name === 'AbortError'
+	                    ? '⚠ O envio demorou demais. Verifique sua conexão e tente novamente.'
+	                    : '⚠ Falha na conexão. Tente novamente.';
 	                resetUonixTurnstile();
 	                btn.disabled = false;
 	                btn.innerHTML = '<span>Enviar Candidatura</span>';
@@ -813,7 +840,10 @@ function uonix_processar_trabalhe_handler() {
         empty($_POST['uonix_trab_nonce']) ||
         !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['uonix_trab_nonce'])), 'uonix_trab_nonce_action')
     ) {
-        wp_send_json_error(array('message' => 'Sessão expirada. Recarregue a página e tente novamente.'));
+        // Diferente do Turnstile, aqui recarregar É necessário: o nonce expirou e só um
+        // novo carregamento gera outro válido. A mensagem explica o motivo em vez de dar
+        // só a ordem, e avisa que o preenchimento será perdido.
+        wp_send_json_error(array('message' => 'Sua sessão expirou por inatividade. Recarregue a página para enviar novamente (o preenchimento será perdido).'));
     }
 
     if (!uonix_garantir_pasta_curriculos_protegida()) {

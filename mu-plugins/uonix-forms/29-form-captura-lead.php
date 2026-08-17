@@ -377,19 +377,41 @@ function uonix_gerar_form_captura_html() {
 
             if (hasError) return;
 
+            // Bloqueio preventivo do Turnstile: evita a ida-e-volta ao servidor quando
+            // o desafio não foi completado, e mostra o problema onde a ação é
+            // necessária. Se o campo não existir no DOM (widget não carregou), NÃO
+            // bloqueia — a validação do servidor continua sendo a barreira real.
+            const tsCampo = form.querySelector('[name="cf-turnstile-response"]');
+            if (tsCampo && !(tsCampo.value || '').trim()) {
+                feedbackError.textContent = 'Confirme a verificação de segurança para continuar.';
+                feedbackError.style.display = 'block';
+                const tsWrap = form.querySelector('.cf-turnstile, .uonix-turnstile-widget');
+                if (tsWrap && typeof tsWrap.scrollIntoView === 'function') {
+                    tsWrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                return;
+            }
+
             // 4. Setup Loading e Envio AJAX
             btn.disabled = true;
             btn.innerHTML = '<span>Processando...</span>';
-            
+
             const formData = new FormData(form);
             formData.append('action', 'uonix_processar_lead_customizado');
 
+            // Watchdog: conexão que abre e nunca responde não dispara `.catch()`, e o
+            // botão ficaria desabilitado para sempre.
+            const tsAbort = new AbortController();
+            const tsTimer = setTimeout(function () { tsAbort.abort(); }, 20000);
+
             fetch(window.location.origin + '/wp-admin/admin-ajax.php', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: tsAbort.signal
             })
             .then(response => response.json())
             .then(data => {
+                clearTimeout(tsTimer);
                 if (data.success) {
                     // SUCESSO: Esconde o Form e Mostra a Tela de Sucesso
                     formFieldsBlock.style.display = 'none';
@@ -414,8 +436,11 @@ function uonix_gerar_form_captura_html() {
                 }
             })
             .catch(error => {
+                clearTimeout(tsTimer);
                 feedbackError.style.display = 'block';
-                feedbackError.innerHTML = '⚠ Falha na conexão. Tente novamente.';
+                feedbackError.innerHTML = error && error.name === 'AbortError'
+                    ? '⚠ A conexão demorou demais. Tente novamente.'
+                    : '⚠ Falha na conexão. Tente novamente.';
                 resetUonixTurnstile();
                 btn.disabled = false;
                 btn.innerHTML = '<span>Baixar Material Grátis</span>';
