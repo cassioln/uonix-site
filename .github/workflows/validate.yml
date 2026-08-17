@@ -42,6 +42,9 @@ jobs:
       - name: Test social links use https
         run: php scripts/tests/test-social-links-https.php
 
+      - name: Test noindex on flow pages
+        run: php scripts/tests/test-noindex-paginas-de-fluxo.php
+
       - name: Test indexing policy
         run: php scripts/tests/test-indexing-policy.php
 
