@@ -221,14 +221,57 @@ uonix_analytics_assert_same(
 	'sem options do Site Kit não há injeção'
 );
 
-// AdSense NÃO deve entrar na conta: não emite tag de medição de pageview e bloqueá-lo
-// por isso suspenderia o GTM sem motivo.
+// AdSense NÃO deve entrar na conta: serve anúncio, não emite medição de pageview, e
+// bloqueá-lo suspenderia o container GTM sem motivo.
 uonix_analytics_assert_same(
 	'',
 	uonix_site_kit_injeta_medicao( array(
 		'googlesitekit_adsense_settings' => array( 'useSnippet' => true, 'accountID' => 'ca-pub-123' ),
 	) ),
 	'AdSense não caracteriza conflito de medição'
+);
+
+/*
+ * Campos descobertos na revisão do PR #110, lendo o código do plugin.
+ *
+ * Analytics_4.php:1920 get_tag_id() dá PRECEDÊNCIA a googleTagID sobre measurementID.
+ * Cobrir só measurementID deixava passar o caso em que o Site Kit criou o Google Tag —
+ * a guarda não detectaria e a contagem dupla aconteceria.
+ */
+uonix_analytics_assert_same(
+	'analytics-4',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'measurementID' => '', 'googleTagID' => 'GT-ABC123' ),
+	) ),
+	'googleTagID preenchido caracteriza injeção (tem precedência sobre measurementID)'
+);
+
+uonix_analytics_assert_same(
+	'analytics-4',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'googleTagContainerID' => '12345678' ),
+	) ),
+	'googleTagContainerID preenchido caracteriza injeção'
+);
+
+/*
+ * O módulo Ads NÃO tem gate de useSnippet: Ads.php:337 register_tag() injeta assim que
+ * conversionID existe. Emite gtag.js (AW-*), que compartilha gtag/dataLayer com o GA4.
+ */
+uonix_analytics_assert_same(
+	'ads',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_ads_settings' => array( 'conversionID' => 'AW-987654321' ),
+	) ),
+	'Ads com conversionID injeta gtag mesmo SEM useSnippet — precisa ser detectado'
+);
+
+uonix_analytics_assert_same(
+	'',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_ads_settings' => array( 'conversionID' => '' ),
+	) ),
+	'Ads sem conversionID não injeta'
 );
 
 // A guarda precisa ESTAR LIGADA ao fluxo, não só definida.

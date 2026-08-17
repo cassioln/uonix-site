@@ -54,9 +54,18 @@ if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
      * @return string ''  quando não injeta; nome do módulo quando injeta.
      */
     function uonix_site_kit_injeta_medicao( $options = null ) {
-        // Módulo => campos de ID que, preenchidos, significam "tem tag para emitir".
+        /*
+         * Módulo => campos cuja presença significa "tem tag para emitir".
+         *
+         * Lista derivada do CÓDIGO do plugin, não de suposição:
+         *
+         *   Analytics_4.php:1920 get_tag_id() dá PRECEDÊNCIA a `googleTagID` sobre
+         *   `measurementID` — cobrir só measurementID deixaria passar o caso em que o
+         *   Site Kit criou o Google Tag e emite por ele. `googleTagContainerID` também
+         *   entra: é campo de Settings do mesmo módulo (Settings.php:61).
+         */
         $modulos = array(
-            'analytics-4' => array( 'measurementID', 'webDataStreamID' ),
+            'analytics-4' => array( 'measurementID', 'webDataStreamID', 'googleTagID', 'googleTagContainerID' ),
             'tagmanager'  => array( 'containerID', 'gtagContainerID' ),
         );
 
@@ -81,6 +90,33 @@ if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
             foreach ( $campos_id as $campo ) {
                 if ( ! empty( $settings[ $campo ] ) && '' !== trim( (string) $settings[ $campo ] ) ) {
                     return $modulo;
+                }
+            }
+        }
+
+        /*
+         * O módulo Ads é tratado SEPARADAMENTE porque NÃO tem gate de `useSnippet`.
+         *
+         *   Ads.php:337 register_tag() injeta assim que `conversionID` existe — não há
+         *   opção de "colocar o snippet no site" para desmarcar.
+         *
+         * Ele emite gtag.js de conversão (AW-*), que compartilha o mesmo objeto
+         * `gtag`/dataLayer do GA4. Se o container GTM também emitir gtag, há dois
+         * carregamentos concorrentes do mesmo script — daí o Ads contar, ao contrário do
+         * AdSense (que serve anúncio, não medição).
+         */
+        $chave_ads = 'googlesitekit_ads_settings';
+
+        if ( null !== $options ) {
+            $ads = isset( $options[ $chave_ads ] ) ? $options[ $chave_ads ] : null;
+        } else {
+            $ads = function_exists( 'get_option' ) ? get_option( $chave_ads ) : null;
+        }
+
+        if ( is_array( $ads ) ) {
+            foreach ( array( 'conversionID', 'paxConversionID' ) as $campo ) {
+                if ( ! empty( $ads[ $campo ] ) && '' !== trim( (string) $ads[ $campo ] ) ) {
+                    return 'ads';
                 }
             }
         }
