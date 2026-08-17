@@ -405,7 +405,7 @@ if ( ! function_exists( 'uonix_comment_ler_rascunho' ) ) {
 		$memo     = is_array( $rascunho ) ? $rascunho : array();
 
 		/*
-		 * Consumo de uso único.
+		 * Consumo de uso único, SEM condição.
 		 *
 		 * Sem isto o rascunho ficava até 15 min no banco e a chave, que viaja na URL,
 		 * continuava válida — quem recebesse o link veria o que a outra pessoa digitou.
@@ -413,10 +413,15 @@ if ( ! function_exists( 'uonix_comment_ler_rascunho' ) ) {
 		 *
 		 * O delete vem DEPOIS de carregar em $memo, então os dois filtros ainda recebem o
 		 * conteúdo neste request; só um recarregamento da mesma URL vem vazio.
+		 *
+		 * Antes havia um `if ( array() !== $memo )` em volta. Removido: além de
+		 * desnecessário (delete_transient é seguro quando a chave não existe), era frágil —
+		 * um revisor provou que inverter a condição para `array() === $memo` fazia o código
+		 * deletar só quando o rascunho estava VAZIO e NUNCA quando havia conteúdo real,
+		 * reintroduzindo o bug original em silêncio. Menos condição, menos superfície de
+		 * regressão.
 		 */
-		if ( array() !== $memo ) {
-			delete_transient( 'uonix_cmt_draft_' . $chave );
-		}
+		delete_transient( 'uonix_cmt_draft_' . $chave );
 
 		return $memo;
 	}

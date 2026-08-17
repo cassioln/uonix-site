@@ -256,12 +256,38 @@ assert(
 // ANTES do get_transient passava nas asserções de presença, mas quebrava a feature por
 // completo (o rascunho era apagado antes de ser lido, então nunca era recuperado).
 // Presença não é suficiente quando o contrato é sequencial.
+//
+// A extração do corpo tem guarda de TAMANHO. Um segundo revisor provou que mudar a
+// indentação de fechamento fazia a regex capturar um corpo MAIOR que o esperado — engolindo
+// a função seguinte até achar o próximo `\n\t}` — e o teste passava em silêncio, com o
+// corpo errado. Passagem silenciosa é pior que falha: o teste diria "ok" sem verificar a
+// função certa.
 const mLer = comentarios.match(
   /function uonix_comment_ler_rascunho\(\)\s*\{([\s\S]*?)\n\t\}/
 );
 assert(mLer, 'não encontrei o corpo de uonix_comment_ler_rascunho()');
 
 const corpoLer = mLer[1];
+
+// A função tem 42 linhas medidas. Se a captura passar de 48, a regex engoliu código
+// vizinho (com a indentação de fechamento alterada, captura 56) e as asserções de ordem
+// abaixo deixariam de olhar a função certa — passando em silêncio.
+const linhasCorpo = corpoLer.split('\n').length;
+assert(
+  linhasCorpo <= 48,
+  `a extração do corpo de uonix_comment_ler_rascunho() capturou ${linhasCorpo} linhas ` +
+    `(esperado ~42) — a regex engoliu código vizinho, provavelmente porque a indentação ` +
+    `de fechamento da função mudou. As asserções de ordem abaixo passariam em silêncio ` +
+    `verificando o trecho errado.`
+);
+
+// E não pode conter outra declaração de função: sinal claro de captura excessiva.
+assert(
+  !/\n\s*function\s+\w+\s*\(/.test(corpoLer),
+  'o corpo extraído contém outra declaração de function — a regex capturou além do fim de ' +
+    'uonix_comment_ler_rascunho()'
+);
+
 const posGet = corpoLer.indexOf("get_transient( 'uonix_cmt_draft_'");
 const posDel = corpoLer.indexOf("delete_transient( 'uonix_cmt_draft_'");
 
