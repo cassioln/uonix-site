@@ -343,7 +343,20 @@ if ( ! function_exists( 'uonix_comment_chave_rascunho' ) ) {
 		static $chave = null;
 
 		if ( null === $chave ) {
-			$chave = wp_generate_password( 20, false, false );
+			/*
+			 * SÓ minúsculas e dígitos, de propósito.
+			 *
+			 * A leitura passa por sanitize_key(), que aplica strtolower(). Com
+			 * wp_generate_password( 20, false, false ) — que inclui MAIÚSCULAS — a chave
+			 * gravada divergia da chave lida em 99,99% dos casos e o transient nunca era
+			 * encontrado: a preservação do rascunho não funcionava.
+			 *
+			 * Medido: (36/62)^20 = 1 acerto a cada ~52.700 tentativas.
+			 *
+			 * 20 caracteres em [a-z0-9] = 36^20 ≈ 1,3e31 combinações. Espaço de chave
+			 * mais que suficiente para um identificador efêmero de 15 minutos.
+			 */
+			$chave = strtolower( wp_generate_password( 20, false, false ) );
 		}
 
 		return $chave;

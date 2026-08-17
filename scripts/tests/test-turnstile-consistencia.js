@@ -201,9 +201,27 @@ assert(
   !/add_query_arg\(\s*['"]comment['"]/.test(comentarios),
   'o texto do comentário não pode ir na query string'
 );
+// O texto preservado precisa voltar ao textarea por filtro oficial.
+//
+// Atenção: existe OUTRO filtro pré-existente em comment_form_field_comment (linha ~188)
+// que anexa campos ocultos. Asserir só o nome do hook casaria com ele e passaria mesmo
+// se a injeção do rascunho fosse removida — o revisor do PR flagrou exatamente isso.
+// Aqui exigimos o filtro QUE INJETA o rascunho.
 assert(
-  /comment_form_field_comment/.test(comentarios),
-  'o texto preservado precisa voltar ao textarea via filtro oficial do WordPress'
+  /add_filter\(\s*'comment_form_field_comment'[\s\S]{0,400}uonix_comment_ler_rascunho\(\)[\s\S]{0,400}esc_textarea/.test(
+    comentarios
+  ),
+  'o rascunho precisa ser injetado no textarea por um filtro comment_form_field_comment ' +
+    'que use uonix_comment_ler_rascunho() e esc_textarea()'
+);
+
+// A chave do transient precisa ser minúscula: a leitura passa por sanitize_key(), que
+// faz strtolower(). Sem isso, gravado != lido em 99,99% dos casos e o rascunho é
+// perdido — bug real encontrado na revisão do PR #109.
+assert(
+  /strtolower\(\s*wp_generate_password\(/.test(comentarios),
+  'a chave do rascunho precisa ser gerada em minúsculas (sanitize_key aplica strtolower ' +
+    'na leitura, então chave com maiúsculas nunca é encontrada)'
 );
 
 console.log(`PASS: consistência do Turnstile nas 6 superfícies (${n} asserções)`);
