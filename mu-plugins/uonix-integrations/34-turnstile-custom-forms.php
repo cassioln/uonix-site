@@ -420,7 +420,11 @@ if ( ! function_exists( 'uonix_turnstile_validate_request' ) ) {
 		$token    = sanitize_text_field( wp_unslash( $_POST['cf-turnstile-response'] ?? '' ) );
 
 		if ( empty( $token ) ) {
-			return new WP_Error( 'uonix_turnstile_empty', 'Falha na verificação de segurança. Recarregue a página e tente novamente.' );
+			// Caso mais comum: o usuário não completou o widget. É o cenário mais
+			// brando dos três e não exige recarregar — o widget é resetado pelo JS
+			// (scheduleTurnstileReset no checkout_error), então pedir reload era
+			// burocracia desnecessária.
+			return new WP_Error( 'uonix_turnstile_empty', 'Confirme a verificação de segurança para continuar.' );
 		}
 
 		$response = wp_remote_post(

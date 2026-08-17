@@ -255,6 +255,9 @@ jobs:
       - name: Test PageSpeed check script
         run: node --test scripts/tests/test-pagespeed-check.mjs
 
+      - name: Test checkout Turnstile UX guard
+        run: node scripts/tests/test-checkout-turnstile-ux.js
+
       - name: Test email migration passfile tooling
         run: python3 -m unittest discover --start-directory scripts/email-migration --pattern 'test_*.py' --verbose
 
