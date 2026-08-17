@@ -241,6 +241,9 @@ jobs:
       - name: Test clone safety boundaries
         run: bash scripts/tests/test-clone-safety.sh
 
+      - name: Test clear_cache real execution
+        run: bash scripts/tests/test-clear-cache-execucao-real.sh
+
       - name: Test deploy bundle
         run: bash scripts/tests/test-deploy-bundle.sh
 
