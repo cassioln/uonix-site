@@ -5,14 +5,25 @@
 
 ## 1. Fronteira operacional
 
+> **⚠️ ESTADO HISTÓRICO — o cutover foi concluído em 2026-08-15.**
+>
+> A tabela abaixo e as seções seguintes descrevem a topologia **durante** a migração, quando
+> o site novo atendia em `site.uonix.com.br` e `uonix.com.br` ainda servia o site do Criador
+> de Sites. Ficam preservadas como registro do que foi feito e por quê.
+>
+> **Topologia atual:** produção é `uonix.com.br`, com indexação liberada. O domínio de
+> trânsito `site.uonix.com.br` foi removido do painel e **não resolve mais em DNS** (medido).
+> A referência canônica é `docs/ambientes.md`; em caso de conflito, ele prevalece.
+
 | Ambiente | URL | Host | Branch |
 | --- | --- | --- | --- |
-| Produção provisória | `site.uonix.com.br` | Locaweb | `master` |
+| Produção provisória (histórico) | `site.uonix.com.br` | Locaweb | `master` |
 | QA | `uonix.ksio.dev` | HostGator | `qa` |
 | DEV | `test.uonix.ksio.dev` | HostGator | `dev` |
 | Local | `localhost:8080` | Podman | `local` |
 
-**`uonix.com.br` é o site antigo, em produção real, e está intocável.** Enquanto o
+**[Histórico, válido até 2026-08-15] `uonix.com.br` é o site antigo, em produção real, e
+está intocável.** Enquanto o
 site novo não estiver nesse domínio, `site.uonix.com.br` não é produção definitiva:
 desenvolvimento e teste nele são liberados.
 
