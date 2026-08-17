@@ -39,6 +39,9 @@ jobs:
       - name: Test e-mail policy
         run: php scripts/tests/test-email-policy.php
 
+      - name: Test social links use https
+        run: php scripts/tests/test-social-links-https.php
+
       - name: Test indexing policy
         run: php scripts/tests/test-indexing-policy.php
 
