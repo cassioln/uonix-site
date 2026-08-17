@@ -202,6 +202,21 @@ for (const arq of FORMS) {
   // A chamada tem de estar em profundidade ZERO dentro do ramo: nenhum `{` aberto e não
   // fechado antes dela. Assim `if`, `while`, `for`, `try`, `switch` e função aninhada são
   // todos rejeitados, sem depender de como o autor indentou.
+  //
+  // LIMITAÇÃO CONHECIDA (medida, não suposta): a contagem não distingue chave em código de
+  // chave dentro de string. Verifiquei os casos comuns e todos ficam BALANCEADOS na mesma
+  // linha, então não afetam o resultado:
+  //
+  //   var o = { a: 1 };            delta 0
+  //   var m = `total ${x} itens`;   delta 0
+  //   var re = /a{2,3}/;           delta 0
+  //   var m = 'erro {grave}';      delta 0
+  //   /* nota {x} */               delta 0
+  //
+  // O único caso que envenenaria a conta é uma string com chave DESBALANCEADA
+  // (`var s = 'só abre {';` -> delta 1). É raro e daria falso positivo, não falso negativo:
+  // o teste reclamaria de código correto, e a mensagem aponta o ramo — quem mexer entende.
+  // Escrever um parser de JS aqui seria desproporcional para o risco.
   const chamadaSempreExecutada = (trecho) => {
     let profundidade = 0;
 
