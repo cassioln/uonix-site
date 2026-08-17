@@ -251,10 +251,33 @@ assert(
 //
 // Sem delete_transient a chave, que viaja na URL, continuava válida por 15 min: quem
 // recebesse o link veria o que a outra pessoa digitou. Levantado na revisão do PR #109.
+//
+// A ORDEM importa e é verificada: um revisor provou que mover o delete_transient para
+// ANTES do get_transient passava nas asserções de presença, mas quebrava a feature por
+// completo (o rascunho era apagado antes de ser lido, então nunca era recuperado).
+// Presença não é suficiente quando o contrato é sequencial.
+const mLer = comentarios.match(
+  /function uonix_comment_ler_rascunho\(\)\s*\{([\s\S]*?)\n\t\}/
+);
+assert(mLer, 'não encontrei o corpo de uonix_comment_ler_rascunho()');
+
+const corpoLer = mLer[1];
+const posGet = corpoLer.indexOf("get_transient( 'uonix_cmt_draft_'");
+const posDel = corpoLer.indexOf("delete_transient( 'uonix_cmt_draft_'");
+
 assert(
-  /delete_transient\(\s*'uonix_cmt_draft_'\s*\.\s*\$chave\s*\)/.test(comentarios),
+  posGet !== -1,
+  'uonix_comment_ler_rascunho precisa ler o rascunho com get_transient'
+);
+assert(
+  posDel !== -1,
   'o rascunho precisa ser consumido com delete_transient depois de lido — a chave viaja ' +
     'na URL e ficaria reutilizável por quem recebesse o link'
+);
+assert(
+  posGet < posDel,
+  'delete_transient vem ANTES de get_transient: o rascunho seria apagado antes de ser ' +
+    'lido e nunca chegaria ao formulário. A ordem é parte do contrato.'
 );
 
 // O consumo exige cache por request: a leitura acontece em DOIS filtros, e sem memo o
