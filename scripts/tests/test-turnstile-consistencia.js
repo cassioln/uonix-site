@@ -187,52 +187,47 @@ for (const arq of FORMS) {
   const chamadaAtiva = (trecho) =>
     trecho.split('\n').some((linha) => /^\s*clearTimeout\(tsTimer\)\s*;/.test(linha));
 
-  // E não pode estar dentro de bloco CONDICIONAL.
+  // E não pode estar dentro de bloco algum.
   //
-  // Um revisor apontou o buraco: `if (algo) {` numa linha e `clearTimeout(tsTimer);` na
-  // seguinte satisfazia `chamadaAtiva` — a linha existe e é código ativo — mas a limpeza
-  // só aconteceria quando a condição fosse verdadeira. Com `if (false)` o timer fica
-  // pendurado e o teste passava verde.
+  // Histórico das duas tentativas anteriores, ambas furadas por revisores:
   //
-  // Reproduzido antes de corrigir: `if (window.__nunca) {`, `if (false) {` e `if (0) {`
-  // todos davam exit=0.
+  //   1ª: só exigia linha de código ativo -> `if (false) { clearTimeout(...); }` passava.
+  //   2ª: media INDENTAÇÃO (chamada no nível do ramo) -> um revisor mostrou que escrever o
+  //       corpo do if SEM indentar (`if (false) {` e a chamada na mesma coluna do ramo)
+  //       burlava a medida. Idem `while (false)` e `try { } catch (e) {}`.
   //
-  // O contrato é: limpar SEMPRE ao sair do ramo. Portanto a chamada tem de estar no nível
-  // do próprio ramo, não aninhada em condição. Medimos pela indentação: a chamada não pode
-  // estar mais indentada que a menor indentação de código do trecho.
-  const semGuardaCondicional = (trecho) => {
-    const linhas = trecho.split('\n').filter((l) => l.trim() !== '');
-    if (linhas.length === 0) return false;
+  // Indentação é convenção de estilo, não estrutura: qualquer verificação baseada nela é
+  // burlável por formatação. Agora contamos CHAVES — isso é estrutura de verdade.
+  //
+  // A chamada tem de estar em profundidade ZERO dentro do ramo: nenhum `{` aberto e não
+  // fechado antes dela. Assim `if`, `while`, `for`, `try`, `switch` e função aninhada são
+  // todos rejeitados, sem depender de como o autor indentou.
+  const chamadaSempreExecutada = (trecho) => {
+    let profundidade = 0;
 
-    // menor indentação do trecho = nível do próprio ramo
-    const nivelRamo = Math.min(
-      ...linhas.map((l) => l.match(/^\s*/)[0].length)
-    );
+    for (const linha of trecho.split('\n')) {
+      // ignora comentários de linha inteira para não contar chaves dentro deles
+      const codigo = linha.replace(/\/\/.*$/, '');
 
-    const idx = linhas.findIndex(
-      (l) =>
-        /^\s*clearTimeout\(tsTimer\)\s*;/.test(l) &&
-        l.match(/^\s*/)[0].length === nivelRamo
-    );
+      if (
+        profundidade === 0 &&
+        /^\s*clearTimeout\(tsTimer\)\s*;/.test(codigo)
+      ) {
+        return true;
+      }
 
-    if (idx === -1) return false;
+      // nada que interrompa o fluxo pode vir antes, no nível do ramo
+      if (profundidade === 0 && /^\s*(return\b|throw\b)/.test(codigo)) {
+        return false;
+      }
 
-    // Nada que interrompa o fluxo pode vir ANTES, no mesmo nível.
-    //
-    // Encontrei esta burla eu mesmo ao testar o PR: `return;` seguido de
-    // `clearTimeout(tsTimer);` deixa a chamada no nível certo do ramo, satisfazendo a
-    // medida de indentação, mas o código nunca chega nela. É patológico (ninguém escreve
-    // por acidente, e o resto do ramo também ficaria morto), mas o custo de fechar é uma
-    // linha.
-    const interrompeAntes = linhas
-      .slice(0, idx)
-      .some(
-        (l) =>
-          l.match(/^\s*/)[0].length === nivelRamo &&
-          /^\s*(return\b|throw\b)/.test(l)
-      );
+      for (const ch of codigo) {
+        if (ch === '{') profundidade++;
+        else if (ch === '}') profundidade--;
+      }
+    }
 
-    return !interrompeAntes;
+    return false;
   };
 
   assert(
@@ -241,8 +236,8 @@ for (const arq of FORMS) {
       `o timer sobrevive ao sucesso e aborta uma requisição posterior`
   );
   assert(
-    semGuardaCondicional(ramoThen[1]),
-    `${nome}: o clearTimeout(tsTimer) do .then() está aninhado em bloco condicional. ` +
+    chamadaSempreExecutada(ramoThen[1]),
+    `${nome}: o clearTimeout(tsTimer) do .then() está dentro de um bloco (if/while/try/for). ` +
       `A limpeza tem de acontecer SEMPRE ao sair do ramo — sob uma condição falsa o timer ` +
       `sobrevive e aborta uma requisição posterior.`
   );
@@ -252,8 +247,8 @@ for (const arq of FORMS) {
       `o timer fica pendurado após erro`
   );
   assert(
-    semGuardaCondicional(ramoCatch[1]),
-    `${nome}: o clearTimeout(tsTimer) do .catch() está aninhado em bloco condicional. ` +
+    chamadaSempreExecutada(ramoCatch[1]),
+    `${nome}: o clearTimeout(tsTimer) do .catch() está dentro de um bloco (if/while/try/for). ` +
       `A limpeza tem de acontecer SEMPRE ao sair do ramo — sob uma condição falsa o timer ` +
       `fica pendurado após erro.`
   );
