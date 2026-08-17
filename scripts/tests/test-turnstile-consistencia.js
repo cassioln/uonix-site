@@ -183,6 +183,20 @@ for (const arq of FORMS) {
     `${nome}: não encontrei o ramo .catch(<param> => { ... }) — a forma do callback mudou?`
   );
 
+  // A verificação de que a limpeza SEMPRE acontece mudou de arquivo.
+  //
+  // Três tentativas de provar isso por leitura estática foram furadas por revisores
+  // (if de condição falsa, corpo sem indentar, if de uma linha com return antes), e a
+  // terceira ainda produziu falsos positivos com comentário de bloco, regex e template
+  // literal multi-linha.
+  //
+  // "Esta linha sempre executa?" é análise de FLUXO, não de texto — regex não decide.
+  // Agora isso é provado por EXECUÇÃO em scripts/tests/test-watchdog-execucao-real.js, que
+  // roda o corpo do ramo num sandbox com espião em clearTimeout.
+  //
+  // Aqui fica apenas a verificação de PRESENÇA em código ativo, que é barata e pega o caso
+  // trivial da linha comentada.
+
   // linha ativa = começa com espaços e já vem clearTimeout, sem // antes
   const chamadaAtiva = (trecho) =>
     trecho.split('\n').some((linha) => /^\s*clearTimeout\(tsTimer\)\s*;/.test(linha));
