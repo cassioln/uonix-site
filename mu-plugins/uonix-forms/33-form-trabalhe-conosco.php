@@ -727,10 +727,18 @@ function uonix_gerar_form_trabalhe_html() {
             formData.append('action', 'uonix_processar_trabalhe');
 
             // Watchdog: conexão que abre e nunca responde não dispara `.catch()`. Aqui
-            // o risco é maior que nos outros formulários porque há upload de currículo,
-            // que naturalmente demora mais — daí 30s em vez de 20s.
+            // o risco é maior que nos outros formulários porque há upload de currículo.
+            //
+            // 90s, não 30s. O limite aceito é 3 MB (validado no cliente na linha ~637 e
+            // no servidor na ~886). Em 3G lento (~0,4 Mbps de upload) 3 MB levam ~60s —
+            // um watchdog de 30s abortaria o envio de um candidato legítimo usando o
+            // celular em área de sinal ruim. 90s cobre esse pior caso com folga e ainda
+            // devolve o controle do botão em tempo humano.
+            //
+            // Abortar não deixa arquivo parcial no servidor: o PHP recebe
+            // UPLOAD_ERR_PARTIAL e o handler exige UPLOAD_ERR_OK, então rejeita.
             const tsAbort = new AbortController();
-            const tsTimer = setTimeout(function () { tsAbort.abort(); }, 30000);
+            const tsTimer = setTimeout(function () { tsAbort.abort(); }, 90000);
 
             fetch(ajaxUrl, {
                 method: 'POST',

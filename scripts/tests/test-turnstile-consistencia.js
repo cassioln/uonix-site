@@ -145,7 +145,17 @@ for (const arq of FORMS) {
   const mTimer = js.match(/setTimeout\(function \(\) \{ tsAbort\.abort\(\); \}, (\d+)\)/);
   assert(mTimer, `${nome}: o watchdog precisa abortar o fetch`);
   const ms = Number(mTimer[1]);
-  assert(ms >= 5000 && ms <= 60000, `${nome}: watchdog de ${ms}ms fora da faixa razoável`);
+  // Piso: abaixo de 5s abortaria requisição normal. Teto: acima de 120s a pessoa
+  // desiste antes de recuperar o botão.
+  //
+  // O formulário de currículo aceita 3 MB e precisa de folga: em 3G lento (~0,4 Mbps
+  // de upload) 3 MB levam ~60s, então um watchdog curto abortaria envio LEGÍTIMO.
+  // Por isso a faixa é ampla — o que o teste protege é a EXISTÊNCIA do watchdog e a
+  // ordem de grandeza, não um valor exato.
+  assert(
+    ms >= 5000 && ms <= 120000,
+    `${nome}: watchdog de ${ms}ms fora da faixa razoável (5s-120s)`
+  );
 
   // o timer precisa ser limpo nos DOIS ramos, senão fica pendurado
   const limpezas = (js.match(/clearTimeout\(tsTimer\)/g) || []).length;
