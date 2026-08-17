@@ -15,6 +15,21 @@ function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
 	$GLOBALS['uonix_test_actions'][] = array( $hook, $callback, $priority, $accepted_args );
 }
 
+/*
+ * Options do WordPress, injetáveis pelo teste.
+ *
+ * Necessário para exercitar a guarda contra o Google Site Kit: sem este stub,
+ * `function_exists('get_option')` era false, a guarda nunca rodava de verdade e uma
+ * mutação que REMOVIA a chamada passava sem ser detectada.
+ */
+$GLOBALS['uonix_test_options'] = array();
+
+function get_option( $name, $default = false ) {
+	return array_key_exists( $name, $GLOBALS['uonix_test_options'] )
+		? $GLOBALS['uonix_test_options'][ $name ]
+		: $default;
+}
+
 function is_admin() {
 	return false;
 }
@@ -136,6 +151,179 @@ uonix_analytics_assert_not_contains( 'tag.goadopt.io', $staging_hints, 'QA não 
 $source = file_get_contents( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-integrations/38-integracoes-analytics-lgpd.php' );
 uonix_analytics_assert_not_contains( 'GTM-P8TR5CCH', $source, 'ID GTM fixo foi removido do código' );
 uonix_analytics_assert_not_contains( '4e6a8df6-4bee-43c7-86d9-7b91ccc9df56', $source, 'ID AdOpt fixo foi removido do código' );
+
+/*
+ * ---------------------------------------------------------------------------
+ * Guarda contra contagem dupla com o Google Site Kit
+ * ---------------------------------------------------------------------------
+ *
+ * O Site Kit, quando o módulo Analytics está conectado, injeta a própria tag GA4. Como
+ * este arquivo emite o container GTM, os dois juntos duplicam pageviews e conversões —
+ * silenciosamente.
+ *
+ * Estado medido em produção (2026-08-16): useSnippet = true nas três options, mas TODOS
+ * os IDs vazios. Não há conflito hoje, mas basta conectar o módulo no painel para
+ * começar. Estes casos provam que a guarda decide certo.
+ *
+ * As options são INJETADAS (não lidas do banco) para o teste ser determinístico.
+ */
+
+// Caso real de hoje: useSnippet ligado mas sem nenhum ID -> NÃO injeta, logo sem conflito.
+uonix_analytics_assert_same(
+	'',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'measurementID' => '', 'webDataStreamID' => '' ),
+		'googlesitekit_tagmanager_settings'  => array( 'useSnippet' => true, 'containerID' => '' ),
+	) ),
+	'useSnippet=true com IDs vazios não caracteriza injeção (estado atual de produção)'
+);
+
+// Módulo conectado de verdade -> conflito detectado.
+uonix_analytics_assert_same(
+	'analytics-4',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'measurementID' => 'G-ABC123XYZ' ),
+	) ),
+	'measurementID preenchido com useSnippet=true caracteriza injeção do GA4'
+);
+
+// useSnippet desligado: o Site Kit só lê dados, não coloca tag. Sem conflito.
+uonix_analytics_assert_same(
+	'',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_analytics-4_settings' => array( 'useSnippet' => false, 'measurementID' => 'G-ABC123XYZ' ),
+	) ),
+	'useSnippet=false não injeta, mesmo com ID preenchido'
+);
+
+// O módulo Tag Manager também conta.
+uonix_analytics_assert_same(
+	'tagmanager',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_tagmanager_settings' => array( 'useSnippet' => true, 'containerID' => 'GTM-OUTRO99' ),
+	) ),
+	'containerID do Tag Manager preenchido caracteriza injeção'
+);
+
+// Espaço em branco não é ID válido.
+uonix_analytics_assert_same(
+	'',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'measurementID' => '   ' ),
+	) ),
+	'ID só com espaços não caracteriza injeção'
+);
+
+// Site Kit ausente/não configurado.
+uonix_analytics_assert_same(
+	'',
+	uonix_site_kit_injeta_medicao( array() ),
+	'sem options do Site Kit não há injeção'
+);
+
+// AdSense NÃO deve entrar na conta: serve anúncio, não emite medição de pageview, e
+// bloqueá-lo suspenderia o container GTM sem motivo.
+uonix_analytics_assert_same(
+	'',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_adsense_settings' => array( 'useSnippet' => true, 'accountID' => 'ca-pub-123' ),
+	) ),
+	'AdSense não caracteriza conflito de medição'
+);
+
+/*
+ * UM CASO POR CAMPO SECUNDÁRIO.
+ *
+ * O revisor do PR #110 provou que sem isso a remoção de um campo secundário da lista
+ * passava impune (exit=0): nenhuma asserção exercitava o campo com o primário VAZIO.
+ * Cada caso abaixo preenche SÓ o campo secundário, então remover aquele campo da lista
+ * quebra o teste.
+ *
+ * Campos conferidos nos Tag_Guard reais do plugin (Site Kit 1.185.0):
+ *   Analytics_4/Tag_Guard.php:33   useSnippet && measurementID
+ *   Tag_Manager/Tag_Guard.php:55   is_amp ? ampContainerID : containerID
+ */
+uonix_analytics_assert_same(
+	'analytics-4',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'measurementID' => '', 'googleTagID' => 'GT-ABC123' ),
+	) ),
+	'googleTagID sozinho caracteriza injeção (get_tag_id() lhe dá precedência)'
+);
+
+uonix_analytics_assert_same(
+	'tagmanager',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_tagmanager_settings' => array( 'useSnippet' => true, 'containerID' => '', 'ampContainerID' => 'GTM-AMP999' ),
+	) ),
+	'ampContainerID sozinho caracteriza injeção (é o campo do Tag_Guard quando is_amp)'
+);
+
+/*
+ * O módulo Ads NÃO tem gate de useSnippet: Ads.php:337 register_tag() injeta assim que
+ * conversionID existe. Emite gtag.js (AW-*), que compartilha gtag/dataLayer com o GA4.
+ */
+uonix_analytics_assert_same(
+	'ads',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_ads_settings' => array( 'conversionID' => 'AW-987654321' ),
+	) ),
+	'Ads com conversionID injeta gtag mesmo SEM useSnippet — precisa ser detectado'
+);
+
+uonix_analytics_assert_same(
+	'ads',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_ads_settings' => array( 'conversionID' => '', 'paxConversionID' => 'AW-111222333' ),
+	) ),
+	'paxConversionID sozinho também caracteriza injeção do Ads'
+);
+
+uonix_analytics_assert_same(
+	'',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_ads_settings' => array( 'conversionID' => '' ),
+	) ),
+	'Ads sem conversionID não injeta'
+);
+
+// A guarda precisa ESTAR LIGADA ao fluxo, não só definida.
+//
+// Buscar o nome da função no código-fonte é asserção fraca: o nome sobrevive no
+// comentário e na própria definição, então trocar a chamada por `if ( false )` passaria
+// — uma mutação provou exatamente isso. Aqui exercitamos o COMPORTAMENTO real, com as
+// options do Site Kit injetadas via stub de get_option().
+$GLOBALS['uonix_test_options'] = array(
+	'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'measurementID' => 'G-CONFLITO1' ),
+);
+
+uonix_analytics_assert_same(
+	false,
+	uonix_analytics_configuration( 'production', true, 'GTM-REAL123', 'adopt-real-id' ),
+	'com o Site Kit injetando GA4, a configuração precisa recuar (senão há contagem dupla)'
+);
+
+// Estado atual de produção: Site Kit ativo, useSnippet ligado, mas IDs vazios.
+// O container GTM deve continuar sendo emitido normalmente.
+$GLOBALS['uonix_test_options'] = array(
+	'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'measurementID' => '' ),
+	'googlesitekit_tagmanager_settings'  => array( 'useSnippet' => true, 'containerID' => '' ),
+);
+
+uonix_analytics_assert_same(
+	true,
+	is_array( uonix_analytics_configuration( 'production', true, 'GTM-REAL123', 'adopt-real-id' ) ),
+	'Site Kit sem IDs configurados não deve suspender o container GTM'
+);
+
+// Site Kit removido/ausente: nada muda para o snippet.
+$GLOBALS['uonix_test_options'] = array();
+
+uonix_analytics_assert_same(
+	true,
+	is_array( uonix_analytics_configuration( 'production', true, 'GTM-REAL123', 'adopt-real-id' ) ),
+	'sem o Site Kit instalado, a configuração válida continua sendo aceita'
+);
 
 if ( 0 !== $failures ) {
 	exit( 1 );
