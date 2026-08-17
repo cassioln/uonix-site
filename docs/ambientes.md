@@ -56,6 +56,46 @@ O CompressX é gerenciado por ambiente. Seus diretórios de runtime (`wp-content
 - A guarda de deploy não substitui preflight, backup, smoke test, rollback nem aprovação humana nas operações de alto impacto.
 - Nenhum ambiente deve receber produção automática, migração, importação de banco, promoção de document root ou mudança de domínio com base apenas neste documento.
 
+## Encerramento da migração
+
+Registro das decisões finais, para não se perderem no histórico de conversa.
+
+### Hospedagem antiga (`186.202.135.240`, Windows)
+
+**Desativação AUTORIZADA por Cassio em 2026-08-17.**
+
+Era o último caminho de rollback do cutover: se algo desse errado, re-adicionar o domínio ao
+plano Windows era a volta possível. Os critérios que sustentavam a espera foram atendidos:
+
+| critério | estado |
+|---|---|
+| cutover concluído e validado | ✅ 2026-08-15 |
+| sitemap lido pelo Google | ✅ 16/08, 50 páginas, "processado" |
+| páginas indexadas | ✅ 32 |
+| erro de cobertura no Search Console | ✅ nenhum |
+| checkout validado com envio real | ✅ 2026-08-17 |
+
+Ao desativar, o rollback deixa de existir. Qualquer problema posterior se resolve para
+frente, no ambiente novo.
+
+### Rotação de credenciais
+
+**Fora de escopo deste board por decisão de Cassio (2026-08-17):** tratado direto com os
+usuários das caixas. Verificado que nenhuma credencial está versionada — `git grep` por
+padrões de senha, token e chave privada não retorna nada, e o `.env` está no `.gitignore`.
+
+### Trade-off aceito: 404 nas URLs do site antigo
+
+Cassio definiu que nada do site do Criador de Sites seria aproveitado. Consequência medida
+depois: **114 rotas antigas respondem 404**, e a autoridade de SEO delas é perdida.
+
+Os 20 "redirects" que parecem funcionar **não são cadastrados** — é o
+`redirect_guess_404_permalink()` do core adivinhando pelo slug. Provado inventando slugs que
+nunca existiram (`/porca-sextavada`, `/barra-roscada-304`) e que ainda assim redirecionam.
+
+Diagnóstico completo, com CSV das 135 rotas medidas, no card C43 do board
+`uonix-cutover-dominio`. **Pausado a pedido de Cassio** em 2026-08-17.
+
 ## Documentação relacionada
 
 - [Clone de ambientes](clone-ambientes.md): contrato operacional, preservação de runtime e procedimentos de clone.
