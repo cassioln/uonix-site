@@ -383,15 +383,42 @@ if ( ! function_exists( 'uonix_comment_guardar_rascunho' ) ) {
 
 if ( ! function_exists( 'uonix_comment_ler_rascunho' ) ) {
 	function uonix_comment_ler_rascunho() {
+		/*
+		 * Cache por request: a leitura acontece em DOIS filtros
+		 * (comment_form_field_comment e comment_form_defaults). Sem o cache, o segundo
+		 * filtro não encontraria mais nada depois de o primeiro consumir o transient.
+		 */
+		static $memo = null;
+
+		if ( null !== $memo ) {
+			return $memo;
+		}
+
 		$chave = isset( $_GET['comment_draft'] ) ? sanitize_key( wp_unslash( (string) $_GET['comment_draft'] ) ) : '';
 
 		if ( '' === $chave ) {
-			return array();
+			$memo = array();
+			return $memo;
 		}
 
 		$rascunho = get_transient( 'uonix_cmt_draft_' . $chave );
+		$memo     = is_array( $rascunho ) ? $rascunho : array();
 
-		return is_array( $rascunho ) ? $rascunho : array();
+		/*
+		 * Consumo de uso único.
+		 *
+		 * Sem isto o rascunho ficava até 15 min no banco e a chave, que viaja na URL,
+		 * continuava válida — quem recebesse o link veria o que a outra pessoa digitou.
+		 * Levantado na revisão do PR #109.
+		 *
+		 * O delete vem DEPOIS de carregar em $memo, então os dois filtros ainda recebem o
+		 * conteúdo neste request; só um recarregamento da mesma URL vem vazio.
+		 */
+		if ( array() !== $memo ) {
+			delete_transient( 'uonix_cmt_draft_' . $chave );
+		}
+
+		return $memo;
 	}
 }
 

@@ -159,23 +159,32 @@ for (const arq of FORMS) {
 
   // O timer precisa ser limpo nos DOIS ramos, senão fica pendurado.
   //
-  // Contar ocorrências NÃO basta: duplicar clearTimeout no .then() e remover do .catch()
-  // mantém a contagem em 2 e passava — o revisor do PR #109 provou isso. É preciso
-  // verificar a PRESENÇA EM CADA RAMO.
+  // Duas armadilhas já provadas por revisores neste PR:
+  //   1. CONTAR ocorrências não basta — duplicar no .then() e remover do .catch() mantém
+  //      a contagem em 2 e passava.
+  //   2. Buscar o texto não basta — `// clearTimeout(tsTimer);` COMENTADO satisfazia o
+  //      regex, deixando o watchdog pendurado com o teste verde.
+  //
+  // Por isso: extrai cada ramo E exige a chamada em linha de CÓDIGO ATIVO.
   const ramoThen = js.match(/\.then\(\s*data\s*=>\s*\{([\s\S]*?)\n\s*\}\)/);
   const ramoCatch = js.match(/\.catch\(\s*error\s*=>\s*\{([\s\S]*?)\n\s*\}\)/);
 
   assert(ramoThen, `${nome}: não encontrei o ramo .then(data => ...)`);
   assert(ramoCatch, `${nome}: não encontrei o ramo .catch(error => ...)`);
+
+  // linha ativa = começa com espaços e já vem clearTimeout, sem // antes
+  const chamadaAtiva = (trecho) =>
+    trecho.split('\n').some((linha) => /^\s*clearTimeout\(tsTimer\)\s*;/.test(linha));
+
   assert(
-    /clearTimeout\(tsTimer\)/.test(ramoThen[1]),
-    `${nome}: falta clearTimeout(tsTimer) DENTRO do .then() — o timer sobreviveria ao ` +
-      `sucesso e abortaria uma requisição posterior`
+    chamadaAtiva(ramoThen[1]),
+    `${nome}: falta clearTimeout(tsTimer) ATIVO dentro do .then() — se estiver comentado, ` +
+      `o timer sobrevive ao sucesso e aborta uma requisição posterior`
   );
   assert(
-    /clearTimeout\(tsTimer\)/.test(ramoCatch[1]),
-    `${nome}: falta clearTimeout(tsTimer) DENTRO do .catch() — o timer ficaria pendurado ` +
-      `após erro`
+    chamadaAtiva(ramoCatch[1]),
+    `${nome}: falta clearTimeout(tsTimer) ATIVO dentro do .catch() — se estiver comentado, ` +
+      `o timer fica pendurado após erro`
   );
 
   // bloqueio preventivo do Turnstile
@@ -238,6 +247,23 @@ assert(
     'que use uonix_comment_ler_rascunho() e esc_textarea()'
 );
 
+// O rascunho tem de ser CONSUMIDO depois de lido.
+//
+// Sem delete_transient a chave, que viaja na URL, continuava válida por 15 min: quem
+// recebesse o link veria o que a outra pessoa digitou. Levantado na revisão do PR #109.
+assert(
+  /delete_transient\(\s*'uonix_cmt_draft_'\s*\.\s*\$chave\s*\)/.test(comentarios),
+  'o rascunho precisa ser consumido com delete_transient depois de lido — a chave viaja ' +
+    'na URL e ficaria reutilizável por quem recebesse o link'
+);
+
+// O consumo exige cache por request: a leitura acontece em DOIS filtros, e sem memo o
+// segundo não encontraria mais nada depois de o primeiro deletar o transient.
+assert(
+  /static \$memo/.test(comentarios),
+  'uonix_comment_ler_rascunho precisa de cache por request (static $memo): sem ele, ' +
+    'consumir o transient no primeiro filtro deixaria o segundo sem dados'
+);
 // A chave do transient precisa ser minúscula: a leitura passa por sanitize_key(), que
 // faz strtolower(). Sem isso, gravado != lido em 99,99% dos casos e o rascunho é
 // perdido — bug real encontrado na revisão do PR #109.
