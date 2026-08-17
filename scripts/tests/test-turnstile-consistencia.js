@@ -157,12 +157,25 @@ for (const arq of FORMS) {
     `${nome}: watchdog de ${ms}ms fora da faixa razoável (5s-120s)`
   );
 
-  // o timer precisa ser limpo nos DOIS ramos, senão fica pendurado
-  const limpezas = (js.match(/clearTimeout\(tsTimer\)/g) || []).length;
+  // O timer precisa ser limpo nos DOIS ramos, senão fica pendurado.
+  //
+  // Contar ocorrências NÃO basta: duplicar clearTimeout no .then() e remover do .catch()
+  // mantém a contagem em 2 e passava — o revisor do PR #109 provou isso. É preciso
+  // verificar a PRESENÇA EM CADA RAMO.
+  const ramoThen = js.match(/\.then\(\s*data\s*=>\s*\{([\s\S]*?)\n\s*\}\)/);
+  const ramoCatch = js.match(/\.catch\(\s*error\s*=>\s*\{([\s\S]*?)\n\s*\}\)/);
+
+  assert(ramoThen, `${nome}: não encontrei o ramo .then(data => ...)`);
+  assert(ramoCatch, `${nome}: não encontrei o ramo .catch(error => ...)`);
   assert(
-    limpezas >= 2,
-    `${nome}: clearTimeout(tsTimer) aparece ${limpezas}x — precisa estar no .then() E no ` +
-      `.catch(), senão o timer sobrevive ao fluxo`
+    /clearTimeout\(tsTimer\)/.test(ramoThen[1]),
+    `${nome}: falta clearTimeout(tsTimer) DENTRO do .then() — o timer sobreviveria ao ` +
+      `sucesso e abortaria uma requisição posterior`
+  );
+  assert(
+    /clearTimeout\(tsTimer\)/.test(ramoCatch[1]),
+    `${nome}: falta clearTimeout(tsTimer) DENTRO do .catch() — o timer ficaria pendurado ` +
+      `após erro`
   );
 
   // bloqueio preventivo do Turnstile
