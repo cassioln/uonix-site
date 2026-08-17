@@ -26,6 +26,69 @@ if ( ! defined( 'ABSPATH' ) ) {
  * - UI Enterprise (Design System Uônix + Flexbox Grid).
  */
 
+if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
+    /**
+     * O Google Site Kit está injetando GA4/GTM por conta própria?
+     *
+     * POR QUE ISSO EXISTE
+     *
+     * O snippet deste arquivo injeta o container GTM incondicionalmente. O Site Kit,
+     * quando o módulo Analytics está CONECTADO, injeta a própria tag GA4. Se os dois
+     * acontecerem juntos, o GA4 chega por dois caminhos e tudo conta em dobro:
+     * pageviews, conversões, e a taxa de rejeição cai artificialmente. Silencioso —
+     * ninguém percebe sem abrir o relatório em detalhe.
+     *
+     * Medido em 2026-08-16: o Site Kit está ATIVO com `useSnippet = true` nas três
+     * options (analytics-4, tagmanager, adsense), mas todos os IDs estão VAZIOS, então
+     * ele não tem tag para colocar. Ou seja, hoje não há conflito — por acidente, não
+     * por projeto. Bastam 3 cliques no painel do Site Kit para conectar o Analytics e
+     * a contagem dupla começa, sem nenhum aviso.
+     *
+     * Esta função fecha essa porta: se o Site Kit passar a injetar, o snippet recua e
+     * avisa no admin.
+     *
+     * `useSnippet = true` é o DEFAULT do plugin, não uma escolha — por isso ele sozinho
+     * não indica nada. O que importa é ter useSnippet TRUE **e** um ID preenchido.
+     *
+     * @param array|null $options Options do Site Kit (injetável para teste).
+     * @return string ''  quando não injeta; nome do módulo quando injeta.
+     */
+    function uonix_site_kit_injeta_medicao( $options = null ) {
+        // Módulo => campos de ID que, preenchidos, significam "tem tag para emitir".
+        $modulos = array(
+            'analytics-4' => array( 'measurementID', 'webDataStreamID' ),
+            'tagmanager'  => array( 'containerID', 'gtagContainerID' ),
+        );
+
+        foreach ( $modulos as $modulo => $campos_id ) {
+            $chave = 'googlesitekit_' . $modulo . '_settings';
+
+            if ( null !== $options ) {
+                $settings = isset( $options[ $chave ] ) ? $options[ $chave ] : null;
+            } else {
+                $settings = function_exists( 'get_option' ) ? get_option( $chave ) : null;
+            }
+
+            if ( ! is_array( $settings ) ) {
+                continue;
+            }
+
+            // Sem useSnippet o Site Kit não coloca tag no site, só lê dados.
+            if ( empty( $settings['useSnippet'] ) ) {
+                continue;
+            }
+
+            foreach ( $campos_id as $campo ) {
+                if ( ! empty( $settings[ $campo ] ) && '' !== trim( (string) $settings[ $campo ] ) ) {
+                    return $modulo;
+                }
+            }
+        }
+
+        return '';
+    }
+}
+
 if ( ! function_exists( 'uonix_analytics_configuration' ) ) {
     /**
      * Retorna a configuração completa somente para produção explicitamente habilitada.
@@ -54,6 +117,21 @@ if ( ! function_exists( 'uonix_analytics_configuration' ) ) {
         $adopt_website_id = trim( (string) $adopt_website_id );
 
         if ( 'production' !== $environment || true !== $enabled || '' === $gtm_container_id || '' === $adopt_website_id ) {
+            return false;
+        }
+
+        /*
+         * Recua se o Site Kit já estiver injetando GA4/GTM.
+         *
+         * Sem esta guarda, conectar o módulo Analytics no painel do Site Kit (3 cliques,
+         * sem aviso) faria o GA4 chegar por dois caminhos e contar tudo em dobro. Aqui a
+         * decisão é fail-closed: na dúvida, NÃO emitimos tag — dado faltando é
+         * recuperável, dado duplicado contamina o histórico e não tem como separar
+         * depois.
+         *
+         * O admin_notice avisa quem mexeu, para o recuo não ser silencioso.
+         */
+        if ( '' !== uonix_site_kit_injeta_medicao() ) {
             return false;
         }
 
@@ -89,7 +167,34 @@ if ( ! function_exists( 'uonix_analytics_admin_notice' ) ) {
         $environment = defined( 'UONIX_ENV' ) ? UONIX_ENV : null;
         $enabled     = defined( 'UONIX_ANALYTICS_ENABLED' ) ? UONIX_ANALYTICS_ENABLED : false;
 
-        if ( 'production' !== $environment || true !== $enabled || false !== uonix_analytics_configuration() ) {
+        if ( 'production' !== $environment || true !== $enabled ) {
+            return;
+        }
+
+        /*
+         * Conflito com o Site Kit tem aviso próprio e mais específico: quem conectou o
+         * módulo precisa saber que o container GTM foi suspenso por causa disso, senão
+         * vai concluir que "o analytics parou de funcionar" sem relacionar as duas
+         * coisas.
+         */
+        $modulo = uonix_site_kit_injeta_medicao();
+
+        if ( '' !== $modulo ) {
+            echo '<div class="notice notice-warning"><p><strong>'
+                . esc_html( 'Container GTM suspenso para evitar contagem dupla.' )
+                . '</strong> '
+                . esc_html( sprintf(
+                    'O módulo "%s" do Google Site Kit está injetando a própria tag de medição. '
+                    . 'Como o site já emite o container GTM, manter os dois duplicaria pageviews e conversões. '
+                    . 'Escolha UMA fonte: desmarque "Colocar o snippet no site" no Site Kit para voltar ao container GTM, '
+                    . 'ou remova a tag correspondente de dentro do container se preferir medir pelo Site Kit.',
+                    $modulo
+                ) )
+                . '</p></div>';
+            return;
+        }
+
+        if ( false !== uonix_analytics_configuration() ) {
             return;
         }
 
