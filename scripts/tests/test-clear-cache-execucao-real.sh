@@ -329,16 +329,28 @@ fi
 # segurança real — um caminho com espaço quebra o comando, e um caminho com metacaracteres
 # pode injetar argumentos no wp-cli do servidor.
 #
-# A prova é funcional: usamos um wp_path com ESPAÇO e um caractere perigoso. Se o valor
-# estiver escapado, ele aparece protegido no comando; se estiver cru, aparece literal.
+# O caminho de teste usa METACARACTERES PERIGOSOS, não só espaço. Um segundo revisor provou
+# com prova de conceito que um "escaper" caseiro que trata apenas espaço
+# (ex.: ${var// /\\ }) passava 25/25 enquanto deixava $(), ;, " e * SEM proteção — e
+# demonstrou um payload $(touch ...) que seria EXECUTADO no servidor.
+#
+# Testar com o caso fácil (espaço) dá falsa confiança. Aqui cada metacaractere é verificado
+# individualmente, para que a mensagem de falha diga exatamente qual escapou.
 REMOTO_ESC="$TMP/remote-cmd-escaping.txt"
 : > "$REMOTO_ESC"
+
+# cada elemento é um metacaractere que, sem escaping, muda o significado do comando remoto.
+#
+# Aspas SIMPLES são deliberadas: queremos o texto LITERAL '$(id)' viajando como dado, não o
+# resultado de executar id. É exatamente o que um atacante colocaria num caminho.
+# shellcheck disable=SC2016
+WP_PATH_HOSTIL='/home/a b/$(id)/`id`/x;y/z*/q"r/public_html'
 
 (
   # shellcheck disable=SC2329
   is_remote_env() { return 0; }
   # shellcheck disable=SC2329
-  wp_path() { printf '/home/com espaco/public_html\n'; }
+  wp_path() { printf '%s\n' "$WP_PATH_HOSTIL"; }
   # shellcheck disable=SC2329
   wp_cli_shell() { printf 'php85 wp-cli.phar\n'; }
   # shellcheck disable=SC2329
@@ -350,19 +362,52 @@ REMOTO_ESC="$TMP/remote-cmd-escaping.txt"
   clear_cache "producao"
 ) >/dev/null 2>&1
 
+# 1. o caminho NÃO pode aparecer literal: significa zero escaping
 asserts=$((asserts + 1))
-if grep -qF -- '--path=/home/com espaco/public_html' "$REMOTO_ESC"; then
-  falhou "o valor do --path foi para o comando remoto SEM escaping: um caminho com espaço \
-quebra o wp-cli no servidor e metacaracteres podem injetar argumentos. Use \
+if grep -qF -- "--path=$WP_PATH_HOSTIL" "$REMOTO_ESC"; then
+  falhou "o valor do --path foi para o comando remoto SEM NENHUM escaping. Use \
 printf '%q'. Comando emitido: $(cat "$REMOTO_ESC")"
 fi
 
-# com printf '%q' o espaço vira '\ ' (barra invertida antes do espaço)
+# 2. o valor precisa chegar PROTEGIDO — mas há mais de uma forma correta de proteger.
+#
+#    Um revisor testou `--path='$wp_root'` (aspas simples) e meu teste reprovava. Aspas
+#    simples são escaping CORRETO em bash: protegem TODOS os metacaracteres, exceto a
+#    própria aspa simples. Reprovar isso era falso positivo — o teste dizia "inseguro"
+#    sobre código seguro.
+#
+#    Verificar a FORMA (barra invertida antes de cada metacaractere) prende o teste a uma
+#    implementação. O contrato real é: o shell remoto tem de receber o caminho ÍNTEGRO.
+#
+#    Por isso a verificação por forma foi trocada pela prova de REVERSIBILIDADE abaixo, que
+#    aceita qualquer escaping correto e rejeita qualquer um incompleto.
+
+# 3. prova por reversibilidade: o shell reconstrói o caminho original?
+#
+#    Em vez de adivinhar a forma do escaping (barra invertida? aspas simples? $'...'?),
+#    perguntamos ao próprio shell. Se ele reconstrói o valor exato, o escaping está correto
+#    para QUALQUER metacaractere — inclusive os que não pensei em listar. Se não reconstrói,
+#    algo se perdeu no caminho.
+#
+#    É a mesma pergunta que o servidor remoto fará ao interpretar o comando.
+#
+#    Atenção à extração: `[^ ]*` NÃO serve, porque o escaping insere `\ ` e o recorte
+#    pararia no meio do valor. Delimitamos pelo argumento seguinte do wp-cli.
 asserts=$((asserts + 1))
-if ! grep -q -- '--path=/home/com\\\? espaco' "$REMOTO_ESC" \
-  && ! grep -qF -- "--path='/home/com espaco/public_html'" "$REMOTO_ESC"; then
-  falhou "não encontrei o --path com o valor escapado no comando remoto. Esperava o \
-espaço protegido (por barra invertida ou aspas). Comando emitido: $(cat "$REMOTO_ESC")"
+trecho_path=$(sed -n 's/.*--path=\(.*\) transient delete.*/\1/p' "$REMOTO_ESC" | head -1)
+
+if [ -z "$trecho_path" ]; then
+  falhou "não consegui extrair o --path do comando remoto (a ordem dos argumentos do \
+wp-cli mudou?). Sem isso a prova de escaping não roda e passaria em silêncio. \
+Comando emitido: $(cat "$REMOTO_ESC")"
+else
+  reconstruido=$(eval "printf '%s' $trecho_path" 2>/dev/null || printf '<<falhou>>')
+
+  if [ "$reconstruido" != "$WP_PATH_HOSTIL" ]; then
+    falhou "o --path emitido não reconstrói o caminho original ao ser interpretado pelo \
+shell remoto — o escaping está incompleto e metacaracteres podem ser EXECUTADOS no \
+servidor. Esperado: [$WP_PATH_HOSTIL]  Obtido: [$reconstruido]  Trecho: [$trecho_path]"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
