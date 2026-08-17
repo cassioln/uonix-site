@@ -117,6 +117,16 @@ add_action('wp_footer', function () {
 			margin-bottom: 20px !important; 
         }
 
+        /* O título de topo é fixo em CSS, então no erro ele contradizia a realidade:
+           dizia "Informe os dados para orçamento" mesmo com todos os campos
+           preenchidos, quando o problema era apenas a verificação de segurança.
+           No estado de erro o texto passa a ser neutro — a mensagem específica de
+           cada erro já aparece no bloco .woocommerce-error logo abaixo. */
+        .woocommerce:has(.woocommerce-error)::before,
+        body.uonix-has-error .woo-orcamento .woocommerce::before {
+            content: "Revise os itens abaixo para continuar";
+        }
+
         /* Títulos (Informações para contato, Seu pedido, etc) */
         .woocommerce-checkout h3 {
             background: transparent !important;
@@ -360,6 +370,38 @@ add_action('wp_footer', function () {
             margin: 18px 0 16px;
         }
 
+        /* Estado "pendente": aplicado pelo JS quando o usuário tenta enviar sem
+           completar o Turnstile. Destaca o widget no lugar onde a ação é necessária,
+           em vez de exigir que ele procure a mensagem no topo da página. */
+        .uonix-checkout-turnstile.uonix-turnstile-pendente {
+            border-left: 4px solid #dc2626;
+            background: #fef2f2;
+            border-radius: 6px;
+            padding: 12px 12px 12px 14px;
+            animation: uonixTurnstilePulse 0.9s ease-in-out 1;
+        }
+
+        .uonix-turnstile-aviso {
+            margin: 10px 0 0;
+            color: #dc2626;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 1.4;
+        }
+
+        @keyframes uonixTurnstilePulse {
+            0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.35); }
+            70%  { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+        }
+
+        /* Respeita quem pediu menos animação no sistema operacional. */
+        @media (prefers-reduced-motion: reduce) {
+            .uonix-checkout-turnstile.uonix-turnstile-pendente {
+                animation: none;
+            }
+        }
+
         .uonix-checkout-turnstile.uonix-turnstile-visible .uonix-turnstile-widget,
         .uonix-checkout-turnstile .uonix-turnstile-widget.uonix-turnstile-error {
             min-height: 65px !important;
@@ -405,9 +447,64 @@ add_action('wp_footer', function () {
             }
 
             var turnstileResetTimer = null;
+            var loadingWatchdog = null;
 
             function clearTurnstileResponse() {
                 $('form.checkout [name="cf-turnstile-response"], .woocommerce-checkout [name="cf-turnstile-response"]').val('');
+            }
+
+            // O Turnstile só preenche `cf-turnstile-response` quando o desafio é
+            // concluído. Campo vazio = usuário ainda não confirmou.
+            function turnstilePendente() {
+                var $campo = $('form.checkout [name="cf-turnstile-response"], .woocommerce-checkout [name="cf-turnstile-response"]');
+
+                // Sem o campo no DOM, o Turnstile não está ativo neste contexto:
+                // não bloqueia (evita travar o checkout se o widget não carregar).
+                if (!$campo.length) {
+                    return false;
+                }
+
+                var preenchido = false;
+
+                $campo.each(function () {
+                    if ($.trim($(this).val() || '') !== '') {
+                        preenchido = true;
+                    }
+                });
+
+                return !preenchido;
+            }
+
+            function limparAvisoTurnstile() {
+                $('.uonix-checkout-turnstile').removeClass('uonix-turnstile-pendente');
+                $('.uonix-turnstile-aviso').remove();
+            }
+
+            // Feedback local: destaca o widget, mostra o recado ao lado dele e rola até
+            // lá. Sem recarregar a página, sem ida ao servidor.
+            function destacarTurnstile() {
+                var $wrapper = $('.uonix-checkout-turnstile').first();
+
+                if (!$wrapper.length) {
+                    $wrapper = getTurnstileWidgets().first().closest('div');
+                }
+
+                if (!$wrapper.length) {
+                    return;
+                }
+
+                $wrapper.addClass('uonix-turnstile-pendente uonix-turnstile-visible');
+                getTurnstileWidgets().addClass('uonix-turnstile-visible');
+
+                if (!$wrapper.find('.uonix-turnstile-aviso').length) {
+                    $wrapper.append('<p class="uonix-turnstile-aviso" role="alert">Confirme a verificação de segurança para enviar o orçamento.</p>');
+                }
+
+                var alvo = $wrapper.get(0);
+
+                if (alvo && typeof alvo.scrollIntoView === 'function') {
+                    alvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
             }
 
             function getTurnstileWidgets() {
@@ -514,14 +611,43 @@ add_action('wp_footer', function () {
                 setTimeout(syncTurnstileVisibility, 1600);
 
                 // Interações de clique no Enviar
+                //
+                // O `checkout_place_order` do WooCommerce aceita `false` como veto: se
+                // retornarmos false, o WC não dispara o AJAX. Usamos isso para barrar o
+                // envio quando o Turnstile não foi completado — assim o usuário não
+                // perde a viagem até o servidor e não vê spinner nenhum.
                 $('form.checkout').on('checkout_place_order', function () {
+                    if (turnstilePendente()) {
+                        destacarTurnstile();
+                        return false;
+                    }
+
                     $('#place_order').addClass('uonix-loading');
                     // Remove o vermelho do topo quando o usuário tenta de novo
-                    $('body').removeClass('uonix-has-error'); 
+                    $('body').removeClass('uonix-has-error');
+                    limparAvisoTurnstile();
+
+                    // Rede de segurança: se por qualquer motivo o `checkout_error` não
+                    // disparar (erro fora do padrão AJAX do WC, resposta inesperada,
+                    // conexão perdida), o botão ficaria com `pointer-events: none` e a
+                    // tela pareceria travada com o spinner rodando para sempre. Este
+                    // timeout garante que o usuário sempre recupera o controle.
+                    if (loadingWatchdog) {
+                        clearTimeout(loadingWatchdog);
+                    }
+                    loadingWatchdog = setTimeout(function () {
+                        if ($('#place_order').hasClass('uonix-loading')) {
+                            $('#place_order').removeClass('uonix-loading');
+                        }
+                    }, 20000);
                 });
 
                 // Trata o erro (Adiciona loading de volta e pinta o topo de vermelho)
                 $(document.body).on('checkout_error', function () {
+                    if (loadingWatchdog) {
+                        clearTimeout(loadingWatchdog);
+                        loadingWatchdog = null;
+                    }
                     $('#place_order').removeClass('uonix-loading');
                     $('body').addClass('uonix-has-error'); 
                     scheduleTurnstileReset();
