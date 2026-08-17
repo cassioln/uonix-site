@@ -267,6 +267,9 @@ jobs:
       - name: Test Turnstile consistency across surfaces
         run: node scripts/tests/test-turnstile-consistencia.js
 
+      - name: Test Turnstile re-render after checkout AJAX
+        run: node scripts/tests/test-turnstile-rerender-checkout.js
+
       - name: Test email migration passfile tooling
         run: python3 -m unittest discover --start-directory scripts/email-migration --pattern 'test_*.py' --verbose
 
