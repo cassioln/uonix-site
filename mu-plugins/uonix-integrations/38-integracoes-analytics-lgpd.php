@@ -57,16 +57,31 @@ if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
         /*
          * Módulo => campos cuja presença significa "tem tag para emitir".
          *
-         * Lista derivada do CÓDIGO do plugin, não de suposição:
+         * Lista derivada dos Tag_Guard REAIS do plugin instalado (Site Kit 1.185.0),
+         * verificada arquivo por arquivo — não de memória:
          *
-         *   Analytics_4.php:1920 get_tag_id() dá PRECEDÊNCIA a `googleTagID` sobre
-         *   `measurementID` — cobrir só measurementID deixaria passar o caso em que o
-         *   Site Kit criou o Google Tag e emite por ele. `googleTagContainerID` também
-         *   entra: é campo de Settings do mesmo módulo (Settings.php:61).
+         *   Analytics_4/Tag_Guard.php:33
+         *     return ! empty( $settings['useSnippet'] ) && ! empty( $settings['measurementID'] );
+         *
+         *   Tag_Manager/Tag_Guard.php:55
+         *     $container_id = $this->is_amp ? $settings['ampContainerID'] : $settings['containerID'];
+         *
+         * `ampContainerID` é o campo consultado quando a requisição é AMP. Hoje não há
+         * plugin AMP instalado, então é inalcançável — mas esta guarda existe justamente
+         * para o cenário "alguém reinstala/instala depois".
+         *
+         * `googleTagID` entra porque Analytics_4::get_tag_id() lhe dá PRECEDÊNCIA sobre
+         * measurementID ao montar a tag; o Tag_Guard ainda exige measurementID, então
+         * hoje ele é redundante — mas deixa a guarda correta se o gate mudar.
+         *
+         * NÃO inclua `gtagContainerID`: verificado, tem ZERO ocorrências em includes/ do
+         * plugin. Era campo inventado. `webDataStreamID` também saiu: existe em Settings
+         * mas NÃO participa de nenhuma decisão de emitir tag (nem no Tag_Guard nem no
+         * Web_Tag) — cobri-lo dava falsa sensação de completude.
          */
         $modulos = array(
-            'analytics-4' => array( 'measurementID', 'webDataStreamID', 'googleTagID', 'googleTagContainerID' ),
-            'tagmanager'  => array( 'containerID', 'gtagContainerID' ),
+            'analytics-4' => array( 'measurementID', 'googleTagID' ),
+            'tagmanager'  => array( 'containerID', 'ampContainerID' ),
         );
 
         foreach ( $modulos as $modulo => $campos_id ) {
@@ -200,6 +215,15 @@ if ( ! function_exists( 'uonix_analytics_admin_notice' ) ) {
      * Avisa sobre configuração incompleta sem exibir qualquer identificador.
      */
     function uonix_analytics_admin_notice() {
+        /*
+         * Restrito a quem pode agir sobre o aviso. Antes rodava para qualquer usuário
+         * logado no admin — um assinante veria a mensagem sem poder fazer nada.
+         * Levantado na revisão do PR #110.
+         */
+        if ( function_exists( 'current_user_can' ) && ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+
         $environment = defined( 'UONIX_ENV' ) ? UONIX_ENV : null;
         $enabled     = defined( 'UONIX_ANALYTICS_ENABLED' ) ? UONIX_ANALYTICS_ENABLED : false;
 

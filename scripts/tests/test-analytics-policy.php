@@ -232,26 +232,31 @@ uonix_analytics_assert_same(
 );
 
 /*
- * Campos descobertos na revisão do PR #110, lendo o código do plugin.
+ * UM CASO POR CAMPO SECUNDÁRIO.
  *
- * Analytics_4.php:1920 get_tag_id() dá PRECEDÊNCIA a googleTagID sobre measurementID.
- * Cobrir só measurementID deixava passar o caso em que o Site Kit criou o Google Tag —
- * a guarda não detectaria e a contagem dupla aconteceria.
+ * O revisor do PR #110 provou que sem isso a remoção de um campo secundário da lista
+ * passava impune (exit=0): nenhuma asserção exercitava o campo com o primário VAZIO.
+ * Cada caso abaixo preenche SÓ o campo secundário, então remover aquele campo da lista
+ * quebra o teste.
+ *
+ * Campos conferidos nos Tag_Guard reais do plugin (Site Kit 1.185.0):
+ *   Analytics_4/Tag_Guard.php:33   useSnippet && measurementID
+ *   Tag_Manager/Tag_Guard.php:55   is_amp ? ampContainerID : containerID
  */
 uonix_analytics_assert_same(
 	'analytics-4',
 	uonix_site_kit_injeta_medicao( array(
 		'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'measurementID' => '', 'googleTagID' => 'GT-ABC123' ),
 	) ),
-	'googleTagID preenchido caracteriza injeção (tem precedência sobre measurementID)'
+	'googleTagID sozinho caracteriza injeção (get_tag_id() lhe dá precedência)'
 );
 
 uonix_analytics_assert_same(
-	'analytics-4',
+	'tagmanager',
 	uonix_site_kit_injeta_medicao( array(
-		'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'googleTagContainerID' => '12345678' ),
+		'googlesitekit_tagmanager_settings' => array( 'useSnippet' => true, 'containerID' => '', 'ampContainerID' => 'GTM-AMP999' ),
 	) ),
-	'googleTagContainerID preenchido caracteriza injeção'
+	'ampContainerID sozinho caracteriza injeção (é o campo do Tag_Guard quando is_amp)'
 );
 
 /*
@@ -264,6 +269,14 @@ uonix_analytics_assert_same(
 		'googlesitekit_ads_settings' => array( 'conversionID' => 'AW-987654321' ),
 	) ),
 	'Ads com conversionID injeta gtag mesmo SEM useSnippet — precisa ser detectado'
+);
+
+uonix_analytics_assert_same(
+	'ads',
+	uonix_site_kit_injeta_medicao( array(
+		'googlesitekit_ads_settings' => array( 'conversionID' => '', 'paxConversionID' => 'AW-111222333' ),
+	) ),
+	'paxConversionID sozinho também caracteriza injeção do Ads'
 );
 
 uonix_analytics_assert_same(
