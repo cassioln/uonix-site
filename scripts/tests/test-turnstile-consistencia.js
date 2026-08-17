@@ -224,4 +224,18 @@ assert(
     'na leitura, então chave com maiúsculas nunca é encontrada)'
 );
 
+// ESCAPE obrigatório nos campos reinjetados.
+//
+// O revisor do PR #109 encontrou que remover esc_attr() da injeção de author/email/url
+// NÃO era detectado: o valor vem de $_POST de um visitante e é escrito dentro de um
+// atributo HTML. Sem escape, uma aspa fecha o atributo e injeta HTML arbitrário.
+//
+// esc_url_raw/sanitize_email no armazenamento NÃO substituem o escape na saída: eles
+// normalizam, não neutralizam contexto de atributo.
+assert(
+  /value="'\s*\.\s*esc_attr\(\s*\$rascunho\[\s*\$campo\s*\]\s*\)\s*\.\s*'"/.test(comentarios),
+  'os campos author/email/url reinjetados precisam passar por esc_attr() — sem isso uma ' +
+    'aspa no valor do visitante escapa do atributo e injeta HTML'
+);
+
 console.log(`PASS: consistência do Turnstile nas 6 superfícies (${n} asserções)`);
