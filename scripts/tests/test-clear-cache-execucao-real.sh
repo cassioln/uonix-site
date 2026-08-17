@@ -228,8 +228,11 @@ printf 'img\n' > "$WPC2/uploads/foto.jpg"
 
 (
   LOCAL_WP_CONTENT="$WPC2"
+  # shellcheck disable=SC2329  # chamados indiretamente pela função carregada abaixo
   local_wp() { :; }
+  # shellcheck disable=SC2329
   log() { :; }
+  # shellcheck disable=SC2329
   is_remote_env() { return 1; }
   # shellcheck disable=SC1090
   . "$FONTE_COM_DIRS"
@@ -246,6 +249,7 @@ assert_presente "$WPC2/uploads/foto.jpg" "uploads nunca deve ser tocado"
 # ---------------------------------------------------------------------------
 # Cenário 5: idempotência — rodar de novo não pode falhar
 # ---------------------------------------------------------------------------
+# shellcheck disable=SC2034  # lida pela função extraída, não por este script
 LOCAL_WP_CONTENT="$WPC"
 asserts=$((asserts + 1))
 if ! clear_cache "local" >/dev/null 2>&1; then
@@ -266,11 +270,19 @@ REMOTO_CMD="$TMP/remote-cmd.txt"
 : > "$REMOTO_CMD"
 
 (
+  # Os stubs a seguir são invocados INDIRETAMENTE pela função carregada com `. $FONTE_FN`;
+  # o shellcheck não enxerga essa indireção (SC2329).
+  # shellcheck disable=SC2329
   is_remote_env() { return 0; }              # força o caminho REMOTO
+  # shellcheck disable=SC2329
   wp_path() { printf '/home/storage/f/34/12/siteuonix1/public_html\n'; }
+  # shellcheck disable=SC2329
   wp_cli_shell() { printf 'php85 wp-cli.phar\n'; }
+  # shellcheck disable=SC2329
   remote_run() { printf '%s\n' "$2" >> "$REMOTO_CMD"; }
+  # shellcheck disable=SC2329
   shell_join() { printf '%s\n' "$*"; }
+  # shellcheck disable=SC2329
   log() { :; }
   # shellcheck disable=SC1090
   . "$FONTE_FN"
