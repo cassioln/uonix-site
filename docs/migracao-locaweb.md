@@ -569,3 +569,82 @@ home.
 - Nenhuma credencial em log, ticket ou documentação.
 - Cutover de `uonix.com.br`, SMTP real e checkout transacional ficam fora de qualquer
   execução automatizada.
+
+## 19. Aprendizados da migração (registrado em 2026-08-17)
+
+Cada item abaixo custou uma investigação. Estão aqui para que a próxima migração não pague
+o mesmo preço.
+
+### O que a medição revelou — e que a suposição não teria revelado
+
+**`wp option update` falha em SILÊNCIO quando `WP_HOME`/`WP_SITEURL` são constantes.**
+O comando retorna sucesso e o banco não muda: a constante do `wp-config.php` sempre vence.
+Em troca de domínio, editar o `wp-config.php` primeiro e corrigir o banco com `UPDATE` SQL
+direto. Conferir por releitura, nunca pelo código de saída.
+
+**403 no vhost novo antes da propagação.** O host devolve 403 enquanto o domínio não está
+associado ao plano — não é erro de permissão de arquivo. Diagnosticar pelo painel do host,
+não pelo `.htaccess`.
+
+**187 URLs do domínio antigo no banco, 33 delas órfãs.** Buscar só em `post_content` não
+basta: URLs vivem em `options` (serializadas), `postmeta` e `termmeta`. E options
+serializadas exigem alteração via PHP — o comprimento da string faz parte do dado
+(`s:38:"http://..."`), então um `UPDATE ... REPLACE` cru corrompe a option e pode derrubar
+o tema.
+
+**GTM e AdOpt desapareceram uma vez sem erro visível.** Nenhum log, nenhuma tela branca —
+apenas pararam de sair no HTML. Validar presença explicitamente (grep pelo ID do
+container), nunca por ausência de erro.
+
+**O Turnstile é lazy: `curl | grep` dá falso negativo.** O widget está no HTML, mas o
+`api.js` só carrega após interação com o formulário. Um teste por `curl` conclui
+"não está lá" incorretamente. A validação tem de ser funcional, com navegador real.
+
+**O PHP do host segfaulta (rc=139) em qualquer arquivo, até em `<?php echo 1;`.** Não é o
+código: é o binário. Para `php -l` e testes, usar container (`docker run php:8.3-cli`).
+
+**fail2ban bane por VOLUME de conexões, não por senha errada.** Dezenas de comandos SSH
+curtos em sequência disparam o bloqueio. Padrão que funciona: `scp` de um script + UMA
+conexão para executá-lo. Uma sessão SSH pendurada (socket em `CLOSED`) também conta.
+
+**`AddHandler php80-script` no `.htaccess` é o que define a versão do PHP.** Sem essa
+linha o host cai para PHP 5.2.17 e endpoints `/api/*` retornam 500 sem log. Se o PHP
+"voltar no tempo" após uma alteração no `.htaccess`, é a primeira coisa a conferir.
+
+**MySQL em UTC-3 e PHP gravando em UTC.** Comparações de data ficam com 3h de diferença.
+Usar `UTC_TIMESTAMP()` no SQL e `gmdate()` no PHP, de forma consistente.
+
+### Sobre ordem de inicialização de plugins
+
+O Pods registra o CPT em `init` prioridade **11**; o Rank Math consulta os post types em
+`init` prioridade **10**. Resultado: o rótulo do CPT aparece vazio nas abas de configuração
+do Rank Math, embora os dados no banco estejam perfeitos. Não é encoding — é o INSTANTE da
+leitura. Antes de investigar dados, verificar a ordem dos hooks.
+
+### Sobre testes que dão falsa confiança
+
+Nove asserções escritas durante esta migração não provavam o que anunciavam. Cinco
+famílias distintas:
+
+1. **por nome** — o identificador existe em comentário, na definição, ou em outro
+   consumidor do mesmo hook
+2. **por contagem** — "aparece 2x" não é "aparece nos dois lugares certos"
+3. **por código inativo** — buscar texto no fonte não distingue código que roda de
+   `// código comentado`
+4. **dimensão sem caso** — lista de N itens com asserção só do primeiro: remover qualquer
+   outro passa verde
+5. **ramo inteiro sem cenário** — o mais grave, porque é invisível. Se todos os cenários
+   forçam o mesmo lado do `if`, o outro ramo pode ser zerado sem nada reclamar. E costuma
+   ser o ramo de produção.
+
+Regra que ficou: **rodar a mutação e ver `exit=1`**, em vez de supor que veria. Detalhes e
+checklist na skill `test-validity-and-mutation-proof`.
+
+### Armadilhas de bash que custaram tempo
+
+- `if ! cmd` e `( set -e; f ) || true` **desligam o errexit**. Para detectar que uma função
+  aborta, só `bash -c` em processo separado funciona.
+- Arquivo temporário com nome fixo + chamadas em paralelo = exit code de outra execução.
+  Levou a caçar um bug que não existia. Usar nomes únicos.
+- Um worktree removido por outro processo deixa o `cwd` da sessão inválido, e os erros
+  seguintes apontam para o lugar errado. Passar `workdir` explícito.
