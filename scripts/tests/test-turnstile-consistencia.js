@@ -166,11 +166,22 @@ for (const arq of FORMS) {
   //      regex, deixando o watchdog pendurado com o teste verde.
   //
   // Por isso: extrai cada ramo E exige a chamada em linha de CÓDIGO ATIVO.
-  const ramoThen = js.match(/\.then\(\s*data\s*=>\s*\{([\s\S]*?)\n\s*\}\)/);
-  const ramoCatch = js.match(/\.catch\(\s*error\s*=>\s*\{([\s\S]*?)\n\s*\}\)/);
+  //
+  // O nome do parâmetro é LIVRE (`\w+`), não fixo. Um revisor apontou que a versão antiga
+  // exigia literalmente `data` e `error`: renomear para `.catch(err => {` fazia o teste
+  // falhar sem haver defeito — change-detector puro, porque o nome da variável não é
+  // contrato nenhum. Hoje o repo usa `data`, `response` e `error`; todos casam.
+  const ramoThen = js.match(/\.then\(\s*\w+\s*=>\s*\{([\s\S]*?)\n\s*\}\)/);
+  const ramoCatch = js.match(/\.catch\(\s*\w+\s*=>\s*\{([\s\S]*?)\n\s*\}\)/);
 
-  assert(ramoThen, `${nome}: não encontrei o ramo .then(data => ...)`);
-  assert(ramoCatch, `${nome}: não encontrei o ramo .catch(error => ...)`);
+  assert(
+    ramoThen,
+    `${nome}: não encontrei o ramo .then(<param> => { ... }) — a forma do callback mudou?`
+  );
+  assert(
+    ramoCatch,
+    `${nome}: não encontrei o ramo .catch(<param> => { ... }) — a forma do callback mudou?`
+  );
 
   // linha ativa = começa com espaços e já vem clearTimeout, sem // antes
   const chamadaAtiva = (trecho) =>
