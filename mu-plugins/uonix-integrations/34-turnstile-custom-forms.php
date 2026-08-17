@@ -430,7 +430,16 @@ if ( ! function_exists( 'uonix_turnstile_validate_request' ) ) {
 		$response = wp_remote_post(
 			'https://challenges.cloudflare.com/turnstile/v0/siteverify',
 			array(
-				'timeout' => 10,
+				/*
+				 * 5s em vez de 10s. O siteverify da Cloudflare responde tipicamente em
+				 * menos de 500ms; 10s significava que, em degradação, a pessoa ficava
+				 * 10 segundos olhando um spinner antes de ver o erro — e no checkout
+				 * isso passava do watchdog de UX.
+				 *
+				 * Cortar em 5s ainda dá margem de 10x sobre o tempo normal. O filtro
+				 * permite ajustar sem editar o mu-plugin.
+				 */
+				'timeout' => (int) apply_filters( 'uonix_turnstile_verify_timeout', 5 ),
 				'body'    => array(
 					'secret'   => $settings['secretKey'],
 					'response' => $token,
@@ -463,12 +472,28 @@ if ( ! function_exists( 'uonix_turnstile_validate_request' ) ) {
 if ( ! function_exists( 'uonix_turnstile_send_json_error_if_invalid' ) ) {
 	/**
 	 * Encapsula a resposta AJAX padrão dos formulários Uonix.
+	 *
+	 * Devolve também o `code` do WP_Error. Antes só `message` era enviado, e o JS não
+	 * conseguia distinguir "faltou completar o desafio" de "desafio inválido" — o que
+	 * impedia UX específica no cliente (ex.: destacar o widget apenas no primeiro caso,
+	 * como o checkout passou a fazer).
+	 *
+	 * Códigos possíveis:
+	 *   uonix_turnstile_empty           token ausente — a pessoa não completou
+	 *   uonix_turnstile_failed          a Cloudflare recusou o token
+	 *   uonix_turnstile_action_mismatch action divergente do esperado
+	 *   uonix_turnstile_request_failed  falha de transporte (rede/timeout)
 	 */
 	function uonix_turnstile_send_json_error_if_invalid( $action ) {
 		$validation = uonix_turnstile_validate_request( $action );
 
 		if ( is_wp_error( $validation ) ) {
-			wp_send_json_error( array( 'message' => $validation->get_error_message() ) );
+			wp_send_json_error(
+				array(
+					'message' => $validation->get_error_message(),
+					'code'    => $validation->get_error_code(),
+				)
+			);
 		}
 	}
 }

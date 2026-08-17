@@ -24,6 +24,27 @@ if ( ! function_exists( 'uonix_login_turnstile_is_active' ) ) {
 	 * hooks da tela de login são executados.
 	 */
 	function uonix_login_turnstile_is_active() {
+		/*
+		 * Escape hatch para recuperação de acesso.
+		 *
+		 * Existe um cenário de lockout que os fail-opens abaixo NÃO cobrem: secret
+		 * PRESENTE mas ERRADO (typo, rotação de chave feita pela metade). Nesse caso a
+		 * Cloudflare responde HTTP 200 com success=false, indistinguível de um humano
+		 * que falhou o desafio — e o login é bloqueado para todos.
+		 *
+		 * Sem esta constante, a única saída seria editar arquivo por SSH/FTP. Com ela,
+		 * basta acrescentar ao wp-config.php:
+		 *
+		 *     define( 'UONIX_LOGIN_TURNSTILE_DISABLE', true );
+		 *
+		 * Desligar o desafio do login é perda de defesa contra automação, NÃO de
+		 * autenticação: usuário e senha continuam sendo exigidos. Use como medida
+		 * temporária e remova a linha depois de corrigir a chave.
+		 */
+		if ( defined( 'UONIX_LOGIN_TURNSTILE_DISABLE' ) && UONIX_LOGIN_TURNSTILE_DISABLE ) {
+			return false;
+		}
+
 		return function_exists( 'uonix_turnstile_is_enabled' )
 			&& function_exists( 'uonix_turnstile_render_widget' )
 			&& function_exists( 'uonix_turnstile_validate_request' )
@@ -103,9 +124,14 @@ if ( ! function_exists( 'uonix_login_turnstile_validate' ) ) {
 				return $user;
 			}
 
+			// Mensagem alinhada com o validador compartilhado
+			// (34-turnstile-custom-forms.php). Antes dizia "Recarregue a página e
+			// tente novamente", o que era burocrático e desnecessário: o widget é
+			// re-renderizado a cada carregamento do wp-login.php, então basta
+			// completar o desafio e enviar de novo.
 			return new WP_Error(
 				'uonix_login_turnstile',
-				__( '<strong>Erro:</strong> falha na verificação de segurança. Recarregue a página e tente novamente.', 'uonix' )
+				__( '<strong>Erro:</strong> confirme a verificação de segurança para continuar.', 'uonix' )
 			);
 		}
 

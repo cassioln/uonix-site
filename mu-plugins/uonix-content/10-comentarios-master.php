@@ -327,6 +327,151 @@ add_action('manage_comments_custom_column', function($col, $id) {
 // CAPTCHA continua inline; comentário duplicado abre modal.
 // ==============================================================================
 
+/**
+ * Guarda o rascunho do comentário quando a validação falha.
+ *
+ * O fluxo de erro do WordPress é wp_die -> redirect, e o redirect descarta o $_POST.
+ * Sem isto, quem escreveu um comentário longo e errou o captcha perdia tudo.
+ *
+ * O conteúdo fica num transient de 15 minutos, identificado por uma chave aleatória
+ * de uso único que viaja na URL. O texto NUNCA vai para a query string: apareceria
+ * em logs de acesso, no header Referer e no histórico do navegador, e comentários
+ * longos estourariam o limite prático de tamanho da URL.
+ */
+if ( ! function_exists( 'uonix_comment_chave_rascunho' ) ) {
+	function uonix_comment_chave_rascunho() {
+		static $chave = null;
+
+		if ( null === $chave ) {
+			/*
+			 * SÓ minúsculas e dígitos, de propósito.
+			 *
+			 * A leitura passa por sanitize_key(), que aplica strtolower(). Com
+			 * wp_generate_password( 20, false, false ) — que inclui MAIÚSCULAS — a chave
+			 * gravada divergia da chave lida em 99,99% dos casos e o transient nunca era
+			 * encontrado: a preservação do rascunho não funcionava.
+			 *
+			 * Medido: (36/62)^20 = 1 acerto a cada ~52.700 tentativas.
+			 *
+			 * 20 caracteres em [a-z0-9] = 36^20 ≈ 1,3e31 combinações. Espaço de chave
+			 * mais que suficiente para um identificador efêmero de 15 minutos.
+			 */
+			$chave = strtolower( wp_generate_password( 20, false, false ) );
+		}
+
+		return $chave;
+	}
+}
+
+if ( ! function_exists( 'uonix_comment_guardar_rascunho' ) ) {
+	function uonix_comment_guardar_rascunho() {
+		if ( empty( $_POST['comment'] ) ) {
+			return;
+		}
+
+		$rascunho = array(
+			'comment' => wp_unslash( (string) $_POST['comment'] ),
+			'author'  => isset( $_POST['author'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['author'] ) ) : '',
+			'email'   => isset( $_POST['email'] ) ? sanitize_email( wp_unslash( (string) $_POST['email'] ) ) : '',
+			'url'     => isset( $_POST['url'] ) ? esc_url_raw( wp_unslash( (string) $_POST['url'] ) ) : '',
+		);
+
+		// 15 min cobre com folga um novo desafio sem acumular lixo no banco.
+		set_transient( 'uonix_cmt_draft_' . uonix_comment_chave_rascunho(), $rascunho, 15 * MINUTE_IN_SECONDS );
+	}
+}
+
+if ( ! function_exists( 'uonix_comment_ler_rascunho' ) ) {
+	function uonix_comment_ler_rascunho() {
+		/*
+		 * Cache por request: a leitura acontece em DOIS filtros
+		 * (comment_form_field_comment e comment_form_defaults). Sem o cache, o segundo
+		 * filtro não encontraria mais nada depois de o primeiro consumir o transient.
+		 */
+		static $memo = null;
+
+		if ( null !== $memo ) {
+			return $memo;
+		}
+
+		$chave = isset( $_GET['comment_draft'] ) ? sanitize_key( wp_unslash( (string) $_GET['comment_draft'] ) ) : '';
+
+		if ( '' === $chave ) {
+			$memo = array();
+			return $memo;
+		}
+
+		$rascunho = get_transient( 'uonix_cmt_draft_' . $chave );
+		$memo     = is_array( $rascunho ) ? $rascunho : array();
+
+		/*
+		 * Consumo de uso único, SEM condição.
+		 *
+		 * Sem isto o rascunho ficava até 15 min no banco e a chave, que viaja na URL,
+		 * continuava válida — quem recebesse o link veria o que a outra pessoa digitou.
+		 * Levantado na revisão do PR #109.
+		 *
+		 * O delete vem DEPOIS de carregar em $memo, então os dois filtros ainda recebem o
+		 * conteúdo neste request; só um recarregamento da mesma URL vem vazio.
+		 *
+		 * Antes havia um `if ( array() !== $memo )` em volta. Removido: além de
+		 * desnecessário (delete_transient é seguro quando a chave não existe), era frágil —
+		 * um revisor provou que inverter a condição para `array() === $memo` fazia o código
+		 * deletar só quando o rascunho estava VAZIO e NUNCA quando havia conteúdo real,
+		 * reintroduzindo o bug original em silêncio. Menos condição, menos superfície de
+		 * regressão.
+		 */
+		delete_transient( 'uonix_cmt_draft_' . $chave );
+
+		return $memo;
+	}
+}
+
+/**
+ * Devolve o texto ao formulário depois do redirect.
+ *
+ * Usa os filtros oficiais do WordPress em vez de reescrever o template do
+ * formulário de comentários.
+ */
+add_filter( 'comment_form_field_comment', function ( $campo ) {
+	$rascunho = uonix_comment_ler_rascunho();
+
+	if ( empty( $rascunho['comment'] ) ) {
+		return $campo;
+	}
+
+	// O textarea do core vem vazio (`></textarea>`); injeta o conteúdo preservado.
+	return preg_replace(
+		'/(<textarea[^>]*)>(\s*)<\/textarea>/',
+		'$1>' . esc_textarea( $rascunho['comment'] ) . '</textarea>',
+		$campo,
+		1
+	);
+}, 20 );
+
+add_filter( 'comment_form_defaults', function ( $defaults ) {
+	$rascunho = uonix_comment_ler_rascunho();
+
+	if ( ! $rascunho ) {
+		return $defaults;
+	}
+
+	foreach ( array( 'author', 'email', 'url' ) as $campo ) {
+		if ( empty( $rascunho[ $campo ] ) || empty( $defaults['fields'][ $campo ] ) ) {
+			continue;
+		}
+
+		$defaults['fields'][ $campo ] = preg_replace(
+			'/(name=["\']' . $campo . '["\'][^>]*?)value=["\'][^"\']*["\']/',
+			'$1value="' . esc_attr( $rascunho[ $campo ] ) . '"',
+			$defaults['fields'][ $campo ],
+			1
+		);
+	}
+
+	return $defaults;
+}, 20 );
+
 add_filter('wp_die_handler', function($handler) {
     $script = isset($_SERVER['SCRIPT_NAME']) ? $_SERVER['SCRIPT_NAME'] : '';
 
@@ -379,8 +524,22 @@ function uonix_comment_custom_wp_die_handler($message, $title = '', $args = arra
         stripos($plain_message, 'calma ai') !== false;
 
     if ($is_captcha_error) {
+        // Preserva o que a pessoa digitou. O redirect descarta o $_POST, então sem
+        // isto um comentário longo era perdido só porque o captcha falhou.
+        //
+        // O conteúdo vai para um transient (NÃO para a query string): texto de
+        // comentário na URL vazaria em logs de acesso, Referer e histórico, além de
+        // estourar o limite prático de tamanho. Na URL viaja apenas uma chave
+        // aleatória de uso único.
+        uonix_comment_guardar_rascunho();
+
         $url = remove_query_arg('comment_error', $url);
         $url = add_query_arg('comment_error', 'captcha', $url);
+
+        $chave = uonix_comment_chave_rascunho();
+        if ($chave) {
+            $url = add_query_arg('comment_draft', $chave, $url);
+        }
 
         wp_safe_redirect($url);
         exit;
