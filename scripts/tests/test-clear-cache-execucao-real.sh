@@ -253,6 +253,66 @@ if ! clear_cache "local" >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
+# Cenário 6: o RAMO REMOTO — o que roda em PRODUÇÃO (Locaweb)
+#
+# Sem este cenário, o branch `is_remote_env` verdadeiro fica 100% descoberto: substituir
+# todo o corpo remoto por `true` passava com 17/17 asserções verdes, e nenhum outro teste
+# do repo exercita esse caminho (todos stubam clear_cache por inteiro). Uma regressão que
+# ZERASSE a limpeza de cache em produção passaria impune — achado do revisor do PR #111.
+#
+# `remote_run` é stubado para CAPTURAR o comando em vez de executar por SSH.
+# ---------------------------------------------------------------------------
+REMOTO_CMD="$TMP/remote-cmd.txt"
+: > "$REMOTO_CMD"
+
+(
+  is_remote_env() { return 0; }              # força o caminho REMOTO
+  wp_path() { printf '/home/storage/f/34/12/siteuonix1/public_html\n'; }
+  wp_cli_shell() { printf 'php85 wp-cli.phar\n'; }
+  remote_run() { printf '%s\n' "$2" >> "$REMOTO_CMD"; }
+  shell_join() { printf '%s\n' "$*"; }
+  log() { :; }
+  # shellcheck disable=SC1090
+  . "$FONTE_FN"
+  clear_cache "producao"
+) >/dev/null 2>&1
+
+assert_contem "$REMOTO_CMD" "transient delete --all" \
+  "o ramo REMOTO precisa limpar transients — é o que roda em produção"
+assert_contem "$REMOTO_CMD" "cache flush" \
+  "o ramo REMOTO precisa dar flush no object cache"
+assert_contem "$REMOTO_CMD" "set -euo pipefail" \
+  "o comando remoto precisa abortar em erro não tratado (set -euo pipefail)"
+
+# O caminho do WP precisa viajar em CADA chamada do wp-cli: sem --path o wp-cli age no
+# diretório de trabalho do SSH, não na instalação. Contar não basta — as duas chamadas
+# precisam ter o --path (uma mutação que removeu só de uma escapava).
+asserts=$((asserts + 1))
+chamadas_wp=$(grep -c 'transient delete --all\|cache flush' "$REMOTO_CMD" 2>/dev/null || echo 0)
+com_path=$(grep -c -- '--path=' "$REMOTO_CMD" 2>/dev/null || echo 0)
+if [ "$chamadas_wp" -lt 2 ] || [ "$com_path" -lt 2 ]; then
+  falhou "cada chamada do wp-cli no remoto precisa de --path: encontrei $chamadas_wp \
+chamada(s) e $com_path com --path. Sem --path o wp-cli age no diretório errado do servidor"
+fi
+
+# Cada chamada precisa de `|| true`: limpar cache é best-effort e um wp-cli que falhe no
+# servidor não pode abortar o clone com `set -euo pipefail` ativo no comando remoto.
+asserts=$((asserts + 1))
+com_or_true=$(grep -c '|| true' "$REMOTO_CMD" 2>/dev/null || echo 0)
+if [ "$com_or_true" -lt 2 ]; then
+  falhou "cada chamada do wp-cli no remoto precisa de '|| true' (achei $com_or_true): com \
+'set -euo pipefail' no comando remoto, um wp-cli que falhe abortaria o clone"
+fi
+
+# Nenhum `rm -rf` deve ser emitido hoje: cache_dirs está vazio. Um rm -rf construído com
+# variável vazia em produção seria catastrófico.
+asserts=$((asserts + 1))
+if grep -q 'rm -rf' "$REMOTO_CMD"; then
+  falhou "com cache_dirs vazio, o comando remoto NÃO deve conter 'rm -rf' — um caminho \
+mal montado apagaria dados em produção. Comando emitido: $(cat "$REMOTO_CMD")"
+fi
+
+# ---------------------------------------------------------------------------
 if [ "$falhas" -ne 0 ]; then
   printf 'FALHOU: %d asserções, %d falhas\n' "$asserts" "$falhas" >&2
   exit 1
