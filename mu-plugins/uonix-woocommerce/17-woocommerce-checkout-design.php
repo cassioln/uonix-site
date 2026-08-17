@@ -655,8 +655,35 @@ add_action('wp_footer', function () {
             });
 
             // Monitora atualizações de Ajax do WooCommerce
+            //
+            // O widget do Turnstile é emitido em woocommerce_review_order_before_submit,
+            // que vive DENTRO do template review-order.php. O WooCommerce SUBSTITUI esse
+            // template inteiro a cada update_order_review — troca de CEP, cupom, frete.
+            //
+            // Quando isso acontece o container do widget vai embora com o markup antigo, e
+            // o api.js da Cloudflare passa a reclamar no console:
+            //
+            //   [Cloudflare Turnstile] Cannot find Widget cf-chl-widget-xxxxx
+            //
+            // O cliente fica sem widget nenhum, o campo cf-turnstile-response fica vazio, e
+            // a validação server-side (corretamente fail-closed) rejeita o envio com
+            // "Falha na verificação de segurança". Resultado: pedido legítimo bloqueado.
+            //
+            // syncTurnstileVisibility() apenas alterna classes CSS conforme o iframe ter
+            // dimensão — não recria nada. Sem este prepare(), não há caminho que reconstrua
+            // o widget destruído.
+            //
+            // prepare() é seguro chamar sempre: renderContainer() sai cedo quando o
+            // container já tem dataset.uonixRendered === '1', então widget vivo não é
+            // duplicado. E prepare() (em vez de renderAll()) garante que o api.js esteja
+            // carregado antes, cobrindo o caso do AJAX ocorrer durante o load inicial.
             $(document.body).on('updated_checkout', function () {
                 reformatCheckoutTable();
+
+                if (window.uonixTurnstile && typeof window.uonixTurnstile.prepare === 'function') {
+                    window.uonixTurnstile.prepare(document).then(syncTurnstileVisibility);
+                }
+
                 syncTurnstileVisibility();
                 setTimeout(syncTurnstileVisibility, 600);
                 setTimeout(syncTurnstileVisibility, 1600);
