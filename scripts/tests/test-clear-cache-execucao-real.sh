@@ -281,8 +281,6 @@ REMOTO_CMD="$TMP/remote-cmd.txt"
   # shellcheck disable=SC2329
   remote_run() { printf '%s\n' "$2" >> "$REMOTO_CMD"; }
   # shellcheck disable=SC2329
-  shell_join() { printf '%s\n' "$*"; }
-  # shellcheck disable=SC2329
   log() { :; }
   # shellcheck disable=SC1090
   . "$FONTE_FN"
@@ -322,6 +320,49 @@ asserts=$((asserts + 1))
 if grep -q 'rm -rf' "$REMOTO_CMD"; then
   falhou "com cache_dirs vazio, o comando remoto NÃO deve conter 'rm -rf' — um caminho \
 mal montado apagaria dados em produção. Comando emitido: $(cat "$REMOTO_CMD")"
+fi
+
+# O valor do --path precisa vir ESCAPADO com printf '%q'.
+#
+# Conferir só a presença de `--path=` não basta: um revisor provou que remover o
+# `printf '%q'` (deixando `--path=$wp_root` cru) passava 23/23 verde. É regressão de
+# segurança real — um caminho com espaço quebra o comando, e um caminho com metacaracteres
+# pode injetar argumentos no wp-cli do servidor.
+#
+# A prova é funcional: usamos um wp_path com ESPAÇO e um caractere perigoso. Se o valor
+# estiver escapado, ele aparece protegido no comando; se estiver cru, aparece literal.
+REMOTO_ESC="$TMP/remote-cmd-escaping.txt"
+: > "$REMOTO_ESC"
+
+(
+  # shellcheck disable=SC2329
+  is_remote_env() { return 0; }
+  # shellcheck disable=SC2329
+  wp_path() { printf '/home/com espaco/public_html\n'; }
+  # shellcheck disable=SC2329
+  wp_cli_shell() { printf 'php85 wp-cli.phar\n'; }
+  # shellcheck disable=SC2329
+  remote_run() { printf '%s\n' "$2" >> "$REMOTO_ESC"; }
+  # shellcheck disable=SC2329
+  log() { :; }
+  # shellcheck disable=SC1090
+  . "$FONTE_FN"
+  clear_cache "producao"
+) >/dev/null 2>&1
+
+asserts=$((asserts + 1))
+if grep -qF -- '--path=/home/com espaco/public_html' "$REMOTO_ESC"; then
+  falhou "o valor do --path foi para o comando remoto SEM escaping: um caminho com espaço \
+quebra o wp-cli no servidor e metacaracteres podem injetar argumentos. Use \
+printf '%q'. Comando emitido: $(cat "$REMOTO_ESC")"
+fi
+
+# com printf '%q' o espaço vira '\ ' (barra invertida antes do espaço)
+asserts=$((asserts + 1))
+if ! grep -q -- '--path=/home/com\\\? espaco' "$REMOTO_ESC" \
+  && ! grep -qF -- "--path='/home/com espaco/public_html'" "$REMOTO_ESC"; then
+  falhou "não encontrei o --path com o valor escapado no comando remoto. Esperava o \
+espaço protegido (por barra invertida ou aspas). Comando emitido: $(cat "$REMOTO_ESC")"
 fi
 
 # ---------------------------------------------------------------------------
