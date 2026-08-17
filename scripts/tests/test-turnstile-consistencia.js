@@ -209,10 +209,30 @@ for (const arq of FORMS) {
       ...linhas.map((l) => l.match(/^\s*/)[0].length)
     );
 
-    return linhas.some((l) => {
-      if (!/^\s*clearTimeout\(tsTimer\)\s*;/.test(l)) return false;
-      return l.match(/^\s*/)[0].length === nivelRamo;
-    });
+    const idx = linhas.findIndex(
+      (l) =>
+        /^\s*clearTimeout\(tsTimer\)\s*;/.test(l) &&
+        l.match(/^\s*/)[0].length === nivelRamo
+    );
+
+    if (idx === -1) return false;
+
+    // Nada que interrompa o fluxo pode vir ANTES, no mesmo nível.
+    //
+    // Encontrei esta burla eu mesmo ao testar o PR: `return;` seguido de
+    // `clearTimeout(tsTimer);` deixa a chamada no nível certo do ramo, satisfazendo a
+    // medida de indentação, mas o código nunca chega nela. É patológico (ninguém escreve
+    // por acidente, e o resto do ramo também ficaria morto), mas o custo de fechar é uma
+    // linha.
+    const interrompeAntes = linhas
+      .slice(0, idx)
+      .some(
+        (l) =>
+          l.match(/^\s*/)[0].length === nivelRamo &&
+          /^\s*(return\b|throw\b)/.test(l)
+      );
+
+    return !interrompeAntes;
   };
 
   assert(
