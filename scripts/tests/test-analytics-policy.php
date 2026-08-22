@@ -79,6 +79,17 @@ function uonix_analytics_assert_not_contains( $needle, $haystack, $message ) {
 	}
 }
 
+function uonix_analytics_assert_css_declaration( $selector, $declaration, $css, $message ) {
+	global $failures;
+
+	$pattern = '/' . preg_quote( $selector, '/' ) . '\\s*\\{(?<body>.*?)\\}/s';
+
+	if ( ! preg_match( $pattern, $css, $matches ) || false === strpos( $matches['body'], $declaration ) ) {
+		++$failures;
+		fwrite( STDERR, sprintf( "FAIL: %s (seletor/declaracao ausente: %s { %s })\n", $message, $selector, $declaration ) );
+	}
+}
+
 $required_functions = array(
 	'uonix_analytics_configuration',
 	'uonix_render_analytics_head',
@@ -110,6 +121,14 @@ uonix_render_analytics_head( $valid );
 $head_html = ob_get_clean();
 uonix_analytics_assert_contains( 'GTM-REAL123', $head_html, 'head injeta GTM que entrega GA4' );
 uonix_analytics_assert_contains( 'real-adopt-id', $head_html, 'head injeta AdOpt' );
+
+$do_not_sell_selector = '#uonix-cookie-root #cookie-banner div:has(> #adopt-accept-all-button) > button:not(#adopt-preferences-button):not(#adopt-accept-all-button)';
+uonix_analytics_assert_css_declaration(
+	$do_not_sell_selector,
+	'border-radius: 8px !important',
+	$head_html,
+	'botão Não venda usa o mesmo arredondamento discreto do Aceitar sem alterar Minhas opções'
+);
 
 ob_start();
 uonix_render_analytics_body( $valid );

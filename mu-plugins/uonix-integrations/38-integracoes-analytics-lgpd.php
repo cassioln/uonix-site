@@ -302,6 +302,11 @@ function uonix_render_analytics_head( $configuration = null ) {
             appearance: none !important; border-radius: 8px !important; font-weight: 700 !important; font-size: 13px !important; padding: 10px 18px !important; cursor: pointer !important; border: none !important; white-space: nowrap !important;
         }
 
+        /* "Não venda" não recebe ID do AdOpt; mantém o mesmo raio do Aceitar. */
+        #uonix-cookie-root #cookie-banner div:has(> #adopt-accept-all-button) > button:not(#adopt-preferences-button):not(#adopt-accept-all-button) {
+            border-radius: 8px !important;
+        }
+
         /* Rejeitar */
         #uonix-cookie-root #adopt-reject-all-button,
         #uonix-cookie-root #preference-banner div > button:nth-last-of-type(2) {
