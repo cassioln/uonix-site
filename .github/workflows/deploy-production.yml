@@ -669,14 +669,14 @@ jobs:
           test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get home)" = "$target_url"
           check 'option siteurl = URL canônica'
           test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get siteurl)" = "$target_url"
-          check 'política de indexação (UONIX_ALLOW_INDEXING, blog_public)'
+          check 'política de indexação de produção indexável (UONIX_ALLOW_INDEXING, blog_public)'
           "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval '
           if (
               ! defined( "UONIX_ALLOW_INDEXING" )
-              || false !== UONIX_ALLOW_INDEXING
+              || true !== UONIX_ALLOW_INDEXING
               || ! function_exists( "uonix_environment_allows_indexing" )
-              || uonix_environment_allows_indexing()
-              || "0" !== (string) get_option( "blog_public" )
+              || ! uonix_environment_allows_indexing()
+              || "1" !== (string) get_option( "blog_public" )
           ) {
               exit( 1 );
           }
@@ -701,15 +701,16 @@ jobs:
           }
           '
           REMOTE
-          printf 'smoke: %s\n' 'X-Robots-Tag noindex/nofollow/noarchive'
+          printf 'smoke: %s\n' 'X-Robots-Tag sem noindex/nofollow/noarchive'
           headers="$(mktemp)"
           trap 'rm -f "$headers"' EXIT
           effective_url="$(curl --fail --silent --show-error --location --max-time 30 \
             --dump-header "$headers" --output /dev/null --write-out '%{url_effective}' "$TARGET_URL/")"
           [ "$effective_url" = "$TARGET_URL/" ]
-          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noindex'
-          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*nofollow'
-          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noarchive'
+          if tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*(noindex|nofollow|noarchive)'; then
+            printf 'produção não pode responder com X-Robots-Tag restritivo após o cutover\n' >&2
+            exit 1
+          fi
 
       - name: Migrate legacy variation technical sheets
         if: ${{ inputs.migrate_variation_technical_sheet }}
@@ -1046,18 +1047,19 @@ jobs:
           test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get home)" = "$target_url"
           rollback_check 'option siteurl = URL canônica'
           test "$("$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" option get siteurl)" = "$target_url"
-          rollback_check 'política de indexação (UONIX_ALLOW_INDEXING, blog_public)'
-          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'if (!defined("UONIX_ALLOW_INDEXING") || false !== UONIX_ALLOW_INDEXING || !function_exists("uonix_environment_allows_indexing") || uonix_environment_allows_indexing() || "0" !== (string) get_option("blog_public")) { exit(1); }'
+          rollback_check 'política de indexação de produção indexável (UONIX_ALLOW_INDEXING, blog_public)'
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'if (!defined("UONIX_ALLOW_INDEXING") || true !== UONIX_ALLOW_INDEXING || !function_exists("uonix_environment_allows_indexing") || !uonix_environment_allows_indexing() || "1" !== (string) get_option("blog_public")) { exit(1); }'
           REMOTE
-          printf 'rollback: %s\n' 'X-Robots-Tag noindex/nofollow/noarchive'
+          printf 'rollback: %s\n' 'X-Robots-Tag sem noindex/nofollow/noarchive'
           headers="$(mktemp)"
           trap 'rm -f "$headers"' EXIT
           effective_url="$(curl --fail --silent --show-error --location --max-time 30 \
             --dump-header "$headers" --output /dev/null --write-out '%{url_effective}' "$TARGET_URL/")"
           [ "$effective_url" = "$TARGET_URL/" ]
-          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noindex'
-          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*nofollow'
-          tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*noarchive'
+          if tr -d '\r' < "$headers" | grep -Eiq '^X-Robots-Tag:.*(noindex|nofollow|noarchive)'; then
+            printf 'rollback não pode validar X-Robots-Tag restritivo após o cutover\n' >&2
+            exit 1
+          fi
 
           # O smoke externo também faz parte da prova. Só agora o marcador de código
           # pode ser removido; se esta conexão falhar, o lock permanece fechado.
