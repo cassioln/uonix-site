@@ -45,8 +45,9 @@ scripts/email-migration/passfiles/
 __pycache__/
 *.pyc
 
-# Planos de sessão do agente (contexto local de trabalho)
+# Planos e especificações gerados por agentes (contexto de trabalho, não entrega do site).
 .hermes/plans/
+docs/superpowers/
 
 # Worktrees git criados para trabalho isolado (git worktree add .worktrees/...).
 # São checkouts locais, nunca conteúdo do repositório: versioná-los aninharia
