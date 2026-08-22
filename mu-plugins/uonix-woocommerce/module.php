@@ -24,6 +24,7 @@ uonix_mu_require_files(
 		'23-rfq-produto-padrao.php',
 		'24-admin-resumo-editor-estavel.php',
 		'25-admin-resumo-fixo.php',
+		'26-turnstile-store-api-checkout.php',
 	),
 	'uonix-woocommerce'
 );

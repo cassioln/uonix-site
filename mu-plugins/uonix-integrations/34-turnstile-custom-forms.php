@@ -410,14 +410,26 @@ if ( ! function_exists( 'uonix_turnstile_render_widget' ) ) {
 if ( ! function_exists( 'uonix_turnstile_validate_request' ) ) {
 	/**
 	 * Valida o token enviado pelo formulário customizado antes de gravar dados.
+	 *
+	 * @param string      $expected_action Action esperada no resultado da Cloudflare.
+	 * @param string|null $token           Token explícito. Quando null, lê de $_POST.
+	 *                                    Necessário para superfícies que NÃO populam
+	 *                                    $_POST — a Store API do WooCommerce recebe
+	 *                                    JSON, então $_POST fica vazio e ler de lá
+	 *                                    daria "token ausente" mesmo com token válido.
 	 */
-	function uonix_turnstile_validate_request( $expected_action = '' ) {
+	function uonix_turnstile_validate_request( $expected_action = '', $token = null ) {
 		if ( ! uonix_turnstile_is_enabled() ) {
 			return true;
 		}
 
 		$settings = uonix_turnstile_get_settings();
-		$token    = sanitize_text_field( wp_unslash( $_POST['cf-turnstile-response'] ?? '' ) );
+
+		if ( null === $token ) {
+			$token = wp_unslash( $_POST['cf-turnstile-response'] ?? '' );
+		}
+
+		$token = sanitize_text_field( (string) $token );
 
 		if ( empty( $token ) ) {
 			// Caso mais comum: o usuário não completou o widget. É o cenário mais
