@@ -60,6 +60,9 @@ jobs:
       - name: Test login Turnstile contract
         run: php scripts/tests/test-login-turnstile.php
 
+      - name: Test Store API checkout Turnstile guard
+        run: php scripts/tests/test-turnstile-store-api-checkout.php
+
       - name: Test login visual scope
         run: php scripts/tests/test-login-visual-scope.php
 
