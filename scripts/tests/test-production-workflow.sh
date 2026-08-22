@@ -77,6 +77,7 @@ require(production, r'cancel-in-progress:\s*false', 'produção não pode cancel
 # da escrita no banco, e o rollback precisa saber quais domínios foram alterados.
 production_backup_step = named_step_run(production, 'Back up managed remote paths')
 production_publish_step = named_step_run(production, 'Publish only managed paths and verify manifest')
+production_smoke_step = named_step_run(production, 'Clear cache and run smoke tests')
 production_migration_step = named_step_run(production, 'Migrate legacy variation technical sheets')
 production_rollback_step = named_step_run(production, 'Roll back managed code after failure')
 production_release_step = named_step_run(production, 'Release exclusive production lock')
@@ -109,6 +110,38 @@ require(
 )
 if not migration_index < rollback_index < release_index:
     raise AssertionError('rollback deve ser o último gate antes da liberação do lock')
+
+# Pós-cutover: https://uonix.com.br é produção definitiva e indexável. O smoke e
+# o rollback não podem mais exigir o estado histórico de noindex usado durante a
+# transição em site.uonix.com.br; essa divergência bloqueia publicação e mantém o
+# lock remoto mesmo após o código ser restaurado com sucesso.
+for label, step in (
+    ('smoke', production_smoke_step),
+    ('rollback', production_rollback_step),
+):
+    for pattern in (
+        r'!\s*defined\(\s*"UONIX_ALLOW_INDEXING"\s*\)',
+        r'true\s*!==\s*UONIX_ALLOW_INDEXING',
+        r'!\s*function_exists\(\s*"uonix_environment_allows_indexing"\s*\)',
+        r'!\s*uonix_environment_allows_indexing\(\)',
+        r'"1"\s*!==\s*\(string\)\s*get_option\(\s*"blog_public"\s*\)',
+    ):
+        require(
+            step,
+            pattern,
+            f'{label} precisa validar produção indexável (true/true/1) após o cutover',
+        )
+    forbid(
+        step,
+        r'false\s*!==\s*UONIX_ALLOW_INDEXING|"0"\s*!==\s*\(string\)\s*get_option\(\s*"blog_public"\s*\)',
+        f'{label} não pode voltar a exigir produção noindex após o cutover',
+    )
+    require(
+        step,
+        r"if tr -d .*?grep -Eiq '\^X-Robots-Tag:\.\*\(noindex\|nofollow\|noarchive\)'; then.*?exit 1.*?fi",
+        f'{label} HTTP precisa rejeitar cabeçalho noindex/nofollow/noarchive em produção',
+    )
+
 forbid(
     production,
     r'- name: Retain .*backups|tail -n \+31.*?rm -rf',
