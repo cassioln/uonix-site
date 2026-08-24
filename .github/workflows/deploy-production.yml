@@ -399,7 +399,14 @@ jobs:
           # O marcador remoto é criado antes do primeiro rsync. Rollback e release
           # consultam este arquivo para não restaurar código quando nenhuma
           # transferência mutável chegou a começar.
-          sshpass -e ssh \
+          #
+          # Idempotente por desenho: se a conexão cair DEPOIS que o marcador foi
+          # criado mas ANTES da resposta chegar ao runner, um retry vai encontrar
+          # o marcador já presente. Nesse caso, se ele pertencer a este run_id,
+          # é sucesso — não uma falha de "arquivo já existe". Só um marcador de
+          # OUTRO run_id é rejeitado (lock legitimamente de outra execução).
+          bash scripts/lib/ssh-retry.sh 5 10 -- \
+            sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
             -o PubkeyAuthentication=no \
@@ -423,17 +430,29 @@ jobs:
           test "$(file_mode "$lock_path/owner")" = 600
           test "$(cat "$lock_path/owner")" = "$run_id"
           marker="$lock_path/code-mutation-started"
-          test ! -e "$marker"
-          test ! -L "$marker"
-          ( set -o noclobber; umask 077; printf '%s\n' "$run_id" > "$marker" )
-          chmod 600 "$marker"
+          # Guarda contra corrida: a checagem test ! -L precede a criação, e o
+          # noclobber garante criação atômica exclusiva. Se o marcador já existe
+          # (retry cuja resposta anterior se perdeu na conexão cortada), pulamos a
+          # criação e apenas revalidamos — mas só aceitamos se pertencer a ESTE
+          # run_id; qualquer outro dono/symlink/modo é falha real e fail-closed.
+          if [ ! -e "$marker" ]; then
+            test ! -L "$marker"
+            ( set -o noclobber; umask 077; printf '%s\n' "$run_id" > "$marker" )
+            chmod 600 "$marker"
+          else
+            printf 'marcador de código já presente; validando retry idempotente\n' >&2
+          fi
           test -f "$marker"
           test ! -L "$marker"
           test "$(file_mode "$marker")" = 600
           test "$(cat "$marker")" = "$run_id"
           REMOTE
 
-          rsync -az --delete \
+          rsync_retry() {
+            bash scripts/lib/ssh-retry.sh 5 10 -- rsync "$@"
+          }
+
+          rsync_retry -az --delete \
             -e "$ssh_transport" \
             .deploy/theme/ \
             "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/themes/kadence-child/"
@@ -446,18 +465,19 @@ jobs:
           # publicar na ordem correta fecha a janela em vez de apenas sobreviver a
           # ela. Não inverta sem reler scripts/tests/test-mu-loader-resilience.sh.
           for module_name in "${expected_modules[@]}"; do
-            rsync -az --delete \
+            rsync_retry -az --delete \
               -e "$ssh_transport" \
               ".deploy/mu-plugins/$module_name/" \
               "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/mu-plugins/$module_name/"
           done
 
-          rsync -az \
+          rsync_retry -az \
             -e "$ssh_transport" \
             .deploy/mu-plugins/uonix-core.php \
             "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/mu-plugins/uonix-core.php"
 
-          sshpass -e ssh \
+          bash scripts/lib/ssh-retry.sh 5 10 -- \
+            sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
             -o PubkeyAuthentication=no \
@@ -511,7 +531,11 @@ jobs:
             *[!0-9a-f]*) exit 1 ;;
           esac
 
-          sshpass -e ssh \
+          # Reserva exclusiva do manifesto esperado, idempotente pelo mesmo motivo
+          # do marcador de código: um retry pode encontrar o arquivo vazio já
+          # reservado por uma tentativa anterior cuja resposta se perdeu.
+          bash scripts/lib/ssh-retry.sh 5 10 -- \
+            sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
             -o PubkeyAuthentication=no \
@@ -529,22 +553,29 @@ jobs:
               stat -f '%Lp' "$1"
             fi
           }
-          test ! -e "$manifest"
-          test ! -L "$manifest"
-          ( set -o noclobber; umask 077; : > "$manifest" )
-          chmod 600 "$manifest"
+          # Mesma guarda TOCTOU do marcador de código: test ! -L antes da reserva
+          # exclusiva com noclobber. Um retry cuja resposta anterior se perdeu
+          # reencontra o manifesto já reservado vazio — revalidamos sem recriar.
+          if [ ! -e "$manifest" ]; then
+            test ! -L "$manifest"
+            ( set -o noclobber; umask 077; : > "$manifest" )
+            chmod 600 "$manifest"
+          else
+            printf 'manifesto esperado já reservado; validando retry idempotente\n' >&2
+          fi
           test -f "$manifest"
           test ! -L "$manifest"
           test ! -s "$manifest"
           test "$(file_mode "$manifest")" = 600
           REMOTE
 
-          rsync -az --chmod=F600 \
+          rsync_retry -az --chmod=F600 \
             -e "$ssh_transport" \
             .deploy/manifest.sha256 \
             "$remote:$BACKUP_DIR/manifest.expected.sha256"
 
-          sshpass -e ssh \
+          bash scripts/lib/ssh-retry.sh 5 10 -- \
+            sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
             -o PubkeyAuthentication=no \
