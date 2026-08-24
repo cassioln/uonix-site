@@ -155,7 +155,7 @@ require(
 for marker in ('code-mutation-started', 'db-mutation-started'):
     if marker not in production:
         raise AssertionError(f'marcador remoto de mutação ausente: {marker}')
-if production_publish_step.index('code-mutation-started') > production_publish_step.index('rsync -az --delete'):
+if production_publish_step.index('code-mutation-started') > production_publish_step.index('rsync_retry -az --delete'):
     raise AssertionError('marcador de código precisa existir antes do primeiro rsync mutável')
 publish_code = '\n'.join(
     line for line in production_publish_step.splitlines()
@@ -174,7 +174,7 @@ allowlist_index = publish_code.index('expected_modules=()')
 name_guard_index = publish_code.index('uonix-*[!A-Za-z0-9._-]*')
 empty_gate_index = publish_code.index('${#expected_modules[@]}" -eq 0')
 marker_index = publish_code.index('bash -s -- "$operation_lock" "$DEPLOY_RUN_ID"')
-first_rsync_index = publish_code.index('rsync -az')
+first_rsync_index = publish_code.index('rsync_retry -az')
 if not allowlist_index < name_guard_index < empty_gate_index < marker_index < first_rsync_index:
     raise AssertionError(
         'allowlist de produção precisa ser validada antes do marcador e do primeiro rsync mutável'
@@ -186,12 +186,12 @@ require(
 )
 require(
     publish_code,
-    r'rsync\s+-az\s+--chmod=F600\s+\\\s+-e\s+"\$ssh_transport"\s+\\\s+\.deploy/manifest\.sha256\s+\\\s+"\$remote:\$BACKUP_DIR/manifest\.expected\.sha256"',
+    r'rsync_retry\s+-az\s+--chmod=F600\s+\\\s+-e\s+"\$ssh_transport"\s+\\\s+\.deploy/manifest\.sha256\s+\\\s+"\$remote:\$BACKUP_DIR/manifest\.expected\.sha256"',
     'transporte do manifesto esperado precisa publicá-lo explicitamente em modo 0600',
 )
 require(
     publish_code,
-    r'test ! -e "\$manifest"\s+test ! -L "\$manifest"\s+\(\s*set -o noclobber;\s*umask 077;\s*:\s*>\s*"\$manifest"\s*\)\s+chmod 600 "\$manifest"\s+test -f "\$manifest"\s+test ! -L "\$manifest"\s+test ! -s "\$manifest"\s+test "\$\(file_mode "\$manifest"\)" = 600',
+    r'\(\s*set -o noclobber;\s*umask 077;\s*:\s*>\s*"\$manifest"\s*\)\s+chmod 600 "\$manifest"\s+test -f "\$manifest"\s+test ! -L "\$manifest"\s+test ! -s "\$manifest"\s+test "\$\(file_mode "\$manifest"\)" = 600',
     'path do manifesto esperado precisa ser reservado exclusivamente, vazio, regular e 0600 antes do rsync',
 )
 require(
@@ -211,7 +211,7 @@ require(
 )
 manifest_hash_index = publish_code.index('expected_manifest_checksum="$(sha256sum .deploy/manifest.sha256')
 manifest_reserve_index = publish_code.index('bash -s -- "$BACKUP_DIR/manifest.expected.sha256"')
-manifest_rsync_index = publish_code.index('rsync -az --chmod=F600')
+manifest_rsync_index = publish_code.index('rsync_retry -az --chmod=F600')
 manifest_compare_index = publish_code.index('test "$actual_manifest_checksum" = "$expected_manifest_checksum"')
 if not manifest_hash_index < manifest_reserve_index < manifest_rsync_index < manifest_compare_index:
     raise AssertionError('hash local, reserva exclusiva, transporte e comparação remota estão fora de ordem')

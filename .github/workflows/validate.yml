@@ -153,6 +153,9 @@ jobs:
       - name: Test SSH transport
         run: bash scripts/tests/test-ssh-transport.sh
 
+      - name: Test SSH retry (transport-only backoff)
+        run: bash scripts/tests/test-ssh-retry.sh
+
       - name: Test database backup contract
         run: bash scripts/tests/test-database-backup.sh
 
