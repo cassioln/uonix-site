@@ -191,7 +191,7 @@ require(
 )
 require(
     publish_code,
-    r'\(\s*set -o noclobber;\s*umask 077;\s*:\s*>\s*"\$manifest"\s*\)\s+chmod 600 "\$manifest"\s+test -f "\$manifest"\s+test ! -L "\$manifest"\s+test ! -s "\$manifest"\s+test "\$\(file_mode "\$manifest"\)" = 600',
+    r'\(\s*set -o noclobber;\s*umask 077;\s*:\s*>\s*"\$manifest"\s*\)\s+chmod 600 "\$manifest".*?test -f "\$manifest"\s+test ! -L "\$manifest"\s+test ! -s "\$manifest"\s+test "\$\(file_mode "\$manifest"\)" = 600',
     'path do manifesto esperado precisa ser reservado exclusivamente, vazio, regular e 0600 antes do rsync',
 )
 require(

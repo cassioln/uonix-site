@@ -430,20 +430,22 @@ jobs:
           test "$(file_mode "$lock_path/owner")" = 600
           test "$(cat "$lock_path/owner")" = "$run_id"
           marker="$lock_path/code-mutation-started"
-          if [ -e "$marker" ] || [ -L "$marker" ]; then
-            test -f "$marker"
+          # Guarda contra corrida: a checagem test ! -L precede a criação, e o
+          # noclobber garante criação atômica exclusiva. Se o marcador já existe
+          # (retry cuja resposta anterior se perdeu na conexão cortada), pulamos a
+          # criação e apenas revalidamos — mas só aceitamos se pertencer a ESTE
+          # run_id; qualquer outro dono/symlink/modo é falha real e fail-closed.
+          if [ ! -e "$marker" ]; then
             test ! -L "$marker"
-            test "$(file_mode "$marker")" = 600
-            test "$(cat "$marker")" = "$run_id"
-            printf 'marcador de código já presente e pertence a este run (retry idempotente)\n' >&2
-          else
             ( set -o noclobber; umask 077; printf '%s\n' "$run_id" > "$marker" )
             chmod 600 "$marker"
-            test -f "$marker"
-            test ! -L "$marker"
-            test "$(file_mode "$marker")" = 600
-            test "$(cat "$marker")" = "$run_id"
+          else
+            printf 'marcador de código já presente; validando retry idempotente\n' >&2
           fi
+          test -f "$marker"
+          test ! -L "$marker"
+          test "$(file_mode "$marker")" = 600
+          test "$(cat "$marker")" = "$run_id"
           REMOTE
 
           rsync_retry() {
@@ -551,20 +553,20 @@ jobs:
               stat -f '%Lp' "$1"
             fi
           }
-          if [ -e "$manifest" ] || [ -L "$manifest" ]; then
-            test -f "$manifest"
+          # Mesma guarda TOCTOU do marcador de código: test ! -L antes da reserva
+          # exclusiva com noclobber. Um retry cuja resposta anterior se perdeu
+          # reencontra o manifesto já reservado vazio — revalidamos sem recriar.
+          if [ ! -e "$manifest" ]; then
             test ! -L "$manifest"
-            test ! -s "$manifest"
-            test "$(file_mode "$manifest")" = 600
-            printf 'manifesto esperado já reservado vazio (retry idempotente)\n' >&2
-          else
             ( set -o noclobber; umask 077; : > "$manifest" )
             chmod 600 "$manifest"
-            test -f "$manifest"
-            test ! -L "$manifest"
-            test ! -s "$manifest"
-            test "$(file_mode "$manifest")" = 600
+          else
+            printf 'manifesto esperado já reservado; validando retry idempotente\n' >&2
           fi
+          test -f "$manifest"
+          test ! -L "$manifest"
+          test ! -s "$manifest"
+          test "$(file_mode "$manifest")" = 600
           REMOTE
 
           rsync_retry -az --chmod=F600 \
