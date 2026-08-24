@@ -50,12 +50,16 @@ if ( ! function_exists( 'uonix_header_add_nosnippet' ) ) {
 
 		// Marca apenas a primeira tag <header ...> do bloco, preservando os
 		// demais atributos existentes.
-		return preg_replace(
+		$marked = preg_replace(
 			'/<header\b(?![^>]*\bdata-nosnippet\b)([^>]*)>/i',
 			'<header$1 data-nosnippet>',
 			$block_content,
 			1
 		);
+
+		// Em erro de PCRE (ex.: limite de backtracking), preg_replace devolve
+		// null; nesse caso preserva o conteúdo original em vez de esvaziar o bloco.
+		return ( null === $marked ) ? $block_content : $marked;
 	}
 }
 
