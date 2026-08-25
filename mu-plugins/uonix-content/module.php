@@ -20,6 +20,7 @@ uonix_mu_require_files(
 		'44-footer-copyright.php',
 		'45-seo-faqpage-schema.php',
 		'46-seo-tabs-wordcount.php',
+		'47-seo-organization-schema.php',
 	),
 	'uonix-content'
 );
