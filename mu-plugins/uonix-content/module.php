@@ -19,6 +19,7 @@ uonix_mu_require_files(
 		'37-blog-arquivo-editor.php',
 		'44-footer-copyright.php',
 		'45-seo-faqpage-schema.php',
+		'46-seo-tabs-wordcount.php',
 	),
 	'uonix-content'
 );
