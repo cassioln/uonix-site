@@ -75,7 +75,13 @@ function uonix_garantir_pasta_curriculos_protegida() {
 </IfModule>
 HTACCESS;
 
-    if (!file_exists($htaccess_path)) {
+    // A pasta pode ter sido criada anteriormente com um .htaccess vazio ou
+    // incompleto. Nesse caso, file_exists() seria verdadeiro, mas o currículo
+    // continuaria acessível pela URL pública de uploads. Repara o conteúdo
+    // sempre que ele divergir da regra de bloqueio esperada.
+    $current_htaccess = file_exists($htaccess_path) ? @file_get_contents($htaccess_path) : false;
+
+    if ($current_htaccess !== $htaccess_content) {
         if (false === @file_put_contents($htaccess_path, $htaccess_content)) {
             return false;
         }
@@ -89,6 +95,10 @@ HTACCESS;
 
     return true;
 }
+
+// Repara instalações legadas que já possuam a pasta de currículos com
+// .htaccess vazio/incompleto, sem esperar uma nova candidatura ser enviada.
+add_action('init', 'uonix_garantir_pasta_curriculos_protegida', 5);
 
 /**
  * Gera token seguro para o link protegido.
@@ -526,7 +536,7 @@ function uonix_gerar_form_trabalhe_html() {
                     <svg class="uonix-file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:24px;height:24px;">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
                     </svg>
-                    <span class="uonix-file-text" id="trab_file_text">Anexar Currículo *</span>
+                    <label for="trab_curriculo" class="uonix-file-text" id="trab_file_text">Anexar Currículo *</label>
                     <span class="uonix-file-hint" id="trab_file_hint">Formatos: PDF, DOC, DOCX (Máx 3MB)</span>
                     <input type="file" name="curriculo" id="trab_curriculo" accept=".pdf,.doc,.docx">
                 </div>
