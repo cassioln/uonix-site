@@ -417,12 +417,17 @@ function uonix_render_analytics_head( $configuration = null ) {
             text-decoration: underline !important;
         }
 
-        /* Container dos Botões Principais */
-        #uonix-cookie-root #cookie-banner div:has(> #adopt-reject-all-button) {
+        /* Container dos Botões Principais.
+           Mira o container pelos DOIS estados do AdOpt: quando o botão do meio
+           vem com id (#adopt-reject-all-button) e quando vem sem id — nesse caso
+           o "Aceitar" (#adopt-accept-all-button) sempre existe e ancora o gap,
+           evitando que os botões fiquem colados se o AdOpt trocar o markup. */
+        #uonix-cookie-root #cookie-banner div:has(> #adopt-reject-all-button),
+        #uonix-cookie-root #cookie-banner div:has(> #adopt-accept-all-button) {
             display: flex !important; 
             align-items: center !important; 
             justify-content: flex-end !important; 
-            gap: 10px !important; 
+            gap: 12px !important; 
             width: 100% !important;
             margin-top: 16px !important;
             flex-wrap: wrap !important;
@@ -467,7 +472,11 @@ function uonix_render_analytics_head( $configuration = null ) {
             appearance: none !important; border-radius: 8px !important; font-weight: 700 !important; font-size: 13px !important; padding: 10px 18px !important; cursor: pointer !important; border: none !important; white-space: nowrap !important;
         }
 
-        /* "Não venda" não recebe ID do AdOpt; mantém o mesmo raio do Aceitar. */
+        /* Fallback de arredondamento para o botão de recusa quando o AdOpt o
+           serve SEM id (estados antigos rotulavam "Não venda"). Mira por exclusão
+           — não é "Minhas opções" nem "Aceitar" — para casar com o botão do meio
+           mesmo sem id; quando ele vem com #adopt-reject-all-button, a regra
+           "Rejeitar" abaixo já o cobre. Mantém o mesmo raio do Aceitar. */
         #uonix-cookie-root #cookie-banner div:has(> #adopt-accept-all-button) > button:not(#adopt-preferences-button):not(#adopt-accept-all-button) {
             border-radius: 8px !important;
         }
@@ -635,6 +644,36 @@ function uonix_render_analytics_body( $configuration = null ) {
         if (window.__uonixCookieRootInit) return;
         window.__uonixCookieRootInit = true;
 
+        function normalizeRejectLabel(cookieBanner) {
+            /*
+             * O AdOpt, dependendo da configuração/versão servida, rotula o botão
+             * de recusa como "Rejeitar" (com id #adopt-reject-all-button) OU como
+             * "Não venda"/"Não vender" (sem id). Este site padroniza em "Rejeitar".
+             *
+             * Mira o botão por EXCLUSÃO — não é "Minhas opções" nem "Aceitar" —,
+             * exatamente o mesmo critério que o CSS usa, para funcionar mesmo
+             * quando a classe é dinâmica e o id não existe. Só reescreve quando o
+             * texto atual é uma variante de "Não venda/vender"; nunca mexe se já
+             * estiver correto.
+             */
+            if (!cookieBanner) return;
+            var accept = document.getElementById('adopt-accept-all-button');
+            var container = accept ? accept.parentElement : cookieBanner;
+            if (!container) return;
+
+            var buttons = container.querySelectorAll('button');
+            for (var i = 0; i < buttons.length; i++) {
+                var b = buttons[i];
+                if (b.id === 'adopt-preferences-button' || b.id === 'adopt-accept-all-button') {
+                    continue;
+                }
+                var txt = (b.textContent || '').trim();
+                if (/^n[ãa]o\s+vend/i.test(txt)) {
+                    b.textContent = 'Rejeitar';
+                }
+            }
+        }
+
         function mountCookieElements() {
             var root = document.getElementById('uonix-cookie-root');
             var cookieBanner = document.getElementById('cookie-banner');
@@ -649,6 +688,8 @@ function uonix_render_analytics_body( $configuration = null ) {
             if (preferenceBanner && preferenceBanner.parentElement !== root) {
                 root.appendChild(preferenceBanner);
             }
+
+            normalizeRejectLabel(cookieBanner);
 
             return !!(cookieBanner || preferenceBanner);
         }
