@@ -1,0 +1,33 @@
+name: DIAG known_hosts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect LOCAWEB_SSH_KNOWN_HOSTS secret materialization
+        env:
+          LOCAWEB_SSH_KNOWN_HOSTS: ${{ secrets.LOCAWEB_SSH_KNOWN_HOSTS }}
+        run: |
+          set -uo pipefail
+          KH="$RUNNER_TEMP/kh"
+          printf '%s\n' "$LOCAWEB_SSH_KNOWN_HOSTS" > "$KH"
+          echo "=== bytes / linhas ==="
+          wc -c "$KH"; wc -l "$KH"
+          echo "=== tipos de chave (coluna 2) ==="
+          awk '{print $2}' "$KH" | sort | uniq -c
+          echo "=== ha barra-n literal (secret malformado)? ==="
+          if grep -q '\\n' "$KH"; then echo "SIM -- secret tem \\n LITERAL (malformado)"; else echo "nao -- quebras de linha reais"; fi
+          echo "=== ssh-keygen -F ftp.uonix.com.br (o que o SSH encontra) ==="
+          ssh-keygen -F ftp.uonix.com.br -f "$KH" 2>&1 | grep -E '^#|ssh-|ecdsa' | sed -E 's/(AAAA[A-Za-z0-9+/]{16}).*/\1.../'
+          echo "=== primeira linha (cabeca, mascarada) ==="
+          head -1 "$KH" | cut -c1-60
+          echo "=== ssh-keyscan do runner (o servidor real) ==="
+          ssh-keyscan -T 10 -t rsa,ecdsa,ed25519 ftp.uonix.com.br 2>&1 | grep -v '^#' | awk '{print $2}' | sort
+          echo "=== versoes ==="
+          ssh -V 2>&1
