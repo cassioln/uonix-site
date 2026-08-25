@@ -93,6 +93,9 @@ jobs:
       - name: Test managed code has no implicit schema mutations
         run: php scripts/tests/test-managed-code-no-schema-mutations.php
 
+      - name: Test SEO Organization schema enrichment
+        run: php scripts/tests/test-seo-organization-schema.php
+
       - name: Validate variation technical sheet admin script
         run: node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
 
