@@ -275,14 +275,23 @@ local_db_prefix() {
 }
 
 local_db_query() {
+  local query="$1"
+  shift
+  # Argumentos restantes (ex.: --skip-column-names --batch --raw), repassados por
+  # `local_wp db query <SQL> <flags>`, precisam chegar ao cliente. Sem repassá-los,
+  # `wp db query --skip-column-names` no destino local ainda imprimia o cabeçalho da
+  # coluna: o remap de autores lia "ID\n<n>" como id, valid_author_id rejeitava e o
+  # clone caía em rollback. O ramo remoto já aplica essas flags; este alinha o local.
   MYSQL_PWD="$LOCAL_DB_PASSWORD" podman exec \
     -e MYSQL_PWD \
     "$LOCAL_DB_CONTAINER" \
     mariadb \
     -u "$LOCAL_DB_USER" \
     --skip-ssl \
-    "$LOCAL_DB_NAME" \
-    -e "$1"
+    --default-character-set=utf8mb4 \
+    "$@" \
+    --database "$LOCAL_DB_NAME" \
+    -e "$query"
 }
 
 local_db_dump_options() {
