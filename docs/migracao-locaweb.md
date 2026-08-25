@@ -118,8 +118,33 @@ mudança de workflow contorna. **Deploy automatizado para QA e DEV está bloquea
 infraestrutura**, não por código. Resolver exige liberar os IPs de saída dos runners
 no cPanel ou usar runner self-hosted.
 
-A Locaweb **não** tem essa restrição: runners autenticam e publicam normalmente
-(comprovado nos runs `30679406274` e `30683187557`).
+> Atualização 2026-08-25: no dry-run `prod->dev` pelo CI (run `32889424957`) o passo
+> "Validando ambiente: dev" **passou** — o HostGator aceitou a conexão SSH do runner.
+> Isso sugere que o bloqueio acima pode ter mudado (IP do runner liberado, ou o
+> HostGator deixou de recusar). ATENÇÃO: o dry-run só faz SSH de validação; o
+> `--execute` faz `rsync` pesado para o HostGator. Antes de confiar em deploy/clone
+> automatizado com destino QA/DEV, rodar um `--execute` real e confirmar que o rsync
+> não volta a dar `Connection refused`/`code 255`. Até essa confirmação, tratar o
+> deploy automatizado para HostGator como não comprovado.
+
+A Locaweb **não** filtra runners por IP: eles autenticam e publicam normalmente
+com a senha correta (comprovado nos runs `30679406274`, `30683187557` e, após a
+correção de 2026-08-25, no run `32889357016`, em que o runner Azure autenticou e
+executou `whoami` na Locaweb; e no dry-run `prod->dev` completo pelo CI, run
+`32889424957`, que validou prod E dev e concluiu sem alterações).
+
+> Armadilha diagnosticada em 2026-08-25 (não repetir o erro): o CI de clone
+> começou a falhar com `Permission denied (publickey,password)` ao validar `prod`.
+> A causa **não** era filtro de IP — era a senha do **GitHub Environment secret**
+> `LOCAWEB_SSH_PASSWORD` (environment `clone-operations`) estar **desatualizada**:
+> a senha da Locaweb foi trocada, o `.env` local foi atualizado, mas o environment
+> secret não. Dois passwords de 14 bytes com hashes diferentes enganam qualquer
+> comparação por comprimento — **compare por SHA256**. Environment secrets têm
+> precedência sobre repo secrets; atualize com
+> `gh secret set LOCAWEB_SSH_PASSWORD --env clone-operations` (e `--env production-locaweb`).
+> O mesmo vale para `LOCAWEB_SSH_KNOWN_HOSTS` (que também estava sem a chave ED25519
+> no environment). Sempre que o CI der `Permission denied` na Locaweb, confira
+> primeiro se o env secret bate (por hash) com a credencial local que funciona.
 
 ## 7. Peculiaridades do ambiente Locaweb
 
