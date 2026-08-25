@@ -31,3 +31,13 @@ jobs:
           ssh-keyscan -T 10 -t rsa,ecdsa,ed25519 ftp.uonix.com.br 2>&1 | grep -v '^#' | awk '{print $2}' | sort
           echo "=== versoes ==="
           ssh -V 2>&1
+          echo "=== TESTE REAL: comando ssh da lib (sem senha), fase de host key, -v ==="
+          ssh -p 22 \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=0 \
+            -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$KH" \
+            -o ConnectTimeout=15 \
+            -v siteuonix1@ftp.uonix.com.br true 2>&1 | grep -iE "host key|Server host key|ed25519|rsa|ecdsa|matching|verification|debug1: Host|Offered|Permission|Authenticated" | head -30
+          echo "=== FIM TESTE (Permission denied = host key OK; Host key verification failed = BUG) ==="
