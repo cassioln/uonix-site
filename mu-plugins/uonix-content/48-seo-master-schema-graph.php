@@ -6,17 +6,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * UONIX SEO - Motor Universal de Dados Estruturados Schema.org (@graph).
  *
- * Totalmente Dinâmico e Escalável:
- * 1. Qualquer novo Serviço criado no painel ganha automaticamente Breadcrumb + Service.
- * 2. Qualquer novo Artigo de Blog criado ganha automaticamente Breadcrumb + BlogPosting.
- * 3. Qualquer nova Categoria de Produto criada ganha automaticamente Breadcrumb + CollectionPage + ItemList com seus produtos.
- * 4. O Hub /servicos/ puxa automaticamente todos os serviços existentes em tempo real.
- * 5. A página /empresa/ emite AboutPage conectada à Organização oficial da Uônix.
+ * Arquitetura e Contratos de Emissão:
+ * 1. Serviços Individuais (servicos): Emite Service enriquecido (normas ABNT/NR-35) + BreadcrumbList.
+ * 2. Hub de Serviços (/servicos/): Emite CollectionPage + OfferCatalog dinâmico + BreadcrumbList.
+ * 3. Artigos do Blog (post): Emite BreadcrumbList (Rank Math gerencia BlogPosting nativamente).
+ * 4. Categorias de Produto (product_cat): Emite BreadcrumbList (Rank Math gerencia CollectionPage nativamente).
+ * 5. Produtos Individuais (product): Emite BreadcrumbList (Rank Math gerencia Product nativamente).
+ * 6. Página Institucional (/empresa/): Emite AboutPage conectada à Organização oficial via @id puro.
+ * 7. FAQ Dinâmico: Extrai e emite FAQPage para páginas com accordions Kadence (exceto produtos).
  *
- * Fallback Inteligente: Se qualquer post/página tiver um Schema manual configurado
- * no painel do Rank Math, o Rank Math assume a emissão e este motor não duplica.
- *
- * URLs 100% dinâmicas via home_url() e get_permalink() — zero localhost em produção.
+ * Regra de Grafos Google: Entidades principais (como a Organização oficial) são referenciadas
+ * exclusivamente por seu @id canônico ('/#organization') para evitar nós duplicados ou conflitantes.
  */
 
 add_action( 'wp_head', 'uonix_seo_master_schema_graph_engine', 20 );
@@ -28,7 +28,7 @@ add_action( 'wp_head', 'uonix_seo_master_schema_graph_engine', 20 );
  * @return bool True se houver Schema ativo no Rank Math, False se vazio/padrão.
  */
 function uonix_has_custom_rank_math_schema( $post_id ) {
-    if ( ! $post_id ) {
+    if ( ! $post_id || ! function_exists( 'get_post_meta' ) ) {
         return false;
     }
 
@@ -56,12 +56,12 @@ function uonix_seo_master_schema_graph_engine() {
     // =========================================================================
     // 1. PÁGINA HUB DE SERVIÇOS (/servicos/)
     // =========================================================================
-    if ( is_page( 'servicos' ) ) {
-        $hub_id       = get_queried_object_id();
-        $servicos_url = get_permalink( $hub_id );
+    if ( function_exists( 'is_page' ) && is_page( 'servicos' ) ) {
+        $hub_id        = get_queried_object_id();
+        $servicos_url  = get_permalink( $hub_id );
         $has_rm_schema = uonix_has_custom_rank_math_schema( $hub_id );
 
-        $hub_desc = get_post_meta( $hub_id, 'rank_math_description', true );
+        $hub_desc = function_exists( 'get_post_meta' ) ? get_post_meta( $hub_id, 'rank_math_description', true ) : '';
         if ( empty( $hub_desc ) ) {
             $hub_desc = 'Serviços completos de ancoragem predial, projetos com ART, ensaios de arrancamento e linhas de vida NR-35 em todo o Brasil.';
         }
@@ -75,7 +75,7 @@ function uonix_seo_master_schema_graph_engine() {
             ),
         );
 
-        if ( ! $has_rm_schema ) {
+        if ( ! $has_rm_schema && function_exists( 'get_posts' ) ) {
             // Busca dinâmica de TODOS os serviços publicados em tempo real
             $services_query = get_posts( array(
                 'post_type'      => 'servicos',
@@ -104,11 +104,7 @@ function uonix_seo_master_schema_graph_engine() {
                 'url'         => $servicos_url,
                 'description' => wp_strip_all_tags( $hub_desc ),
                 'provider'    => array(
-                    '@type'     => 'LocalBusiness',
-                    '@id'       => home_url( '/#organization' ),
-                    'name'      => 'Uonix Montagens e Consultoria Tecnica Ltda',
-                    'url'       => home_url( '/' ),
-                    'telephone' => '+55 11 4372-9366',
+                    '@id' => home_url( '/#organization' ),
                 ),
                 'mainEntity'  => array(
                     '@type'           => 'OfferCatalog',
@@ -122,13 +118,13 @@ function uonix_seo_master_schema_graph_engine() {
     // =========================================================================
     // 2. PÁGINAS INDIVIDUAIS DE SERVIÇOS (Post Type 'servicos' - Atuais e Futuros)
     // =========================================================================
-    elseif ( is_singular( 'servicos' ) ) {
+    elseif ( function_exists( 'is_singular' ) && is_singular( 'servicos' ) ) {
         $post_id       = get_queried_object_id();
         $service_url   = get_permalink( $post_id );
         $service_title = get_the_title( $post_id );
         $has_rm_schema = uonix_has_custom_rank_math_schema( $post_id );
 
-        $servicos_page = get_page_by_path( 'servicos' );
+        $servicos_page = function_exists( 'get_page_by_path' ) ? get_page_by_path( 'servicos' ) : null;
         $servicos_url  = $servicos_page ? get_permalink( $servicos_page ) : home_url( '/servicos/' );
 
         // Breadcrumb dinâmico
@@ -143,11 +139,11 @@ function uonix_seo_master_schema_graph_engine() {
         );
 
         if ( ! $has_rm_schema ) {
-            $service_desc = get_post_meta( $post_id, 'rank_math_description', true );
-            if ( empty( $service_desc ) ) {
+            $service_desc = function_exists( 'get_post_meta' ) ? get_post_meta( $post_id, 'rank_math_description', true ) : '';
+            if ( empty( $service_desc ) && function_exists( 'get_the_excerpt' ) ) {
                 $service_desc = get_the_excerpt( $post_id );
             }
-            if ( empty( $service_desc ) ) {
+            if ( empty( $service_desc ) && function_exists( 'get_post_field' ) ) {
                 $service_desc = wp_strip_all_tags( get_post_field( 'post_content', $post_id ) );
                 $service_desc = wp_trim_words( $service_desc, 30, '...' );
             }
@@ -161,11 +157,7 @@ function uonix_seo_master_schema_graph_engine() {
                 'serviceType'    => 'Ancoragem Predial e Segurança em Altura',
                 'category'       => 'Engenharia de Acesso e Trabalho em Altura',
                 'provider'       => array(
-                    '@type'     => 'LocalBusiness',
-                    '@id'       => home_url( '/#organization' ),
-                    'name'      => 'Uonix Montagens e Consultoria Tecnica Ltda',
-                    'url'       => home_url( '/' ),
-                    'telephone' => '+55 11 4372-9366',
+                    '@id' => home_url( '/#organization' ),
                 ),
                 'areaServed'     => array(
                     '@type' => 'Country',
@@ -183,16 +175,15 @@ function uonix_seo_master_schema_graph_engine() {
     // =========================================================================
     // 3. ARTIGOS DO BLOG (Post Type 'post' - Atuais e Futuros)
     // =========================================================================
-    elseif ( is_singular( 'post' ) ) {
-        $post_id       = get_queried_object_id();
-        $post_url      = get_permalink( $post_id );
-        $post_title    = get_the_title( $post_id );
-        $has_rm_schema = uonix_has_custom_rank_math_schema( $post_id );
+    elseif ( function_exists( 'is_singular' ) && is_singular( 'post' ) ) {
+        $post_id    = get_queried_object_id();
+        $post_url   = get_permalink( $post_id );
+        $post_title = get_the_title( $post_id );
 
-        $blog_page = get_page_by_path( 'blog' );
+        $blog_page = function_exists( 'get_page_by_path' ) ? get_page_by_path( 'blog' ) : null;
         $blog_url  = $blog_page ? get_permalink( $blog_page ) : home_url( '/blog/' );
 
-        // Breadcrumb do Artigo
+        // Breadcrumb do Artigo (Rank Math emite BlogPosting/Article nativamente)
         $graph[] = array(
             '@type'           => 'BreadcrumbList',
             '@id'             => $post_url . '#breadcrumb',
@@ -202,54 +193,12 @@ function uonix_seo_master_schema_graph_engine() {
                 array( '@type' => 'ListItem', 'position' => 3, 'name' => wp_strip_all_tags( $post_title ), 'item' => $post_url ),
             ),
         );
-
-        if ( ! $has_rm_schema ) {
-            $post_desc = get_post_meta( $post_id, 'rank_math_description', true );
-            if ( empty( $post_desc ) ) {
-                $post_desc = get_the_excerpt( $post_id );
-            }
-            if ( empty( $post_desc ) ) {
-                $post_desc = wp_strip_all_tags( get_post_field( 'post_content', $post_id ) );
-                $post_desc = wp_trim_words( $post_desc, 30, '...' );
-            }
-
-            $thumb_id  = get_post_thumbnail_id( $post_id );
-            $thumb_url = $thumb_id ? wp_get_attachment_image_url( $thumb_id, 'full' ) : '';
-
-            $article_entity = array(
-                '@type'            => 'BlogPosting',
-                '@id'              => $post_url . '#article',
-                'headline'         => wp_strip_all_tags( $post_title ),
-                'url'              => $post_url,
-                'description'      => wp_strip_all_tags( $post_desc ),
-                'datePublished'    => get_the_date( 'c', $post_id ),
-                'dateModified'     => get_the_modified_date( 'c', $post_id ),
-                'inLanguage'       => 'pt-BR',
-                'mainEntityOfPage' => $post_url,
-                'publisher'        => array(
-                    '@type' => 'Organization',
-                    '@id'   => home_url( '/#organization' ),
-                    'name'  => 'Uonix Montagens e Consultoria Tecnica Ltda',
-                    'url'   => home_url( '/' ),
-                ),
-                'about'            => array(
-                    '@type' => 'Thing',
-                    'name'  => 'Ancoragem Predial e Segurança em Trabalho em Altura',
-                ),
-            );
-
-            if ( ! empty( $thumb_url ) ) {
-                $article_entity['image'] = $thumb_url;
-            }
-
-            $graph[] = $article_entity;
-        }
     }
 
     // =========================================================================
     // 4. PÁGINA INSTITUCIONAL A EMPRESA (/empresa/)
     // =========================================================================
-    elseif ( is_page( 'empresa' ) ) {
+    elseif ( function_exists( 'is_page' ) && is_page( 'empresa' ) ) {
         $page_id    = get_queried_object_id();
         $page_url   = get_permalink( $page_id );
         $page_title = get_the_title( $page_id );
@@ -270,30 +219,68 @@ function uonix_seo_master_schema_graph_engine() {
             'name'         => 'Sobre a Uônix: Fabricante de Ancoragem Predial e Engenharia',
             'description'  => 'Conheça a história, infraestrutura de fabricação e capacidade técnica em engenharia de ancoragem predial e linhas de vida da Uônix.',
             'mainEntity'   => array(
-                '@type'     => 'LocalBusiness',
-                '@id'       => home_url( '/#organization' ),
-                'name'      => 'Uonix Montagens e Consultoria Tecnica Ltda',
-                'url'       => home_url( '/' ),
-                'telephone' => '+55 11 4372-9366',
-                'areaServed'=> array( '@type' => 'Country', 'name' => 'Brasil' ),
+                '@id' => home_url( '/#organization' ),
             ),
         );
     }
 
     // =========================================================================
-    // 5. CATEGORIAS DE PRODUTOS WOOCOMMERCE (product_cat - Atuais e Futuras)
+    // 5. PÁGINAS INDIVIDUAIS DE PRODUTO (WooCommerce)
+    // =========================================================================
+    elseif ( ( function_exists( 'is_product' ) && is_product() ) || ( function_exists( 'is_singular' ) && is_singular( 'product' ) ) ) {
+        $product_id    = get_queried_object_id();
+        $product_url   = get_permalink( $product_id );
+        $product_title = get_the_title( $product_id );
+
+        $produtos_page = function_exists( 'get_page_by_path' ) ? get_page_by_path( 'produtos' ) : null;
+        $produtos_url  = $produtos_page ? get_permalink( $produtos_page ) : home_url( '/produtos/' );
+
+        $breadcrumb_items = array(
+            array( '@type' => 'ListItem', 'position' => 1, 'name' => 'Início', 'item' => home_url( '/' ) ),
+            array( '@type' => 'ListItem', 'position' => 2, 'name' => 'Produtos', 'item' => $produtos_url ),
+        );
+
+        $pos = 3;
+        if ( function_exists( 'get_the_terms' ) ) {
+            $terms = get_the_terms( $product_id, 'product_cat' );
+            if ( ! empty( $terms ) && ! ( function_exists( 'is_wp_error' ) && is_wp_error( $terms ) ) ) {
+                $cat = $terms[0];
+                $breadcrumb_items[] = array(
+                    '@type'    => 'ListItem',
+                    'position' => $pos++,
+                    'name'     => wp_strip_all_tags( $cat->name ),
+                    'item'     => get_term_link( $cat ),
+                );
+            }
+        }
+
+        $breadcrumb_items[] = array(
+            '@type'    => 'ListItem',
+            'position' => $pos,
+            'name'     => wp_strip_all_tags( $product_title ),
+            'item'     => $product_url,
+        );
+
+        $graph[] = array(
+            '@type'           => 'BreadcrumbList',
+            '@id'             => $product_url . '#breadcrumb',
+            'itemListElement' => $breadcrumb_items,
+        );
+    }
+
+    // =========================================================================
+    // 6. CATEGORIAS DE PRODUTOS WOOCOMMERCE (product_cat - Atuais e Futuras)
     // =========================================================================
     elseif ( function_exists( 'is_product_category' ) && is_product_category() ) {
         $term = get_queried_object();
         if ( $term && isset( $term->term_id ) ) {
-            $cat_url   = get_term_link( $term );
-            $cat_name  = $term->name;
-            $cat_desc  = ! empty( $term->description ) ? wp_strip_all_tags( $term->description ) : ( get_term_meta( $term->term_id, 'rank_math_description', true ) ?: 'Catálogo de ' . $cat_name . ' direto da fábrica com entrega em todo o Brasil.' );
+            $cat_url  = get_term_link( $term );
+            $cat_name = $term->name;
 
-            $produtos_page = get_page_by_path( 'produtos' );
+            $produtos_page = function_exists( 'get_page_by_path' ) ? get_page_by_path( 'produtos' ) : null;
             $produtos_url  = $produtos_page ? get_permalink( $produtos_page ) : home_url( '/produtos/' );
 
-            // Breadcrumb da Categoria
+            // Breadcrumb da Categoria (Rank Math já gerencia CollectionPage nativamente)
             $graph[] = array(
                 '@type'           => 'BreadcrumbList',
                 '@id'             => $cat_url . '#breadcrumb',
@@ -303,58 +290,13 @@ function uonix_seo_master_schema_graph_engine() {
                     array( '@type' => 'ListItem', 'position' => 3, 'name' => wp_strip_all_tags( $cat_name ), 'item' => $cat_url ),
                 ),
             );
-
-            // Consulta dinâmica de todos os produtos desta categoria
-            $products_in_cat = get_posts( array(
-                'post_type'      => 'product',
-                'post_status'    => 'publish',
-                'posts_per_page' => 50,
-                'tax_query'      => array(
-                    array(
-                        'taxonomy' => 'product_cat',
-                        'field'    => 'term_id',
-                        'terms'    => $term->term_id,
-                    ),
-                ),
-                'orderby'        => 'title',
-                'order'          => 'ASC',
-            ) );
-
-            $product_items = array();
-            $pos = 1;
-            foreach ( $products_in_cat as $prod ) {
-                $product_items[] = array(
-                    '@type'    => 'ListItem',
-                    'position' => $pos++,
-                    'url'      => get_permalink( $prod->ID ),
-                    'name'     => wp_strip_all_tags( get_the_title( $prod->ID ) ),
-                );
-            }
-
-            $graph[] = array(
-                '@type'       => 'CollectionPage',
-                '@id'         => $cat_url . '#collection',
-                'name'        => wp_strip_all_tags( $cat_name ) . ' | Direto da Fábrica | Uônix',
-                'url'         => $cat_url,
-                'description' => wp_strip_all_tags( $cat_desc ),
-                'provider'    => array(
-                    '@type' => 'LocalBusiness',
-                    '@id'   => home_url( '/#organization' ),
-                    'name'  => 'Uonix Montagens e Consultoria Tecnica Ltda',
-                ),
-                'mainEntity'  => array(
-                    '@type'           => 'ItemList',
-                    'numberOfItems'   => count( $product_items ),
-                    'itemListElement' => $product_items,
-                ),
-            );
         }
     }
 
     // =========================================================================
-    // 6. DEMAIS PÁGINAS INSTITUCIONAIS (Ex: /produtos/, /cotacao/, /contato/)
+    // 7. DEMAIS PÁGINAS INSTITUCIONAIS (Ex: /produtos/, /cotacao/, /contato/)
     // =========================================================================
-    elseif ( is_page() && ! is_front_page() ) {
+    elseif ( function_exists( 'is_page' ) && is_page() && ! is_front_page() ) {
         $page_id    = get_queried_object_id();
         $page_url   = get_permalink( $page_id );
         $page_title = get_the_title( $page_id );
@@ -370,10 +312,11 @@ function uonix_seo_master_schema_graph_engine() {
     }
 
     // =========================================================================
-    // 7. DETECÇÃO DINÂMICA DE FAQPAGES (Blocos Kadence Accordion / Reutilizáveis)
+    // 8. DETECÇÃO DINÂMICA DE FAQPAGES (Blocos Kadence Accordion / Reutilizáveis)
     // =========================================================================
     $current_id = get_queried_object_id();
-    if ( $current_id && ! is_front_page() ) {
+    $is_product = ( function_exists( 'is_product' ) && is_product() ) || ( function_exists( 'is_singular' ) && is_singular( 'product' ) );
+    if ( $current_id && ! is_front_page() && ! $is_product ) {
         $faq_questions = uonix_extract_faqpage_questions( $current_id );
         if ( ! empty( $faq_questions ) ) {
             $current_url = get_permalink( $current_id );
@@ -427,12 +370,20 @@ function uonix_extract_faqpage_questions( $post_id ) {
         }
     }
 
-    // Se na página /produtos/ ou outra página o bloco FAQ existir em wp_block (ex: post_name 'faq' ou ID 2859)
+    // Se na página /produtos/ ou outra página o bloco FAQ existir em wp_block por slug 'faq'
     if ( false === strpos( $content, 'wp:kadence/pane' ) ) {
         if ( function_exists( 'is_page' ) && is_page( 'produtos' ) ) {
             $faq_block = function_exists( 'get_page_by_path' ) ? get_page_by_path( 'faq', OBJECT, 'wp_block' ) : null;
-            if ( ! $faq_block && function_exists( 'get_post' ) ) {
-                $faq_block = get_post( 2859 );
+            if ( ! $faq_block && function_exists( 'get_posts' ) ) {
+                $found_blocks = get_posts( array(
+                    'post_type'      => 'wp_block',
+                    'name'           => 'faq',
+                    'post_status'    => 'publish',
+                    'posts_per_page' => 1,
+                ) );
+                if ( ! empty( $found_blocks ) ) {
+                    $faq_block = $found_blocks[0];
+                }
             }
             if ( $faq_block && ! empty( $faq_block->post_content ) ) {
                 $content .= "\n" . $faq_block->post_content;
@@ -484,4 +435,3 @@ function uonix_extract_faqpage_questions( $post_id ) {
 
     return $qa_items;
 }
-
