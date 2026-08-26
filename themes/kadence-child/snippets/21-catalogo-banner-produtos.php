@@ -19,6 +19,31 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * UÔNIX: Injetor de Setas e Autoplay para Tabs Kadence (Com Proteção de Foco, Scroll e Mega Menu)
  */
+add_action('wp_head', function() {
+    // Carrega apenas na página de produtos (7150).
+    if ( ! is_page(7150) ) return;
+    ?>
+    <style id="uonix-banner-produtos-h1-fix">
+    /*
+     * UÔNIX: correção visual de H1 dentro do banner de produtos.
+     * Os títulos das tabs do banner (bloco Kadence 7255) usam o estilo do próprio bloco.
+     * Quando um desses títulos é promovido de <h2> para <h1> (por SEO — 1 H1 na página
+     * /produtos/), a regra GLOBAL do tema h1{ text-transform:uppercase; line-height:1.1 }
+     * passa a incidir e deixa o título em caixa alta. Este override restaura o comportamento
+     * visual de H2 para QUALQUER h1 dentro do banner (#tabs-produtos-banner), de forma
+     * resiliente à natureza dinâmica do bloco: se outra tab virar H1 no editor no futuro,
+     * o fix continua valendo. Não toca na tag (mantém o H1 semântico); font-size/cor já vêm
+     * do próprio bloco Kadence (especificidade maior).
+     */
+    #tabs-produtos-banner h1.wp-block-kadence-advancedheading,
+    #tabs-produtos-banner h1 {
+        text-transform: none !important;
+        line-height: 1.2 !important;
+    }
+    </style>
+    <?php
+}, 5);
+
 add_action('wp_footer', function() {
     // Carrega apenas na página de produtos
     if ( ! is_page(7150) ) return; 
