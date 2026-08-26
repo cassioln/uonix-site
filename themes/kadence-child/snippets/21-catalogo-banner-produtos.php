@@ -19,6 +19,30 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * UÔNIX: Injetor de Setas e Autoplay para Tabs Kadence (Com Proteção de Foco, Scroll e Mega Menu)
  */
+add_action('wp_head', function() {
+    // Carrega apenas na página de produtos (7150).
+    if ( ! is_page(7150) ) return;
+    ?>
+    <style id="uonix-banner-produtos-h1-fix">
+    /*
+     * UÔNIX: correção visual do H1 do banner de produtos.
+     * O heading "Linha de Olhais de Ancoragem Uônix" (bloco Kadence 7255_9681e7-0e) foi
+     * promovido de <h2> para <h1> por SEO (1 H1 na página). A regra GLOBAL do tema
+     * h1{ text-transform:uppercase; line-height:1.1; ... } passou a incidir e alterou o
+     * visual (título em caixa alta). Aqui restauramos o comportamento que o bloco tinha
+     * como H2, SEM tocar na tag (mantém o H1 semântico). font-size/cor já vêm do próprio
+     * bloco (especificidade maior); reforçamos text-transform e line-height, que o bloco
+     * não define e por isso vazavam do h1 global.
+     */
+    h1.kt-adv-heading7255_9681e7-0e,
+    h1.kt-adv-heading7255_9681e7-0e[data-kb-block="kb-adv-heading7255_9681e7-0e"] {
+        text-transform: none !important;
+        line-height: 1.2 !important;
+    }
+    </style>
+    <?php
+}, 5);
+
 add_action('wp_footer', function() {
     // Carrega apenas na página de produtos
     if ( ! is_page(7150) ) return; 
