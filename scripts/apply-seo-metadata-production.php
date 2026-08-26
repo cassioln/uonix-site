@@ -175,6 +175,65 @@ function uonix_sync_post_meta( $slugs, $post_type, $title, $desc, $focus_kw ) {
 }
 
 /**
+ * Sincroniza título do post e metadados Rank Math por slug (aceita aliases).
+ */
+function uonix_sync_post_title_and_meta( $slugs, $post_type, $clean_title, $title, $desc, $focus_kw ) {
+	$candidates = (array) $slugs;
+	$post_found = null;
+	$matched_slug = '';
+
+	foreach ( $candidates as $candidate_slug ) {
+		$posts = get_posts( array(
+			'name'           => $candidate_slug,
+			'post_type'      => $post_type,
+			'post_status'    => 'any',
+			'posts_per_page' => 1,
+		) );
+		if ( ! empty( $posts ) ) {
+			$post_found   = $posts[0];
+			$matched_slug = $candidate_slug;
+			break;
+		}
+	}
+
+	if ( ! $post_found ) {
+		echo "⚠️  [NÃO ENCONTRADO] {$post_type}: " . implode( ' / ', $candidates ) . "\n";
+		$GLOBALS['uonix_skipped']++;
+		return;
+	}
+
+	$post_id = $post_found->ID;
+
+	if ( ! uonix_backup_target( 'post', $post_id ) ) {
+		echo "⛔ [ABORTA] Falha ao salvar backup do post ID {$post_id} — nada gravado.\n";
+		$GLOBALS['uonix_skipped']++;
+		return;
+	}
+
+	$title_changed = false;
+	if ( ! empty( $clean_title ) && $post_found->post_title !== $clean_title ) {
+		$GLOBALS['uonix_changes']++;
+		$title_changed = true;
+		if ( $GLOBALS['uonix_apply'] ) {
+			wp_update_post( array(
+				'ID'         => $post_id,
+				'post_title' => $clean_title,
+			) );
+		}
+	} else {
+		$GLOBALS['uonix_noop']++;
+	}
+
+	$c1 = uonix_set_post_meta_if_changed( $post_id, 'rank_math_title', $title );
+	$c2 = uonix_set_post_meta_if_changed( $post_id, 'rank_math_description', $desc );
+	$c3 = uonix_set_post_meta_if_changed( $post_id, 'rank_math_focus_keyword', $focus_kw );
+
+	$changed = ( $title_changed || $c1 || $c2 || $c3 );
+	$tag     = $GLOBALS['uonix_apply'] ? ( $changed ? 'ATUALIZADO' : 'sem mudança' ) : ( $changed ? 'MUDARIA' : 'sem mudança' );
+	echo "   [{$tag}] {$post_type} (ID {$post_id}) '{$matched_slug}'\n";
+}
+
+/**
  * Sincroniza metadados Rank Math de um termo (categoria) por slug.
  */
 function uonix_sync_term_meta( $slug, $taxonomy, $title, $desc, $focus_kw ) {
@@ -212,7 +271,7 @@ if ( $front_page_id ) {
 	if ( uonix_backup_target( 'post', $front_page_id ) ) {
 		$h1 = uonix_set_post_meta_if_changed( $front_page_id, 'rank_math_title', 'Fabricante de Ancoragem Predial e Dispositivos de Ancoragem | Uônix' );
 		$h2 = uonix_set_post_meta_if_changed( $front_page_id, 'rank_math_description', 'Fabricante de dispositivos de ancoragem predial e olhais em aço inox 304/316. Projetos, ensaios de arrancamento e instalação NR-35 com ART para todo o Brasil.' );
-		$h3 = uonix_set_post_meta_if_changed( $front_page_id, 'rank_math_focus_keyword', 'ancoragem predial, dispositivos de ancoragem, olhal de ancoragem, nr-35' );
+		$h3 = uonix_set_post_meta_if_changed( $front_page_id, 'rank_math_focus_keyword', 'home, ancoragem predial, dispositivos de ancoragem, olhal de ancoragem, nr-35' );
 		$changed = ( $h1 || $h2 || $h3 );
 		$tag = $GLOBALS['uonix_apply'] ? ( $changed ? 'ATUALIZADO' : 'sem mudança' ) : ( $changed ? 'MUDARIA' : 'sem mudança' );
 		echo "   [{$tag}] Página Inicial / Home (ID {$front_page_id})\n";
@@ -226,28 +285,56 @@ uonix_sync_post_meta(
 	'produtos', 'page',
 	'Dispositivos de Ancoragem e Linha de Fixação | Fábrica Uônix',
 	'Catálogo completo de dispositivos de ancoragem, olhais em inox 304 e 316, fixação química e mecânica. Venda direto da fábrica com laudo de teste para todo o Brasil.',
-	'dispositivos de ancoragem, produtos de ancoragem, olhal de ancoragem'
+	'produtos, dispositivos de ancoragem, produtos de ancoragem, olhal de ancoragem'
 );
 
 uonix_sync_post_meta(
 	'servicos', 'page',
 	'Serviços de Ancoragem Predial e Linhas de Vida NR-35 | Uônix',
 	'Serviços especializados em ancoragem predial: instalação de pontos, ensaios de arrancamento estático 1.500 kgf, projetos executivos e emissão de ART CREA em todo o Brasil.',
-	'serviços de ancoragem, instalação de ancoragem, ensaio de arrancamento'
+	'serviços, serviços de ancoragem, instalação de ancoragem, ensaio de arrancamento'
 );
 
 uonix_sync_post_meta(
 	'empresa', 'page',
 	'Sobre a Uônix | Especialista em Ancoragem Predial e Segurança',
 	'Conheça a Uônix: fabricante nacional e consultoria de engenharia especializada em sistemas de ancoragem predial, linhas de vida e conformidade com a NR-35 e NBR 16325.',
-	'uônix, sobre a uônix, fabricante de ancoragem predial'
+	'empresa, sobre a uônix, uônix, fabricante de ancoragem predial'
+);
+
+uonix_sync_post_meta(
+	'blog', 'page',
+	'Blog Uônix | Artigos Técnicos sobre Ancoragem Predial e NR-35',
+	'Artigos técnicos, guias e conteúdos especializados sobre ancoragem predial, ensaios de arrancamento, cálculo de ZLQ e normas de segurança em altura.',
+	'blog, blog ancoragem predial, artigos nr-35'
 );
 
 uonix_sync_post_meta(
 	array( 'cotacao', 'orcamento', 'contato' ), 'page',
 	'Solicite Cotação e Orçamento | Uônix Ancoragem Predial',
 	'Solicite seu orçamento de dispositivos de ancoragem direto da fábrica ou consulte nosso departamento de engenharia para projetos e instalações NR-35 em todo o país.',
-	'orçamento ancoragem predial, cotação dispositivos de ancoragem, contato uonix'
+	'orçamento, orçamento ancoragem predial, cotação dispositivos de ancoragem, contato uonix'
+);
+
+uonix_sync_post_meta(
+	'finalizar-orcamento', 'page',
+	'Finalizar Orçamento de Dispositivos e Serviços | Uônix',
+	'Revise os itens selecionados e envie sua solicitação de orçamento de dispositivos de ancoragem e serviços de engenharia Uônix.',
+	'finalizar orçamento, orçamento uonix'
+);
+
+uonix_sync_post_meta(
+	array( 'politica-de-privacidade', 'privacidade' ), 'page',
+	'Política de Privacidade e Proteção de Dados | Uônix',
+	'Conheça nossa política de privacidade e conformidade com a LGPD no tratamento e proteção dos seus dados na Uônix.',
+	'política de privacidade, privacidade uonix'
+);
+
+uonix_sync_post_meta(
+	array( 'trabalhe-conosco', 'trabalhe-na-uonix' ), 'page',
+	'Trabalhe na Uônix | Oportunidades em Engenharia e Segurança',
+	'Faça parte da equipe Uônix. Conheça nossas oportunidades nas áreas de engenharia, vendas técnicas e fabricação de sistemas de ancoragem.',
+	'trabalhe na uônix, trabalhe conosco, vagas uonix'
 );
 
 // =========================================================================
@@ -290,63 +377,299 @@ echo "\n--- 3. SERVIÇOS TÉCNICOS DE ENGENHARIA (CPT servicos) ---\n";
 
 $servicos_data = array(
 	array(
-		'aliases' => array( 'instalacao-de-pontos-de-ancoragem', 'instalacao-pontos-ancoragem' ),
-		'title'   => 'Instalação de Pontos de Ancoragem Predial NR-35 com ART | Uônix',
-		'desc'    => 'Instalação profissional de pontos de ancoragem predial em concreto e estrutura metálica. Atendimento às normas NR-35, NR-18 e NBR 16325 com emissão de ART em todo o Brasil.',
-		'kw'      => 'instalação de pontos de ancoragem, ancoragem predial nr-35, pontos de ancoragem',
+		'aliases'     => array( 'instalacao-de-pontos-de-ancoragem', 'instalacao-pontos-ancoragem' ),
+		'clean_title' => 'Instalação de Pontos de Ancoragem',
+		'title'       => 'Instalação de Pontos de Ancoragem Predial NR-35 com ART | Uônix',
+		'desc'        => 'Instalação profissional de pontos de ancoragem predial em concreto e estrutura metálica. Atendimento às normas NR-35, NR-18 e NBR 16325 com emissão de ART em todo o Brasil.',
+		'kw'          => 'instalação de pontos de ancoragem, ancoragem predial nr-35, pontos de ancoragem',
 	),
 	array(
-		'aliases' => array( 'ensaios-de-arrancamento', 'ensaio-de-arrancamento' ),
-		'title'   => 'Ensaio de Arrancamento Estático de Ancoragem (15 kN) | Uônix',
-		'desc'    => 'Teste e ensaio de arrancamento estático com carga de 1.500 kgf (15 kN) para validação de pontos de ancoragem conforme NBR 16325-1. Laudo técnico e ART inclusos.',
-		'kw'      => 'ensaio de arrancamento, teste de arrancamento estático, laudo teste de ancoragem',
+		'aliases'     => array( 'ensaios-de-arrancamento', 'ensaio-de-arrancamento' ),
+		'clean_title' => 'Ensaios de Arrancamento',
+		'title'       => 'Ensaio de Arrancamento Estático de Ancoragem (15 kN) | Uônix',
+		'desc'        => 'Teste e ensaio de arrancamento estático com carga de 1.500 kgf (15 kN) para validação de pontos de ancoragem conforme NBR 16325-1. Laudo técnico e ART inclusos.',
+		'kw'          => 'ensaios de arrancamento, ensaio de arrancamento, teste de arrancamento estático',
 	),
 	array(
-		'aliases' => array( 'projeto-ancoragem', 'projeto-de-ancoragem' ),
-		'title'   => 'Projeto de Ancoragem Predial e Linhas de Vida com ART | Uônix',
-		'desc'    => 'Desenvolvimento de projeto executivo de sistemas de ancoragem predial, memorial de cálculo, dimensionamento de fixações e planta de pontos conforme NR-35 e NBR 16325.',
-		'kw'      => 'projeto de ancoragem predial, projeto linha de vida, projeto nr-35',
+		'aliases'     => array( 'projeto-ancoragem', 'projeto-de-ancoragem' ),
+		'clean_title' => 'Projeto de Ancoragem',
+		'title'       => 'Projeto de Ancoragem Predial e Linhas de Vida com ART | Uônix',
+		'desc'        => 'Desenvolvimento de projeto executivo de sistemas de ancoragem predial, memorial de cálculo, dimensionamento de fixações e planta de pontos conforme NR-35 e NBR 16325.',
+		'kw'          => 'projeto de ancoragem, projeto de ancoragem predial, projeto linha de vida',
 	),
 	array(
-		'aliases' => array( 'relatorio-tecnico-e-fotografico', 'laudo-tecnico-e-fotografico' ),
-		'title'   => 'Laudo Técnico e Fotográfico de Ancoragem Predial NR-35 | Uônix',
-		'desc'    => 'Inspeção e laudo técnico com relatório fotográfico detalhado de conformidade dos pontos de ancoragem existentes. Emissão de parecer de engenharia e ART CREA.',
-		'kw'      => 'laudo técnico de ancoragem, laudo fotográfico nr-35, inspeção de ancoragem',
+		'aliases'     => array( 'relatorio-tecnico-e-fotografico', 'laudo-tecnico-e-fotografico' ),
+		'clean_title' => 'Relatório Técnico e Fotográfico',
+		'title'       => 'Laudo Técnico e Fotográfico de Ancoragem Predial NR-35 | Uônix',
+		'desc'        => 'Inspeção e laudo técnico com relatório fotográfico detalhado de conformidade dos pontos de ancoragem existentes. Emissão de parecer de engenharia e ART CREA.',
+		'kw'          => 'relatório técnico e fotográfico, laudo técnico de ancoragem, laudo fotográfico nr-35',
 	),
 	array(
-		'aliases' => array( 'art' ),
-		'title'   => 'Emissão de ART para Ancoragem Predial e Trabalho em Altura | Uônix',
-		'desc'    => 'Emissão de Anotação de Responsabilidade Técnica (ART) por engenheiros habilitados pelo CREA para projetos, instalações e testes de ancoragem predial e linhas de vida.',
-		'kw'      => 'art ancoragem predial, art nr-35, art para trabalho em altura',
+		'aliases'     => array( 'art' ),
+		'clean_title' => 'ART',
+		'title'       => 'Emissão de ART para Ancoragem Predial e Trabalho em Altura | Uônix',
+		'desc'        => 'Emissão de Anotação de Responsabilidade Técnica (ART) por engenheiros habilitados pelo CREA para projetos, instalações e testes de ancoragem predial e linhas de vida.',
+		'kw'          => 'art, art ancoragem predial, art nr-35',
 	),
 	array(
-		'aliases' => array( 'projeto-cadeirinha-pintura', 'projeto-de-cadeirinha-de-pintura' ),
-		'title'   => 'Projeto de Ancoragem para Cadeirinha de Pintura Fachada NR-18 | Uônix',
-		'desc'    => 'Dimensionamento e projeto de pontos de ancoragem específicos para uso de cadeirinha suspensa (balancim individual) em manutenção e pintura predial conforme NR-18.',
-		'kw'      => 'projeto cadeirinha de pintura, ancoragem cadeirinha suspensa, nr-18 fachada',
+		'aliases'     => array( 'projeto-cadeirinha-pintura', 'projeto-de-cadeirinha-de-pintura' ),
+		'clean_title' => 'Projeto de Cadeirinha de Pintura',
+		'title'       => 'Projeto de Ancoragem para Cadeirinha de Pintura Fachada NR-18 | Uônix',
+		'desc'        => 'Dimensionamento e projeto de pontos de ancoragem específicos para uso de cadeirinha suspensa (balancim individual) em manutenção e pintura predial conforme NR-18.',
+		'kw'          => 'projeto de cadeirinha de pintura, projeto cadeirinha de pintura, nr-18 fachada',
 	),
 	array(
-		'aliases' => array( 'projeto-balancim', 'projeto-de-balancim' ),
-		'title'   => 'Projeto de Ancoragem para Balancim Elétrico e Manual | Uônix',
-		'desc'    => 'Projeto estrutural e pontos de fixação para balancins suspensos elétricos e manuais em fachadas prediais. Cálculo de sobrecargas e emissão de ART.',
-		'kw'      => 'projeto de balancim, ancoragem para balancim elétrico, balancim fachada',
+		'aliases'     => array( 'projeto-balancim', 'projeto-de-balancim' ),
+		'clean_title' => 'Projeto de Balancim',
+		'title'       => 'Projeto de Ancoragem para Balancim Elétrico e Manual | Uônix',
+		'desc'        => 'Projeto estrutural e pontos de fixação para balancins suspensos elétricos e manuais em fachadas prediais. Cálculo de sobrecargas e emissão de ART.',
+		'kw'          => 'projeto de balancim, ancoragem para balancim elétrico, balancim fachada',
 	),
 	array(
-		'aliases' => array( 'projeto-andaime-fachadeiro', 'projeto-de-andaime-fachadeiro' ),
-		'title'   => 'Projeto de Amarração e Ancoragem de Andaime Fachadeiro | Uônix',
-		'desc'    => 'Projeto de fixação e estroncamento de andaimes fachadeiros para obras e reformas prediais. Conformidade com NR-18 e cálculo estrutural com ART.',
-		'kw'      => 'projeto andaime fachadeiro, ancoragem de andaimes, amarração de andaime nr-18',
+		'aliases'     => array( 'projeto-andaime-fachadeiro', 'projeto-de-andaime-fachadeiro' ),
+		'clean_title' => 'Projeto de Andaime Fachadeiro',
+		'title'       => 'Projeto de Amarração e Ancoragem de Andaime Fachadeiro | Uônix',
+		'desc'        => 'Projeto de fixação e estroncamento de andaimes fachadeiros para obras e reformas prediais. Conformidade com NR-18 e cálculo estrutural com ART.',
+		'kw'          => 'projeto de andaime fachadeiro, projeto andaime fachadeiro, amarração de andaime nr-18',
 	),
 	array(
-		'aliases' => array( 'projetos-de-instalacao', 'projetos-de-instalac-a-o' ),
-		'title'   => 'Projetos de Instalação de Sistemas de Proteção contra Quedas | Uônix',
-		'desc'    => 'Engenharia completa para instalação de sistemas de ancoragem e proteção coletiva em edificações comerciais, residenciais e industriais em todo o território nacional.',
-		'kw'      => 'projetos de instalação ancoragem, proteção contra quedas nr-35',
+		'aliases'     => array( 'projetos-de-instalacao', 'projetos-de-instalac-a-o' ),
+		'clean_title' => 'Projetos de Instalação',
+		'title'       => 'Projetos de Instalação de Sistemas de Proteção contra Quedas | Uônix',
+		'desc'        => 'Engenharia completa para instalação de sistemas de ancoragem e proteção coletiva em edificações comerciais, residenciais e industriais em todo o território nacional.',
+		'kw'          => 'projetos de instalação, projetos de instalação ancoragem, proteção contra quedas nr-35',
 	),
 );
 
 foreach ( $servicos_data as $s_meta ) {
-	uonix_sync_post_meta( $s_meta['aliases'], 'servicos', $s_meta['title'], $s_meta['desc'], $s_meta['kw'] );
+	uonix_sync_post_title_and_meta( $s_meta['aliases'], 'servicos', $s_meta['clean_title'], $s_meta['title'], $s_meta['desc'], $s_meta['kw'] );
+}
+
+// =========================================================================
+// 4. PRODUTOS WOOCOMMERCE (Limpeza de <br> e Alinhamento de Metadados)
+// =========================================================================
+echo "\n--- 4. PRODUTOS WOOCOMMERCE (Limpeza de <br> e Metadados) ---\n";
+
+$produtos_data = array(
+	array(
+		'aliases'     => array( 'ancoragem-uonix-modelo-210-inox' ),
+		'clean_title' => 'Olhal de Ancoragem Modelo 210 Inox 304',
+		'title'       => 'Olhal de Ancoragem Modelo 210 Inox 304 | Uônix',
+		'desc'        => 'Olhal de ancoragem inox 304 modelo 210 para ancoragem predial em concreto ou estrutura metálica. Sistema com barra roscada, chumbador, porcas e arruelas.',
+		'kw'          => 'olhal de ancoragem modelo 210 inox 304, olhal de ancoragem inox 304, ancoragem modelo 210',
+	),
+	array(
+		'aliases'     => array( 'ancoragem-modelo-210-inox-316' ),
+		'clean_title' => 'Olhal de Ancoragem Modelo 210 Inox 316',
+		'title'       => 'Olhal de Ancoragem Modelo 210 Inox 316 | Uônix',
+		'desc'        => 'Olhal de ancoragem inox 316 modelo 210 para ambientes agressivos e alta corrosão. Sistema com barra roscada, chumbador químico, porcas e arruelas.',
+		'kw'          => 'olhal de ancoragem modelo 210 inox 316, olhal de ancoragem inox 316, ancoragem modelo 210',
+	),
+	array(
+		'aliases'     => array( 'ancoragem-uonix-modelo-277-inox-316' ),
+		'clean_title' => 'Olhal de Ancoragem Modelo 277 Inox 316',
+		'title'       => 'Olhal de Ancoragem Modelo 277 Inox 316 | Uônix',
+		'desc'        => 'Olhal de ancoragem inox 316 modelo 277 para ancoragem predial em ambientes agressivos. Sistema com barra roscada, chumbador, porcas e arruelas.',
+		'kw'          => 'olhal de ancoragem modelo 277 inox 316, olhal de ancoragem inox 316, ancoragem modelo 277',
+	),
+	array(
+		'aliases'     => array( 'arruela-funileiroinox-304', 'arruela-funileiro-inox-304' ),
+		'clean_title' => 'Arruela Funileiro Inox 304',
+		'title'       => 'Arruela Funileiro Inox 304 1/2" | Uônix',
+		'desc'        => 'Arruela funileiro inox 304 de 1/2" para distribuição uniforme da força de aperto. Aba ampla e alta resistência à corrosão em ambientes úmidos.',
+		'kw'          => 'arruela funileiro inox 304, arruela funileiro inox, arruela aba larga inox',
+	),
+	array(
+		'aliases'     => array( 'porca-sextavada-inox' ),
+		'clean_title' => 'Porca Sextavada Inox 304',
+		'title'       => 'Porca Sextavada Inox 304 para Fixação | Uônix',
+		'desc'        => 'Porca sextavada inox 304 para fixações resistentes à corrosão em ambientes agressivos. Alta resistência mecânica para uso estrutural, naval e industrial.',
+		'kw'          => 'porca sextavada inox 304, porca sextavada inox, porca inox 304',
+	),
+	array(
+		'aliases'     => array( 'porca-sextavada-zincada' ),
+		'clean_title' => 'Porca Sextavada Aço Carbono',
+		'title'       => 'Porca Sextavada Zincada Aço Carbono | Uônix',
+		'desc'        => 'Porca sextavada zincada em aço carbono, resistente e econômica para fixações. Revestimento de zinco que retarda a corrosão em umidade moderada.',
+		'kw'          => 'porca sextavada aço carbono, porca sextavada zincada, porca de aço carbono',
+	),
+	array(
+		'aliases'     => array( 'barra-roscada-304-com-chanfro' ),
+		'clean_title' => 'Barra Roscada Inox 304 com Chanfro',
+		'title'       => 'Barra Roscada Inox 304 com Chanfro 45° | Uônix',
+		'desc'        => 'Barra roscada inox 304 com chanfro de 45° para ancoragem química em concreto. Rosca UNC de 13 fios; o chanfro evita bolhas e preenche todo o furo.',
+		'kw'          => 'barra roscada inox 304 com chanfro, barra roscada com chanfro, barra roscada inox 304',
+	),
+	array(
+		'aliases'     => array( 'barra-roscada-inox-304' ),
+		'clean_title' => 'Barra Roscada Inox 304',
+		'title'       => 'Barra Roscada Inox 304 para Ancoragem | Uônix',
+		'desc'        => 'Barra roscada em aço inox 304 para fixações estruturais e ancoragem predial. Alta resistência mecânica e durabilidade contra corrosão.',
+		'kw'          => 'barra roscada inox 304, barra roscada inox, haste roscada inox',
+	),
+	array(
+		'aliases'     => array( 'grampo-de-cabo-de-aco-galvanizado' ),
+		'clean_title' => 'Grampo de Cabo de Aço',
+		'title'       => 'Grampo para Cabo de Aço Galvanizado (Clip) | Uônix',
+		'desc'        => 'Grampo para cabo de aço galvanizado (clip) para fixação, emenda e laços em cabos. Sela e arco em U que comprimem o cabo com total segurança.',
+		'kw'          => 'grampo de cabo de aço, grampo para cabo de aço, clip de cabo de aço',
+	),
+	array(
+		'aliases'     => array( 'chumbador-de-expansao-com-prisioneiro' ),
+		'clean_title' => 'Chumbador de Expansão com Prisioneiro',
+		'title'       => 'Chumbador de Expansão com Prisioneiro | Uônix',
+		'desc'        => 'Chumbador mecânico de expansão com prisioneiro para fixações estruturais pesadas em concreto maciço. Alta carga de tração e cisalhamento.',
+		'kw'          => 'chumbador de expansão com prisioneiro, chumbador de expansão, chumbador mecânico',
+	),
+	array(
+		'aliases'     => array( 'chumbador-quimico-aqi380-pro' ),
+		'clean_title' => 'Chumbador Químico AQI380 PRO',
+		'title'       => 'Chumbador Químico AQI380 PRO Âncora | Uônix',
+		'desc'        => 'Chumbador químico bicomponente por injeção AQI380 PRO em resina viniléster. Alto desempenho para ancoragens estruturais pesadas em concreto.',
+		'kw'          => 'chumbador químico aqi380 pro, chumbador químico, resina química ancoragem',
+	),
+	array(
+		'aliases'     => array( 'chumbador-quimico-walsywa' ),
+		'clean_title' => 'Chumbador Químico WQI 44',
+		'title'       => 'Chumbador Químico WQI 44 Plus Walsywa | Uônix',
+		'desc'        => 'Chumbador químico por injeção WQI 44 Plus para fixações estruturais em concreto e alvenaria. Cura rápida e excelente aderência química.',
+		'kw'          => 'chumbador químico wqi 44, chumbador químico walsywa, chumbador químico',
+	),
+	array(
+		'aliases'     => array( 'aplicador-apl-380-ancora' ),
+		'clean_title' => 'Aplicador APL 380',
+		'title'       => 'Aplicador APL 380 para Chumbador Químico | Uônix',
+		'desc'        => 'Aplicador APL 380 para chumbador químico com gatilho suave e preciso. Design ergonômico e resistente para aplicação contínua, uniforme e profissional.',
+		'kw'          => 'aplicador apl 380, aplicador de chumbador químico, pistola para chumbador químico',
+	),
+	array(
+		'aliases'     => array( 'aplicador-de-chumbador-quimico-300ml' ),
+		'clean_title' => 'Aplicador de Chumbador Químico 300ml',
+		'title'       => 'Aplicador de Chumbador Químico 300ml | Uônix',
+		'desc'        => 'Aplicador manual profissional para cartuchos de chumbador químico de 300ml. Estrutura reforçada para aplicação suave e precisa.',
+		'kw'          => 'aplicador de chumbador químico 300ml, aplicador de chumbador químico, pistola 300ml',
+	),
+	array(
+		'aliases'     => array( 'aplicador-de-chumbador-quimico-345ml' ),
+		'clean_title' => 'Aplicador de Chumbador Químico 345ml',
+		'title'       => 'Aplicador de Chumbador Químico 345ml | Uônix',
+		'desc'        => 'Aplicador manual coaxial reforçado para cartuchos de resina química de 345ml e 380ml. Máximo rendimento e esforço reduzido.',
+		'kw'          => 'aplicador de chumbador químico 345ml, aplicador de chumbador químico, pistola coaxial',
+	),
+	array(
+		'aliases'     => array( 'adesivo-anaerobico-120' ),
+		'clean_title' => 'Adesivo Anaeróbico 120',
+		'title'       => 'Adesivo Anaeróbico 120 Trava Rosca | Uônix',
+		'desc'        => 'Adesivo químico anaeróbico de alto torque para travamento e vedação de roscas e fixações metálicas. Evita afrouxamento por vibração.',
+		'kw'          => 'adesivo anaeróbico 120, adesivo anaeróbico, trava rosca alto torque',
+	),
+	array(
+		'aliases'     => array( 'ampola-quimica-ancora' ),
+		'clean_title' => 'Ampola Química AQA',
+		'title'       => 'Ampola Química AQA Âncora para Concreto | Uônix',
+		'desc'        => 'Ampola química de vidro com dosagem precisa de resina viniléster e catalisador para ancoragem de barras roscadas em concreto maciço.',
+		'kw'          => 'ampola química aqa, ampola química, ancoragem química por cápsula',
+	),
+	array(
+		'aliases'     => array( 'ampola-quimica-walsywa' ),
+		'clean_title' => 'Ampola Química WQA',
+		'title'       => 'Ampola Química WQA Walsywa para Ancoragem | Uônix',
+		'desc'        => 'Ampola de ancoragem química pré-dosada para fixações estruturais rápidas e de alta capacidade de carga em bases de concreto.',
+		'kw'          => 'ampola química wqa, ampola química walsywa, ampola de ancoragem',
+	),
+);
+
+foreach ( $produtos_data as $p_meta ) {
+	uonix_sync_post_title_and_meta( $p_meta['aliases'], 'product', $p_meta['clean_title'], $p_meta['title'], $p_meta['desc'], $p_meta['kw'] );
+}
+
+// =========================================================================
+// 5. POSTS DE BLOG (Alinhamento de Palavras-Chave de Foco)
+// =========================================================================
+echo "\n--- 5. POSTS DE BLOG (Alinhamento de Palavras-Chave de Foco) ---\n";
+
+$posts_data = array(
+	array(
+		'aliases'     => array( 'fator-de-queda-o-risco-comeca-no-projeto-nao-na-queda' ),
+		'clean_title' => 'Fator de queda: o risco começa no projeto, não na queda',
+		'title'       => 'Fator de Queda: O Risco Começa no Projeto, Não na Queda | Blog Uônix',
+		'desc'        => 'Entenda o conceito de fator de queda no trabalho em altura, por que ele deve ser previsto no projeto de ancoragem e como mitigar riscos conforme a NR-35.',
+		'kw'          => 'fator de queda, fator de queda no trabalho em altura, projeto de ancoragem nr-35',
+	),
+	array(
+		'aliases'     => array( 'aco-inox-304-vs-316-em-ancoragem-predial-qual-escolher' ),
+		'clean_title' => 'Aço Inox 304 vs. 316 em ancoragem predial: Qual escolher?',
+		'title'       => 'Aço Inox 304 vs. 316 em Ancoragem Predial: Qual Escolher? | Blog Uônix',
+		'desc'        => 'Comparativo técnico entre aço inox 304 e 316 para dispositivos de ancoragem predial. Conheça as diferenças de resistência à corrosão, custo e aplicações.',
+		'kw'          => 'aço inox 304 vs. 316, aço inox 304 vs 316, ancoragem inox 304 ou 316',
+	),
+	array(
+		'aliases'     => array( 'trabalho-em-altura-conceito-riscos-e-o-papel-do-sistema-de-ancoragem-2', 'trabalho-em-altura-conceito-riscos-e-o-papel-do-sistema-de-ancoragem' ),
+		'clean_title' => 'Trabalho em altura: conceito, riscos e o papel do sistema de ancoragem',
+		'title'       => 'Trabalho em Altura: Conceito, Riscos e o Papel da Ancoragem | Blog Uônix',
+		'desc'        => 'O que é trabalho em altura conforme a NR-35, principais riscos operacionais e a importância de um sistema de ancoragem predial certificado e inspecionado.',
+		'kw'          => 'trabalho em altura, riscos no trabalho em altura, sistema de ancoragem nr-35',
+	),
+	array(
+		'aliases'     => array( 'ensaio-de-arrancamento-o-que-e-como-funciona-e-por-que-e-exigido-por-norma' ),
+		'clean_title' => 'Ensaio de arrancamento: o que é, como funciona e por que é exigido por norma',
+		'title'       => 'Ensaio de Arrancamento: O que É, Como Funciona e Exigências | Blog Uônix',
+		'desc'        => 'Saiba tudo sobre o ensaio de arrancamento estático para pontos de ancoragem: metodologia de teste de 1.500 kgf, normas NBR 16325 e laudo técnico com ART.',
+		'kw'          => 'ensaio de arrancamento, ensaio de arrancamento estático, teste de arrancamento ancoragem',
+	),
+	array(
+		'aliases'     => array( 'art-em-ancoragem-predial-o-que-e-por-que-e-obrigatoria-e-como-obte-la' ),
+		'clean_title' => 'ART em ancoragem predial: o que é, por que é obrigatória e como obtê-la',
+		'title'       => 'ART em Ancoragem Predial: O que É e por que É Obrigatória | Blog Uônix',
+		'desc'        => 'Entenda a importância da Anotação de Responsabilidade Técnica (ART) do CREA em projetos, instalações e inspeções de ancoragem predial e trabalho em altura.',
+		'kw'          => 'art em ancoragem predial, art ancoragem predial, art crea nr-35',
+	),
+	array(
+		'aliases'     => array( 'zona-livre-de-queda-zlq-como-calcular-corretamente' ),
+		'clean_title' => 'Zona Livre de Queda (ZLQ): Como Calcular Corretamente',
+		'title'       => 'Zona Livre de Queda (ZLQ): Como Calcular Corretamente | Blog Uônix',
+		'desc'        => 'Aprenda a calcular a Zona Livre de Queda (ZLQ) em sistemas de proteção contra quedas com memorial prático, variáveis do talabarte e normas NR-35.',
+		'kw'          => 'zona livre de queda, como calcular zona livre de queda, zlq nr-35',
+	),
+	array(
+		'aliases'     => array( 'ensaio-estatico-e-ensaio-dinamico-em-ancoragem-qual-a-diferenca-e-quando-cada-um-e-exigido' ),
+		'clean_title' => 'Ensaio Estático e Ensaio Dinâmico em Ancoragem: Qual a Diferença e Quando Cada um é Exigido?',
+		'title'       => 'Ensaio Estático e Ensaio Dinâmico em Ancoragem: Diferenças | Blog Uônix',
+		'desc'        => 'Descubra a diferença prática e normativa entre o ensaio estático e o ensaio dinâmico em dispositivos de ancoragem conforme a NBR 16325-1.',
+		'kw'          => 'ensaio estático e ensaio dinâmico, ensaio estático e dinâmico, testes de ancoragem',
+	),
+	array(
+		'aliases'     => array( 'ancoragem-predial-e-legislacao-o-que-nr-18-nr-35-e-nbr-16325-1-exigem-na-pratica' ),
+		'clean_title' => 'Ancoragem predial e legislação: O que NR-18, NR-35 e NBR 16325-1 exigem na prática',
+		'title'       => 'Ancoragem Predial e Legislação: NR-18, NR-35 e NBR 16325 | Blog Uônix',
+		'desc'        => 'Panorama completo sobre a legislação brasileira de ancoragem predial: requisitos da NR-18, diretrizes da NR-35 e padrões técnicos da NBR 16325-1.',
+		'kw'          => 'ancoragem predial e legislação, legislação de ancoragem predial, normas ancoragem predial',
+	),
+	array(
+		'aliases'     => array( 'inspecao-de-pontos-de-ancoragem-prazos-responsabilidades-e-exigencias-normativas' ),
+		'clean_title' => 'Inspeção de pontos de ancoragem: Prazos, responsabilidades e exigências normativas',
+		'title'       => 'Inspeção de Pontos de Ancoragem: Prazos e Responsabilidades | Blog Uônix',
+		'desc'        => 'Periodicidade de inspeção de pontos de ancoragem predial, responsabilidade legal do síndico e documentação obrigatória conforme a NR-35.',
+		'kw'          => 'inspeção de pontos de ancoragem, inspeção anual de ancoragem, laudo de ancoragem predial',
+	),
+	array(
+		'aliases'     => array( 'zona-livre-de-queda-zlq-o-que-e-e-por-que-ela-salva-vidas' ),
+		'clean_title' => 'Zona Livre de Queda (ZLQ): O que é e por que ela salva vidas',
+		'title'       => 'Zona Livre de Queda (ZLQ): O que É e por que Salva Vidas | Blog Uônix',
+		'desc'        => 'Entenda o conceito de Zona Livre de Queda (ZLQ), a física da retenção de queda em altura e como o dimensionamento correto evita acidentes fatais.',
+		'kw'          => 'zona livre de queda, o que é zona livre de queda, zlq retenção de queda',
+	),
+	array(
+		'aliases'     => array( 'toda-edificacao-e-obrigada-a-ter-olhal-de-ancoragem' ),
+		'clean_title' => 'Toda edificação é obrigada a ter olhal de ancoragem?',
+		'title'       => 'Toda Edificação É Obrigada a Ter Olhal de Ancoragem? | Blog Uônix',
+		'desc'        => 'Entenda quando a instalação de olhais e dispositivos de ancoragem predial é obrigatória por lei segundo a NR-18, NR-35 e o Código Civil.',
+		'kw'          => 'toda edificação é obrigada a ter olhal de ancoragem, olhal de ancoragem obrigatório, obrigatoriedade ancoragem predial',
+	),
+);
+
+foreach ( $posts_data as $post_meta ) {
+	uonix_sync_post_title_and_meta( $post_meta['aliases'], 'post', $post_meta['clean_title'], $post_meta['title'], $post_meta['desc'], $post_meta['kw'] );
 }
 
 // =========================================================================
