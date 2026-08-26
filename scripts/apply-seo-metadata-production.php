@@ -266,6 +266,22 @@ function uonix_sync_term_meta( $slug, $taxonomy, $title, $desc, $focus_kw ) {
 // =========================================================================
 echo "--- 1. PÁGINAS INSTITUCIONAIS E COMERCIAIS ---\n";
 
+// Sincroniza Verificação do Google Search Console nas Ferramentas de Webmaster do Rank Math
+$general_opts         = get_option( 'rank-math-options-general', array() );
+$target_google_verify = 'gwb3yPi79I8knt2zh_ctf3tZuEyasOFwLCNoeE2TO1w';
+if ( ! isset( $general_opts['google_verify'] ) || $general_opts['google_verify'] !== $target_google_verify ) {
+	$GLOBALS['uonix_changes']++;
+	if ( $GLOBALS['uonix_apply'] ) {
+		$general_opts['google_verify'] = $target_google_verify;
+		update_option( 'rank-math-options-general', $general_opts );
+	}
+	$tag = $GLOBALS['uonix_apply'] ? 'ATUALIZADO' : 'MUDARIA';
+	echo "   [{$tag}] Rank Math Webmaster: google_verify configurado\n";
+} else {
+	$GLOBALS['uonix_noop']++;
+	echo "   [sem mudança] Rank Math Webmaster: google_verify já configurado\n";
+}
+
 $front_page_id = get_option( 'page_on_front' );
 if ( $front_page_id ) {
 	if ( uonix_backup_target( 'post', $front_page_id ) ) {
