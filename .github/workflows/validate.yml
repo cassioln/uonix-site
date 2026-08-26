@@ -99,6 +99,9 @@ jobs:
       - name: Test SEO service breadcrumb schema
         run: php scripts/tests/test-seo-servico-breadcrumb-schema.php
 
+      - name: Test SEO Product schema enhancement
+        run: php scripts/tests/test-seo-product-schema-enhancement.php
+
       - name: Lint SEO metadata sync script
         run: php -l scripts/apply-seo-metadata-production.php
 
