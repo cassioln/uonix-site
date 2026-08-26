@@ -81,6 +81,23 @@ function wp_trim_words( $text, $num_words = 55, $more = null ) {
 function wp_strip_all_tags( $string, $remove_breaks = false ) {
     return trim( strip_tags( (string) $string ) );
 }
+function get_post( $id = null ) {
+    if ( 2377 === $id ) {
+        return (object) array(
+            'ID'           => 2377,
+            'post_title'   => 'Instalação de Pontos de Ancoragem',
+            'post_content' => '',
+        );
+    }
+    if ( 7150 === $id ) {
+        return (object) array(
+            'ID'           => 7150,
+            'post_title'   => 'Produtos',
+            'post_content' => '<!-- wp:kadence/pane {"id":1} --><div class="wp-block-kadence-pane kt-accordion-pane"><span class="kt-blocks-accordion-title">Vocês emitem nota fiscal?</span><div class="kt-accordion-panel-inner"><p>Sim, com certeza.</p></div></div><!-- /wp:kadence/pane -->',
+        );
+    }
+    return null;
+}
 function wp_json_encode( $data, $options = 0, $depth = 512 ) {
     return json_encode( $data, $options, $depth );
 }

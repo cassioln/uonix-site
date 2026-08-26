@@ -369,6 +369,22 @@ function uonix_seo_master_schema_graph_engine() {
         );
     }
 
+    // =========================================================================
+    // 7. DETECÇÃO DINÂMICA DE FAQPAGES (Blocos Kadence Accordion / Reutilizáveis)
+    // =========================================================================
+    $current_id = get_queried_object_id();
+    if ( $current_id && ! is_front_page() ) {
+        $faq_questions = uonix_extract_faqpage_questions( $current_id );
+        if ( ! empty( $faq_questions ) ) {
+            $current_url = get_permalink( $current_id );
+            $graph[]     = array(
+                '@type'      => 'FAQPage',
+                '@id'        => $current_url . '#faq',
+                'mainEntity' => $faq_questions,
+            );
+        }
+    }
+
     if ( empty( $graph ) ) {
         return;
     }
@@ -382,3 +398,90 @@ function uonix_seo_master_schema_graph_engine() {
         echo "\n<script type=\"application/ld+json\">" . $json . "</script>\n";
     }
 }
+
+/**
+ * Extrai pares de pergunta e resposta de blocos Gutenberg (Kadence pane / wp_block) de um post ou página.
+ *
+ * @param int $post_id ID do post ou página.
+ * @return array Lista de entidades Question/Answer compatíveis com Schema.org/FAQPage.
+ */
+function uonix_extract_faqpage_questions( $post_id ) {
+    if ( ! $post_id || ! function_exists( 'get_post' ) ) {
+        return array();
+    }
+
+    $post = get_post( $post_id );
+    if ( ! $post ) {
+        return array();
+    }
+
+    $content = $post->post_content ?? '';
+
+    // Se houver referências a blocos reutilizáveis (wp:block), concatena o conteúdo deles
+    if ( preg_match_all( '/<!--\s+wp:block\s+{"ref":(\d+)}\s+\/-->/i', $content, $ref_matches ) ) {
+        foreach ( $ref_matches[1] as $ref_id ) {
+            $ref_post = get_post( (int) $ref_id );
+            if ( $ref_post && ! empty( $ref_post->post_content ) ) {
+                $content .= "\n" . $ref_post->post_content;
+            }
+        }
+    }
+
+    // Se na página /produtos/ ou outra página o bloco FAQ existir em wp_block (ex: post_name 'faq' ou ID 2859)
+    if ( false === strpos( $content, 'wp:kadence/pane' ) ) {
+        if ( function_exists( 'is_page' ) && is_page( 'produtos' ) ) {
+            $faq_block = function_exists( 'get_page_by_path' ) ? get_page_by_path( 'faq', OBJECT, 'wp_block' ) : null;
+            if ( ! $faq_block && function_exists( 'get_post' ) ) {
+                $faq_block = get_post( 2859 );
+            }
+            if ( $faq_block && ! empty( $faq_block->post_content ) ) {
+                $content .= "\n" . $faq_block->post_content;
+            }
+        }
+    }
+
+    if ( false === strpos( $content, 'wp:kadence/pane' ) ) {
+        return array();
+    }
+
+    preg_match_all( '/<!-- wp:kadence\/pane.*?-->(.*?)<!-- \/wp:kadence\/pane -->/is', $content, $panes );
+    if ( empty( $panes[1] ) ) {
+        return array();
+    }
+
+    $qa_items = array();
+    foreach ( $panes[1] as $pane_html ) {
+        $q = '';
+        $a = '';
+
+        if ( preg_match( '/class=[\'"]kt-blocks-accordion-title[\'"][^>]*>(.*?)<\/span>/is', $pane_html, $qm ) ) {
+            $q = trim( wp_strip_all_tags( $qm[1] ) );
+            $q = preg_replace( '/\s+/', ' ', $q );
+        }
+
+        if ( preg_match( '/class=[\'"]kt-accordion-panel-inner[\'"][^>]*>(.*?)<\/div>/is', $pane_html, $am ) ) {
+            $a = trim( wp_strip_all_tags( $am[1] ) );
+            $a = preg_replace( '/\s+/', ' ', $a );
+        } else {
+            $a = trim( wp_strip_all_tags( $pane_html ) );
+            if ( ! empty( $q ) ) {
+                $a = str_replace( $q, '', $a );
+            }
+            $a = preg_replace( '/\s+/', ' ', $a );
+        }
+
+        if ( ! empty( $q ) && ! empty( $a ) && mb_strlen( $q ) > 3 ) {
+            $qa_items[] = array(
+                '@type'          => 'Question',
+                'name'           => $q,
+                'acceptedAnswer' => array(
+                    '@type' => 'Answer',
+                    'text'  => $a,
+                ),
+            );
+        }
+    }
+
+    return $qa_items;
+}
+
