@@ -21,7 +21,7 @@ uonix_mu_require_files(
 		'45-seo-faqpage-schema.php',
 		'46-seo-tabs-wordcount.php',
 		'47-seo-organization-schema.php',
-		'48-seo-servico-breadcrumb-schema.php',
+		'48-seo-master-schema-graph.php',
 	),
 	'uonix-content'
 );
