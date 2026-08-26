@@ -17,6 +17,7 @@ define( 'ABSPATH', __DIR__ );
 
 $GLOBALS['uonix_breadcrumb_actions'] = array();
 $GLOBALS['uonix_test_is_servicos']   = true;
+$GLOBALS['uonix_test_title_override'] = null;
 
 function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
     $GLOBALS['uonix_breadcrumb_actions'][] = array(
@@ -47,6 +48,9 @@ function get_permalink( $id = 0 ) {
     return '';
 }
 function get_the_title( $id = 0 ) {
+    if ( ! empty( $GLOBALS['uonix_test_title_override'] ) ) {
+        return $GLOBALS['uonix_test_title_override'];
+    }
     return ( 2377 === $id ) ? 'Instalação de Pontos de Ancoragem' : '';
 }
 function get_page_by_path( $path ) {
@@ -130,6 +134,36 @@ ob_start();
 uonix_seo_servico_breadcrumb_schema();
 $non_service = ob_get_clean();
 breadcrumb_assert( '' === $non_service, 'não emite nada fora de páginas de serviço' );
+
+// 4. Caso adversarial: título com </script> NÃO pode quebrar do bloco <script>.
+//    O escape com JSON_HEX_TAG converte '<'/'>' em \u003C/\u003E.
+$GLOBALS['uonix_test_is_servicos']    = true;
+$GLOBALS['uonix_test_title_override'] = 'X</script><script>alert(1)</script>';
+ob_start();
+uonix_seo_servico_breadcrumb_schema();
+$adv = ob_get_clean();
+$GLOBALS['uonix_test_title_override'] = null;
+
+$adv_payload = '';
+if ( preg_match( '#<script type="application/ld\+json">(.*?)</script>#s', $adv, $am ) ) {
+    $adv_payload = $am[1];
+}
+breadcrumb_assert( '' !== $adv_payload, 'caso adversarial: bloco JSON-LD é parseável' );
+breadcrumb_assert( false === strpos( $adv_payload, '</script>' ), 'caso adversarial: payload NÃO contém </script> cru (sem breakout)' );
+breadcrumb_assert( false === strpos( $adv_payload, '<script' ), 'caso adversarial: payload NÃO contém <script cru' );
+breadcrumb_assert( false === strpos( $adv_payload, '<' ), 'caso adversarial: nenhum < cru sobrevive no payload (strip + JSON_HEX_TAG)' );
+$adv_data = json_decode( $adv_payload, true );
+breadcrumb_assert( is_array( $adv_data ) && 'BreadcrumbList' === ( $adv_data['@type'] ?? '' ), 'caso adversarial: JSON ainda decodifica para BreadcrumbList' );
+
+// 5. Prova isolada da camada de escape (defesa em profundidade): mesmo que um '<'
+//    chegasse ao encoder (hipótese onde wp_strip_all_tags não estivesse no caminho),
+//    JSON_HEX_TAG o converte em \u003C — nunca um <script/</script> literal.
+$hardened = wp_json_encode(
+    array( 'name' => 'a<b></script>' ),
+    JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+);
+breadcrumb_assert( false === strpos( (string) $hardened, '<' ), 'escape endurecido: JSON_HEX_TAG remove todo < cru' );
+breadcrumb_assert( false !== strpos( (string) $hardened, '\\u003C' ), 'escape endurecido: < vira \\u003C' );
 
 if ( 0 !== $failures ) {
     fwrite( STDERR, "\n{$failures} asserção(ões) falharam.\n" );

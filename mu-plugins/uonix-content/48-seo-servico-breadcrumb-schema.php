@@ -71,7 +71,16 @@ function uonix_seo_servico_breadcrumb_schema() {
         'itemListElement' => $items,
     );
 
-    echo "\n<script type=\"application/ld+json\">"
-        . wp_json_encode( $schema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES )
-        . "</script>\n";
+    // Escape endurecido: JSON_HEX_TAG converte '<'/'>' em \u003C/\u003E, de modo
+    // que nenhum conteúdo (nem um '</script>' num título) consiga quebrar do bloco
+    // <script>. Defesa em profundidade — não depende de wp_strip_all_tags.
+    $json = wp_json_encode(
+        $schema,
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+    );
+    if ( false === $json ) {
+        return;
+    }
+
+    echo "\n<script type=\"application/ld+json\">" . $json . "</script>\n";
 }
