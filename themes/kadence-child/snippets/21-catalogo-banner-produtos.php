@@ -25,17 +25,18 @@ add_action('wp_head', function() {
     ?>
     <style id="uonix-banner-produtos-h1-fix">
     /*
-     * UÔNIX: correção visual do H1 do banner de produtos.
-     * O heading "Linha de Olhais de Ancoragem Uônix" (bloco Kadence 7255_9681e7-0e) foi
-     * promovido de <h2> para <h1> por SEO (1 H1 na página). A regra GLOBAL do tema
-     * h1{ text-transform:uppercase; line-height:1.1; ... } passou a incidir e alterou o
-     * visual (título em caixa alta). Aqui restauramos o comportamento que o bloco tinha
-     * como H2, SEM tocar na tag (mantém o H1 semântico). font-size/cor já vêm do próprio
-     * bloco (especificidade maior); reforçamos text-transform e line-height, que o bloco
-     * não define e por isso vazavam do h1 global.
+     * UÔNIX: correção visual de H1 dentro do banner de produtos.
+     * Os títulos das tabs do banner (bloco Kadence 7255) usam o estilo do próprio bloco.
+     * Quando um desses títulos é promovido de <h2> para <h1> (por SEO — 1 H1 na página
+     * /produtos/), a regra GLOBAL do tema h1{ text-transform:uppercase; line-height:1.1 }
+     * passa a incidir e deixa o título em caixa alta. Este override restaura o comportamento
+     * visual de H2 para QUALQUER h1 dentro do banner (#tabs-produtos-banner), de forma
+     * resiliente à natureza dinâmica do bloco: se outra tab virar H1 no editor no futuro,
+     * o fix continua valendo. Não toca na tag (mantém o H1 semântico); font-size/cor já vêm
+     * do próprio bloco Kadence (especificidade maior).
      */
-    h1.kt-adv-heading7255_9681e7-0e,
-    h1.kt-adv-heading7255_9681e7-0e[data-kb-block="kb-adv-heading7255_9681e7-0e"] {
+    #tabs-produtos-banner h1.wp-block-kadence-advancedheading,
+    #tabs-produtos-banner h1 {
         text-transform: none !important;
         line-height: 1.2 !important;
     }
