@@ -410,9 +410,26 @@ function uonix_gerar_pagina_blog_v2_2() {
             
             .uonix-bp-section-title { font-size: 22px; margin: 40px 0 20px 0; } /* Ajuste de título para mobile */
         }
+
+        /* Título principal (H1) da página do blog */
+        .uonix-bp-page-title {
+            margin: 0 0 24px 0;
+            font-size: 30px;
+            font-weight: 800;
+            line-height: 1.2;
+            color: #0e3780;
+        }
+        @media (max-width: 768px) {
+            .uonix-bp-page-title { font-size: 24px; margin-bottom: 18px; }
+        }
     </style>
 
     <div class="uonix-bp-wrapper">
+        <?php if ($paged == 1) : ?>
+            <h1 class="uonix-bp-page-title">Blog Uônix: Ancoragem Predial e Trabalho em Altura</h1>
+        <?php else : ?>
+            <h1 class="uonix-bp-page-title">Blog Uônix — Página <?php echo (int) $paged; ?></h1>
+        <?php endif; ?>
         <?php if ($paged == 1 && !empty($destaque)) : 
             $f_id = $destaque[0]->ID;
             $f_title = get_the_title($f_id);
