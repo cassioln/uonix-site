@@ -9,6 +9,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Complementa o nó Product nativo do Rank Math com atributos comerciais e de confiança:
  *  - Marca oficial conectada à @id canônica da Organização ('/#organization').
  *  - Indicação de país de origem (Brasil — fabricação 100% nacional).
+ *  - Garantia de fábrica de 12 meses contra defeitos de fabricação (WarrantyPromise / MerchantReturnPolicy).
  *  - Detalhes de envio e cobertura logística para todo o território nacional (OfferShippingDetails).
  *  - Vendedor (seller) referenciando #organization por @id puro.
  *
@@ -54,7 +55,26 @@ function uonix_enrich_rank_math_product_schema( $data, $jsonld ) {
             'name'  => 'Brasil',
         );
 
-        // 3. Enriquecimento de Ofertas (Offers)
+        // 3. Garantia de Fábrica de 12 Meses contra defeitos de fabricação
+        $data[ $key ]['hasMerchantReturnPolicy'] = array(
+            '@type'                => 'MerchantReturnPolicy',
+            'applicableCountry'    => 'BR',
+            'returnPolicyCategory' => 'https://schema.org/MerchantReturnFiniteReturnWindow',
+            'merchantReturnDays'   => 365,
+            'returnMethod'         => 'https://schema.org/ReturnByMail',
+            'returnFees'           => 'https://schema.org/FreeReturn',
+        );
+        $data[ $key ]['warranty'] = array(
+            '@type'              => 'WarrantyPromise',
+            'durationOfWarranty' => array(
+                '@type'    => 'QuantitativeValue',
+                'value'    => 12,
+                'unitCode' => 'MON',
+            ),
+            'warrantyScope'      => 'Garantia de 12 meses contra defeito de fabricação',
+        );
+
+        // 4. Enriquecimento de Ofertas (Offers)
         if ( isset( $data[ $key ]['offers'] ) && is_array( $data[ $key ]['offers'] ) ) {
             // Se for array indexado de ofertas ou oferta única
             if ( isset( $data[ $key ]['offers']['@type'] ) ) {
