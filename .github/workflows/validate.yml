@@ -96,6 +96,12 @@ jobs:
       - name: Test SEO Organization schema enrichment
         run: php scripts/tests/test-seo-organization-schema.php
 
+      - name: Test SEO service breadcrumb schema
+        run: php scripts/tests/test-seo-servico-breadcrumb-schema.php
+
+      - name: Lint SEO metadata sync script
+        run: php -l scripts/apply-seo-metadata-production.php
+
       - name: Validate variation technical sheet admin script
         run: node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
 

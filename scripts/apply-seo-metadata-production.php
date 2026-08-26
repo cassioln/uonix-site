@@ -1,0 +1,534 @@
+<?php
+/**
+ * Script de Sincronização de Metadados de SEO e Bloco FAQ via WP-CLI.
+ *
+ * Aplica de forma idempotente e SEGURA:
+ * 1. Metadados Rank Math (Title, Description, Focus Keyword) por SLUG (compatível com IDs de produção).
+ * 2. Sincroniza o Bloco Padrão de FAQ (wp_block slug 'faq') TRANSFORMANDO o post_content REAL do
+ *    ambiente-alvo (nunca sobrescreve com um HTML de outro ambiente): corrige "olhar"->"olhal",
+ *    neutraliza URLs de ambiente (localhost), insere perguntas ausentes ancorando no fechamento do
+ *    accordion, e RECALCULA o paneCount a partir do número real de panes.
+ * 3. Limpeza de cache ao finalizar.
+ *
+ * Segurança (fail-closed):
+ * - NÃO usa ID hardcoded: o bloco FAQ é resolvido exclusivamente pelo slug 'faq'.
+ * - Guarda anti-vazamento: aborta a gravação do FAQ se o conteúdo final contiver 'localhost' ou '<h1'.
+ * - Backup automático (content + meta em base64->json) de cada alvo tocado antes de gravar (modo apply).
+ * - Idempotente: reexecutar não deve produzir mudanças (CHANGES=0 no segundo dry-run).
+ *
+ * Compatível com PHP 7.1+ (ambiente de produção Locaweb).
+ *
+ * Modo de Uso:
+ *   Dry-run (padrão, NÃO grava):
+ *     Local:      wp eval-file scripts/apply-seo-metadata-production.php --allow-root
+ *     Produção:   /usr/bin/php85 /caminho/wp-cli.phar eval-file scripts/apply-seo-metadata-production.php --path=/home/storage/f/34/12/siteuonix1/public_html
+ *   Aplicar de fato (grava + backup):
+ *     acrescente o argumento posicional literal: ... eval-file scripts/apply-seo-metadata-production.php apply
+ *
+ * O modo é lido de $args[0] (WP-CLI passa argumentos posicionais após o nome do arquivo).
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit( "Este script deve ser executado via WP-CLI (wp eval-file).\n" );
+}
+
+// -------------------------------------------------------------------------
+// MODO: dry-run (padrão) vs apply. WP-CLI expõe posicionais em $args.
+// -------------------------------------------------------------------------
+$UONIX_APPLY = false;
+if ( isset( $args ) && is_array( $args ) ) {
+	foreach ( $args as $a ) {
+		if ( 'apply' === strtolower( trim( (string) $a ) ) ) {
+			$UONIX_APPLY = true;
+		}
+	}
+}
+
+$GLOBALS['uonix_apply']   = $UONIX_APPLY;
+$GLOBALS['uonix_changes'] = 0; // nº de gravações que ocorreriam (dry) ou ocorreram (apply)
+$GLOBALS['uonix_skipped'] = 0;
+$GLOBALS['uonix_noop']    = 0; // já estava no valor desejado
+
+$mode_label = $UONIX_APPLY ? 'APLICAR (grava + backup)' : 'DRY-RUN (somente simulação)';
+
+echo "========================================================================\n";
+echo "🚀 SINCRONIZAÇÃO DE METADADOS SEO E FAQ (UÔNIX) — MODO: {$mode_label}\n";
+echo "========================================================================\n\n";
+
+// Diretório de backup (apenas no modo apply).
+$GLOBALS['uonix_backup_dir'] = '';
+if ( $UONIX_APPLY ) {
+	$base = defined( 'WP_CONTENT_DIR' ) ? WP_CONTENT_DIR : ABSPATH;
+	$dir  = rtrim( $base, '/' ) . '/uploads/uonix-seo-backups/' . gmdate( 'Ymd-His' );
+	if ( ! is_dir( $dir ) ) {
+		@mkdir( $dir, 0755, true );
+	}
+	$GLOBALS['uonix_backup_dir'] = is_dir( $dir ) ? $dir : '';
+	echo "🗂  Backups desta execução: " . ( $GLOBALS['uonix_backup_dir'] ?: '(FALHA ao criar — abortará gravações)' ) . "\n\n";
+}
+
+/**
+ * Salva um snapshot (content + meta) do post/termo antes de gravar. Só no modo apply.
+ * $type: 'post' | 'term'
+ */
+function uonix_backup_target( $type, $id ) {
+	if ( ! $GLOBALS['uonix_apply'] ) {
+		return true; // dry-run não faz backup
+	}
+	if ( empty( $GLOBALS['uonix_backup_dir'] ) ) {
+		return false; // sem diretório de backup => fail-closed
+	}
+	$snapshot = array( 'type' => $type, 'id' => $id, 'time' => gmdate( 'c' ) );
+	if ( 'post' === $type ) {
+		$p = get_post( $id );
+		if ( $p ) {
+			$snapshot['post_title']   = $p->post_title;
+			$snapshot['post_content'] = $p->post_content;
+		}
+		$snapshot['meta'] = get_post_meta( $id );
+	} else {
+		$snapshot['meta'] = get_term_meta( $id );
+	}
+	$json = wp_json_encode( $snapshot );
+	if ( false === $json ) {
+		echo "   ⚠️  backup: wp_json_encode falhou (" . ( function_exists( 'json_last_error_msg' ) ? json_last_error_msg() : 'erro desconhecido' ) . ") para {$type} ID {$id}.\n";
+		return false;
+	}
+	$file = $GLOBALS['uonix_backup_dir'] . '/' . $type . '-' . $id . '.json';
+	return false !== file_put_contents( $file, $json );
+}
+
+/**
+ * Aplica uma meta se o valor for diferente do atual. Conta mudança/no-op.
+ * Retorna true se houve (ou haveria) gravação.
+ */
+function uonix_set_post_meta_if_changed( $post_id, $key, $value ) {
+	$current = get_post_meta( $post_id, $key, true );
+	if ( (string) $current === (string) $value ) {
+		$GLOBALS['uonix_noop']++;
+		return false;
+	}
+	if ( $GLOBALS['uonix_apply'] ) {
+		update_post_meta( $post_id, $key, $value );
+	}
+	$GLOBALS['uonix_changes']++;
+	return true;
+}
+
+function uonix_set_term_meta_if_changed( $term_id, $key, $value ) {
+	$current = get_term_meta( $term_id, $key, true );
+	if ( (string) $current === (string) $value ) {
+		$GLOBALS['uonix_noop']++;
+		return false;
+	}
+	if ( $GLOBALS['uonix_apply'] ) {
+		update_term_meta( $term_id, $key, $value );
+	}
+	$GLOBALS['uonix_changes']++;
+	return true;
+}
+
+/**
+ * Sincroniza metadados Rank Math de um post/página por slug (aceita aliases).
+ */
+function uonix_sync_post_meta( $slugs, $post_type, $title, $desc, $focus_kw ) {
+	$candidates = (array) $slugs;
+	$post_found = null;
+	$matched_slug = '';
+
+	foreach ( $candidates as $candidate_slug ) {
+		$posts = get_posts( array(
+			'name'           => $candidate_slug,
+			'post_type'      => $post_type,
+			'post_status'    => 'any',
+			'posts_per_page' => 1,
+		) );
+		if ( ! empty( $posts ) ) {
+			$post_found   = $posts[0];
+			$matched_slug = $candidate_slug;
+			break;
+		}
+	}
+
+	if ( ! $post_found ) {
+		echo "⚠️  [NÃO ENCONTRADO] {$post_type}: " . implode( ' / ', $candidates ) . "\n";
+		$GLOBALS['uonix_skipped']++;
+		return;
+	}
+
+	$post_id = $post_found->ID;
+
+	// backup antes de qualquer gravação (uma vez por post tocado)
+	if ( ! uonix_backup_target( 'post', $post_id ) ) {
+		echo "⛔ [ABORTA] Falha ao salvar backup do post ID {$post_id} — nada gravado.\n";
+		$GLOBALS['uonix_skipped']++;
+		return;
+	}
+
+	$c1 = uonix_set_post_meta_if_changed( $post_id, 'rank_math_title', $title );
+	$c2 = uonix_set_post_meta_if_changed( $post_id, 'rank_math_description', $desc );
+	$c3 = uonix_set_post_meta_if_changed( $post_id, 'rank_math_focus_keyword', $focus_kw );
+
+	$changed = ( $c1 || $c2 || $c3 );
+	$tag     = $GLOBALS['uonix_apply'] ? ( $changed ? 'ATUALIZADO' : 'sem mudança' ) : ( $changed ? 'MUDARIA' : 'sem mudança' );
+	echo "   [{$tag}] {$post_type} (ID {$post_id}) '{$matched_slug}'\n";
+}
+
+/**
+ * Sincroniza metadados Rank Math de um termo (categoria) por slug.
+ */
+function uonix_sync_term_meta( $slug, $taxonomy, $title, $desc, $focus_kw ) {
+	$term = get_term_by( 'slug', $slug, $taxonomy );
+	if ( ! $term || is_wp_error( $term ) ) {
+		echo "⚠️  [NÃO ENCONTRADO] Termo {$taxonomy}: '{$slug}'\n";
+		$GLOBALS['uonix_skipped']++;
+		return;
+	}
+
+	$term_id = $term->term_id;
+
+	if ( ! uonix_backup_target( 'term', $term_id ) ) {
+		echo "⛔ [ABORTA] Falha ao salvar backup do termo ID {$term_id} — nada gravado.\n";
+		$GLOBALS['uonix_skipped']++;
+		return;
+	}
+
+	$c1 = uonix_set_term_meta_if_changed( $term_id, 'rank_math_title', $title );
+	$c2 = uonix_set_term_meta_if_changed( $term_id, 'rank_math_description', $desc );
+	$c3 = uonix_set_term_meta_if_changed( $term_id, 'rank_math_focus_keyword', $focus_kw );
+
+	$changed = ( $c1 || $c2 || $c3 );
+	$tag     = $GLOBALS['uonix_apply'] ? ( $changed ? 'ATUALIZADO' : 'sem mudança' ) : ( $changed ? 'MUDARIA' : 'sem mudança' );
+	echo "   [{$tag}] Categoria (ID {$term_id}) '{$slug}'\n";
+}
+
+// =========================================================================
+// 1. PÁGINAS INSTITUCIONAIS E HUBS
+// =========================================================================
+echo "--- 1. PÁGINAS INSTITUCIONAIS E COMERCIAIS ---\n";
+
+$front_page_id = get_option( 'page_on_front' );
+if ( $front_page_id ) {
+	if ( uonix_backup_target( 'post', $front_page_id ) ) {
+		$h1 = uonix_set_post_meta_if_changed( $front_page_id, 'rank_math_title', 'Fabricante de Ancoragem Predial e Dispositivos de Ancoragem | Uônix' );
+		$h2 = uonix_set_post_meta_if_changed( $front_page_id, 'rank_math_description', 'Fabricante de dispositivos de ancoragem predial e olhais em aço inox 304/316. Projetos, ensaios de arrancamento e instalação NR-35 com ART para todo o Brasil.' );
+		$h3 = uonix_set_post_meta_if_changed( $front_page_id, 'rank_math_focus_keyword', 'ancoragem predial, dispositivos de ancoragem, olhal de ancoragem, nr-35' );
+		$changed = ( $h1 || $h2 || $h3 );
+		$tag = $GLOBALS['uonix_apply'] ? ( $changed ? 'ATUALIZADO' : 'sem mudança' ) : ( $changed ? 'MUDARIA' : 'sem mudança' );
+		echo "   [{$tag}] Página Inicial / Home (ID {$front_page_id})\n";
+	} else {
+		echo "⛔ [ABORTA] Falha ao salvar backup da Home (ID {$front_page_id}).\n";
+		$GLOBALS['uonix_skipped']++;
+	}
+}
+
+uonix_sync_post_meta(
+	'produtos', 'page',
+	'Dispositivos de Ancoragem e Linha de Fixação | Fábrica Uônix',
+	'Catálogo completo de dispositivos de ancoragem, olhais em inox 304 e 316, fixação química e mecânica. Venda direto da fábrica com laudo de teste para todo o Brasil.',
+	'dispositivos de ancoragem, produtos de ancoragem, olhal de ancoragem'
+);
+
+uonix_sync_post_meta(
+	'servicos', 'page',
+	'Serviços de Ancoragem Predial e Linhas de Vida NR-35 | Uônix',
+	'Serviços especializados em ancoragem predial: instalação de pontos, ensaios de arrancamento estático 1.500 kgf, projetos executivos e emissão de ART CREA em todo o Brasil.',
+	'serviços de ancoragem, instalação de ancoragem, ensaio de arrancamento'
+);
+
+uonix_sync_post_meta(
+	'empresa', 'page',
+	'Sobre a Uônix | Especialista em Ancoragem Predial e Segurança',
+	'Conheça a Uônix: fabricante nacional e consultoria de engenharia especializada em sistemas de ancoragem predial, linhas de vida e conformidade com a NR-35 e NBR 16325.',
+	'uônix, sobre a uônix, fabricante de ancoragem predial'
+);
+
+uonix_sync_post_meta(
+	array( 'cotacao', 'orcamento', 'contato' ), 'page',
+	'Solicite Cotação e Orçamento | Uônix Ancoragem Predial',
+	'Solicite seu orçamento de dispositivos de ancoragem direto da fábrica ou consulte nosso departamento de engenharia para projetos e instalações NR-35 em todo o país.',
+	'orçamento ancoragem predial, cotação dispositivos de ancoragem, contato uonix'
+);
+
+// =========================================================================
+// 2. CATEGORIAS WOOCOMMERCE
+// =========================================================================
+echo "\n--- 2. CATEGORIAS DE PRODUTOS WOOCOMMERCE ---\n";
+
+uonix_sync_term_meta(
+	'olhal-de-ancoragem', 'product_cat',
+	'Olhal de Ancoragem Inox 304 e 316 | Dispositivos de Ancoragem Uônix',
+	'Olhais e dispositivos de ancoragem tipo A1 fabricados em aço inox 304 e 316. Resistência atestada acima de 1.500 kgf conforme NR-35 e NBR 16325-1. Envio para todo o Brasil.',
+	'olhal de ancoragem, dispositivos de ancoragem, ancoragem inox'
+);
+
+uonix_sync_term_meta(
+	'fixacao-quimica', 'product_cat',
+	'Fixação Química para Ancoragem Predial | Chumbadores e Resinas Uônix',
+	'Linha de fixação química de alta performance para instalação de pontos de ancoragem em concreto. Chumbadores químicos bicomponentes, ampolas e aplicadores profissionais.',
+	'fixação química, chumbador químico, resina de ancoragem'
+);
+
+uonix_sync_term_meta(
+	'fixacao-mecanica', 'product_cat',
+	'Fixação Mecânica para Ancoragem | Chumbadores e Barras Roscadas Uônix',
+	'Chumbadores mecânicos de expansão, barras roscadas em inox 304 e porcas de alta resistência para sistemas de ancoragem predial e fixação estrutural pesada.',
+	'fixação mecânica, chumbador de expansão, barra roscada inox'
+);
+
+uonix_sync_term_meta(
+	'acessorios', 'product_cat',
+	'Acessórios para Sistemas de Ancoragem e Linhas de Vida | Uônix',
+	'Acessórios essenciais para ancoragem predial: grampos para cabo de aço, arruelas de funileiro em inox 304 e componentes de fixação com alta durabilidade.',
+	'acessórios de ancoragem, grampo cabo de aço'
+);
+
+// =========================================================================
+// 3. SERVIÇOS DE ENGENHARIA (CPT 'servicos')
+// =========================================================================
+echo "\n--- 3. SERVIÇOS TÉCNICOS DE ENGENHARIA (CPT servicos) ---\n";
+
+$servicos_data = array(
+	array(
+		'aliases' => array( 'instalacao-de-pontos-de-ancoragem', 'instalacao-pontos-ancoragem' ),
+		'title'   => 'Instalação de Pontos de Ancoragem Predial NR-35 com ART | Uônix',
+		'desc'    => 'Instalação profissional de pontos de ancoragem predial em concreto e estrutura metálica. Atendimento às normas NR-35, NR-18 e NBR 16325 com emissão de ART em todo o Brasil.',
+		'kw'      => 'instalação de pontos de ancoragem, ancoragem predial nr-35, pontos de ancoragem',
+	),
+	array(
+		'aliases' => array( 'ensaios-de-arrancamento', 'ensaio-de-arrancamento' ),
+		'title'   => 'Ensaio de Arrancamento Estático de Ancoragem (15 kN) | Uônix',
+		'desc'    => 'Teste e ensaio de arrancamento estático com carga de 1.500 kgf (15 kN) para validação de pontos de ancoragem conforme NBR 16325-1. Laudo técnico e ART inclusos.',
+		'kw'      => 'ensaio de arrancamento, teste de arrancamento estático, laudo teste de ancoragem',
+	),
+	array(
+		'aliases' => array( 'projeto-ancoragem', 'projeto-de-ancoragem' ),
+		'title'   => 'Projeto de Ancoragem Predial e Linhas de Vida com ART | Uônix',
+		'desc'    => 'Desenvolvimento de projeto executivo de sistemas de ancoragem predial, memorial de cálculo, dimensionamento de fixações e planta de pontos conforme NR-35 e NBR 16325.',
+		'kw'      => 'projeto de ancoragem predial, projeto linha de vida, projeto nr-35',
+	),
+	array(
+		'aliases' => array( 'relatorio-tecnico-e-fotografico', 'laudo-tecnico-e-fotografico' ),
+		'title'   => 'Laudo Técnico e Fotográfico de Ancoragem Predial NR-35 | Uônix',
+		'desc'    => 'Inspeção e laudo técnico com relatório fotográfico detalhado de conformidade dos pontos de ancoragem existentes. Emissão de parecer de engenharia e ART CREA.',
+		'kw'      => 'laudo técnico de ancoragem, laudo fotográfico nr-35, inspeção de ancoragem',
+	),
+	array(
+		'aliases' => array( 'art' ),
+		'title'   => 'Emissão de ART para Ancoragem Predial e Trabalho em Altura | Uônix',
+		'desc'    => 'Emissão de Anotação de Responsabilidade Técnica (ART) por engenheiros habilitados pelo CREA para projetos, instalações e testes de ancoragem predial e linhas de vida.',
+		'kw'      => 'art ancoragem predial, art nr-35, art para trabalho em altura',
+	),
+	array(
+		'aliases' => array( 'projeto-cadeirinha-pintura', 'projeto-de-cadeirinha-de-pintura' ),
+		'title'   => 'Projeto de Ancoragem para Cadeirinha de Pintura Fachada NR-18 | Uônix',
+		'desc'    => 'Dimensionamento e projeto de pontos de ancoragem específicos para uso de cadeirinha suspensa (balancim individual) em manutenção e pintura predial conforme NR-18.',
+		'kw'      => 'projeto cadeirinha de pintura, ancoragem cadeirinha suspensa, nr-18 fachada',
+	),
+	array(
+		'aliases' => array( 'projeto-balancim', 'projeto-de-balancim' ),
+		'title'   => 'Projeto de Ancoragem para Balancim Elétrico e Manual | Uônix',
+		'desc'    => 'Projeto estrutural e pontos de fixação para balancins suspensos elétricos e manuais em fachadas prediais. Cálculo de sobrecargas e emissão de ART.',
+		'kw'      => 'projeto de balancim, ancoragem para balancim elétrico, balancim fachada',
+	),
+	array(
+		'aliases' => array( 'projeto-andaime-fachadeiro', 'projeto-de-andaime-fachadeiro' ),
+		'title'   => 'Projeto de Amarração e Ancoragem de Andaime Fachadeiro | Uônix',
+		'desc'    => 'Projeto de fixação e estroncamento de andaimes fachadeiros para obras e reformas prediais. Conformidade com NR-18 e cálculo estrutural com ART.',
+		'kw'      => 'projeto andaime fachadeiro, ancoragem de andaimes, amarração de andaime nr-18',
+	),
+	array(
+		'aliases' => array( 'projetos-de-instalacao', 'projetos-de-instalac-a-o' ),
+		'title'   => 'Projetos de Instalação de Sistemas de Proteção contra Quedas | Uônix',
+		'desc'    => 'Engenharia completa para instalação de sistemas de ancoragem e proteção coletiva em edificações comerciais, residenciais e industriais em todo o território nacional.',
+		'kw'      => 'projetos de instalação ancoragem, proteção contra quedas nr-35',
+	),
+);
+
+foreach ( $servicos_data as $s_meta ) {
+	uonix_sync_post_meta( $s_meta['aliases'], 'servicos', $s_meta['title'], $s_meta['desc'], $s_meta['kw'] );
+}
+
+// =========================================================================
+// 4. SINCRONIZAÇÃO SEGURA DO BLOCO FAQ (wp_block slug 'faq')
+//    Transforma o post_content REAL do ambiente-alvo. Fail-closed.
+// =========================================================================
+echo "\n--- 4. BLOCO PADRÃO FAQ (wp_block 'faq') ---\n";
+
+$faq_posts = get_posts( array(
+	'post_type'      => 'wp_block',
+	'name'           => 'faq',
+	'post_status'    => 'any',
+	'posts_per_page' => 1,
+) );
+
+if ( empty( $faq_posts ) ) {
+	echo "⚠️  [AVISO] Bloco wp_block 'faq' não localizado por slug — FAQ não sincronizado (sem fallback por ID).\n";
+	$GLOBALS['uonix_skipped']++;
+} else {
+	$faq_post = $faq_posts[0];
+	$faq_id   = $faq_post->ID;
+	$orig     = (string) $faq_post->post_content;
+	$c        = $orig;
+
+	// (a) Correção textual "olhar" -> "olhal" (todas as variações de espaçamento antes de '?').
+	$c = str_replace(
+		'Como é feita a instalação do olhar de ancoragem da Uônix ?',
+		'Como é feita a instalação do olhal de ancoragem da Uônix?',
+		$c
+	);
+	$c = str_replace(
+		'Como é feita a instalação do olhar de ancoragem da Uônix?',
+		'Como é feita a instalação do olhal de ancoragem da Uônix?',
+		$c
+	);
+	// fallback genérico: qualquer "olhar de ancoragem" remanescente vira "olhal de ancoragem".
+	$c = str_replace( 'olhar de ancoragem', 'olhal de ancoragem', $c );
+
+	// (b) Neutraliza QUALQUER URL de ambiente local para caminho relativo (não só a específica).
+	$c = str_replace( 'http://localhost:8080', '', $c );
+	$c = str_replace( 'https://localhost:8080', '', $c );
+	$c = str_replace( 'http://127.0.0.1:8080', '', $c );
+
+	// (c) Insere perguntas ausentes ANCORANDO no fechamento do accordion (âncora única e estável).
+	$anchor = '<!-- /wp:kadence/accordion -->';
+	$new_questions = array(
+		array(
+			'marker' => 'A Uônix envia dispositivos de ancoragem para todo o Brasil?',
+			'q'      => 'A Uônix envia dispositivos de ancoragem para todo o Brasil?',
+			'a'      => 'Sim, realizamos entregas para todo o território nacional, com embalagem reforçada e documentação técnica de acompanhamento.',
+		),
+		array(
+			'marker' => 'a Uônix realiza o projeto e a instalação',
+			'q'      => 'Além de fabricar os produtos, a Uônix realiza o projeto e a instalação?',
+			'a'      => 'Sim, dispomos de corpo de engenharia próprio para elaboração de projetos executivos, instalação in loco, ensaios de arrancamento estático e emissão de ART registrada no CREA.',
+		),
+	);
+
+	$anchor_pos = strpos( $c, $anchor );
+	if ( false === $anchor_pos ) {
+		echo "⚠️  [AVISO] Âncora de fechamento do accordion não encontrada — perguntas novas NÃO inseridas (metadados/correções textuais preservados).\n";
+	} else {
+		// Descobre o próximo id/uniqueID de pane a partir do markup real (não inventa base).
+		// uniqueID base: extrai o prefixo antes do sufixo '-NN' em kt-pane<base>-<n> ou uniqueID "<base>-<n>".
+		$uid_base = 'uonix_faq';
+		if ( preg_match( '/"uniqueID":"([0-9a-zA-Z]+_[0-9a-zA-Z]+)-[0-9]+"/', $c, $m ) ) {
+			$uid_base = $m[1];
+		}
+		// maior id de pane atual
+		$max_id = 0;
+		if ( preg_match_all( '/<!--\s*wp:kadence\/pane\s*\{[^}]*"id":([0-9]+)/', $c, $mm ) ) {
+			foreach ( $mm[1] as $idv ) {
+				$idv = (int) $idv;
+				if ( $idv > $max_id ) { $max_id = $idv; }
+			}
+		}
+
+		$panes_to_add = '';
+		$added        = 0;
+		foreach ( $new_questions as $nq ) {
+			if ( false !== strpos( $c, $nq['marker'] ) ) {
+				continue; // já existe -> idempotente
+			}
+			$max_id++;
+			$uid   = $uid_base . '-' . $max_id;
+			$class = 'kt-accordion-pane-' . $max_id . ' kt-pane' . $uid;
+			$q     = htmlspecialchars( $nq['q'], ENT_QUOTES, 'UTF-8' );
+			$a     = htmlspecialchars( $nq['a'], ENT_QUOTES, 'UTF-8' );
+			$panes_to_add .=
+				"\n<!-- wp:kadence/pane {\"id\":{$max_id},\"uniqueID\":\"{$uid}\"} -->\n"
+				. "<div class=\"wp-block-kadence-pane kt-accordion-pane {$class}\"><div class=\"kt-accordion-header-wrap\"><button class=\"kt-blocks-accordion-header kt-acccordion-button-label-show\" type=\"button\"><span class=\"kt-blocks-accordion-title-wrap\"><span class=\"kt-blocks-accordion-title\"><strong>{$q}</strong></span></span><span class=\"kt-blocks-accordion-icon-trigger\"></span></button></div><div class=\"kt-accordion-panel\"><div class=\"kt-accordion-panel-inner\"><!-- wp:paragraph -->\n"
+				. "<p>{$a}</p>\n"
+				. "<!-- /wp:paragraph --></div></div></div>\n"
+				. "<!-- /wp:kadence/pane -->\n";
+			$added++;
+		}
+
+		if ( $added > 0 ) {
+			// A âncora é precedida pelos </div> de fechamento das panes; inserimos ANTES desses fechamentos.
+			// Estratégia robusta: inserir imediatamente antes da sequência "</div></div></div>\n<!-- /wp:kadence/accordion -->"
+			// quando presente; caso contrário, imediatamente antes da âncora.
+			$closing = "</div></div></div>\n" . $anchor;
+			if ( false !== strpos( $c, $closing ) ) {
+				$c = str_replace( $closing, $panes_to_add . $closing, $c );
+			} else {
+				$c = substr( $c, 0, $anchor_pos ) . $panes_to_add . substr( $c, $anchor_pos );
+			}
+		}
+	}
+
+	// (d) RECALCULA o paneCount a partir do número REAL de panes (corrige a dessincronização de origem).
+	$real_panes = preg_match_all( '/<!--\s*wp:kadence\/pane\b/', $c, $tmp );
+	$real_panes = (int) $real_panes;
+	$pane_anomaly = '';
+	if ( $real_panes > 0 ) {
+		$c = preg_replace( '/("paneCount":)[0-9]+/', '${1}' . $real_panes, $c, 1 );
+	} elseif ( false !== strpos( $c, '"paneCount"' ) ) {
+		// Anomalia: o bloco declara paneCount mas nenhuma pane foi detectada
+		// (regex/markup inesperado). Marca para abortar via guarda fail-closed abaixo.
+		$pane_anomaly = "anomalia: 'paneCount' presente mas 0 panes detectadas (regex/markup inesperado)";
+	}
+
+	// (e) GUARDAS FAIL-CLOSED antes de qualquer gravação.
+	$abort_reason = '';
+	if ( '' !== $pane_anomaly ) {
+		$abort_reason = $pane_anomaly;
+	} elseif ( false !== strpos( $c, 'localhost' ) ) {
+		$abort_reason = "conteúdo final ainda contém 'localhost'";
+	} elseif ( false !== stripos( $c, '<h1' ) ) {
+		$abort_reason = "conteúdo final contém '<h1' (não permitido em bloco reutilizável)";
+	}
+
+	$will_change = ( $c !== $orig );
+
+	if ( '' !== $abort_reason ) {
+		echo "⛔ [ABORTA FAQ] {$abort_reason} — bloco NÃO gravado (fail-closed).\n";
+		$GLOBALS['uonix_skipped']++;
+	} elseif ( ! $will_change ) {
+		echo "   [sem mudança] Bloco FAQ (ID {$faq_id}) já está sincronizado (paneCount={$real_panes}).\n";
+		$GLOBALS['uonix_noop']++;
+	} else {
+		if ( ! uonix_backup_target( 'post', $faq_id ) ) {
+			echo "⛔ [ABORTA FAQ] Falha ao salvar backup do bloco FAQ (ID {$faq_id}) — nada gravado.\n";
+			$GLOBALS['uonix_skipped']++;
+		} else {
+			if ( $GLOBALS['uonix_apply'] ) {
+				$res = wp_update_post( array(
+					'ID'           => $faq_id,
+					'post_content' => $c,
+				), true );
+				if ( is_wp_error( $res ) ) {
+					echo "⛔ [ERRO FAQ] wp_update_post falhou: " . $res->get_error_message() . "\n";
+					$GLOBALS['uonix_skipped']++;
+				} else {
+					echo "✅ [ATUALIZADO] Bloco FAQ (ID {$faq_id}) sincronizado (paneCount={$real_panes}).\n";
+					$GLOBALS['uonix_changes']++;
+				}
+			} else {
+				echo "   [MUDARIA] Bloco FAQ (ID {$faq_id}) seria sincronizado (paneCount recalculado={$real_panes}).\n";
+				$GLOBALS['uonix_changes']++;
+			}
+		}
+	}
+}
+
+// =========================================================================
+// 5. FLUSH DE CACHE (apenas no modo apply)
+// =========================================================================
+echo "\n--- 5. LIMPEZA DE CACHE ---\n";
+if ( $GLOBALS['uonix_apply'] && function_exists( 'wp_cache_flush' ) ) {
+	wp_cache_flush();
+	echo "✅ [OK] wp_cache_flush() executado.\n";
+} else {
+	echo "   (dry-run: cache não foi limpo)\n";
+}
+
+echo "\n========================================================================\n";
+echo ( $GLOBALS['uonix_apply'] ? "🎉 APLICAÇÃO CONCLUÍDA!\n" : "🔎 DRY-RUN CONCLUÍDO (nada foi gravado).\n" );
+echo "   CHANGES={$GLOBALS['uonix_changes']}  (gravações " . ( $GLOBALS['uonix_apply'] ? 'efetuadas' : 'que ocorreriam' ) . ")\n";
+echo "   NOOP={$GLOBALS['uonix_noop']}  (já no valor desejado)\n";
+echo "   SKIPPED={$GLOBALS['uonix_skipped']}  (não encontrados / abortados)\n";
+if ( $GLOBALS['uonix_apply'] && $GLOBALS['uonix_backup_dir'] ) {
+	echo "   BACKUP_DIR={$GLOBALS['uonix_backup_dir']}\n";
+}
+echo "========================================================================\n";
