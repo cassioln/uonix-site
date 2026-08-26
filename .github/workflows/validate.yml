@@ -111,6 +111,9 @@ jobs:
       - name: Test clone administration panel
         run: php scripts/tests/test-clone-admin.php
 
+      - name: Test admin analytics dashboard
+        run: php scripts/tests/test-admin-analytics-dashboard.php
+
   shell-and-config:
     name: Shell, workflows, Node and Compose
     runs-on: ubuntu-latest
