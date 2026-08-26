@@ -6,12 +6,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * UONIX SEO - Enriquecimento B2B do Schema Product emitido pelo Rank Math.
  *
- * Complementa o nó Product nativo do Rank Math com atributos comerciais e de confiança:
- *  - Marca oficial conectada à @id canônica da Organização ('/#organization').
- *  - Indicação de país de origem (Brasil — fabricação 100% nacional).
- *  - Garantia de fábrica de 12 meses contra defeitos de fabricação (WarrantyPromise / MerchantReturnPolicy).
- *  - Detalhes de envio e cobertura logística para todo o território nacional (OfferShippingDetails).
- *  - Vendedor (seller) referenciando #organization por @id puro.
+ * Complementa o nó Product nativo do Rank Math com atributos comerciais e de confiança
+ * que são FATOS sustentáveis do negócio (fabricante/fornecedor B2B, catálogo por cotação):
+ *  - Marca oficial referenciada à @id canônica da Organização ('/#organization') por @id PURO.
+ *  - País de origem (Brasil — fabricação nacional).
+ *  - Garantia de fábrica de 12 meses contra defeitos de fabricação (WarrantyPromise).
+ *  - Na oferta: condição "novo" (NewCondition), vendedor (@id puro) e área atendida (Brasil).
+ *
+ * NÃO declara política de devolução (MerchantReturnPolicy) nem frete grátis
+ * (OfferShippingDetails/shippingRate): a Uônix não oferece devolução gratuita e o frete
+ * não é gratuito — marcá-los seria claim comercial não sustentado (risco de ação manual do
+ * Google) e incompatível com o catálogo por cotação (produtos sem preço transacional).
  *
  * Utiliza o filtro oficial rank_math/json_ld, sem criar blocos de script extras.
  */
@@ -42,28 +47,20 @@ function uonix_enrich_rank_math_product_schema( $data, $jsonld ) {
             continue;
         }
 
-        // 1. Marca oficial conectada
+        // 1. Marca oficial: referência por @id PURO à Organização já emitida pelo Rank Math.
+        //    Não redefinir @type/name aqui (evita conflito de entidade no mesmo @id).
         $data[ $key ]['brand'] = array(
-            '@type' => 'Brand',
-            'name'  => 'Uônix',
-            '@id'   => $org_id,
+            '@id' => $org_id,
         );
 
-        // 2. País de Origem (Fabricação Nacional)
+        // 2. País de origem (fabricação nacional) — fato sustentável.
         $data[ $key ]['countryOfOrigin'] = array(
             '@type' => 'Country',
             'name'  => 'Brasil',
         );
 
-        // 3. Garantia de Fábrica de 12 Meses contra defeitos de fabricação
-        $data[ $key ]['hasMerchantReturnPolicy'] = array(
-            '@type'                => 'MerchantReturnPolicy',
-            'applicableCountry'    => 'BR',
-            'returnPolicyCategory' => 'https://schema.org/MerchantReturnFiniteReturnWindow',
-            'merchantReturnDays'   => 365,
-            'returnMethod'         => 'https://schema.org/ReturnByMail',
-            'returnFees'           => 'https://schema.org/FreeReturn',
-        );
+        // 3. Garantia de fábrica de 12 meses contra defeito de fabricação (WarrantyPromise).
+        //    Isto é GARANTIA (defeito de fabricação), não política de devolução do consumidor.
         $data[ $key ]['warranty'] = array(
             '@type'              => 'WarrantyPromise',
             'durationOfWarranty' => array(
@@ -74,48 +71,18 @@ function uonix_enrich_rank_math_product_schema( $data, $jsonld ) {
             'warrantyScope'      => 'Garantia de 12 meses contra defeito de fabricação',
         );
 
-        // 4. Enriquecimento de Ofertas (Offers)
-        if ( isset( $data[ $key ]['offers'] ) && is_array( $data[ $key ]['offers'] ) ) {
-            // Se for array indexado de ofertas ou oferta única
-            if ( isset( $data[ $key ]['offers']['@type'] ) ) {
-                $data[ $key ]['offers']['itemCondition'] = 'https://schema.org/NewCondition';
-                $data[ $key ]['offers']['seller']        = array( '@id' => $org_id );
-                $data[ $key ]['offers']['areaServed']    = array(
-                    array(
-                        '@type' => 'Country',
-                        'name'  => 'Brasil',
-                    ),
-                );
-                $data[ $key ]['offers']['shippingDetails'] = array(
-                    '@type'               => 'OfferShippingDetails',
-                    'shippingRate'        => array(
-                        '@type'    => 'MonetaryAmount',
-                        'value'    => '0',
-                        'currency' => 'BRL',
-                    ),
-                    'shippingDestination' => array(
-                        array(
-                            '@type'          => 'DefinedRegion',
-                            'addressCountry' => 'BR',
-                        ),
-                    ),
-                    'deliveryTime'        => array(
-                        '@type'        => 'ShippingDeliveryTime',
-                        'handlingTime' => array(
-                            '@type'    => 'QuantitativeValue',
-                            'minValue' => 0,
-                            'maxValue' => 1,
-                            'unitCode' => 'DAY',
-                        ),
-                        'transitTime'  => array(
-                            '@type'    => 'QuantitativeValue',
-                            'minValue' => 1,
-                            'maxValue' => 5,
-                            'unitCode' => 'DAY',
-                        ),
-                    ),
-                );
-            }
+        // 4. Enriquecimento da oferta (quando o Rank Math emite uma oferta única).
+        //    Apenas fatos sustentáveis: produto novo, vendedor (@id puro) e área atendida.
+        //    Sem shippingDetails/shippingRate (frete não é gratuito) e sem MerchantReturnPolicy.
+        if ( isset( $data[ $key ]['offers'] ) && is_array( $data[ $key ]['offers'] ) && isset( $data[ $key ]['offers']['@type'] ) ) {
+            $data[ $key ]['offers']['itemCondition'] = 'https://schema.org/NewCondition';
+            $data[ $key ]['offers']['seller']        = array( '@id' => $org_id );
+            $data[ $key ]['offers']['areaServed']    = array(
+                array(
+                    '@type' => 'Country',
+                    'name'  => 'Brasil',
+                ),
+            );
         }
     }
 

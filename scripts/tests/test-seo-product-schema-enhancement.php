@@ -4,8 +4,12 @@
  *
  * Valida:
  *  - Registro do filtro rank_math/json_ld na prioridade 25 com 2 argumentos;
- *  - Enriquecimento de entidades Product (brand, countryOfOrigin, hasMerchantReturnPolicy, shippingDetails);
- *  - Referência canônica à Organização por @id puro;
+ *  - Enriquecimento de entidades Product com FATOS sustentáveis
+ *    (brand por @id puro, countryOfOrigin Brasil, WarrantyPromise de 12 meses,
+ *     e na oferta: NewCondition + seller @id puro + areaServed Brasil);
+ *  - AUSÊNCIA de claims não sustentados: sem hasMerchantReturnPolicy (não há
+ *    devolução gratuita) e sem shippingDetails/shippingRate (frete não é grátis);
+ *  - brand referencia #organization por @id PURO (sem @type/name conflitantes);
  *  - Preservação intacta de grafos sem entidade Product (fail-closed).
  */
 
@@ -70,15 +74,31 @@ $sample_graph = array(
 $enriched = uonix_enrich_rank_math_product_schema( $sample_graph, null );
 $prod     = $enriched['product'];
 
-product_assert( 'Uônix' === ( $prod['brand']['name'] ?? '' ), 'brand é definida como Uônix' );
+// --- brand por @id PURO (sem @type/name conflitantes com a Organization) ---
+product_assert(
+    'https://uonix.com.br/#organization' === ( $prod['brand']['@id'] ?? '' ),
+    'brand referencia #organization por @id puro'
+);
+product_assert(
+    ! isset( $prod['brand']['@type'] ) && ! isset( $prod['brand']['name'] ),
+    'brand NÃO redefine @type/name (evita conflito de entidade no mesmo @id)'
+);
+
+// --- fatos sustentáveis ---
 product_assert( 'Brasil' === ( $prod['countryOfOrigin']['name'] ?? '' ), 'countryOfOrigin é Brasil' );
-product_assert( isset( $prod['hasMerchantReturnPolicy'] ), 'possui hasMerchantReturnPolicy (garantia de fábrica)' );
-product_assert( 365 === ( $prod['hasMerchantReturnPolicy']['merchantReturnDays'] ?? 0 ), 'garantia de 365 dias (12 meses)' );
-product_assert( 'WarrantyPromise' === ( $prod['warranty']['@type'] ?? '' ), 'possui WarrantyPromise com escopo contra defeito de fabricação' );
+product_assert( 'WarrantyPromise' === ( $prod['warranty']['@type'] ?? '' ), 'possui WarrantyPromise (garantia de fábrica)' );
 product_assert( 12 === ( $prod['warranty']['durationOfWarranty']['value'] ?? 0 ), 'duração da garantia de 12 meses' );
+product_assert( 'MON' === ( $prod['warranty']['durationOfWarranty']['unitCode'] ?? '' ), 'duração da garantia em meses (unitCode MON)' );
+
+// --- oferta: só fatos sustentáveis ---
 product_assert( 'https://schema.org/NewCondition' === ( $prod['offers']['itemCondition'] ?? '' ), 'oferta declara NewCondition' );
 product_assert( 'https://uonix.com.br/#organization' === ( $prod['offers']['seller']['@id'] ?? '' ), 'seller referencia #organization por @id puro' );
-product_assert( isset( $prod['offers']['shippingDetails'] ), 'oferta possui shippingDetails para entrega nacional' );
+product_assert( 'Brasil' === ( $prod['offers']['areaServed'][0]['name'] ?? '' ), 'oferta declara areaServed Brasil' );
+
+// --- AUSÊNCIA de claims não sustentados (anti-regressão) ---
+product_assert( ! isset( $prod['hasMerchantReturnPolicy'] ), 'NÃO declara hasMerchantReturnPolicy (sem devolução gratuita)' );
+product_assert( ! isset( $prod['offers']['hasMerchantReturnPolicy'] ), 'oferta NÃO declara hasMerchantReturnPolicy' );
+product_assert( ! isset( $prod['offers']['shippingDetails'] ), 'oferta NÃO declara shippingDetails (frete não é grátis)' );
 
 // 3. Grafo sem Product (preservação fail-closed)
 $other_graph = array(
@@ -92,6 +112,19 @@ product_assert( $other_result === $other_graph, 'preserva inalterados grafos sem
 
 // 4. Entradas nulas ou inválidas
 product_assert( array() === uonix_enrich_rank_math_product_schema( array(), null ), 'lida de forma segura com array vazio' );
+
+// 5. Produto sem oferta: enriquece Product mas não cria bloco offers
+$no_offer = array(
+    'product' => array(
+        '@type' => 'Product',
+        'name'  => 'Produto sem oferta',
+    ),
+);
+$no_offer_result = uonix_enrich_rank_math_product_schema( $no_offer, null );
+product_assert(
+    isset( $no_offer_result['product']['warranty'] ) && ! isset( $no_offer_result['product']['offers'] ),
+    'produto sem oferta é enriquecido sem criar bloco offers'
+);
 
 if ( 0 !== $failures ) {
     fwrite( STDERR, "\n{$failures} asserção(ões) falharam.\n" );
