@@ -71,15 +71,11 @@ $enriched = uonix_enrich_rank_math_product_schema( $sample_graph, null );
 $prod     = $enriched['product'];
 
 product_assert( 'Uônix' === ( $prod['brand']['name'] ?? '' ), 'brand é definida como Uônix' );
-product_assert( 'https://uonix.com.br/#organization' === ( $prod['brand']['@id'] ?? '' ), 'brand conecta à @id canônica da organização' );
 product_assert( 'Brasil' === ( $prod['countryOfOrigin']['name'] ?? '' ), 'countryOfOrigin é Brasil' );
-
-product_assert( isset( $prod['hasMerchantReturnPolicy'] ), 'possui hasMerchantReturnPolicy (garantia de fábrica)' );
-product_assert( 365 === ( $prod['hasMerchantReturnPolicy']['merchantReturnDays'] ?? 0 ), 'garantia de 365 dias (12 meses)' );
-
 product_assert( 'https://schema.org/NewCondition' === ( $prod['offers']['itemCondition'] ?? '' ), 'oferta declara NewCondition' );
 product_assert( 'https://uonix.com.br/#organization' === ( $prod['offers']['seller']['@id'] ?? '' ), 'seller referencia #organization por @id puro' );
 product_assert( isset( $prod['offers']['shippingDetails'] ), 'oferta possui shippingDetails para entrega nacional' );
+product_assert( ! isset( $prod['hasMerchantReturnPolicy'] ), 'não emite hasMerchantReturnPolicy desnecessário no modelo B2B' );
 
 // 3. Grafo sem Product (preservação fail-closed)
 $other_graph = array(

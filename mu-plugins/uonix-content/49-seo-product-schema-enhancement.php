@@ -9,7 +9,6 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Complementa o nó Product nativo do Rank Math com atributos comerciais e de confiança:
  *  - Marca oficial conectada à @id canônica da Organização ('/#organization').
  *  - Indicação de país de origem (Brasil — fabricação 100% nacional).
- *  - Política de garantia de 12 meses contra defeitos de fabricação (MerchantReturnPolicy).
  *  - Detalhes de envio e cobertura logística para todo o território nacional (OfferShippingDetails).
  *  - Vendedor (seller) referenciando #organization por @id puro.
  *
@@ -55,17 +54,7 @@ function uonix_enrich_rank_math_product_schema( $data, $jsonld ) {
             'name'  => 'Brasil',
         );
 
-        // 3. Política de Devolução / Garantia de Fábrica (12 meses)
-        $data[ $key ]['hasMerchantReturnPolicy'] = array(
-            '@type'                => 'MerchantReturnPolicy',
-            'applicableCountry'    => 'BR',
-            'returnPolicyCategory' => 'https://schema.org/MerchantReturnFiniteReturnWindow',
-            'merchantReturnDays'   => 365,
-            'returnMethod'         => 'https://schema.org/ReturnByMail',
-            'returnFees'           => 'https://schema.org/FreeReturn',
-        );
-
-        // 4. Enriquecimento de Ofertas (Offers)
+        // 3. Enriquecimento de Ofertas (Offers)
         if ( isset( $data[ $key ]['offers'] ) && is_array( $data[ $key ]['offers'] ) ) {
             // Se for array indexado de ofertas ou oferta única
             if ( isset( $data[ $key ]['offers']['@type'] ) ) {
