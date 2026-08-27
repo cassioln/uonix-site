@@ -20,6 +20,14 @@ themes/kadence-child/snippets/
 
 Comportamentos que variam por ambiente devem usar o helper versionado em `mu-plugins/uonix-shared/environment.php`, sem duplicar hostnames em snippets visuais. O contrato canônico cobre produção (`https://uonix.com.br/`), QA (`https://uonix.ksio.dev/`), DEV (`https://test.uonix.ksio.dev/`) e local (`http://localhost:8080/`) em [ambientes.md](ambientes.md).
 
+## Analytics, GTM e AdOpt
+
+Em produção, o Google Site Kit deve ser a fonte de injeção do **container GTM existente**. GA4 e Meta Pixel continuam configurados dentro desse container; não habilite a colocação direta de código de Analytics ou Ads no Site Kit, pois duplicaria a medição.
+
+O MU-plugin `mu-plugins/uonix-integrations/38-integracoes-analytics-lgpd.php` permanece responsável pelo AdOpt/LGPD. Quando detecta que o módulo **Tag Manager** do Site Kit já está emitindo o container, ele suprime apenas o seu snippet GTM e o fallback `<noscript>`, preservando o banner e o fluxo de consentimento. Se a emissão pelo Site Kit for desabilitada, o MU-plugin volta a injetar o GTM configurado por ambiente como rollback.
+
+Os IDs e a conexão OAuth do Site Kit são estado privado do WordPress e não pertencem ao Git.
+
 ## Regras
 
 - Cada módulo tem um `module.php` com lista explícita de arquivos.
