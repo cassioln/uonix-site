@@ -20,7 +20,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  * UÔNIX: Integração Master (GTM + AdOpt LGPD)
  * ---------------------------------------------------------
  * - Ordem de carregamento: AdOpt (Consentimento) -> GTM (Tags).
- * - Implementação direta via código para máxima performance (Sem plugins).
+ * - O Site Kit pode assumir a emissão do GTM; o AdOpt continua neste MU-plugin.
+ * - AdOpt via código; GTM próprio apenas como fallback ao Site Kit.
  * - Suporte nativo ao Google Consent Mode v2.
  * - Banner AdOpt movido para um container controlado para blindar CSS.
  * - UI Enterprise (Design System Uônix + Flexbox Grid).
@@ -32,20 +33,19 @@ if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
      *
      * POR QUE ISSO EXISTE
      *
-     * O snippet deste arquivo injeta o container GTM incondicionalmente. O Site Kit,
-     * quando o módulo Analytics está CONECTADO, injeta a própria tag GA4. Se os dois
-     * acontecerem juntos, o GA4 chega por dois caminhos e tudo conta em dobro:
-     * pageviews, conversões, e a taxa de rejeição cai artificialmente. Silencioso —
-     * ninguém percebe sem abrir o relatório em detalhe.
+     * Este arquivo injeta o container GTM apenas como fallback. Quando o módulo Tag
+     * Manager do Site Kit está ativo, ele passa a ser o responsável pelo container e
+     * este MU-plugin preserva somente a camada AdOpt/LGPD. Se Analytics ou Ads do Site
+     * Kit emitirem tags diretamente ao mesmo tempo que o GTM, o GA4 pode chegar por dois
+     * caminhos e tudo conta em dobro: pageviews, conversões e taxa de rejeição ficam
+     * contaminados silenciosamente.
      *
-     * Medido em 2026-08-16: o Site Kit está ATIVO com `useSnippet = true` nas três
-     * options (analytics-4, tagmanager, adsense), mas todos os IDs estão VAZIOS, então
-     * ele não tem tag para colocar. Ou seja, hoje não há conflito — por acidente, não
-     * por projeto. Bastam 3 cliques no painel do Site Kit para conectar o Analytics e
-     * a contagem dupla começa, sem nenhum aviso.
+     * Registro histórico de 2026-08-16: o Site Kit estava ativo com `useSnippet = true`
+     * nas três options (analytics-4, tagmanager, adsense), mas sem IDs. Esse registro não
+     * representa o estado atual e não substitui a leitura das options antes de um corte.
      *
-     * Esta função fecha essa porta: se o Site Kit passar a injetar, o snippet recua e
-     * avisa no admin.
+     * Esta função identifica quem está emitindo medição para que o renderer nunca duplique
+     * o container; a decisão preserva o AdOpt quando a origem for o módulo Tag Manager.
      *
      * `useSnippet = true` é o DEFAULT do plugin, não uma escolha — por isso ele sozinho
      * não indica nada. O que importa é ter useSnippet TRUE **e** um ID preenchido.
@@ -57,8 +57,8 @@ if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
         /*
          * Módulo => campos cuja presença significa "tem tag para emitir".
          *
-         * Lista derivada dos Tag_Guard REAIS do plugin instalado (Site Kit 1.185.0),
-         * verificada arquivo por arquivo — não de memória:
+         * Lista derivada dos Tag_Guard REAIS do pacote Site Kit 1.186.0 fornecido para
+         * esta migração, verificada arquivo por arquivo — não de memória:
          *
          *   Analytics_4/Tag_Guard.php:33
          *     return ! empty( $settings['useSnippet'] ) && ! empty( $settings['measurementID'] );
@@ -70,9 +70,9 @@ if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
          * plugin AMP instalado, então é inalcançável — mas esta guarda existe justamente
          * para o cenário "alguém reinstala/instala depois".
          *
-         * `googleTagID` entra porque Analytics_4::get_tag_id() lhe dá PRECEDÊNCIA sobre
-         * measurementID ao montar a tag; o Tag_Guard ainda exige measurementID, então
-         * hoje ele é redundante — mas deixa a guarda correta se o gate mudar.
+         * `googleTagID` não entra: embora seja usado na composição posterior da Google tag,
+         * o Tag_Guard exige `measurementID` antes de registrar qualquer tag. Tratá-lo
+         * sozinho como injeção desligaria o fallback GTM por falso positivo.
          *
          * NÃO inclua `gtagContainerID`: verificado, tem ZERO ocorrências em includes/ do
          * plugin. Era campo inventado. `webDataStreamID` também saiu: existe em Settings
@@ -80,7 +80,7 @@ if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
          * Web_Tag) — cobri-lo dava falsa sensação de completude.
          */
         $modulos = array(
-            'analytics-4' => array( 'measurementID', 'googleTagID' ),
+            'analytics-4' => array( 'measurementID' ),
             'tagmanager'  => array( 'containerID', 'ampContainerID' ),
         );
 
@@ -172,17 +172,15 @@ if ( ! function_exists( 'uonix_analytics_configuration' ) ) {
         }
 
         /*
-         * Recua se o Site Kit já estiver injetando GA4/GTM.
+         * O Site Kit deve assumir somente a emissão do container GTM existente. Nesse
+         * caso, a configuração continua válida para o AdOpt; o renderer decide, em
+         * separado, não duplicar GTM/noscript.
          *
-         * Sem esta guarda, conectar o módulo Analytics no painel do Site Kit (3 cliques,
-         * sem aviso) faria o GA4 chegar por dois caminhos e contar tudo em dobro. Aqui a
-         * decisão é fail-closed: na dúvida, NÃO emitimos tag — dado faltando é
-         * recuperável, dado duplicado contamina o histórico e não tem como separar
-         * depois.
-         *
-         * O admin_notice avisa quem mexeu, para o recuo não ser silencioso.
+         * Analytics ou Ads emitidos diretamente pelo Site Kit continuam sendo um conflito:
+         * compartilham gtag/dataLayer com o GA4 que vive no GTM e poderiam duplicar a
+         * coleta. Para esses módulos, mantemos o recuo fail-closed já existente.
          */
-        if ( '' !== uonix_site_kit_injeta_medicao() ) {
+        if ( in_array( uonix_site_kit_injeta_medicao(), array( 'analytics-4', 'ads' ), true ) ) {
             return false;
         }
 
@@ -210,6 +208,24 @@ if ( ! function_exists( 'uonix_analytics_configuration_is_complete' ) ) {
     }
 }
 
+if ( ! function_exists( 'uonix_analytics_should_render_gtm' ) ) {
+    /**
+     * Determina se este MU-plugin ainda é responsável por emitir o container GTM.
+     *
+     * O Site Kit pode assumir o mesmo container. A presença de qualquer tag de medição
+     * emitida pelo Site Kit bloqueia o fallback próprio para nunca haver dois snippets
+     * concorrentes. Na rota esperada de Tag Manager, os callbacks mantêm o AdOpt em
+     * separado.
+     *
+     * @param mixed $configuration Configuração candidata.
+     * @return bool
+     */
+    function uonix_analytics_should_render_gtm( $configuration ) {
+        return uonix_analytics_configuration_is_complete( $configuration )
+            && '' === uonix_site_kit_injeta_medicao();
+    }
+}
+
 if ( ! function_exists( 'uonix_analytics_admin_notice' ) ) {
     /**
      * Avisa sobre configuração incompleta sem exibir qualquer identificador.
@@ -231,30 +247,31 @@ if ( ! function_exists( 'uonix_analytics_admin_notice' ) ) {
             return;
         }
 
-        /*
-         * Conflito com o Site Kit tem aviso próprio e mais específico: quem conectou o
-         * módulo precisa saber que o container GTM foi suspenso por causa disso, senão
-         * vai concluir que "o analytics parou de funcionar" sem relacionar as duas
-         * coisas.
-         */
-        $modulo = uonix_site_kit_injeta_medicao();
+        $modulo       = uonix_site_kit_injeta_medicao();
+        $configuration = uonix_analytics_configuration();
+
+        // Caminho esperado da migração: Site Kit emite o container GTM já existente e
+        // este MU-plugin preserva exclusivamente o AdOpt/LGPD.
+        if ( 'tagmanager' === $modulo && false !== $configuration ) {
+            return;
+        }
 
         if ( '' !== $modulo ) {
             echo '<div class="notice notice-warning"><p><strong>'
                 . esc_html( 'Container GTM suspenso para evitar contagem dupla.' )
                 . '</strong> '
                 . esc_html( sprintf(
-                    'O módulo "%s" do Google Site Kit está injetando a própria tag de medição. '
-                    . 'Como o site já emite o container GTM, manter os dois duplicaria pageviews e conversões. '
-                    . 'Escolha UMA fonte: desmarque "Colocar o snippet no site" no Site Kit para voltar ao container GTM, '
-                    . 'ou remova a tag correspondente de dentro do container se preferir medir pelo Site Kit.',
+                    'O módulo "%s" do Google Site Kit está injetando medição diretamente. '
+                    . 'Para não duplicar pageviews e conversões, o fallback GTM e o AdOpt foram bloqueados de forma fail-closed. '
+                    . 'Para preservar GA4 e Meta Pixel no mesmo container, desmarque a colocação de código de Analytics/Ads '
+                    . 'e habilite somente o módulo Tag Manager com o container GTM existente.',
                     $modulo
                 ) )
                 . '</p></div>';
             return;
         }
 
-        if ( false !== uonix_analytics_configuration() ) {
+        if ( false !== $configuration ) {
             return;
         }
 
@@ -276,6 +293,7 @@ function uonix_render_analytics_head( $configuration = null ) {
 
     $gtm_container_id = $configuration['gtm_container_id'];
     $adopt_website_id = $configuration['adopt_website_id'];
+    $render_gtm       = uonix_analytics_should_render_gtm( $configuration );
     ?>
     
     <meta name="adopt-website-id" content="<?php echo esc_attr( $adopt_website_id ); ?>" />
@@ -613,11 +631,13 @@ function uonix_render_analytics_head( $configuration = null ) {
         }
     </style>
 
-    <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-    new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-    j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-    'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-    })(window,document,'script','dataLayer',<?php echo wp_json_encode( $gtm_container_id ); ?>);</script>
+    <?php if ( $render_gtm ) : ?>
+        <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+        new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+        j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+        'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+        })(window,document,'script','dataLayer',<?php echo wp_json_encode( $gtm_container_id ); ?>);</script>
+    <?php endif; ?>
     <?php
 }
 }
@@ -632,12 +652,15 @@ function uonix_render_analytics_body( $configuration = null ) {
     if ( is_admin() || ! uonix_analytics_configuration_is_complete( $configuration ) ) return;
 
     $gtm_container_id = $configuration['gtm_container_id'];
+    $render_gtm       = uonix_analytics_should_render_gtm( $configuration );
     ?>
     
     <div id="uonix-cookie-root" aria-live="polite"></div>
 
-    <noscript><iframe src="<?php echo esc_url( 'https://www.googletagmanager.com/ns.html?id=' . rawurlencode( $gtm_container_id ) ); ?>"
-    height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+    <?php if ( $render_gtm ) : ?>
+        <noscript><iframe src="<?php echo esc_url( 'https://www.googletagmanager.com/ns.html?id=' . rawurlencode( $gtm_container_id ) ); ?>"
+        height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+    <?php endif; ?>
 
     <script>
     (function() {

@@ -258,16 +258,16 @@ uonix_analytics_assert_same(
  * Cada caso abaixo preenche SÓ o campo secundário, então remover aquele campo da lista
  * quebra o teste.
  *
- * Campos conferidos nos Tag_Guard reais do plugin (Site Kit 1.185.0):
+ * Campos conferidos no Tag_Guard real do pacote Site Kit 1.186.0:
  *   Analytics_4/Tag_Guard.php:33   useSnippet && measurementID
  *   Tag_Manager/Tag_Guard.php:55   is_amp ? ampContainerID : containerID
  */
 uonix_analytics_assert_same(
-	'analytics-4',
+	'',
 	uonix_site_kit_injeta_medicao( array(
 		'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'measurementID' => '', 'googleTagID' => 'GT-ABC123' ),
 	) ),
-	'googleTagID sozinho caracteriza injeção (get_tag_id() lhe dá precedência)'
+	'googleTagID sem measurementID não caracteriza injeção do GA4'
 );
 
 uonix_analytics_assert_same(
@@ -312,6 +312,35 @@ uonix_analytics_assert_same(
 // comentário e na própria definição, então trocar a chamada por `if ( false )` passaria
 // — uma mutação provou exatamente isso. Aqui exercitamos o COMPORTAMENTO real, com as
 // options do Site Kit injetadas via stub de get_option().
+
+/*
+ * Migração para Site Kit: quando o módulo Tag Manager passa a emitir o container,
+ * o snippet legado não pode duplicar GTM/noscript. A camada AdOpt, porém, continua
+ * sendo responsabilidade deste MU-plugin e precisa permanecer presente para manter
+ * o consentimento que governa GA4 e Meta Pixel dentro do mesmo container.
+ */
+$GLOBALS['uonix_test_options'] = array(
+	'googlesitekit_tagmanager_settings' => array( 'useSnippet' => true, 'containerID' => 'GTM-REAL123' ),
+);
+
+uonix_analytics_assert_same(
+	$valid,
+	uonix_analytics_configuration( 'production', true, 'GTM-REAL123', 'real-adopt-id' ),
+	'Site Kit assumindo o GTM não invalida a configuração necessária ao AdOpt'
+);
+
+ob_start();
+uonix_render_analytics_head( $valid );
+$site_kit_head_html = ob_get_clean();
+uonix_analytics_assert_contains( 'real-adopt-id', $site_kit_head_html, 'Site Kit no GTM preserva o carregamento do AdOpt' );
+uonix_analytics_assert_not_contains( 'googletagmanager.com/gtm.js?id=', $site_kit_head_html, 'Site Kit no GTM suprime o snippet GTM legado no head' );
+
+ob_start();
+uonix_render_analytics_body( $valid );
+$site_kit_body_html = ob_get_clean();
+uonix_analytics_assert_contains( 'uonix-cookie-root', $site_kit_body_html, 'Site Kit no GTM preserva o root do banner AdOpt' );
+uonix_analytics_assert_not_contains( 'googletagmanager.com/ns.html?id=', $site_kit_body_html, 'Site Kit no GTM suprime o noscript GTM legado' );
+
 $GLOBALS['uonix_test_options'] = array(
 	'googlesitekit_analytics-4_settings' => array( 'useSnippet' => true, 'measurementID' => 'G-CONFLITO1' ),
 );
