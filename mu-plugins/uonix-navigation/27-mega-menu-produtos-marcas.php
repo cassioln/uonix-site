@@ -749,6 +749,11 @@ function uonix_estilos_mega_menu_v14()
                 padding: 20px 24px !important;
             }
 
+            .uonix-dc-panel-featured .uonix-link-ver-linha {
+                font-size: 13.5px !important;
+                margin-left: 18px !important;
+            }
+
             .uonix-featured-title {
                 font-size: 24px !important;
             }
