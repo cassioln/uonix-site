@@ -636,11 +636,19 @@ function uonix_estilos_mega_menu_v14()
                         });
                     });
 
-                    // Ao sair completamente do menu (fechamento), reseta para Olhais de Ancoragem
-                    var megaParent = wrapper.closest('.mega-menu-item') || wrapper.closest('li.menu-item') || wrapper.closest('#mega-menu-wrap-primary');
-                    if (megaParent) {
-                        megaParent.addEventListener('mouseleave', function () {
-                            resetActiveCategory();
+                    // Ao sair completamente do menu de nível superior (fechamento), reseta para Olhais de Ancoragem
+                    var topLevelMenuItem = wrapper.closest('li.mega-menu-item-has-children') || 
+                                           wrapper.closest('li.menu-item-has-children') || 
+                                           document.querySelector('#mega-menu-item-8190') ||
+                                           document.querySelector('#mega-menu-wrap-primary');
+
+                    if (topLevelMenuItem) {
+                        topLevelMenuItem.addEventListener('mouseleave', function () {
+                            setTimeout(function () {
+                                if (!topLevelMenuItem.matches(':hover') && !topLevelMenuItem.classList.contains('mega-toggle-on')) {
+                                    resetActiveCategory();
+                                }
+                            }, 120);
                         });
                     }
                 });
