@@ -268,15 +268,20 @@ function uonix_estilos_mega_menu_v14()
         }
 
         .uonix-header-desc {
-            font-size: 13.5px !important;
+            font-size: 17px !important;
             color: #64748b !important;
             margin: 0 !important;
             line-height: 1.4 !important;
             display: -webkit-box !important;
-            -webkit-line-clamp: 4 !important;
+            -webkit-line-clamp: 3 !important;
             -webkit-box-orient: vertical !important;
             overflow: hidden !important;
             transition: color 0.2s ease !important;
+        }
+
+        .uonix-header-desc.is-product-desc {
+            font-size: 13.5px !important;
+            -webkit-line-clamp: 4 !important;
         }
 
         /* PARTE INFERIOR: GRADE DE PRODUTOS EM 3 COLUNAS */
@@ -722,8 +727,13 @@ function uonix_estilos_mega_menu_v14()
             }
 
             .uonix-header-desc {
-                font-size: 13px !important;
+                font-size: 17px !important;
                 line-height: 1.4 !important;
+                -webkit-line-clamp: 3 !important;
+            }
+
+            .uonix-header-desc.is-product-desc {
+                font-size: 13px !important;
                 -webkit-line-clamp: 3 !important;
             }
 
@@ -900,6 +910,7 @@ function uonix_estilos_mega_menu_v14()
 
                             if (descElem && newDesc) {
                                 descElem.textContent = newDesc;
+                                descElem.classList.add('is-product-desc');
                             }
 
                             if (dynTitle && newTitle) {
@@ -943,6 +954,7 @@ function uonix_estilos_mega_menu_v14()
 
                             if (descElem && defaultDesc) {
                                 descElem.textContent = defaultDesc;
+                                descElem.classList.remove('is-product-desc');
                             }
 
                             if (stageBottom) {
