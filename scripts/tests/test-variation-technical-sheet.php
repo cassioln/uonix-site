@@ -191,6 +191,11 @@ function esc_attr( $text ) {
 	return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
 }
 
+function esc_url( $url ) {
+	$url = (string) $url;
+	return filter_var( $url, FILTER_VALIDATE_URL ) ? $url : '';
+}
+
 function absint( $value ) {
 	return abs( (int) $value );
 }
@@ -298,6 +303,22 @@ function metadata_exists( $meta_type, $object_id, $meta_key ) {
 	return 'post' === $meta_type &&
 		isset( $GLOBALS['vts_migration_store'][ absint( $object_id ) ] ) &&
 		array_key_exists( $meta_key, $GLOBALS['vts_migration_store'][ absint( $object_id ) ]['meta'] );
+}
+
+$GLOBALS['vts_post_meta'] = array();
+$GLOBALS['vts_attachment_images'] = array();
+
+function get_post_meta( $post_id, $meta_key = '', $single = false ) {
+	$value = $GLOBALS['vts_post_meta'][ absint( $post_id ) ][ $meta_key ] ?? '';
+	return $single ? $value : array( $value );
+}
+
+function wp_get_attachment_image( $attachment_id, $size = 'thumbnail', $icon = false, $attr = array() ) {
+	$attachment_id = absint( $attachment_id );
+	if ( ! isset( $GLOBALS['vts_attachment_images'][ $attachment_id ] ) ) {
+		return '';
+	}
+	return '<img src="' . esc_url( $GLOBALS['vts_attachment_images'][ $attachment_id ] ) . '" alt="' . esc_attr( $attr['alt'] ?? '' ) . '">';
 }
 
 function wc_get_formatted_variation( $variation, $flat = false, $include_names = true, $skip_attributes_in_name = false ) {
@@ -526,11 +547,24 @@ function get_term_by( $field, $value, $taxonomy ) {
 	if ( 'slug' !== $field || ! isset( $GLOBALS['vts_terms'][ $taxonomy ][ $value ] ) ) {
 		return false;
 	}
-	return (object) array( 'name' => $GLOBALS['vts_terms'][ $taxonomy ][ $value ] );
+	return (object) array(
+		'name'     => $GLOBALS['vts_terms'][ $taxonomy ][ $value ],
+		'slug'     => $value,
+		'taxonomy' => $taxonomy,
+	);
 }
 
 function is_wp_error( $value ) {
-	return false;
+	return $value instanceof VTS_Fake_WP_Error;
+}
+
+final class VTS_Fake_WP_Error {}
+
+function get_term_link( $term, $taxonomy = '' ) {
+	if ( ! is_object( $term ) || ! isset( $term->slug, $term->taxonomy ) ) {
+		return new VTS_Fake_WP_Error();
+	}
+	return 'https://example.test/' . str_replace( 'pa_', '', (string) $term->taxonomy ) . '/' . (string) $term->slug;
 }
 
 function is_product() {
@@ -606,11 +640,40 @@ vts_assert_same( $repo_root . '/mu-plugins/uonix-woocommerce', $loader_call['bas
 vts_assert_same( 'uonix-woocommerce', $loader_call['scope'], 'loader usa o escopo esperado' );
 $loader_position_20 = array_search( '20-catalogo-titulos-produtos.php', $loader_call['files'], true );
 $loader_position_22 = array_search( '22-ficha-tecnica-variacao.php', $loader_call['files'], true );
+$loader_position_27 = array_search( '27-tabela-fichas-tecnicas-variacoes.php', $loader_call['files'], true );
 vts_assert_true( false !== $loader_position_20, 'loader mantém o módulo 20' );
 vts_assert_true( false !== $loader_position_22, 'loader registra o bootstrap 22 em execução' );
 vts_assert_true( $loader_position_20 < $loader_position_22, 'loader mantém o módulo 22 depois do módulo 20' );
+vts_assert_true( false !== $loader_position_27, 'loader registra o bootstrap 27 em execução' );
+vts_assert_true( $loader_position_22 < $loader_position_27, 'loader mantém o módulo 27 depois da ficha técnica' );
 
 require_once $repo_root . '/mu-plugins/uonix-woocommerce/22-ficha-tecnica-variacao.php';
+require_once $repo_root . '/mu-plugins/uonix-woocommerce/27-tabela-fichas-tecnicas-variacoes.php';
+
+vts_assert_hook(
+	'vts_actions',
+	'add_meta_boxes',
+	array( 'Uonix_VTST_Diagram_Admin', 'register_metabox' ),
+	10,
+	0,
+	'admin registra metabox de imagem do esquema técnico'
+);
+vts_assert_hook(
+	'vts_actions',
+	'admin_enqueue_scripts',
+	array( 'Uonix_VTST_Diagram_Admin', 'enqueue_assets' ),
+	10,
+	1,
+	'admin carrega seletor de mídia somente na edição de produto'
+);
+vts_assert_hook(
+	'vts_actions',
+	'save_post_product',
+	array( 'Uonix_VTST_Diagram_Admin', 'save' ),
+	10,
+	2,
+	'admin persiste escolha explícita de imagem por produto'
+);
 
 function vts_valid_sheet() {
 	return array(
@@ -652,6 +715,60 @@ final class VTS_Fake_Render_Variation {
 
 	public function get_id() {
 		return $this->id;
+	}
+}
+
+final class VTS_Fake_Table_Product {
+	private $attributes;
+	private $children;
+	private $id;
+	private $type;
+
+	public function __construct( $id, $type, array $attributes, array $children ) {
+		$this->id         = $id;
+		$this->type       = $type;
+		$this->attributes = $attributes;
+		$this->children   = $children;
+	}
+
+	public function get_id() {
+		return $this->id;
+	}
+
+	public function is_type( $type ) {
+		return $this->type === $type;
+	}
+
+	public function get_attributes() {
+		return $this->attributes;
+	}
+
+	public function get_children() {
+		return $this->children;
+	}
+}
+
+final class VTS_Fake_Table_Variation {
+	private $attributes;
+	private $id;
+	private $meta;
+
+	public function __construct( $id, array $attributes, $sheet = null ) {
+		$this->id         = $id;
+		$this->attributes = $attributes;
+		$this->meta       = null === $sheet ? array() : array( Uonix_VTS_Schema::META_KEY => $sheet );
+	}
+
+	public function get_id() {
+		return $this->id;
+	}
+
+	public function get_attributes() {
+		return $this->attributes;
+	}
+
+	public function get_meta( $key, $single = true ) {
+		return $this->meta[ $key ] ?? '';
 	}
 }
 
@@ -3009,9 +3126,117 @@ vts_assert_same(
 vts_assert_not_contains( 'repeat(6, 1fr)', $frontend_css, 'CSS não fixa seis colunas' );
 vts_assert_not_contains( 'repeat(4, 1fr)', $frontend_css, 'CSS não fixa quatro colunas' );
 vts_assert_not_contains( '.uonix-ficha-', $frontend_css, 'CSS não reutiliza classes legadas' );
+vts_assert_contains( '.uonix-vtst-diagram {', $frontend_css, 'esquema técnico possui contêiner responsivo' );
+vts_assert_contains( '.uonix-vtst-diagram__image {', $frontend_css, 'imagem do esquema técnico não excede a aba' );
+vts_assert_contains( 'max-width: min(100%, 500px) !important', $frontend_css, 'imagem do esquema técnico vence regras do tema' );
+vts_assert_contains( '.uonix-vtst-table {', $frontend_css, 'tabela consolidada possui estilo próprio' );
+vts_assert_contains( 'border-radius: 8px', $frontend_css, 'tabela consolidada usa o mesmo raio do card de variação' );
+vts_assert_contains( 'box-shadow: 0 1px 5px rgba(15, 23, 42, .035)', $frontend_css, 'tabela consolidada usa a mesma sombra do card de variação' );
+vts_assert_contains( 'color: #1e40af !important', $frontend_css, 'links de atributos usam cor distinta' );
+vts_assert_contains( '.uonix-vtst-table a:hover', $frontend_css, 'links de atributos têm estado hover' );
+vts_assert_contains( 'background: #eff6ff', $frontend_css, 'hover do link evidencia a célula clicável' );
+vts_assert_contains( 'font-size: 15px', $frontend_css, 'texto da tabela tem tamanho ampliado' );
 
 $validation_workflow = file_get_contents( $repo_root . '/.github/workflows/validate.yml' );
 vts_assert_contains( '- name: Validate variation technical sheet admin script', $validation_workflow, 'workflow nomeia o gate do JavaScript administrativo' );
 vts_assert_contains( 'node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js', $validation_workflow, 'workflow valida a sintaxe do editor administrativo' );
+vts_assert_contains( 'node --check mu-plugins/uonix-woocommerce/assets/js/admin-vtst-diagram-image.js', $validation_workflow, 'workflow valida a sintaxe do seletor de imagem técnica' );
+
+// Tabela consolidada de fichas por variação: contrato RED.
+$GLOBALS['vts_terms']['pa_material']['galvanizado'] = 'Galvanizado';
+$GLOBALS['vts_terms']['pa_material']['inox-304']    = 'Inox 304';
+$GLOBALS['vts_terms']['pa_bitola']['3-8']           = '3/8"';
+
+$table_sheet = vts_valid_sheet();
+$table_sheet['sections'][0]['items'] = array(
+	array( 'label' => 'Diâm.', 'value' => '7,94 mm' ),
+	array( 'label' => 'Massa Zinco', 'value' => '70 g/m²' ),
+);
+$GLOBALS['vts_products'][20101] = new VTS_Fake_Table_Variation(
+	20101,
+	array( 'pa_material' => 'galvanizado', 'pa_bitola' => '5-16' ),
+	$table_sheet
+);
+$GLOBALS['vts_products'][20102] = new VTS_Fake_Table_Variation(
+	20102,
+	array( 'pa_material' => 'inox-304', 'pa_bitola' => '3-8' )
+);
+$table_product = new VTS_Fake_Table_Product(
+	20100,
+	'variable',
+	array( 'pa_material' => array(), 'pa_bitola' => array() ),
+	array( 20101, 20102 )
+);
+
+require_once $repo_root . '/mu-plugins/uonix-woocommerce/tabela-fichas-tecnicas-variacoes/class-uonix-vtst-table.php';
+
+$matrix = Uonix_VTST_Table::build_matrix( $table_product );
+vts_assert_same(
+	array( 'Material', 'Bitola' ),
+	array_column( $matrix['attribute_columns'], 'label' ),
+	'matriz preserva os atributos do produto na ordem oficial'
+);
+vts_assert_same( array( 'Diâm.', 'Massa Zinco' ), $matrix['technical_columns'], 'campos técnicos seguem a ordem de primeira ocorrência' );
+vts_assert_same( 'https://example.test/material/galvanizado', $matrix['rows'][0]['attribute_cells'][0]['url'], 'termo de material ganha link oficial' );
+vts_assert_same( '—', $matrix['rows'][1]['technical_values']['Diâm.'], 'variação sem ficha recebe travessão' );
+
+$table_tabs = array(
+	'description'            => array( 'title' => 'Descrição' ),
+	'wb_cptb_1'              => array( 'title' => 'Especificações' ),
+	'additional_information' => array( 'title' => 'Especificações Técnicas' ),
+);
+$GLOBALS['product'] = $table_product;
+$filtered_tabs = Uonix_VTST_Table::replace_additional_information_tab( $table_tabs );
+vts_assert_true( isset( $filtered_tabs['wb_cptb_1'] ), 'aba manual é preservada' );
+vts_assert_false( isset( $filtered_tabs['additional_information'] ), 'aba nativa é removida quando há ficha válida' );
+vts_assert_true( isset( $filtered_tabs[ Uonix_VTST_Table::TAB_KEY ] ), 'aba automática é incluída' );
+vts_assert_same( 'Especificações Técnicas', $filtered_tabs[ Uonix_VTST_Table::TAB_KEY ]['title'], 'título da aba automática é estável' );
+
+ob_start();
+Uonix_VTST_Table::render_tab( Uonix_VTST_Table::TAB_KEY, array() );
+$table_html = ob_get_clean();
+vts_assert_contains( 'woocommerce-product-attributes shop_attributes', $table_html, 'tabela usa classes WooCommerce' );
+vts_assert_contains( 'https://example.test/material/galvanizado', $table_html, 'link taxonômico é renderizado' );
+vts_assert_contains( '—', $table_html, 'célula sem ficha é renderizada com travessão' );
+
+$GLOBALS['vts_attachment_images'][30001] = 'https://example.test/uploads/esquema-grampo.png';
+$GLOBALS['vts_post_meta'][20100][ Uonix_VTST_Table::DIAGRAM_IMAGE_META_KEY ] = 30001;
+ob_start();
+Uonix_VTST_Table::render_tab( Uonix_VTST_Table::TAB_KEY, array() );
+$table_with_diagram = ob_get_clean();
+vts_assert_contains( 'class="uonix-vtst-diagram"', $table_with_diagram, 'imagem explícita recebe wrapper próprio acima da tabela' );
+vts_assert_contains( 'https://example.test/uploads/esquema-grampo.png', $table_with_diagram, 'imagem explícita do produto é renderizada' );
+
+unset( $GLOBALS['vts_post_meta'][20100][ Uonix_VTST_Table::DIAGRAM_IMAGE_META_KEY ] );
+$GLOBALS['vts_attachment_images'][30002] = 'https://example.test/uploads/esquema-legado.png';
+$GLOBALS['vts_attachment_images'][30003] = 'https://example.test/uploads/imagem-faq.png';
+$GLOBALS['vts_post_meta'][20100]['wb_custom_tabs'] = array(
+	array(
+		'title'   => 'Dúvidas Frequentes',
+		'content' => '<p><img class="wp-image-30003" src="https://example.test/uploads/imagem-faq.png" alt=""></p>',
+	),
+	array(
+		'title'   => 'Dimensões',
+		'content' => '<p><img class="wp-image-30002" src="https://example.test/uploads/esquema-legado.png" alt=""></p>',
+	),
+);
+ob_start();
+Uonix_VTST_Table::render_tab( Uonix_VTST_Table::TAB_KEY, array() );
+$table_with_legacy_diagram = ob_get_clean();
+vts_assert_contains( 'https://example.test/uploads/esquema-legado.png', $table_with_legacy_diagram, 'imagem da aba manual antiga é fallback quando não há escolha explícita' );
+vts_assert_not_contains( 'https://example.test/uploads/imagem-faq.png', $table_with_legacy_diagram, 'fallback ignora imagens de abas não técnicas' );
+
+$duplicate_torque_sheet = vts_valid_sheet();
+$duplicate_torque_sheet['sections'][0]['items'] = array(
+	array( 'label' => 'Torque', 'value' => '8 N·m' ),
+	array( 'label' => 'Torque', 'value' => '0,8 kgf·m' ),
+);
+$GLOBALS['vts_products'][20103] = new VTS_Fake_Table_Variation( 20103, array( 'pa_material' => 'galvanizado' ), $duplicate_torque_sheet );
+$duplicate_torque_product = new VTS_Fake_Table_Product( 20104, 'variable', array( 'pa_material' => array() ), array( 20103 ) );
+vts_assert_same(
+	null,
+	Uonix_VTST_Table::build_matrix( $duplicate_torque_product ),
+	'ficha com rótulos técnicos duplicados não gera tabela ambígua'
+);
 
 printf( "PASS: contratos da ficha técnica por variação. (%d asserções)\n", $GLOBALS['vts_assertions'] );
