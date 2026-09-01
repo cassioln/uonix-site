@@ -79,9 +79,9 @@ function uonix_estilos_mega_menu_v14() {
         .uonix-featured-text p { font-size: 17px !important; color: #475569 !important; line-height: 1.5 !important; margin: 0 0 20px 0 !important; }
         
         .uonix-featured-products { display: flex !important; flex-direction: column !important; gap: 12px !important; border-left: 3px solid #f1f5f9 !important; padding-left: 15px !important; width: 100%; margin-bottom: 10px !important; }
-        .uonix-featured-products a { color: #0e3780 !important; font-weight: 600 !important; font-size: 18px !important; line-height: 1.5; text-decoration: none !important; display: flex !important; align-items: center !important; transition: color 0.2s ease !important; }
+        .uonix-featured-products a { color: #0e3780 !important; font-weight: 600 !important; font-size: 18px !important; line-height: 1.5; text-decoration: none !important; display: flex !important; align-items: center !important; transition: color 0.2s ease !important; position: relative !important; }
         .uonix-featured-products a::before { content: "•"; color: #f76a0c !important; margin-right: 8px !important; font-size: 18px !important; }
-        .uonix-featured-products a:hover { color: #f76a0c !important; }
+        .uonix-featured-products a:hover { color: #f76a0c !important; z-index: 100 !important; }
         
         .uonix-featured-image { flex: 1 !important; display: flex !important; align-items: center !important; justify-content: center !important; height: 100% !important; min-height: 250px !important; }
         
@@ -92,8 +92,197 @@ function uonix_estilos_mega_menu_v14() {
         .uonix-dc-info p { font-size: 16px !important; color: #64748b !important; margin-bottom: 5px !important; line-height: 1.5; }
         
         .uonix-dc-sublinks { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 15px 25px !important; line-height: 1.5; padding-left: 0px; padding-right: 0px; margin-top: 15px; }
-        .uonix-dc-sublinks a { font-size: 15px !important; color: #475569 !important; font-weight: 600 !important; text-decoration: none !important; display: flex !important; align-items: flex-start !important; line-height: 1.35 !important; padding-left: 5px; border-left: solid 5px #e9f3ff; }
-        .uonix-dc-sublinks a:hover { color: #003399 !important; border-left: solid 3px #f76a0b; }
+        .uonix-dc-sublinks a { font-size: 15px !important; color: #475569 !important; font-weight: 600 !important; text-decoration: none !important; display: flex !important; align-items: flex-start !important; line-height: 1.35 !important; padding-left: 5px; border-left: solid 5px #e9f3ff; position: relative !important; }
+        .uonix-dc-sublinks a:hover { color: #003399 !important; border-left: solid 3px #f76a0b; z-index: 100 !important; }
+
+        /* ==========================================================
+           MEGA MENU: MINIATURA / TOOLTIP PREVIEW AO PASSAR O MOUSE
+           ========================================================== */
+        .uonix-prod-tooltip {
+            position: absolute !important;
+            width: 155px !important;
+            background: #ffffff !important;
+            border: 1.5px solid #dbeafe !important;
+            border-radius: 10px !important;
+            padding: 8px !important;
+            box-shadow: 0 14px 30px -4px rgba(14, 55, 128, 0.2), 0 6px 12px -2px rgba(0, 0, 0, 0.08) !important;
+            z-index: 9999 !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            box-sizing: border-box !important;
+            transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.2s !important;
+        }
+
+        .uonix-prod-tooltip::before {
+            content: "" !important;
+            position: absolute !important;
+            width: 10px !important;
+            height: 10px !important;
+            background: #ffffff !important;
+            border: 1.5px solid #dbeafe !important;
+            box-sizing: border-box !important;
+            z-index: 10000 !important;
+        }
+
+        .uonix-prod-tooltip-img {
+            width: 100% !important;
+            height: 95px !important;
+            background: #f8fafc !important;
+            border: 1px solid #edf2f7 !important;
+            border-radius: 6px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            overflow: hidden !important;
+            margin-bottom: 6px !important;
+            box-sizing: border-box !important;
+        }
+
+        #mega-menu-wrap-primary .uonix-prod-tooltip-img img,
+        .is-sticky .uonix-prod-tooltip-img img,
+        .site-header-sticky-inner .uonix-prod-tooltip-img img,
+        .header-desktop-sticky .uonix-prod-tooltip-img img,
+        .kadence-sticky-header .uonix-prod-tooltip-img img,
+        .uonix-prod-tooltip-img img {
+            width: 100% !important;
+            height: 95px !important;
+            max-height: 95px !important;
+            min-height: 95px !important;
+            object-fit: contain !important;
+            background: transparent !important;
+            border-radius: 4px !important;
+            flex-shrink: 0 !important;
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        }
+
+        .uonix-prod-link:hover .uonix-prod-tooltip-img img {
+            transform: scale(1.08) !important;
+        }
+
+        .uonix-prod-tooltip-name {
+            font-size: 11.5px !important;
+            font-weight: 700 !important;
+            color: #0e3780 !important;
+            line-height: 1.25 !important;
+            text-align: center !important;
+            display: -webkit-box !important;
+            -webkit-line-clamp: 2 !important;
+            -webkit-box-orient: vertical !important;
+            overflow: hidden !important;
+            margin-bottom: 4px !important;
+            text-decoration: none !important;
+            word-break: break-word !important;
+        }
+
+        .uonix-prod-tooltip-action {
+            font-size: 10.5px !important;
+            font-weight: 800 !important;
+            color: #f76a0c !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            line-height: 1 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 2px !important;
+        }
+
+        /* 1. Posicionamento para Categoria Destaque (Olhais de Ancoragem) */
+        .uonix-featured-products .uonix-prod-link .uonix-prod-tooltip {
+            left: calc(100% + 14px) !important;
+            top: 50% !important;
+            transform: translateY(-50%) translateX(-8px) !important;
+            bottom: auto !important;
+            right: auto !important;
+        }
+
+        .uonix-featured-products .uonix-prod-link:hover .uonix-prod-tooltip {
+            opacity: 1 !important;
+            visibility: visible !important;
+            transform: translateY(-50%) translateX(0) !important;
+        }
+
+        .uonix-featured-products .uonix-prod-link .uonix-prod-tooltip::before {
+            left: -6px !important;
+            top: 50% !important;
+            transform: translateY(-50%) rotate(45deg) !important;
+            border-top: none !important;
+            border-right: none !important;
+        }
+
+        /* 2. Posicionamento para Sublinks em Grade (Fixação Química, Mecânica, Acessórios) */
+        .uonix-dc-sublinks .uonix-prod-link .uonix-prod-tooltip {
+            bottom: calc(100% + 10px) !important;
+            top: auto !important;
+        }
+
+        /* Coluna 1 da grade: alinhamento à esquerda */
+        .uonix-dc-sublinks .uonix-prod-link:nth-child(3n+1) .uonix-prod-tooltip {
+            left: 0 !important;
+            right: auto !important;
+            transform: translateY(8px) !important;
+        }
+
+        .uonix-dc-sublinks .uonix-prod-link:nth-child(3n+1):hover .uonix-prod-tooltip {
+            opacity: 1 !important;
+            visibility: visible !important;
+            transform: translateY(0) !important;
+        }
+
+        .uonix-dc-sublinks .uonix-prod-link:nth-child(3n+1) .uonix-prod-tooltip::before {
+            left: 20px !important;
+            bottom: -6px !important;
+            transform: rotate(45deg) !important;
+            border-top: none !important;
+            border-left: none !important;
+        }
+
+        /* Coluna 2 da grade: centralizado */
+        .uonix-dc-sublinks .uonix-prod-link:nth-child(3n+2) .uonix-prod-tooltip {
+            left: 50% !important;
+            right: auto !important;
+            transform: translateX(-50%) translateY(8px) !important;
+        }
+
+        .uonix-dc-sublinks .uonix-prod-link:nth-child(3n+2):hover .uonix-prod-tooltip {
+            opacity: 1 !important;
+            visibility: visible !important;
+            transform: translateX(-50%) translateY(0) !important;
+        }
+
+        .uonix-dc-sublinks .uonix-prod-link:nth-child(3n+2) .uonix-prod-tooltip::before {
+            left: 50% !important;
+            margin-left: -5px !important;
+            bottom: -6px !important;
+            transform: rotate(45deg) !important;
+            border-top: none !important;
+            border-left: none !important;
+        }
+
+        /* Coluna 3 da grade: alinhamento à direita */
+        .uonix-dc-sublinks .uonix-prod-link:nth-child(3n) .uonix-prod-tooltip {
+            right: 0 !important;
+            left: auto !important;
+            transform: translateY(8px) !important;
+        }
+
+        .uonix-dc-sublinks .uonix-prod-link:nth-child(3n):hover .uonix-prod-tooltip {
+            opacity: 1 !important;
+            visibility: visible !important;
+            transform: translateY(0) !important;
+        }
+
+        .uonix-dc-sublinks .uonix-prod-link:nth-child(3n) .uonix-prod-tooltip::before {
+            right: 20px !important;
+            left: auto !important;
+            bottom: -6px !important;
+            transform: rotate(45deg) !important;
+            border-top: none !important;
+            border-left: none !important;
+        }
 
         /* MEGA MARCAS ROW */
         #mega-menu-wrap-primary #mega-menu-primary li.mega-menu-row:has(.uonix-mega-brands-wrap) { background: #ffffff !important; border: 2px solid #e2e8f0 !important; border-top: 1px solid #f1f5f9 !important; border-radius: 0 0 8px 8px !important; margin-top: -2px !important; padding: 25px 40px !important; box-shadow: 0 12px 25px rgba(0, 0, 0, 0.06) !important; display: block !important; }
@@ -223,9 +412,26 @@ function uonix_gerar_mega_menu_v14() {
                                     <div class="uonix-featured-products">
                                         <?php if ($produtos->have_posts()) :
                                             while ($produtos->have_posts()) : $produtos->the_post(); 
-                                                $t_prod = str_replace(['<br>', '<br/>', '<br />'], ' - ', get_the_title());
-                                                echo '<a href="' . get_the_permalink() . '#catalogo-produtos">' . esc_html($t_prod) . '</a>';
-                                            endwhile;
+                                                $prod_id   = get_the_ID();
+                                                $t_prod    = str_replace(['<br>', '<br/>', '<br />'], ' - ', get_the_title());
+                                                $thumb_url = get_the_post_thumbnail_url($prod_id, 'medium');
+                                                if (empty($thumb_url) && function_exists('wc_placeholder_img_src')) {
+                                                    $thumb_url = wc_placeholder_img_src('woocommerce_thumbnail');
+                                                }
+                                                ?>
+                                                <a href="<?php echo esc_url(get_the_permalink() . '#catalogo-produtos'); ?>" class="uonix-prod-link">
+                                                    <span class="uonix-prod-link-text"><?php echo esc_html($t_prod); ?></span>
+                                                    <?php if (!empty($thumb_url)) : ?>
+                                                        <span class="uonix-prod-tooltip" aria-hidden="true">
+                                                            <span class="uonix-prod-tooltip-img">
+                                                                <img src="<?php echo esc_url($thumb_url); ?>" alt="<?php echo esc_attr($t_prod); ?>" loading="lazy" width="140" height="95">
+                                                            </span>
+                                                            <span class="uonix-prod-tooltip-name"><?php echo esc_html($t_prod); ?></span>
+                                                            <span class="uonix-prod-tooltip-action">Ver produto &rsaquo;</span>
+                                                        </span>
+                                                    <?php endif; ?>
+                                                </a>
+                                            <?php endwhile;
                                         endif; wp_reset_postdata(); ?>
                                     </div>
                                     
@@ -253,9 +459,26 @@ function uonix_gerar_mega_menu_v14() {
                                 <div class="uonix-dc-sublinks">
                                     <?php if ($produtos->have_posts()) :
                                         while ($produtos->have_posts()) : $produtos->the_post(); 
-                                            $t_prod = str_replace(['<br>', '<br/>', '<br />'], ' - ', get_the_title());
-                                            echo '<a href="' . get_the_permalink() . '#catalogo-produtos">' . esc_html($t_prod) . '</a>';
-                                        endwhile;
+                                            $prod_id   = get_the_ID();
+                                            $t_prod    = str_replace(['<br>', '<br/>', '<br />'], ' - ', get_the_title());
+                                            $thumb_url = get_the_post_thumbnail_url($prod_id, 'medium');
+                                            if (empty($thumb_url) && function_exists('wc_placeholder_img_src')) {
+                                                $thumb_url = wc_placeholder_img_src('woocommerce_thumbnail');
+                                            }
+                                            ?>
+                                            <a href="<?php echo esc_url(get_the_permalink() . '#catalogo-produtos'); ?>" class="uonix-prod-link">
+                                                <span class="uonix-prod-link-text"><?php echo esc_html($t_prod); ?></span>
+                                                <?php if (!empty($thumb_url)) : ?>
+                                                    <span class="uonix-prod-tooltip" aria-hidden="true">
+                                                        <span class="uonix-prod-tooltip-img">
+                                                            <img src="<?php echo esc_url($thumb_url); ?>" alt="<?php echo esc_attr($t_prod); ?>" loading="lazy" width="140" height="95">
+                                                        </span>
+                                                        <span class="uonix-prod-tooltip-name"><?php echo esc_html($t_prod); ?></span>
+                                                        <span class="uonix-prod-tooltip-action">Ver produto &rsaquo;</span>
+                                                    </span>
+                                                <?php endif; ?>
+                                            </a>
+                                        <?php endwhile;
                                     else: 
                                         echo '<span>Nenhum produto cadastrado.</span>'; 
                                     endif; 
