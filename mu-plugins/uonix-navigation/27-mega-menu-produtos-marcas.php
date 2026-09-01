@@ -345,7 +345,7 @@ function uonix_estilos_mega_menu_v14() {
         .uonix-dc-panel-featured { 
             padding: 26px 34px !important; 
             flex-direction: row !important; 
-            align-items: center !important; 
+            align-items: stretch !important; 
             gap: 36px !important; 
         }
 
@@ -353,37 +353,38 @@ function uonix_estilos_mega_menu_v14() {
             flex: 1.2 !important; 
             display: flex !important; 
             flex-direction: column !important; 
-            justify-content: center !important; 
+            justify-content: space-between !important; 
             align-items: flex-start !important; 
+            height: 100% !important;
             min-width: 0 !important;
         }
 
-        .uonix-featured-badge {
-            font-size: 11px !important;
-            font-weight: 800 !important;
-            color: #f76a0c !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.8px !important;
-            margin-bottom: 4px !important;
-            display: inline-block !important;
+        .uonix-featured-header {
+            width: 100% !important;
+            margin-bottom: 8px !important;
         }
 
         .uonix-featured-title { 
-            font-size: 30px !important; 
+            font-size: 28px !important; 
             color: #0e3780 !important; 
             font-weight: 800 !important; 
             text-transform: uppercase !important; 
-            margin: 0 0 8px 0 !important; 
+            margin: 0 0 6px 0 !important; 
             line-height: 1.1 !important; 
             letter-spacing: -0.5px !important; 
         }
 
         .uonix-featured-desc { 
-            font-size: 15.5px !important; 
-            color: #475569 !important; 
-            line-height: 1.5 !important; 
-            margin: 0 0 16px 0 !important; 
-            min-height: 45px !important;
+            font-size: 14.5px !important; 
+            color: #64748b !important; 
+            line-height: 1.45 !important; 
+            margin: 0 !important; 
+            min-height: 42px !important;
+            max-height: 42px !important;
+            display: -webkit-box !important;
+            -webkit-line-clamp: 2 !important;
+            -webkit-box-orient: vertical !important;
+            overflow: hidden !important;
         }
         
         .uonix-featured-products { 
@@ -391,7 +392,7 @@ function uonix_estilos_mega_menu_v14() {
             flex-direction: column !important; 
             gap: 9px !important; 
             width: 100% !important; 
-            margin-bottom: 16px !important; 
+            margin: 10px 0 !important; 
         }
 
         .uonix-featured-image-stage { 
@@ -586,10 +587,11 @@ function uonix_estilos_mega_menu_v14() {
                     var defaultDesc  = panel.getAttribute('data-default-desc');
                     var defaultBrand = panel.getAttribute('data-default-brand') || 'UÔNIX';
 
-                    var imgElem   = panel.querySelector('.uonix-dc-header-img, .uonix-featured-img');
-                    var descElem  = panel.querySelector('.uonix-header-desc, .uonix-featured-desc');
-                    var brandElem = panel.querySelector('.uonix-header-brand-badge, .uonix-stage-brand-label');
-                    var dynTitle  = panel.querySelector('.uonix-stage-dyn-title');
+                    var isFeatured = panel.classList.contains('uonix-dc-panel-featured');
+                    var imgElem    = panel.querySelector('.uonix-dc-header-img, .uonix-featured-img');
+                    var descElem   = isFeatured ? null : panel.querySelector('.uonix-header-desc');
+                    var brandElem  = panel.querySelector('.uonix-header-brand-badge, .uonix-stage-brand-label');
+                    var dynTitle   = panel.querySelector('.uonix-stage-dyn-title');
 
                     var items = panel.querySelectorAll('.uonix-prod-stage-item');
                     var gridContainer = panel.querySelector('.uonix-dc-products-grid, .uonix-featured-products');
@@ -699,6 +701,9 @@ function uonix_gerar_mega_menu_v14() {
                     $link_husky = '/produtos/swoof2/product_cat-' . $cat['slug'] . '/#catalogo-produtos';
                     
                     $descricao = (!empty($term) && !empty($term->description)) ? wp_strip_all_tags($term->description) : 'Confira a nossa linha completa para fixação e ancoragem.';
+                    if ($is_featured) {
+                        $descricao = wp_trim_words($descricao, 14, '...');
+                    }
 
                     // Limite: 4 produtos na categoria destaque, 9 nas categorias padrão (3 colunas x 3 linhas)
                     $product_limit = $is_featured ? 4 : 9;
@@ -802,9 +807,10 @@ function uonix_gerar_mega_menu_v14() {
                                  data-default-link="<?php echo esc_url($link_padrao); ?>">
                                 
                                 <div class="uonix-featured-text">
-                                    <span class="uonix-featured-badge">⭐ Linha Principal Uônix</span>
-                                    <h5 class="uonix-featured-title"><?php echo esc_html($titulo_limpo); ?></h5>
-                                    <p class="uonix-featured-desc"><?php echo esc_html($descricao); ?></p>
+                                    <div class="uonix-featured-header">
+                                        <h5 class="uonix-featured-title"><?php echo esc_html($titulo_limpo); ?></h5>
+                                        <p class="uonix-featured-desc"><?php echo esc_html($descricao); ?></p>
+                                    </div>
                                     
                                     <div class="uonix-featured-products">
                                         <?php if (!empty($produtos_lista)) : 
