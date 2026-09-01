@@ -52,6 +52,7 @@ function uonix_estilos_mega_menu_v14()
         .uonix-dynamic-cats-wrapper {
             position: relative !important;
             display: flex !important;
+            align-items: stretch !important;
             width: 100% !important;
             min-height: 420px !important;
             background: #ffffff !important;
@@ -71,6 +72,9 @@ function uonix_estilos_mega_menu_v14()
             display: flex !important;
             flex-direction: column !important;
             border-right: 1px solid #e2e8f0 !important;
+            height: 100% !important;
+            min-height: 100% !important;
+            align-self: stretch !important;
         }
 
         .uonix-dc-catalog-btn {
@@ -79,13 +83,15 @@ function uonix_estilos_mega_menu_v14()
             justify-content: center !important;
             background: #0e3780 !important;
             color: #ffffff !important;
-            padding: 15px !important;
+            padding: 16px 20px !important;
+            min-height: 56px !important;
             font-size: 15px !important;
             font-weight: 800 !important;
             text-decoration: none !important;
             text-transform: uppercase !important;
             letter-spacing: 0.5px !important;
             transition: all 0.3s ease !important;
+            flex-shrink: 0 !important;
         }
 
         .uonix-dc-catalog-btn:hover {
@@ -100,19 +106,29 @@ function uonix_estilos_mega_menu_v14()
             flex: 1 !important;
             display: flex !important;
             flex-direction: column !important;
+            height: 100% !important;
         }
 
         .uonix-dc-item {
             border-bottom: 1px solid #e2e8f0 !important;
             margin: 0 !important;
             padding: 0 !important;
+            flex: 1 1 0% !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+
+        .uonix-dc-item:last-child {
+            border-bottom: none !important;
         }
 
         .uonix-dc-link {
             display: flex !important;
             align-items: center !important;
             justify-content: space-between !important;
-            padding: 15px 20px !important;
+            padding: 0 20px !important;
+            height: 100% !important;
+            flex: 1 !important;
             font-size: 16px !important;
             font-weight: 700 !important;
             color: #475569 !important;
