@@ -17,19 +17,20 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Produtos Mega Menu
  */
 /**
- * UÔNIX: Master Premium V15.0 (Mega Menu com Vitrine Interativa + Marcas)
- * - Vitrine Interativa de Alta Definição com Palco de Preview Padronizado
- * - Troca dinâmica e suave de imagem, marca e detalhes no hover do produto
+ * UÔNIX: Master Premium V16.0 (Mega Menu Dinâmico com Header Interativo + Destaque Olhais)
+ * - Disposição clássica no topo (Foto + Título + Breve Descrição + CTA)
+ * - Ao passar o mouse nos produtos da grade (3 colunas), o cabeçalho se transforma exibindo a foto do produto, fabricante e descrição
+ * - Categoria "Olhais de Ancoragem" com destaque nobre diferenciado
  * - Anti-Squash Absoluto para Header Fixo do Kadence
  */
 
 // ==============================================================================
-// 1. ESTILO COMPARTILHADO (MEGA MENU E MARCAS)
+// 1. ESTILOS COMPARTILHADOS (MEGA MENU E MARCAS)
 // ==============================================================================
 add_action('wp_head', 'uonix_estilos_mega_menu_v14');
 function uonix_estilos_mega_menu_v14() {
     ?>
-    <style id="uonix-megamenu-stage-css">
+    <style id="uonix-megamenu-hybrid-css">
         /* ==========================================================
            MEGA MENU: ESTRUTURA E PAINÉIS PRINCIPAIS
            ========================================================== */
@@ -134,10 +135,11 @@ function uonix_estilos_mega_menu_v14() {
             right: 0 !important; 
             bottom: 0 !important;
             height: 100% !important; 
-            padding: 24px 30px !important; 
+            padding: 24px 32px !important; 
             background: #ffffff !important; 
             display: flex !important; 
             flex-direction: column !important; 
+            justify-content: space-between !important;
             opacity: 0 !important; 
             visibility: hidden !important; 
             z-index: 1 !important; 
@@ -160,80 +162,107 @@ function uonix_estilos_mega_menu_v14() {
         }
 
         /* ==========================================================
-           GRID INTERNO DO PAINEL: LISTA + PALCO DE PREVIEW
+           1. LAYOUT CATEGORIAS PADRÃO (FIXAÇÃO QUÍMICA, MECÂNICA, ACESSÓRIOS)
            ========================================================== */
-        .uonix-dc-panel-grid {
-            display: grid !important;
-            grid-template-columns: 1fr 270px !important;
-            gap: 25px !important;
-            height: 100% !important;
-            align-items: stretch !important;
+        
+        /* PARTE SUPERIOR (HEADER DINÂMICO) */
+        .uonix-dc-header { 
+            display: flex !important; 
+            align-items: center !important; 
+            gap: 28px !important; 
+            border-bottom: 1px solid #f1f5f9 !important; 
+            padding-bottom: 16px !important; 
+            margin-bottom: 12px !important; 
+            min-height: 155px !important; 
             box-sizing: border-box !important;
         }
 
-        .uonix-dc-panel-main {
+        .uonix-dc-header-media {
+            width: 240px !important;
+            min-width: 240px !important;
+            height: 140px !important;
+            background: #f8fafc !important;
+            border: 1px solid #edf2f7 !important;
+            border-radius: 8px !important;
             display: flex !important;
-            flex-direction: column !important;
-            justify-content: space-between !important;
+            align-items: center !important;
+            justify-content: center !important;
+            position: relative !important;
+            overflow: hidden !important;
+            padding: 8px !important;
+            box-sizing: border-box !important;
+        }
+
+        .uonix-header-brand-badge {
+            position: absolute !important;
+            top: 8px !important;
+            left: 8px !important;
+            font-size: 10px !important;
+            font-weight: 800 !important;
+            color: #0e3780 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            background: rgba(233, 243, 255, 0.95) !important;
+            border: 1px solid #dbeafe !important;
+            padding: 2px 7px !important;
+            border-radius: 4px !important;
+            line-height: 1.2 !important;
+            z-index: 2 !important;
+            transition: all 0.2s ease !important;
+        }
+
+        .uonix-dc-info { 
+            display: flex !important; 
+            flex-direction: column !important; 
+            align-items: flex-start !important; 
+            flex: 1 !important;
             min-width: 0 !important;
         }
 
-        /* CABEÇALHO DA CATEGORIA */
-        .uonix-dc-header-wrap {
-            margin-bottom: 12px !important;
-        }
-
-        .uonix-dc-badge {
-            display: inline-block !important;
-            font-size: 11px !important;
-            font-weight: 800 !important;
-            color: #f76a0c !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.8px !important;
-            margin-bottom: 4px !important;
-        }
-
-        .uonix-dc-title {
-            font-size: 24px !important;
-            color: #0e3780 !important;
-            font-weight: 800 !important;
-            text-transform: uppercase !important;
-            margin: 0 0 6px 0 !important;
-            line-height: 1.15 !important;
+        .uonix-header-title { 
+            font-size: 25px !important; 
+            text-transform: uppercase !important; 
+            color: #0e3780 !important; 
+            font-weight: 800 !important; 
+            margin: 0 0 6px 0 !important; 
             letter-spacing: -0.3px !important;
+            line-height: 1.15 !important;
         }
 
-        .uonix-dc-desc {
-            font-size: 14px !important;
-            color: #64748b !important;
-            line-height: 1.4 !important;
-            margin: 0 !important;
+        .uonix-header-desc { 
+            font-size: 14.5px !important; 
+            color: #64748b !important; 
+            margin: 0 0 10px 0 !important; 
+            line-height: 1.45 !important; 
             display: -webkit-box !important;
             -webkit-line-clamp: 2 !important;
             -webkit-box-orient: vertical !important;
             overflow: hidden !important;
+            min-height: 42px !important;
+            transition: color 0.2s ease !important;
         }
 
-        /* GRADE DE PRODUTOS INTERATIVA */
-        .uonix-dc-products-grid {
-            display: grid !important;
-            grid-template-columns: repeat(2, 1fr) !important;
-            gap: 8px 12px !important;
-            margin: 10px 0 !important;
+        /* PARTE INFERIOR: GRADE DE PRODUTOS EM 3 COLUNAS */
+        .uonix-dc-products-grid.uonix-grid-3cols { 
+            display: grid !important; 
+            grid-template-columns: repeat(3, 1fr) !important; 
+            gap: 9px 15px !important; 
             flex: 1 !important;
             align-content: start !important;
+            margin-top: 4px !important;
         }
 
+        /* LINKS DE PRODUTOS ESTILIZADOS E INTERATIVOS */
         .uonix-prod-stage-item {
             display: flex !important;
             align-items: center !important;
             justify-content: space-between !important;
-            padding: 8px 12px !important;
-            background: #f8fafc !important;
+            padding: 7px 10px !important;
+            background: #ffffff !important;
             border: 1px solid #f1f5f9 !important;
-            border-left: 3px solid #e2e8f0 !important;
-            border-radius: 6px !important;
-            color: #334155 !important;
+            border-left: 3.5px solid #e9f3ff !important;
+            border-radius: 4px !important;
+            color: #475569 !important;
             font-size: 13.5px !important;
             font-weight: 600 !important;
             text-decoration: none !important;
@@ -244,11 +273,11 @@ function uonix_estilos_mega_menu_v14() {
         }
 
         .uonix-prod-bullet {
-            width: 6px !important;
-            height: 6px !important;
+            width: 5px !important;
+            height: 5px !important;
             background: #94a3b8 !important;
             border-radius: 50% !important;
-            margin-right: 8px !important;
+            margin-right: 7px !important;
             flex-shrink: 0 !important;
             transition: background 0.2s !important;
         }
@@ -264,19 +293,19 @@ function uonix_estilos_mega_menu_v14() {
             opacity: 0 !important;
             transform: translateX(-4px) !important;
             color: #f76a0c !important;
-            font-size: 15px !important;
+            font-size: 14px !important;
             font-weight: 800 !important;
-            margin-left: 6px !important;
+            margin-left: 4px !important;
             transition: all 0.2s ease !important;
         }
 
         .uonix-prod-stage-item:hover,
         .uonix-prod-stage-item.is-active {
-            background: #ffffff !important;
+            background: #f8fafc !important;
             border-color: #cbd5e1 !important;
-            border-left: 3px solid #f76a0c !important;
+            border-left: 3.5px solid #f76a0c !important;
             color: #0e3780 !important;
-            box-shadow: 0 4px 12px rgba(14, 55, 128, 0.08) !important;
+            box-shadow: 0 3px 8px rgba(14, 55, 128, 0.06) !important;
             transform: translateX(3px) !important;
         }
 
@@ -291,19 +320,18 @@ function uonix_estilos_mega_menu_v14() {
             transform: translateX(0) !important;
         }
 
-        /* LINK VER TODA A LINHA */
+        /* LINK "VER TODA A LINHA" */
         .uonix-link-ver-linha {
             display: inline-flex !important;
             align-items: center !important;
             gap: 6px !important;
-            font-size: 14.5px !important;
+            font-size: 14px !important;
             font-weight: 800 !important;
             line-height: 1.4 !important;
             color: #f76a0c !important;
             text-decoration: none !important;
             text-transform: uppercase !important;
             letter-spacing: 0.3px !important;
-            margin-top: 6px !important;
             transition: all 0.2s ease !important;
         }
         .uonix-link-ver-linha:hover { 
@@ -312,38 +340,96 @@ function uonix_estilos_mega_menu_v14() {
         }
 
         /* ==========================================================
-           PALCO DE PREVIEW DINÂMICO (LADO DIREITO)
+           2. LAYOUT ESPECIAL DESTAQUE: OLHAIS DE ANCORAGEM (CATEGORIA 1)
            ========================================================== */
-        .uonix-dc-panel-stage {
-            display: flex !important;
-            flex-direction: column !important;
-            height: 100% !important;
+        .uonix-dc-panel-featured { 
+            padding: 26px 34px !important; 
+            flex-direction: row !important; 
+            align-items: center !important; 
+            gap: 36px !important; 
+        }
+
+        .uonix-featured-text { 
+            flex: 1.2 !important; 
+            display: flex !important; 
+            flex-direction: column !important; 
+            justify-content: center !important; 
+            align-items: flex-start !important; 
             min-width: 0 !important;
         }
 
-        .uonix-preview-stage-card {
-            height: 100% !important;
-            background: #ffffff !important;
-            border: 1.5px solid #e2e8f0 !important;
-            border-radius: 10px !important;
-            padding: 14px !important;
-            display: flex !important;
-            flex-direction: column !important;
-            justify-content: space-between !important;
-            box-shadow: 0 8px 20px -4px rgba(14, 55, 128, 0.08) !important;
-            box-sizing: border-box !important;
-            position: relative !important;
+        .uonix-featured-badge {
+            font-size: 11px !important;
+            font-weight: 800 !important;
+            color: #f76a0c !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.8px !important;
+            margin-bottom: 4px !important;
+            display: inline-block !important;
         }
 
-        .uonix-stage-topbar {
+        .uonix-featured-title { 
+            font-size: 30px !important; 
+            color: #0e3780 !important; 
+            font-weight: 800 !important; 
+            text-transform: uppercase !important; 
+            margin: 0 0 8px 0 !important; 
+            line-height: 1.1 !important; 
+            letter-spacing: -0.5px !important; 
+        }
+
+        .uonix-featured-desc { 
+            font-size: 15.5px !important; 
+            color: #475569 !important; 
+            line-height: 1.5 !important; 
+            margin: 0 0 16px 0 !important; 
+            min-height: 45px !important;
+        }
+        
+        .uonix-featured-products { 
+            display: flex !important; 
+            flex-direction: column !important; 
+            gap: 9px !important; 
+            width: 100% !important; 
+            margin-bottom: 16px !important; 
+        }
+
+        .uonix-featured-image-stage { 
+            flex: 1 !important; 
+            display: flex !important; 
+            align-items: center !important; 
+            justify-content: center !important; 
+            height: 100% !important; 
+            min-height: 260px !important; 
+        }
+
+        .uonix-stage-frame {
+            width: 100% !important;
+            height: 100% !important;
+            min-height: 270px !important;
+            background: #f8fafc !important;
+            border: 1.5px solid #edf2f7 !important;
+            border-radius: 12px !important;
+            padding: 16px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            box-sizing: border-box !important;
+            position: relative !important;
+            box-shadow: 0 8px 24px -4px rgba(14, 55, 128, 0.07) !important;
+        }
+
+        .uonix-stage-top-tag {
+            width: 100% !important;
             display: flex !important;
             align-items: center !important;
             justify-content: space-between !important;
-            margin-bottom: 10px !important;
+            margin-bottom: 6px !important;
         }
 
-        .uonix-stage-brand-badge {
-            font-size: 10px !important;
+        .uonix-stage-brand-label {
+            font-size: 10.5px !important;
             font-weight: 800 !important;
             color: #0e3780 !important;
             text-transform: uppercase !important;
@@ -351,61 +437,55 @@ function uonix_estilos_mega_menu_v14() {
             background: #e9f3ff !important;
             padding: 3px 8px !important;
             border-radius: 4px !important;
-            display: inline-block !important;
-            max-width: 170px !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            box-sizing: border-box !important;
-            transition: all 0.2s ease !important;
         }
 
-        .uonix-stage-live-badge {
-            font-size: 9.5px !important;
-            font-weight: 800 !important;
-            color: #10b981 !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.5px !important;
-            display: inline-flex !important;
-            align-items: center !important;
-            gap: 4px !important;
-        }
-
-        .uonix-stage-live-dot {
+        .uonix-stage-status-dot {
             width: 6px !important;
             height: 6px !important;
             background: #10b981 !important;
             border-radius: 50% !important;
-            display: inline-block !important;
             box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2) !important;
         }
 
-        .uonix-stage-media {
+        .uonix-stage-media-wrap {
             flex: 1 !important;
-            min-height: 160px !important;
-            max-height: 180px !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
-            background: #f8fafc !important;
-            border: 1px solid #edf2f7 !important;
-            border-radius: 8px !important;
+            width: 100% !important;
             overflow: hidden !important;
-            padding: 10px !important;
-            margin-bottom: 10px !important;
-            box-sizing: border-box !important;
+            padding: 8px 0 !important;
         }
 
-        #mega-menu-wrap-primary .uonix-stage-img,
-        .is-sticky .uonix-stage-img,
-        .site-header-sticky-inner .uonix-stage-img,
-        .header-desktop-sticky .uonix-stage-img,
-        .kadence-sticky-header .uonix-stage-img,
-        .uonix-stage-img {
+        .uonix-stage-bottom-info {
             width: 100% !important;
-            height: 155px !important;
-            min-height: 155px !important;
-            max-height: 155px !important;
+            text-align: center !important;
+            margin-top: 4px !important;
+        }
+
+        .uonix-stage-dyn-title {
+            font-size: 12.5px !important;
+            font-weight: 700 !important;
+            color: #0e3780 !important;
+            display: block !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+
+        /* ==========================================================
+           TRAVAS ABSOLUTAS CONTRA ACHATAMENTO NO MENU FIXO (ANTI-SQUASH)
+           ========================================================== */
+        #mega-menu-wrap-primary .uonix-dc-header-img,
+        .is-sticky .uonix-dc-header-img,
+        .site-header-sticky-inner .uonix-dc-header-img,
+        .header-desktop-sticky .uonix-dc-header-img,
+        .kadence-sticky-header .uonix-dc-header-img,
+        .uonix-dc-header-img {
+            width: 100% !important;
+            height: 124px !important;
+            min-height: 124px !important;
+            max-height: 124px !important;
             object-fit: contain !important;
             background: transparent !important;
             border-radius: 4px !important;
@@ -413,42 +493,21 @@ function uonix_estilos_mega_menu_v14() {
             transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
 
-        .uonix-stage-meta {
-            display: flex !important;
-            flex-direction: column !important;
-            gap: 4px !important;
-        }
-
-        .uonix-stage-prod-title {
-            font-size: 13px !important;
-            font-weight: 700 !important;
-            color: #0e3780 !important;
-            line-height: 1.3 !important;
-            display: -webkit-box !important;
-            -webkit-line-clamp: 2 !important;
-            -webkit-box-orient: vertical !important;
-            overflow: hidden !important;
-            min-height: 34px !important;
-            margin: 0 !important;
-            transition: color 0.2s ease !important;
-        }
-
-        .uonix-stage-cta {
-            font-size: 11.5px !important;
-            font-weight: 800 !important;
-            color: #f76a0c !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.5px !important;
-            text-decoration: none !important;
-            display: inline-flex !important;
-            align-items: center !important;
-            gap: 3px !important;
-            transition: transform 0.2s ease !important;
-        }
-
-        .uonix-stage-cta:hover {
-            color: #0e3780 !important;
-            transform: translateX(3px) !important;
+        #mega-menu-wrap-primary .uonix-featured-img,
+        .is-sticky .uonix-featured-img,
+        .site-header-sticky-inner .uonix-featured-img,
+        .header-desktop-sticky .uonix-featured-img,
+        .kadence-sticky-header .uonix-featured-img,
+        .uonix-featured-img {
+            width: 100% !important;
+            height: 190px !important;
+            min-height: 190px !important;
+            max-height: 200px !important;
+            object-fit: contain !important;
+            background: transparent !important;
+            border-radius: 6px !important;
+            flex-shrink: 0 !important;
+            transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
 
         /* ==========================================================
@@ -500,7 +559,6 @@ function uonix_estilos_mega_menu_v14() {
             transform: translateY(-4px) !important; 
         }
 
-        /* ANTI-SQUASH NAS LOGOS DE MARCAS */
         .uonix-brand-item img {
             max-height: none !important;
             min-height: 42px !important;
@@ -516,61 +574,96 @@ function uonix_estilos_mega_menu_v14() {
         }
     </style>
 
-    <script id="uonix-megamenu-stage-js">
+    <script id="uonix-megamenu-hybrid-js">
         (function() {
-            function initUonixMegaMenuStage() {
-                var stageLinks = document.querySelectorAll('.uonix-prod-stage-item');
-                if (!stageLinks.length) return;
+            function initUonixMegaMenuHybrid() {
+                var panels = document.querySelectorAll('.uonix-dc-panel');
+                if (!panels.length) return;
 
-                stageLinks.forEach(function(link) {
-                    link.addEventListener('mouseenter', function() {
-                        var panel = link.closest('.uonix-dc-panel');
-                        if (!panel) return;
+                panels.forEach(function(panel) {
+                    var defaultImg   = panel.getAttribute('data-default-img');
+                    var defaultTitle = panel.getAttribute('data-default-title');
+                    var defaultDesc  = panel.getAttribute('data-default-desc');
+                    var defaultBrand = panel.getAttribute('data-default-brand') || 'UÔNIX';
 
-                        var stageImg   = panel.querySelector('.uonix-stage-img');
-                        var stageBrand = panel.querySelector('.uonix-stage-brand-badge');
-                        var stageTitle = panel.querySelector('.uonix-stage-prod-title');
-                        var stageCta   = panel.querySelector('.uonix-stage-cta');
+                    var imgElem   = panel.querySelector('.uonix-dc-header-img, .uonix-featured-img');
+                    var descElem  = panel.querySelector('.uonix-header-desc, .uonix-featured-desc');
+                    var brandElem = panel.querySelector('.uonix-header-brand-badge, .uonix-stage-brand-label');
+                    var dynTitle  = panel.querySelector('.uonix-stage-dyn-title');
 
-                        var newImg   = link.getAttribute('data-img');
-                        var newBrand = link.getAttribute('data-brand');
-                        var newTitle = link.getAttribute('data-title');
-                        var newLink  = link.getAttribute('data-link');
+                    var items = panel.querySelectorAll('.uonix-prod-stage-item');
+                    var gridContainer = panel.querySelector('.uonix-dc-products-grid, .uonix-featured-products');
 
-                        if (stageImg && newImg && stageImg.src !== newImg) {
-                            stageImg.style.opacity = '0.3';
-                            stageImg.style.transform = 'scale(0.95)';
-                            setTimeout(function() {
-                                stageImg.src = newImg;
-                                stageImg.alt = newTitle || '';
-                                stageImg.style.opacity = '1';
-                                stageImg.style.transform = 'scale(1)';
-                            }, 80);
-                        }
+                    items.forEach(function(item) {
+                        item.addEventListener('mouseenter', function() {
+                            var newImg   = item.getAttribute('data-img');
+                            var newTitle = item.getAttribute('data-title');
+                            var newDesc  = item.getAttribute('data-desc');
+                            var newBrand = item.getAttribute('data-brand');
 
-                        if (stageBrand && newBrand) {
-                            stageBrand.textContent = newBrand;
-                        }
+                            if (imgElem && newImg && imgElem.src !== newImg) {
+                                imgElem.style.opacity = '0.25';
+                                imgElem.style.transform = 'scale(0.96)';
+                                setTimeout(function() {
+                                    imgElem.src = newImg;
+                                    imgElem.alt = newTitle || '';
+                                    imgElem.style.opacity = '1';
+                                    imgElem.style.transform = 'scale(1)';
+                                }, 70);
+                            }
 
-                        if (stageTitle && newTitle) {
-                            stageTitle.textContent = newTitle;
-                        }
+                            if (brandElem && newBrand) {
+                                brandElem.textContent = newBrand;
+                            }
 
-                        if (stageCta && newLink) {
-                            stageCta.href = newLink;
-                        }
+                            if (descElem && newDesc) {
+                                descElem.textContent = newDesc;
+                            }
 
-                        var siblingItems = panel.querySelectorAll('.uonix-prod-stage-item');
-                        siblingItems.forEach(function(s) { s.classList.remove('is-active'); });
-                        link.classList.add('is-active');
+                            if (dynTitle && newTitle) {
+                                dynTitle.textContent = newTitle;
+                            }
+
+                            items.forEach(function(i) { i.classList.remove('is-active'); });
+                            item.classList.add('is-active');
+                        });
                     });
+
+                    if (gridContainer) {
+                        gridContainer.addEventListener('mouseleave', function() {
+                            if (imgElem && defaultImg && imgElem.src !== defaultImg) {
+                                imgElem.style.opacity = '0.25';
+                                imgElem.style.transform = 'scale(0.96)';
+                                setTimeout(function() {
+                                    imgElem.src = defaultImg;
+                                    imgElem.alt = defaultTitle || '';
+                                    imgElem.style.opacity = '1';
+                                    imgElem.style.transform = 'scale(1)';
+                                }, 70);
+                            }
+
+                            if (brandElem) {
+                                brandElem.textContent = defaultBrand;
+                            }
+
+                            if (descElem && defaultDesc) {
+                                descElem.textContent = defaultDesc;
+                            }
+
+                            if (dynTitle && defaultTitle) {
+                                dynTitle.textContent = defaultTitle;
+                            }
+
+                            items.forEach(function(i) { i.classList.remove('is-active'); });
+                        });
+                    }
                 });
             }
 
             if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', initUonixMegaMenuStage);
+                document.addEventListener('DOMContentLoaded', initUonixMegaMenuHybrid);
             } else {
-                initUonixMegaMenuStage();
+                initUonixMegaMenuHybrid();
             }
         })();
     </script>
@@ -598,6 +691,7 @@ function uonix_gerar_mega_menu_v14() {
                 <?php 
                 $index = 0;
                 foreach ($categorias as $cat) : 
+                    $is_featured = ($index === 0);
                     $index++;
 
                     $term = get_term_by('slug', $cat['slug'], 'product_cat');
@@ -606,10 +700,11 @@ function uonix_gerar_mega_menu_v14() {
                     
                     $descricao = (!empty($term) && !empty($term->description)) ? wp_strip_all_tags($term->description) : 'Confira a nossa linha completa para fixação e ancoragem.';
 
-                    // Limite padronizado de 8 produtos por categoria para preenchimento harmônico em 2 colunas
+                    // Limite: 4 produtos na categoria destaque, 9 nas categorias padrão (3 colunas x 3 linhas)
+                    $product_limit = $is_featured ? 4 : 9;
                     $args = [
                         'post_type'      => 'product',
-                        'posts_per_page' => 8,
+                        'posts_per_page' => $product_limit,
                         'orderby'        => 'menu_order title',
                         'order'          => 'ASC',
                         'tax_query'      => [
@@ -637,7 +732,7 @@ function uonix_gerar_mega_menu_v14() {
                         $imagem_final = wc_placeholder_img_src('woocommerce_single');
                     }
 
-                    // Processar lista de produtos estruturada
+                    // Processar lista de produtos estruturada com breve descrição
                     $produtos_lista = [];
                     if ($produtos->have_posts()) {
                         while ($produtos->have_posts()) {
@@ -667,23 +762,27 @@ function uonix_gerar_mega_menu_v14() {
                                 $p_marca = 'UÔNIX';
                             }
 
+                            // Breve descrição do produto
+                            $p_desc = get_the_excerpt($p_id);
+                            if (empty($p_desc)) {
+                                $p_desc = wp_strip_all_tags(get_post_field('post_content', $p_id));
+                            }
+                            $p_desc = wp_trim_words($p_desc, 12, '...');
+                            if (empty($p_desc)) {
+                                $p_desc = $descricao;
+                            }
+
                             $produtos_lista[] = [
                                 'id'    => $p_id,
                                 'title' => $p_title,
                                 'link'  => $p_link,
                                 'img'   => $p_img,
                                 'brand' => $p_marca,
+                                'desc'  => $p_desc,
                             ];
                         }
                         wp_reset_postdata();
                     }
-
-                    $first_prod = !empty($produtos_lista[0]) ? $produtos_lista[0] : [
-                        'title' => $cat['titulo'],
-                        'link'  => $link_padrao,
-                        'img'   => $imagem_final,
-                        'brand' => 'UÔNIX',
-                    ];
 
                     $titulo_limpo = str_replace(['⚙️ ', '🧪 ', '🔗 ', '🛠️ '], '', $cat['titulo']);
                 ?>
@@ -693,26 +792,28 @@ function uonix_gerar_mega_menu_v14() {
                             <span class="uonix-dc-arrow">&rsaquo;</span>
                         </a>
 
-                        <div class="uonix-dc-panel">
-                            <div class="uonix-dc-panel-grid">
+                        <?php if ($is_featured) : ?>
+                            <!-- CATEGORIA 1: DESTAQUE NOBRE (OLHAIS DE ANCORAGEM) -->
+                            <div class="uonix-dc-panel uonix-dc-panel-featured"
+                                 data-default-img="<?php echo esc_url($imagem_final); ?>"
+                                 data-default-title="<?php echo esc_attr($titulo_limpo); ?>"
+                                 data-default-desc="<?php echo esc_attr($descricao); ?>"
+                                 data-default-brand="UÔNIX"
+                                 data-default-link="<?php echo esc_url($link_padrao); ?>">
                                 
-                                <!-- COLUNA PRINCIPAL: TEXTO + GRID DE PRODUTOS -->
-                                <div class="uonix-dc-panel-main">
-                                    <div class="uonix-dc-header-wrap">
-                                        <span class="uonix-dc-badge">Linha de Produtos</span>
-                                        <h5 class="uonix-dc-title"><?php echo esc_html($titulo_limpo); ?></h5>
-                                        <p class="uonix-dc-desc"><?php echo esc_html($descricao); ?></p>
-                                    </div>
-
-                                    <div class="uonix-dc-products-grid">
+                                <div class="uonix-featured-text">
+                                    <span class="uonix-featured-badge">⭐ Linha Principal Uônix</span>
+                                    <h5 class="uonix-featured-title"><?php echo esc_html($titulo_limpo); ?></h5>
+                                    <p class="uonix-featured-desc"><?php echo esc_html($descricao); ?></p>
+                                    
+                                    <div class="uonix-featured-products">
                                         <?php if (!empty($produtos_lista)) : 
-                                            foreach ($produtos_lista as $p_idx => $prod_item) : 
-                                                $is_first = ($p_idx === 0);
-                                        ?>
+                                            foreach ($produtos_lista as $prod_item) : ?>
                                                 <a href="<?php echo esc_url($prod_item['link']); ?>" 
-                                                   class="uonix-prod-stage-item <?php echo $is_first ? 'is-active' : ''; ?>"
+                                                   class="uonix-prod-stage-item"
                                                    data-img="<?php echo esc_url($prod_item['img']); ?>"
                                                    data-title="<?php echo esc_attr($prod_item['title']); ?>"
+                                                   data-desc="<?php echo esc_attr($prod_item['desc']); ?>"
                                                    data-brand="<?php echo esc_attr($prod_item['brand']); ?>"
                                                    data-link="<?php echo esc_url($prod_item['link']); ?>">
                                                     <span class="uonix-prod-bullet"></span>
@@ -721,50 +822,90 @@ function uonix_gerar_mega_menu_v14() {
                                                 </a>
                                         <?php 
                                             endforeach; 
-                                        else: 
-                                            echo '<span style="color:#64748b; font-size:14px;">Nenhum produto cadastrado nesta categoria.</span>';
-                                        endif; 
-                                        ?>
+                                        endif; ?>
                                     </div>
+                                    
+                                    <a href="<?php echo esc_url($link_padrao); ?>" class="uonix-link-ver-linha">
+                                        Ver toda a linha <?php echo esc_html($titulo_limpo); ?> &rarr;
+                                    </a>
+                                </div>
 
-                                    <div class="uonix-dc-footer-action">
+                                <div class="uonix-featured-image-stage">
+                                    <div class="uonix-stage-frame">
+                                        <div class="uonix-stage-top-tag">
+                                            <span class="uonix-stage-brand-label">UÔNIX</span>
+                                            <span class="uonix-stage-status-dot"></span>
+                                        </div>
+                                        <div class="uonix-stage-media-wrap">
+                                            <img class="uonix-featured-img" 
+                                                 src="<?php echo esc_url($imagem_final); ?>" 
+                                                 alt="<?php echo esc_attr($titulo_limpo); ?>"
+                                                 loading="lazy" 
+                                                 width="260" 
+                                                 height="190" />
+                                        </div>
+                                        <div class="uonix-stage-bottom-info">
+                                            <span class="uonix-stage-dyn-title"><?php echo esc_html($titulo_limpo); ?></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        <?php else : ?>
+                            <!-- CATEGORIAS 2, 3, 4: DISPOSIÇÃO SUPERIOR (FOTO + INFOS) + GRADE EM 3 COLUNAS -->
+                            <div class="uonix-dc-panel uonix-dc-panel-standard"
+                                 data-default-img="<?php echo esc_url($imagem_final); ?>"
+                                 data-default-title="<?php echo esc_attr($titulo_limpo); ?>"
+                                 data-default-desc="<?php echo esc_attr($descricao); ?>"
+                                 data-default-brand="UÔNIX"
+                                 data-default-link="<?php echo esc_url($link_padrao); ?>">
+                                
+                                <!-- HEADER DINÂMICO SUPERIOR -->
+                                <div class="uonix-dc-header">
+                                    <div class="uonix-dc-header-media">
+                                        <span class="uonix-header-brand-badge">UÔNIX</span>
+                                        <img class="uonix-dc-header-img" 
+                                             src="<?php echo esc_url($imagem_final); ?>" 
+                                             alt="<?php echo esc_attr($titulo_limpo); ?>"
+                                             loading="lazy" 
+                                             width="240" 
+                                             height="124" />
+                                    </div>
+                                    <div class="uonix-dc-info">
+                                        <h5 class="uonix-header-title"><?php echo esc_html($titulo_limpo); ?></h5>
+                                        <p class="uonix-header-desc"><?php echo esc_html($descricao); ?></p>
+                                        
                                         <a href="<?php echo esc_url($link_padrao); ?>" class="uonix-link-ver-linha">
                                             Ver toda a linha <?php echo esc_html($titulo_limpo); ?> &rarr;
                                         </a>
                                     </div>
                                 </div>
 
-                                <!-- COLUNA DO PALCO DE PREVIEW (LADO DIREITO) -->
-                                <div class="uonix-dc-panel-stage">
-                                    <div class="uonix-preview-stage-card">
-                                        <div class="uonix-stage-topbar">
-                                            <span class="uonix-stage-brand-badge"><?php echo esc_html($first_prod['brand']); ?></span>
-                                            <span class="uonix-stage-live-badge">
-                                                <span class="uonix-stage-live-dot"></span>
-                                                Preview
-                                            </span>
-                                        </div>
-
-                                        <div class="uonix-stage-media">
-                                            <img class="uonix-stage-img" 
-                                                 src="<?php echo esc_url($first_prod['img']); ?>" 
-                                                 alt="<?php echo esc_attr($first_prod['title']); ?>"
-                                                 loading="lazy" 
-                                                 width="200" 
-                                                 height="155" />
-                                        </div>
-
-                                        <div class="uonix-stage-meta">
-                                            <span class="uonix-stage-prod-title"><?php echo esc_html($first_prod['title']); ?></span>
-                                            <a href="<?php echo esc_url($first_prod['link']); ?>" class="uonix-stage-cta">
-                                                Ver especificações <span>&rsaquo;</span>
+                                <!-- GRADE DE PRODUTOS EM 3 COLUNAS -->
+                                <div class="uonix-dc-products-grid uonix-grid-3cols">
+                                    <?php if (!empty($produtos_lista)) : 
+                                        foreach ($produtos_lista as $prod_item) : ?>
+                                            <a href="<?php echo esc_url($prod_item['link']); ?>" 
+                                               class="uonix-prod-stage-item"
+                                               data-img="<?php echo esc_url($prod_item['img']); ?>"
+                                               data-title="<?php echo esc_attr($prod_item['title']); ?>"
+                                               data-desc="<?php echo esc_attr($prod_item['desc']); ?>"
+                                               data-brand="<?php echo esc_attr($prod_item['brand']); ?>"
+                                               data-link="<?php echo esc_url($prod_item['link']); ?>">
+                                                <span class="uonix-prod-bullet"></span>
+                                                <span class="uonix-prod-label"><?php echo esc_html($prod_item['title']); ?></span>
+                                                <span class="uonix-prod-hover-arrow">&rsaquo;</span>
                                             </a>
-                                        </div>
-                                    </div>
+                                    <?php 
+                                        endforeach; 
+                                    else: 
+                                        echo '<span style="color:#64748b; font-size:14px;">Nenhum produto cadastrado nesta categoria.</span>';
+                                    endif; 
+                                    ?>
                                 </div>
-
                             </div>
-                        </div>
+                        <?php endif; ?>
+
                     </li>
                 <?php endforeach; ?>
             </ul>
