@@ -100,19 +100,19 @@ function uonix_estilos_mega_menu_v14() {
            ========================================================== */
         .uonix-prod-tooltip {
             position: absolute !important;
-            width: 110px !important;
+            width: 115px !important;
             background: #ffffff !important;
             border: 1.5px solid #dbeafe !important;
             border-radius: 8px !important;
-            padding: 5px !important;
+            padding: 5px 5px 6px 5px !important;
             box-shadow: 0 12px 28px -4px rgba(14, 55, 128, 0.2), 0 6px 12px -2px rgba(0, 0, 0, 0.08) !important;
             z-index: 9999 !important;
             opacity: 0 !important;
             visibility: hidden !important;
             pointer-events: none !important;
             display: flex !important;
+            flex-direction: column !important;
             align-items: center !important;
-            justify-content: center !important;
             box-sizing: border-box !important;
             transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.2s !important;
         }
@@ -130,7 +130,7 @@ function uonix_estilos_mega_menu_v14() {
 
         .uonix-prod-tooltip-img {
             width: 100% !important;
-            height: 90px !important;
+            height: 85px !important;
             background: #f8fafc !important;
             border: 1px solid #edf2f7 !important;
             border-radius: 5px !important;
@@ -138,7 +138,7 @@ function uonix_estilos_mega_menu_v14() {
             align-items: center !important;
             justify-content: center !important;
             overflow: hidden !important;
-            margin: 0 !important;
+            margin: 0 0 5px 0 !important;
             box-sizing: border-box !important;
         }
 
@@ -149,9 +149,9 @@ function uonix_estilos_mega_menu_v14() {
         .kadence-sticky-header .uonix-prod-tooltip-img img,
         .uonix-prod-tooltip-img img {
             width: 100% !important;
-            height: 90px !important;
-            max-height: 90px !important;
-            min-height: 90px !important;
+            height: 85px !important;
+            max-height: 85px !important;
+            min-height: 85px !important;
             object-fit: contain !important;
             background: transparent !important;
             border-radius: 4px !important;
@@ -161,6 +161,25 @@ function uonix_estilos_mega_menu_v14() {
 
         .uonix-prod-link:hover .uonix-prod-tooltip-img img {
             transform: scale(1.08) !important;
+        }
+
+        .uonix-prod-tooltip-brand {
+            font-size: 10px !important;
+            font-weight: 800 !important;
+            color: #0e3780 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            background: #e9f3ff !important;
+            padding: 2px 6px !important;
+            border-radius: 3px !important;
+            line-height: 1.2 !important;
+            text-align: center !important;
+            display: block !important;
+            max-width: 100% !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            box-sizing: border-box !important;
         }
 
         /* 1. Posicionamento para Categoria Destaque (Olhais de Ancoragem) */
@@ -391,14 +410,32 @@ function uonix_gerar_mega_menu_v14() {
                                                 if (empty($thumb_url) && function_exists('wc_placeholder_img_src')) {
                                                     $thumb_url = wc_placeholder_img_src('woocommerce_thumbnail');
                                                 }
+
+                                                $marca = '';
+                                                $brands = wp_get_post_terms($prod_id, 'product_brand');
+                                                if (!is_wp_error($brands) && !empty($brands)) {
+                                                    $marca = $brands[0]->name;
+                                                }
+                                                if (empty($marca)) {
+                                                    $pa_brands = wp_get_post_terms($prod_id, 'pa_marca');
+                                                    if (!is_wp_error($pa_brands) && !empty($pa_brands)) {
+                                                        $marca = $pa_brands[0]->name;
+                                                    }
+                                                }
+                                                if (empty($marca)) {
+                                                    $marca = 'Uônix';
+                                                }
                                                 ?>
                                                 <a href="<?php echo esc_url(get_the_permalink() . '#catalogo-produtos'); ?>" class="uonix-prod-link">
                                                     <span class="uonix-prod-link-text"><?php echo esc_html($t_prod); ?></span>
                                                     <?php if (!empty($thumb_url)) : ?>
                                                         <span class="uonix-prod-tooltip" aria-hidden="true">
                                                             <span class="uonix-prod-tooltip-img">
-                                                                <img src="<?php echo esc_url($thumb_url); ?>" alt="<?php echo esc_attr($t_prod); ?>" loading="lazy" width="100" height="90">
+                                                                <img src="<?php echo esc_url($thumb_url); ?>" alt="<?php echo esc_attr($t_prod); ?>" loading="lazy" width="100" height="85">
                                                             </span>
+                                                            <?php if (!empty($marca)) : ?>
+                                                                <span class="uonix-prod-tooltip-brand"><?php echo esc_html($marca); ?></span>
+                                                            <?php endif; ?>
                                                         </span>
                                                     <?php endif; ?>
                                                 </a>
@@ -436,14 +473,32 @@ function uonix_gerar_mega_menu_v14() {
                                             if (empty($thumb_url) && function_exists('wc_placeholder_img_src')) {
                                                 $thumb_url = wc_placeholder_img_src('woocommerce_thumbnail');
                                             }
+
+                                            $marca = '';
+                                            $brands = wp_get_post_terms($prod_id, 'product_brand');
+                                            if (!is_wp_error($brands) && !empty($brands)) {
+                                                $marca = $brands[0]->name;
+                                            }
+                                            if (empty($marca)) {
+                                                $pa_brands = wp_get_post_terms($prod_id, 'pa_marca');
+                                                if (!is_wp_error($pa_brands) && !empty($pa_brands)) {
+                                                    $marca = $pa_brands[0]->name;
+                                                }
+                                            }
+                                            if (empty($marca)) {
+                                                $marca = 'Uônix';
+                                            }
                                             ?>
                                             <a href="<?php echo esc_url(get_the_permalink() . '#catalogo-produtos'); ?>" class="uonix-prod-link">
                                                 <span class="uonix-prod-link-text"><?php echo esc_html($t_prod); ?></span>
                                                 <?php if (!empty($thumb_url)) : ?>
                                                     <span class="uonix-prod-tooltip" aria-hidden="true">
                                                         <span class="uonix-prod-tooltip-img">
-                                                            <img src="<?php echo esc_url($thumb_url); ?>" alt="<?php echo esc_attr($t_prod); ?>" loading="lazy" width="100" height="90">
+                                                            <img src="<?php echo esc_url($thumb_url); ?>" alt="<?php echo esc_attr($t_prod); ?>" loading="lazy" width="100" height="85">
                                                         </span>
+                                                        <?php if (!empty($marca)) : ?>
+                                                            <span class="uonix-prod-tooltip-brand"><?php echo esc_html($marca); ?></span>
+                                                        <?php endif; ?>
                                                     </span>
                                                 <?php endif; ?>
                                             </a>
