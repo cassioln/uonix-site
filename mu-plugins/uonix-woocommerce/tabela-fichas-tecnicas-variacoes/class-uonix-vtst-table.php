@@ -381,6 +381,9 @@ final class Uonix_VTST_Table {
 		}
 
 		foreach ( $tabs as $tab ) {
+			if ( ! self::is_technical_legacy_tab( $tab ) ) {
+				continue;
+			}
 			$content = isset( $tab['content'] ) ? (string) $tab['content'] : '';
 			if ( 1 === preg_match( '/\bwp-image-(\d+)\b/', $content, $matches ) ) {
 				return absint( $matches[1] );
@@ -388,5 +391,26 @@ final class Uonix_VTST_Table {
 		}
 
 		return 0;
+	}
+
+	/**
+	 * Aceita fallback apenas de abas manuais destinadas a medidas/especificações.
+	 *
+	 * @param mixed $tab Dados da aba legada.
+	 * @return bool
+	 */
+	private static function is_technical_legacy_tab( $tab ) {
+		if ( ! is_array( $tab ) ) {
+			return false;
+		}
+
+		$label = '';
+		foreach ( array( 'title', 'nickname' ) as $key ) {
+			if ( isset( $tab[ $key ] ) && is_scalar( $tab[ $key ] ) ) {
+				$label .= ' ' . (string) $tab[ $key ];
+			}
+		}
+
+		return false !== stripos( $label, 'dimens' ) || false !== stripos( $label, 'especifica' );
 	}
 }

@@ -3209,13 +3209,22 @@ vts_assert_contains( 'https://example.test/uploads/esquema-grampo.png', $table_w
 
 unset( $GLOBALS['vts_post_meta'][20100][ Uonix_VTST_Table::DIAGRAM_IMAGE_META_KEY ] );
 $GLOBALS['vts_attachment_images'][30002] = 'https://example.test/uploads/esquema-legado.png';
+$GLOBALS['vts_attachment_images'][30003] = 'https://example.test/uploads/imagem-faq.png';
 $GLOBALS['vts_post_meta'][20100]['wb_custom_tabs'] = array(
-	array( 'content' => '<p><img class="wp-image-30002" src="https://example.test/uploads/esquema-legado.png" alt=""></p>' ),
+	array(
+		'title'   => 'Dúvidas Frequentes',
+		'content' => '<p><img class="wp-image-30003" src="https://example.test/uploads/imagem-faq.png" alt=""></p>',
+	),
+	array(
+		'title'   => 'Dimensões',
+		'content' => '<p><img class="wp-image-30002" src="https://example.test/uploads/esquema-legado.png" alt=""></p>',
+	),
 );
 ob_start();
 Uonix_VTST_Table::render_tab( Uonix_VTST_Table::TAB_KEY, array() );
 $table_with_legacy_diagram = ob_get_clean();
 vts_assert_contains( 'https://example.test/uploads/esquema-legado.png', $table_with_legacy_diagram, 'imagem da aba manual antiga é fallback quando não há escolha explícita' );
+vts_assert_not_contains( 'https://example.test/uploads/imagem-faq.png', $table_with_legacy_diagram, 'fallback ignora imagens de abas não técnicas' );
 
 $duplicate_torque_sheet = vts_valid_sheet();
 $duplicate_torque_sheet['sections'][0]['items'] = array(
