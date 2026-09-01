@@ -29,6 +29,46 @@ if ( ! defined( 'ABSPATH' ) ) {
 // ==============================================================================
 add_shortcode('uonix_form_newsletter', 'uonix_gerar_form_newsletter_html');
 
+/**
+ * Normaliza o referer para o caminho relativo esperado pelo Fluent Forms.
+ *
+ * O Fluent Forms chama site_url() ao persistir _wp_http_referer. Passar uma
+ * URL absoluta aqui gera uma origem duplicada, como
+ * https://uonix.com.br/https://uonix.com.br/.
+ *
+ * @return string Caminho interno com query string opcional.
+ */
+function uonix_newsletter_referer_path() {
+    $referer = wp_get_referer();
+    if ( ! is_string( $referer ) || '' === $referer ) {
+        return '/';
+    }
+
+    $parts = wp_parse_url( $referer );
+    if ( false === $parts || ! is_array( $parts ) ) {
+        return '/';
+    }
+
+    $site_host = wp_parse_url( home_url( '/' ), PHP_URL_HOST );
+    $referer_host = isset( $parts['host'] ) ? $parts['host'] : '';
+    if ( '' !== $referer_host && ( ! is_string( $site_host ) || strtolower( $referer_host ) !== strtolower( $site_host ) ) ) {
+        return '/';
+    }
+
+    $path = isset( $parts['path'] ) && is_string( $parts['path'] ) && '' !== $parts['path']
+        ? $parts['path']
+        : '/';
+    if ( '/' !== $path[0] ) {
+        return '/';
+    }
+
+    if ( isset( $parts['query'] ) && is_string( $parts['query'] ) && '' !== $parts['query'] ) {
+        $path .= '?' . $parts['query'];
+    }
+
+    return $path;
+}
+
 function uonix_gerar_form_newsletter_html($atts) {
     $a = shortcode_atts(array(
         'layout' => 'default' 
@@ -463,7 +503,7 @@ function uonix_processar_newsletter_handler() {
 
     $embedded_post_id = (int) get_option('page_on_front');
     if ($embedded_post_id <= 0) { $embedded_post_id = (int) url_to_postid(home_url('/')); }
-    $referer_path = wp_get_referer() ?: '/';
+    $referer_path = uonix_newsletter_referer_path();
 
     try {
         /** @var \FluentForm\App\Services\Form\SubmissionHandlerService $submissionHandler */
