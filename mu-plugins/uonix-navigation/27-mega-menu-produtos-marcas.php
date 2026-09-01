@@ -123,7 +123,7 @@ function uonix_estilos_mega_menu_v14()
         }
 
         .uonix-dc-item:hover .uonix-dc-link,
-        .uonix-dc-list:not(:hover) .uonix-dc-item:first-child .uonix-dc-link {
+        .uonix-dc-item.is-active-cat .uonix-dc-link {
             background: #ffffff !important;
             color: #0e3780 !important;
             border-left: 4px solid #f76a0c !important;
@@ -149,18 +149,10 @@ function uonix_estilos_mega_menu_v14()
             transition: opacity 0.15s ease, visibility 0.15s ease !important;
         }
 
-        .uonix-dc-item:first-child .uonix-dc-panel {
-            opacity: 1 !important;
-            visibility: visible !important;
-            z-index: 2 !important;
-            transition: none !important;
-        }
-
-        .uonix-dc-item:hover .uonix-dc-panel {
+        .uonix-dc-item.is-active-cat .uonix-dc-panel {
             opacity: 1 !important;
             visibility: visible !important;
             z-index: 10 !important;
-            transition: opacity 0.15s ease, visibility 0.15s ease !important;
         }
 
         /* ==========================================================
@@ -619,6 +611,40 @@ function uonix_estilos_mega_menu_v14()
     <script id="uonix-megamenu-hybrid-js">
         (function () {
             function initUonixMegaMenuHybrid() {
+                var wrappers = document.querySelectorAll('.uonix-dynamic-cats-wrapper');
+                if (!wrappers.length) return;
+
+                wrappers.forEach(function (wrapper) {
+                    var catItems = wrapper.querySelectorAll('.uonix-dc-item');
+                    if (!catItems.length) return;
+
+                    function resetActiveCategory() {
+                        catItems.forEach(function (item, idx) {
+                            if (idx === 0) {
+                                item.classList.add('is-active-cat');
+                            } else {
+                                item.classList.remove('is-active-cat');
+                            }
+                        });
+                    }
+
+                    // A aba em foco permanece a última aba acessada enquanto o menu estiver aberto
+                    catItems.forEach(function (item) {
+                        item.addEventListener('mouseenter', function () {
+                            catItems.forEach(function (i) { i.classList.remove('is-active-cat'); });
+                            item.classList.add('is-active-cat');
+                        });
+                    });
+
+                    // Ao sair completamente do menu (fechamento), reseta para Olhais de Ancoragem
+                    var megaParent = wrapper.closest('.mega-menu-item') || wrapper.closest('li.menu-item') || wrapper.closest('#mega-menu-wrap-primary');
+                    if (megaParent) {
+                        megaParent.addEventListener('mouseleave', function () {
+                            resetActiveCategory();
+                        });
+                    }
+                });
+
                 var panels = document.querySelectorAll('.uonix-dc-panel');
                 if (!panels.length) return;
 
@@ -864,7 +890,7 @@ function uonix_gerar_mega_menu_v14()
 
                     $titulo_limpo = str_replace(['⚙️ ', '🧪 ', '🔗 ', '🛠️ '], '', $cat['titulo']);
                     ?>
-                    <li class="uonix-dc-item">
+                    <li class="uonix-dc-item <?php echo $is_featured ? 'is-active-cat' : ''; ?>">
                         <a href="<?php echo esc_url($link_husky); ?>" class="uonix-dc-link">
                             <span class="uonix-dc-text"><?php echo esc_html($cat['titulo']); ?></span>
                             <span class="uonix-dc-arrow">&rsaquo;</span>
