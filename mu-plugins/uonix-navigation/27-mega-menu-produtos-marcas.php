@@ -265,6 +265,22 @@ function uonix_estilos_mega_menu_v14()
             margin-top: 2px !important;
         }
 
+        /* Adaptação dinâmica para 10 a 12 produtos (4 linhas) */
+        .uonix-dc-products-grid.uonix-grid-count-10,
+        .uonix-dc-products-grid.uonix-grid-count-11,
+        .uonix-dc-products-grid.uonix-grid-count-12 {
+            gap: 6px 12px !important;
+            margin-top: 0 !important;
+        }
+
+        .uonix-dc-products-grid.uonix-grid-count-10 .uonix-prod-stage-item,
+        .uonix-dc-products-grid.uonix-grid-count-11 .uonix-prod-stage-item,
+        .uonix-dc-products-grid.uonix-grid-count-12 .uonix-prod-stage-item {
+            padding: 6.5px 10px !important;
+            min-height: 33px !important;
+            font-size: 13px !important;
+        }
+
         /* LINKS DE PRODUTOS ESTILIZADOS E INTERATIVOS */
         .uonix-prod-stage-item {
             display: flex !important;
@@ -418,6 +434,18 @@ function uonix_estilos_mega_menu_v14()
             gap: 8px !important;
             width: 100% !important;
             margin: 8px 0 !important;
+        }
+
+        /* Adaptação dinâmica para 5 produtos em Olhais */
+        .uonix-featured-products.uonix-prod-count-5 {
+            gap: 5px !important;
+            margin: 4px 0 !important;
+        }
+
+        .uonix-featured-products.uonix-prod-count-5 .uonix-prod-stage-item {
+            padding: 6.5px 12px !important;
+            min-height: 34px !important;
+            font-size: 13px !important;
         }
 
         .uonix-featured-image-stage {
@@ -826,8 +854,8 @@ function uonix_gerar_mega_menu_v14()
                         $descricao = mb_substr($descricao, 0, 450) . '...';
                     }
 
-                    // Limite: 4 produtos na categoria destaque, 9 nas categorias padrão (3 colunas x 3 linhas)
-                    $product_limit = $is_featured ? 4 : 9;
+                    // Limite dinâmico: até 5 produtos em Olhais de Ancoragem, até 12 produtos nas categorias padrão
+                    $product_limit = $is_featured ? 5 : 12;
                     $args = [
                         'post_type' => 'product',
                         'posts_per_page' => $product_limit,
@@ -913,6 +941,7 @@ function uonix_gerar_mega_menu_v14()
                     }
 
                     $titulo_limpo = str_replace(['⚙️ ', '🧪 ', '🔗 ', '🛠️ '], '', $cat['titulo']);
+                    $count_prod = count($produtos_lista);
                     ?>
                     <li class="uonix-dc-item <?php echo $is_featured ? 'is-active-cat' : ''; ?>">
                         <a href="<?php echo esc_url($link_husky); ?>" class="uonix-dc-link">
@@ -936,7 +965,7 @@ function uonix_gerar_mega_menu_v14()
                                         </div>
                                     </div>
 
-                                    <div class="uonix-featured-products">
+                                    <div class="uonix-featured-products uonix-prod-count-<?php echo esc_attr($count_prod); ?>">
                                         <?php if (!empty($produtos_lista)):
                                             foreach ($produtos_lista as $prod_item): ?>
                                                 <a href="<?php echo esc_url($prod_item['link']); ?>" class="uonix-prod-stage-item"
@@ -1006,7 +1035,7 @@ function uonix_gerar_mega_menu_v14()
                                 </div>
 
                                 <!-- GRADE DE PRODUTOS EM 3 COLUNAS -->
-                                <div class="uonix-dc-products-grid uonix-grid-3cols">
+                                <div class="uonix-dc-products-grid uonix-grid-3cols uonix-grid-count-<?php echo esc_attr($count_prod); ?>">
                                     <?php if (!empty($produtos_lista)):
                                         foreach ($produtos_lista as $prod_item): ?>
                                             <a href="<?php echo esc_url($prod_item['link']); ?>" class="uonix-prod-stage-item"
