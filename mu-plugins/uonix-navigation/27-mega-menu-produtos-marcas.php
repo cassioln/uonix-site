@@ -71,8 +71,6 @@ function uonix_estilos_mega_menu_v14()
             display: flex !important;
             flex-direction: column !important;
             border-right: 1px solid #e2e8f0 !important;
-            height: 100% !important;
-            box-sizing: border-box !important;
         }
 
         .uonix-dc-catalog-btn {
@@ -376,16 +374,10 @@ function uonix_estilos_mega_menu_v14()
              2. LAYOUT ESPECIAL DESTAQUE: OLHAIS DE ANCORAGEM (CATEGORIA 1)
             ========================================================== */
         .uonix-dc-panel-featured {
-            position: absolute !important;
-            top: 0 !important;
-            bottom: 0 !important;
-            height: 100% !important;
-            max-height: 100% !important;
             padding: 24px 30px !important;
             flex-direction: row !important;
             align-items: stretch !important;
             gap: 32px !important;
-            box-sizing: border-box !important;
         }
 
         .uonix-dc-panel-featured .uonix-link-ver-linha {
@@ -400,9 +392,7 @@ function uonix_estilos_mega_menu_v14()
             justify-content: space-between !important;
             align-items: flex-start !important;
             height: 100% !important;
-            max-height: 100% !important;
             min-width: 0 !important;
-            box-sizing: border-box !important;
         }
 
         .uonix-featured-header {
@@ -423,13 +413,12 @@ function uonix_estilos_mega_menu_v14()
         /* CONTAINER DE DESCRIÇÃO COMPLETA DA CATEGORIA EM OLHAIS */
         .uonix-featured-desc-wrap {
             height: 90px !important;
-            min-height: 90px !important;
+            min-height: 120px !important;
             max-height: 90px !important;
             overflow-y: auto !important;
             scrollbar-width: thin !important;
             width: 100% !important;
             padding-right: 4px !important;
-            box-sizing: border-box !important;
         }
 
         .uonix-featured-desc {
@@ -465,15 +454,12 @@ function uonix_estilos_mega_menu_v14()
             align-items: center !important;
             justify-content: center !important;
             height: 100% !important;
-            max-height: 100% !important;
             min-height: 270px !important;
-            box-sizing: border-box !important;
         }
 
         .uonix-stage-frame {
             width: 100% !important;
             height: 100% !important;
-            max-height: 100% !important;
             background: #f8fafc !important;
             border: 1.5px solid #edf2f7 !important;
             border-radius: 12px !important;
