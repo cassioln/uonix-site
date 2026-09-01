@@ -106,7 +106,9 @@ jobs:
         run: php -l scripts/apply-seo-metadata-production.php
 
       - name: Validate variation technical sheet admin script
-        run: node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
+        run: |
+          node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
+          node --check mu-plugins/uonix-woocommerce/assets/js/admin-vtst-diagram-image.js
 
       - name: Test clone administration panel
         run: php scripts/tests/test-clone-admin.php
