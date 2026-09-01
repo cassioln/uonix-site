@@ -657,91 +657,116 @@ function uonix_estilos_mega_menu_v14()
 
             .uonix-dc-panel {
                 left: 230px !important;
-                padding: 18px 20px !important;
+                padding: 20px 24px !important;
             }
 
-            /* 1. Header mais compacto */
+            /* 1. Header nobre proporcional com imagem destacada */
             .uonix-dc-header {
-                height: 175px !important;
-                min-height: 175px !important;
-                max-height: 175px !important;
-                gap: 18px !important;
-                padding-bottom: 12px !important;
-                margin-bottom: 12px !important;
+                height: 195px !important;
+                min-height: 195px !important;
+                max-height: 195px !important;
+                gap: 20px !important;
+                padding-bottom: 14px !important;
+                margin-bottom: 14px !important;
             }
 
             .uonix-dc-header-media {
-                width: 230px !important;
-                min-width: 230px !important;
-                height: 155px !important;
-                min-height: 155px !important;
-                max-height: 155px !important;
+                width: 260px !important;
+                min-width: 260px !important;
+                height: 175px !important;
+                min-height: 175px !important;
+                max-height: 175px !important;
             }
 
             #mega-menu-wrap-primary .uonix-dc-header-img,
             .is-sticky .uonix-dc-header-img,
             .uonix-dc-header-img {
-                height: 140px !important;
-                min-height: 140px !important;
-                max-height: 140px !important;
+                height: 160px !important;
+                min-height: 160px !important;
+                max-height: 160px !important;
             }
 
             .uonix-header-title {
-                font-size: 22px !important;
+                font-size: 24px !important;
             }
 
             .uonix-header-desc-wrap {
-                height: 60px !important;
-                min-height: 60px !important;
-                max-height: 60px !important;
+                height: 68px !important;
+                min-height: 68px !important;
+                max-height: 68px !important;
             }
 
             .uonix-header-desc {
                 font-size: 13px !important;
+                line-height: 1.4 !important;
                 -webkit-line-clamp: 3 !important;
             }
 
-            /* 2. Grade de produtos em 2 colunas e limite de até 10 itens (5 por coluna) */
+            /* 2. Grade de produtos em 2 colunas */
             .uonix-dc-products-grid.uonix-grid-3cols {
                 grid-template-columns: repeat(2, 1fr) !important;
-                gap: 8px 12px !important;
+                gap: 12px 14px !important;
+                margin-top: 2px !important;
             }
 
+            /* Para poucos itens (1 a 6 produtos / até 3 linhas): cards altos e confortáveis */
             .uonix-dc-products-grid.uonix-grid-3cols .uonix-prod-stage-item {
-                padding: 7px 11px !important;
-                min-height: 35px !important;
-                font-size: 13px !important;
+                padding: 10px 14px !important;
+                min-height: 42px !important;
+                font-size: 13.5px !important;
             }
 
-            /* Oculta do 11º item em diante para manter exatamente até 10 itens (5 linhas x 2 colunas) */
+            /* Para muitos itens (7 a 10 produtos / 4 a 5 linhas): compactação dinâmica */
+            .uonix-dc-products-grid.uonix-grid-count-7,
+            .uonix-dc-products-grid.uonix-grid-count-8,
+            .uonix-dc-products-grid.uonix-grid-count-9,
+            .uonix-dc-products-grid.uonix-grid-count-10,
+            .uonix-dc-products-grid.uonix-grid-count-11,
+            .uonix-dc-products-grid.uonix-grid-count-12 {
+                gap: 5px 10px !important;
+                margin-top: 0 !important;
+            }
+
+            .uonix-dc-products-grid.uonix-grid-count-7 .uonix-prod-stage-item,
+            .uonix-dc-products-grid.uonix-grid-count-8 .uonix-prod-stage-item,
+            .uonix-dc-products-grid.uonix-grid-count-9 .uonix-prod-stage-item,
+            .uonix-dc-products-grid.uonix-grid-count-10 .uonix-prod-stage-item,
+            .uonix-dc-products-grid.uonix-grid-count-11 .uonix-prod-stage-item,
+            .uonix-dc-products-grid.uonix-grid-count-12 .uonix-prod-stage-item {
+                padding: 6.5px 10px !important;
+                min-height: 32px !important;
+                font-size: 12.5px !important;
+            }
+
+            /* Oculta do 11º item em diante para manter no máximo 10 itens (5 linhas x 2 colunas) */
             .uonix-dc-products-grid.uonix-grid-3cols .uonix-prod-stage-item:nth-child(n+11) {
                 display: none !important;
             }
 
             /* 3. Ajuste para Olhais de Ancoragem */
             .uonix-dc-panel-featured {
-                gap: 20px !important;
-                padding: 18px 20px !important;
+                gap: 24px !important;
+                padding: 20px 24px !important;
             }
 
             .uonix-featured-title {
-                font-size: 22px !important;
+                font-size: 24px !important;
             }
 
             .uonix-featured-desc-wrap {
-                height: 80px !important;
-                min-height: 80px !important;
-                max-height: 80px !important;
+                height: 85px !important;
+                min-height: 85px !important;
+                max-height: 85px !important;
             }
 
             .uonix-featured-image-stage {
-                min-height: 230px !important;
+                min-height: 250px !important;
             }
 
             #mega-menu-wrap-primary .uonix-featured-img,
             .is-sticky .uonix-featured-img,
             .uonix-featured-img {
-                min-height: 165px !important;
+                min-height: 180px !important;
             }
         }
     </style>
