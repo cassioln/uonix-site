@@ -645,6 +645,105 @@ function uonix_estilos_mega_menu_v14()
         .uonix-brand-item:hover img {
             filter: grayscale(0) opacity(1);
         }
+
+        /* ==========================================================
+           RESPONSIVIDADE: TELAS INTERMEDIÁRIAS (MENOR QUE 1205px A 1025px)
+           ========================================================== */
+        @media (max-width: 1204px) {
+            .uonix-dc-sidebar {
+                width: 230px !important;
+                min-width: 230px !important;
+            }
+
+            .uonix-dc-panel {
+                left: 230px !important;
+                padding: 18px 20px !important;
+            }
+
+            /* 1. Header mais compacto */
+            .uonix-dc-header {
+                height: 175px !important;
+                min-height: 175px !important;
+                max-height: 175px !important;
+                gap: 18px !important;
+                padding-bottom: 12px !important;
+                margin-bottom: 12px !important;
+            }
+
+            .uonix-dc-header-media {
+                width: 230px !important;
+                min-width: 230px !important;
+                height: 155px !important;
+                min-height: 155px !important;
+                max-height: 155px !important;
+            }
+
+            #mega-menu-wrap-primary .uonix-dc-header-img,
+            .is-sticky .uonix-dc-header-img,
+            .uonix-dc-header-img {
+                height: 140px !important;
+                min-height: 140px !important;
+                max-height: 140px !important;
+            }
+
+            .uonix-header-title {
+                font-size: 22px !important;
+            }
+
+            .uonix-header-desc-wrap {
+                height: 60px !important;
+                min-height: 60px !important;
+                max-height: 60px !important;
+            }
+
+            .uonix-header-desc {
+                font-size: 13px !important;
+                -webkit-line-clamp: 3 !important;
+            }
+
+            /* 2. Grade de produtos em 2 colunas e limite de até 10 itens (5 por coluna) */
+            .uonix-dc-products-grid.uonix-grid-3cols {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 8px 12px !important;
+            }
+
+            .uonix-dc-products-grid.uonix-grid-3cols .uonix-prod-stage-item {
+                padding: 7px 11px !important;
+                min-height: 35px !important;
+                font-size: 13px !important;
+            }
+
+            /* Oculta do 11º item em diante para manter exatamente até 10 itens (5 linhas x 2 colunas) */
+            .uonix-dc-products-grid.uonix-grid-3cols .uonix-prod-stage-item:nth-child(n+11) {
+                display: none !important;
+            }
+
+            /* 3. Ajuste para Olhais de Ancoragem */
+            .uonix-dc-panel-featured {
+                gap: 20px !important;
+                padding: 18px 20px !important;
+            }
+
+            .uonix-featured-title {
+                font-size: 22px !important;
+            }
+
+            .uonix-featured-desc-wrap {
+                height: 80px !important;
+                min-height: 80px !important;
+                max-height: 80px !important;
+            }
+
+            .uonix-featured-image-stage {
+                min-height: 230px !important;
+            }
+
+            #mega-menu-wrap-primary .uonix-featured-img,
+            .is-sticky .uonix-featured-img,
+            .uonix-featured-img {
+                min-height: 165px !important;
+            }
+        }
     </style>
 
     <script id="uonix-megamenu-hybrid-js">
