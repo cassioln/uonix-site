@@ -90,6 +90,9 @@ jobs:
       - name: Test variation technical sheet
         run: php scripts/tests/test-variation-technical-sheet.php
 
+      - name: Test newsletter source URL
+        run: php scripts/tests/test-newsletter-source-url.php
+
       - name: Test managed code has no implicit schema mutations
         run: php scripts/tests/test-managed-code-no-schema-mutations.php
 
@@ -106,7 +109,9 @@ jobs:
         run: php -l scripts/apply-seo-metadata-production.php
 
       - name: Validate variation technical sheet admin script
-        run: node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
+        run: |
+          node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
+          node --check mu-plugins/uonix-woocommerce/assets/js/admin-vtst-diagram-image.js
 
       - name: Test clone administration panel
         run: php scripts/tests/test-clone-admin.php
