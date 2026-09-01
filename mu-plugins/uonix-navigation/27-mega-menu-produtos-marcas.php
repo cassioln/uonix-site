@@ -138,7 +138,7 @@ function uonix_estilos_mega_menu_v14() {
             align-items: center !important;
             justify-content: center !important;
             overflow: hidden !important;
-            margin: 0 0 5px 0 !important;
+            margin: 0 !important;
             box-sizing: border-box !important;
         }
 
@@ -164,7 +164,8 @@ function uonix_estilos_mega_menu_v14() {
         }
 
         .uonix-prod-tooltip-brand {
-            font-size: 10px !important;
+            align-self: flex-start !important;
+            font-size: 9.5px !important;
             font-weight: 800 !important;
             color: #0e3780 !important;
             text-transform: uppercase !important;
@@ -173,13 +174,14 @@ function uonix_estilos_mega_menu_v14() {
             padding: 2px 6px !important;
             border-radius: 3px !important;
             line-height: 1.2 !important;
-            text-align: center !important;
-            display: block !important;
+            text-align: left !important;
+            display: inline-block !important;
             max-width: 100% !important;
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             box-sizing: border-box !important;
+            margin-bottom: 4px !important;
         }
 
         /* 1. Posicionamento para Categoria Destaque (Olhais de Ancoragem) */
@@ -430,12 +432,12 @@ function uonix_gerar_mega_menu_v14() {
                                                     <span class="uonix-prod-link-text"><?php echo esc_html($t_prod); ?></span>
                                                     <?php if (!empty($thumb_url)) : ?>
                                                         <span class="uonix-prod-tooltip" aria-hidden="true">
-                                                            <span class="uonix-prod-tooltip-img">
-                                                                <img src="<?php echo esc_url($thumb_url); ?>" alt="<?php echo esc_attr($t_prod); ?>" loading="lazy" width="100" height="85">
-                                                            </span>
                                                             <?php if (!empty($marca)) : ?>
                                                                 <span class="uonix-prod-tooltip-brand"><?php echo esc_html($marca); ?></span>
                                                             <?php endif; ?>
+                                                            <span class="uonix-prod-tooltip-img">
+                                                                <img src="<?php echo esc_url($thumb_url); ?>" alt="<?php echo esc_attr($t_prod); ?>" loading="lazy" width="100" height="85">
+                                                            </span>
                                                         </span>
                                                     <?php endif; ?>
                                                 </a>
@@ -493,12 +495,12 @@ function uonix_gerar_mega_menu_v14() {
                                                 <span class="uonix-prod-link-text"><?php echo esc_html($t_prod); ?></span>
                                                 <?php if (!empty($thumb_url)) : ?>
                                                     <span class="uonix-prod-tooltip" aria-hidden="true">
-                                                        <span class="uonix-prod-tooltip-img">
-                                                            <img src="<?php echo esc_url($thumb_url); ?>" alt="<?php echo esc_attr($t_prod); ?>" loading="lazy" width="100" height="85">
-                                                        </span>
                                                         <?php if (!empty($marca)) : ?>
                                                             <span class="uonix-prod-tooltip-brand"><?php echo esc_html($marca); ?></span>
                                                         <?php endif; ?>
+                                                        <span class="uonix-prod-tooltip-img">
+                                                            <img src="<?php echo esc_url($thumb_url); ?>" alt="<?php echo esc_attr($t_prod); ?>" loading="lazy" width="100" height="85">
+                                                        </span>
                                                     </span>
                                                 <?php endif; ?>
                                             </a>
