@@ -214,6 +214,7 @@ function uonix_estilos_mega_menu_v14()
             border-radius: 4px !important;
             line-height: 1.2 !important;
             z-index: 2 !important;
+            display: none;
             transition: all 0.2s ease !important;
         }
 
@@ -630,7 +631,9 @@ function uonix_estilos_mega_menu_v14()
                     var isFeatured = panel.classList.contains('uonix-dc-panel-featured');
                     var imgElem = panel.querySelector('.uonix-dc-header-img, .uonix-featured-img');
                     var descElem = isFeatured ? null : panel.querySelector('.uonix-header-desc');
-                    var brandElem = panel.querySelector('.uonix-header-brand-badge, .uonix-stage-brand-label');
+                    var brandBadge = panel.querySelector('.uonix-header-brand-badge');
+                    var stageTopTag = panel.querySelector('.uonix-stage-top-tag');
+                    var brandLabel = panel.querySelector('.uonix-stage-brand-label');
                     var dynTitle = panel.querySelector('.uonix-stage-dyn-title');
                     var dynDesc = panel.querySelector('.uonix-stage-dyn-desc');
                     var stageBottom = panel.querySelector('.uonix-stage-bottom-info');
@@ -656,8 +659,16 @@ function uonix_estilos_mega_menu_v14()
                                 }, 70);
                             }
 
-                            if (brandElem && newBrand) {
-                                brandElem.textContent = newBrand;
+                            if (brandBadge && newBrand) {
+                                brandBadge.textContent = newBrand;
+                                brandBadge.style.display = 'inline-block';
+                            }
+
+                            if (stageTopTag) {
+                                stageTopTag.style.display = 'flex';
+                            }
+                            if (brandLabel && newBrand) {
+                                brandLabel.textContent = newBrand;
                             }
 
                             if (descElem && newDesc) {
@@ -694,8 +705,13 @@ function uonix_estilos_mega_menu_v14()
                                 }, 70);
                             }
 
-                            if (brandElem) {
-                                brandElem.textContent = defaultBrand;
+                            if (brandBadge) {
+                                brandBadge.style.display = 'none';
+                                brandBadge.textContent = '';
+                            }
+
+                            if (stageTopTag) {
+                                stageTopTag.style.display = 'none';
                             }
 
                             if (descElem && defaultDesc) {
@@ -895,8 +911,8 @@ function uonix_gerar_mega_menu_v14()
 
                                 <div class="uonix-featured-image-stage">
                                     <div class="uonix-stage-frame">
-                                        <div class="uonix-stage-top-tag">
-                                            <span class="uonix-stage-brand-label">UÔNIX</span>
+                                        <div class="uonix-stage-top-tag" style="display: none;">
+                                            <span class="uonix-stage-brand-label"></span>
                                             <span class="uonix-stage-status-dot"></span>
                                         </div>
                                         <div class="uonix-stage-media-wrap">
@@ -923,7 +939,7 @@ function uonix_gerar_mega_menu_v14()
                                 <!-- HEADER DINÂMICO SUPERIOR COM ALTURA TRAVADA -->
                                 <div class="uonix-dc-header">
                                     <div class="uonix-dc-header-media">
-                                        <span class="uonix-header-brand-badge">UÔNIX</span>
+                                        <span class="uonix-header-brand-badge" style="display: none;"></span>
                                         <img class="uonix-dc-header-img" src="<?php echo esc_url($imagem_final); ?>"
                                             alt="<?php echo esc_attr($titulo_limpo); ?>" loading="lazy" width="230" height="124" />
                                     </div>
