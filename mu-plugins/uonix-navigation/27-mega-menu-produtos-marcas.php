@@ -235,9 +235,9 @@ function uonix_estilos_mega_menu_v14()
 
         /* ÁREA DE DESCRIÇÃO DINÂMICA COM ALTURA RIGOROSAMENTE FIXA (SEM SCROLL) */
         .uonix-header-desc-wrap {
-            height: 72px !important;
-            min-height: 72px !important;
-            max-height: 72px !important;
+            height: 76px !important;
+            min-height: 76px !important;
+            max-height: 76px !important;
             overflow: hidden !important;
             margin: 4px 0 !important;
             width: 100% !important;
@@ -247,9 +247,9 @@ function uonix_estilos_mega_menu_v14()
             font-size: 13.5px !important;
             color: #64748b !important;
             margin: 0 !important;
-            line-height: 1.45 !important;
+            line-height: 1.4 !important;
             display: -webkit-box !important;
-            -webkit-line-clamp: 3 !important;
+            -webkit-line-clamp: 4 !important;
             -webkit-box-orient: vertical !important;
             overflow: hidden !important;
             transition: color 0.2s ease !important;
@@ -815,10 +815,10 @@ function uonix_gerar_mega_menu_v14()
                     $link_padrao = get_term_link($term) . '#catalogo-produtos';
                     $link_husky = '/produtos/swoof2/product_cat-' . $cat['slug'] . '/#catalogo-produtos';
 
-                    // Descrição da categoria (limite de ~360 caracteres para categorias normais)
+                    // Descrição da categoria (limite proporcional de ~450 caracteres para categorias normais)
                     $descricao = (!empty($term) && !empty($term->description)) ? wp_strip_all_tags($term->description) : 'Confira a nossa linha completa para fixação e ancoragem.';
-                    if (!$is_featured && mb_strlen($descricao) > 360) {
-                        $descricao = mb_substr($descricao, 0, 360) . '...';
+                    if (!$is_featured && mb_strlen($descricao) > 450) {
+                        $descricao = mb_substr($descricao, 0, 450) . '...';
                     }
 
                     // Limite: 4 produtos na categoria destaque, 9 nas categorias padrão (3 colunas x 3 linhas)
@@ -883,7 +883,7 @@ function uonix_gerar_mega_menu_v14()
                                 $p_marca = 'UÔNIX';
                             }
 
-                            // Descrição do produto completa e limpa (limite de ~360 caracteres para categorias normais)
+                            // Descrição do produto completa e limpa (limite proporcional de ~450 caracteres para categorias normais)
                             $p_desc = get_the_excerpt($p_id);
                             if (empty($p_desc)) {
                                 $p_desc = wp_strip_all_tags(get_post_field('post_content', $p_id));
@@ -891,8 +891,8 @@ function uonix_gerar_mega_menu_v14()
                             $p_desc = wp_strip_all_tags(strip_shortcodes($p_desc));
                             if (empty($p_desc)) {
                                 $p_desc = $descricao;
-                            } elseif (!$is_featured && mb_strlen($p_desc) > 360) {
-                                $p_desc = mb_substr($p_desc, 0, 360) . '...';
+                            } elseif (!$is_featured && mb_strlen($p_desc) > 450) {
+                                $p_desc = mb_substr($p_desc, 0, 450) . '...';
                             }
 
                             $produtos_lista[] = [
