@@ -159,25 +159,27 @@ function uonix_estilos_mega_menu_v14()
                                        1. LAYOUT CATEGORIAS PADRÃO (FIXAÇÃO QUÍMICA, MECÂNICA, ACESSÓRIOS)
                                        ========================================================== */
 
-        /* PARTE SUPERIOR: HEADER DINÂMICO COM ALTURA TRAVADA */
+        /* PARTE SUPERIOR: HEADER DINÂMICO COM ALTURA TRAVADA E IMAGENS AMPLIADAS */
         .uonix-dc-header {
             display: flex !important;
             align-items: center !important;
-            gap: 24px !important;
+            gap: 28px !important;
             border-bottom: 1px solid #f1f5f9 !important;
-            padding-bottom: 14px !important;
-            margin-bottom: 10px !important;
-            height: 152px !important;
-            min-height: 152px !important;
-            max-height: 152px !important;
+            padding-bottom: 18px !important;
+            margin-bottom: 16px !important;
+            height: 204px !important;
+            min-height: 204px !important;
+            max-height: 204px !important;
             flex-shrink: 0 !important;
             box-sizing: border-box !important;
         }
 
         .uonix-dc-header-media {
-            width: 230px !important;
-            min-width: 230px !important;
-            height: 136px !important;
+            width: 290px !important;
+            min-width: 290px !important;
+            height: 186px !important;
+            min-height: 186px !important;
+            max-height: 186px !important;
             background: #f8fafc !important;
             border: 1px solid #edf2f7 !important;
             border-radius: 8px !important;
@@ -186,7 +188,7 @@ function uonix_estilos_mega_menu_v14()
             justify-content: center !important;
             position: relative !important;
             overflow: hidden !important;
-            padding: 6px !important;
+            padding: 8px !important;
             box-sizing: border-box !important;
             flex-shrink: 0 !important;
         }
@@ -222,7 +224,7 @@ function uonix_estilos_mega_menu_v14()
         }
 
         .uonix-header-title {
-            font-size: 24px !important;
+            font-size: 26px !important;
             text-transform: uppercase !important;
             color: #0e3780 !important;
             font-weight: 800 !important;
@@ -233,19 +235,19 @@ function uonix_estilos_mega_menu_v14()
 
         /* ÁREA DE DESCRIÇÃO DINÂMICA COM ALTURA RIGOROSAMENTE FIXA (SEM SCROLL) */
         .uonix-header-desc-wrap {
-            height: 60px !important;
-            min-height: 60px !important;
-            max-height: 60px !important;
+            height: 72px !important;
+            min-height: 72px !important;
+            max-height: 72px !important;
             overflow: hidden !important;
-            margin: 3px 0 !important;
+            margin: 4px 0 !important;
             width: 100% !important;
         }
 
         .uonix-header-desc {
-            font-size: 13px !important;
+            font-size: 13.5px !important;
             color: #64748b !important;
             margin: 0 !important;
-            line-height: 1.4 !important;
+            line-height: 1.45 !important;
             display: -webkit-box !important;
             -webkit-line-clamp: 3 !important;
             -webkit-box-orient: vertical !important;
@@ -257,10 +259,10 @@ function uonix_estilos_mega_menu_v14()
         .uonix-dc-products-grid.uonix-grid-3cols {
             display: grid !important;
             grid-template-columns: repeat(3, 1fr) !important;
-            gap: 8px 14px !important;
+            gap: 12px 16px !important;
             flex: 1 !important;
             align-content: start !important;
-            margin-top: 4px !important;
+            margin-top: 2px !important;
         }
 
         /* LINKS DE PRODUTOS ESTILIZADOS E INTERATIVOS */
@@ -268,13 +270,14 @@ function uonix_estilos_mega_menu_v14()
             display: flex !important;
             align-items: center !important;
             justify-content: space-between !important;
-            padding: 7px 10px !important;
+            padding: 10px 14px !important;
+            min-height: 42px !important;
             background: #ffffff !important;
             border: 1px solid #f1f5f9 !important;
             border-left: 3.5px solid #e9f3ff !important;
-            border-radius: 4px !important;
+            border-radius: 6px !important;
             color: #475569 !important;
-            font-size: 13.5px !important;
+            font-size: 14px !important;
             font-weight: 600 !important;
             text-decoration: none !important;
             line-height: 1.3 !important;
@@ -519,9 +522,9 @@ function uonix_estilos_mega_menu_v14()
         .kadence-sticky-header .uonix-dc-header-img,
         .uonix-dc-header-img {
             width: 100% !important;
-            height: 124px !important;
-            min-height: 124px !important;
-            max-height: 124px !important;
+            height: 172px !important;
+            min-height: 172px !important;
+            max-height: 172px !important;
             object-fit: contain !important;
             background: transparent !important;
             border-radius: 4px !important;
