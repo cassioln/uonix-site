@@ -33,8 +33,8 @@ function uonix_estilos_mega_menu_v14()
     ?>
     <style id="uonix-megamenu-hybrid-css">
         /* ==========================================================
-                           MEGA MENU: ESTRUTURA E PAINÉIS PRINCIPAIS
-                           ========================================================== */
+                                       MEGA MENU: ESTRUTURA E PAINÉIS PRINCIPAIS
+                                       ========================================================== */
         .uonix-dynamic-cats-wrapper,
         .uonix-dc-panel {
             pointer-events: none !important;
@@ -156,8 +156,8 @@ function uonix_estilos_mega_menu_v14()
         }
 
         /* ==========================================================
-                           1. LAYOUT CATEGORIAS PADRÃO (FIXAÇÃO QUÍMICA, MECÂNICA, ACESSÓRIOS)
-                           ========================================================== */
+                                       1. LAYOUT CATEGORIAS PADRÃO (FIXAÇÃO QUÍMICA, MECÂNICA, ACESSÓRIOS)
+                                       ========================================================== */
 
         /* PARTE SUPERIOR: HEADER DINÂMICO COM ALTURA TRAVADA */
         .uonix-dc-header {
@@ -231,13 +231,12 @@ function uonix_estilos_mega_menu_v14()
             line-height: 1.15 !important;
         }
 
-        /* ÁREA DE DESCRIÇÃO DINÂMICA COM ALTURA RIGOROSAMENTE FIXA */
+        /* ÁREA DE DESCRIÇÃO DINÂMICA COM ALTURA RIGOROSAMENTE FIXA (SEM SCROLL) */
         .uonix-header-desc-wrap {
             height: 56px !important;
             min-height: 56px !important;
             max-height: 56px !important;
-            overflow-y: auto !important;
-            scrollbar-width: thin !important;
+            overflow: hidden !important;
             margin: 4px 0 !important;
             width: 100% !important;
         }
@@ -247,6 +246,10 @@ function uonix_estilos_mega_menu_v14()
             color: #64748b !important;
             margin: 0 !important;
             line-height: 1.4 !important;
+            display: -webkit-box !important;
+            -webkit-line-clamp: 2 !important;
+            -webkit-box-orient: vertical !important;
+            overflow: hidden !important;
             transition: color 0.2s ease !important;
         }
 
@@ -349,8 +352,8 @@ function uonix_estilos_mega_menu_v14()
         }
 
         /* ==========================================================
-                           2. LAYOUT ESPECIAL DESTAQUE: OLHAIS DE ANCORAGEM (CATEGORIA 1)
-                           ========================================================== */
+                                       2. LAYOUT ESPECIAL DESTAQUE: OLHAIS DE ANCORAGEM (CATEGORIA 1)
+                                       ========================================================== */
         .uonix-dc-panel-featured {
             padding: 24px 30px !important;
             flex-direction: row !important;
@@ -386,7 +389,7 @@ function uonix_estilos_mega_menu_v14()
         /* CONTAINER DE DESCRIÇÃO COMPLETA DA CATEGORIA EM OLHAIS */
         .uonix-featured-desc-wrap {
             height: 90px !important;
-            min-height: 150px !important;
+            min-height: 120px !important;
             max-height: 90px !important;
             overflow-y: auto !important;
             scrollbar-width: thin !important;
@@ -507,8 +510,8 @@ function uonix_estilos_mega_menu_v14()
         }
 
         /* ==========================================================
-                           TRAVAS ABSOLUTAS CONTRA ACHATAMENTO NO MENU FIXO (ANTI-SQUASH)
-                           ========================================================== */
+                                       TRAVAS ABSOLUTAS CONTRA ACHATAMENTO NO MENU FIXO (ANTI-SQUASH)
+                                       ========================================================== */
         #mega-menu-wrap-primary .uonix-dc-header-img,
         .is-sticky .uonix-dc-header-img,
         .site-header-sticky-inner .uonix-dc-header-img,
@@ -533,9 +536,9 @@ function uonix_estilos_mega_menu_v14()
         .kadence-sticky-header .uonix-featured-img,
         .uonix-featured-img {
             width: 100% !important;
-            height: 200px !important;
+            /* height: 200px !important;
+                    max-height: 215px !important; */
             min-height: 200px !important;
-            max-height: 215px !important;
             object-fit: contain !important;
             background: transparent !important;
             border-radius: 6px !important;
@@ -544,8 +547,8 @@ function uonix_estilos_mega_menu_v14()
         }
 
         /* ==========================================================
-                           MEGA MARCAS ROW
-                           ========================================================== */
+                                       MEGA MARCAS ROW
+                                       ========================================================== */
         #mega-menu-wrap-primary #mega-menu-primary li.mega-menu-row:has(.uonix-mega-brands-wrap) {
             background: #ffffff !important;
             border: 2px solid #e2e8f0 !important;
@@ -637,10 +640,10 @@ function uonix_estilos_mega_menu_v14()
                     });
 
                     // Ao sair completamente do menu de nível superior (fechamento), reseta para Olhais de Ancoragem
-                    var topLevelMenuItem = wrapper.closest('li.mega-menu-item-has-children') || 
-                                           wrapper.closest('li.menu-item-has-children') || 
-                                           document.querySelector('#mega-menu-item-8190') ||
-                                           document.querySelector('#mega-menu-wrap-primary');
+                    var topLevelMenuItem = wrapper.closest('li.mega-menu-item-has-children') ||
+                        wrapper.closest('li.menu-item-has-children') ||
+                        document.querySelector('#mega-menu-item-8190') ||
+                        document.querySelector('#mega-menu-wrap-primary');
 
                     if (topLevelMenuItem) {
                         topLevelMenuItem.addEventListener('mouseleave', function () {
@@ -809,8 +812,11 @@ function uonix_gerar_mega_menu_v14()
                     $link_padrao = get_term_link($term) . '#catalogo-produtos';
                     $link_husky = '/produtos/swoof2/product_cat-' . $cat['slug'] . '/#catalogo-produtos';
 
-                    // Descrição completa da categoria
+                    // Descrição da categoria (limite de ~345 caracteres para categorias normais)
                     $descricao = (!empty($term) && !empty($term->description)) ? wp_strip_all_tags($term->description) : 'Confira a nossa linha completa para fixação e ancoragem.';
+                    if (!$is_featured && mb_strlen($descricao) > 345) {
+                        $descricao = mb_substr($descricao, 0, 345) . '...';
+                    }
 
                     // Limite: 4 produtos na categoria destaque, 9 nas categorias padrão (3 colunas x 3 linhas)
                     $product_limit = $is_featured ? 4 : 9;
@@ -874,7 +880,7 @@ function uonix_gerar_mega_menu_v14()
                                 $p_marca = 'UÔNIX';
                             }
 
-                            // Descrição do produto completa e limpa
+                            // Descrição do produto completa e limpa (limite de ~345 caracteres para categorias normais)
                             $p_desc = get_the_excerpt($p_id);
                             if (empty($p_desc)) {
                                 $p_desc = wp_strip_all_tags(get_post_field('post_content', $p_id));
@@ -882,6 +888,8 @@ function uonix_gerar_mega_menu_v14()
                             $p_desc = wp_strip_all_tags(strip_shortcodes($p_desc));
                             if (empty($p_desc)) {
                                 $p_desc = $descricao;
+                            } elseif (!$is_featured && mb_strlen($p_desc) > 345) {
+                                $p_desc = mb_substr($p_desc, 0, 345) . '...';
                             }
 
                             $produtos_lista[] = [
@@ -1038,12 +1046,12 @@ function uonix_gerar_grid_marcas_premium_v14()
     $taxonomy = 'product_brand';
 
     $args = [
-        'taxonomy'   => $taxonomy,
+        'taxonomy' => $taxonomy,
         'hide_empty' => false,
     ];
 
     if (!empty($marcas_visiveis)) {
-        $args['slug']    = $marcas_visiveis;
+        $args['slug'] = $marcas_visiveis;
         $args['orderby'] = 'slug__in';
     }
 
@@ -1088,9 +1096,9 @@ function uonix_gerar_grid_marcas_premium_v14()
                     $upload_dir = wp_upload_dir();
                     $base_upload_url = $upload_dir['baseurl'];
                     $fallback_map = [
-                        'uonix'   => $base_upload_url . '/2026/02/uonix.webp',
+                        'uonix' => $base_upload_url . '/2026/02/uonix.webp',
                         'walsywa' => $base_upload_url . '/2026/02/walsywa.webp',
-                        'ancora'  => $base_upload_url . '/2026/02/ancora.webp',
+                        'ancora' => $base_upload_url . '/2026/02/ancora.webp',
                         'tekbond' => $base_upload_url . '/2026/02/tekbond.webp',
                     ];
                     if (isset($fallback_map[$slug])) {
