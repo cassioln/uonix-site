@@ -465,6 +465,10 @@ function uonix_estilos_mega_menu_v14()
             margin: 8px 0 !important;
         }
 
+        .uonix-featured-products .uonix-prod-stage-item {
+            font-size: 16px !important;
+        }
+
         /* Adaptação dinâmica para 5 produtos em Olhais */
         .uonix-featured-products.uonix-prod-count-5 {
             gap: 5px !important;
