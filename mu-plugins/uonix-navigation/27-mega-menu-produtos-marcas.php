@@ -618,7 +618,7 @@ function uonix_estilos_mega_menu_v14()
             border-top: 1px solid #f1f5f9 !important;
             border-radius: 0 0 8px 8px !important;
             margin-top: -2px !important;
-            padding: 25px 40px !important;
+            padding: 25px 40px 30px 40px !important;
             box-shadow: 0 12px 25px rgba(0, 0, 0, 0.06) !important;
             display: block !important;
         }
@@ -637,7 +637,7 @@ function uonix_estilos_mega_menu_v14()
 
         .uonix-brands-grid {
             display: grid !important;
-            grid-template-columns: repeat(3, 1fr) !important;
+            grid-template-columns: repeat(6, 1fr) !important;
             gap: 16px !important;
             margin-bottom: 5px !important;
         }
@@ -648,11 +648,11 @@ function uonix_estilos_mega_menu_v14()
             justify-content: center !important;
             background: #ffffff !important;
             border: 1px solid #f1f5f9 !important;
-            border-radius: 8px !important;
+            border-radius: 6px !important;
             width: 100% !important;
-            padding: 12px 24px !important;
-            min-height: 86px !important;
-            height: 86px !important;
+            padding: 10px 20px !important;
+            min-height: 105px !important;
+            height: 105px !important;
             transition: all 0.3s ease !important;
             text-decoration: none !important;
             box-sizing: border-box !important;
@@ -664,9 +664,9 @@ function uonix_estilos_mega_menu_v14()
         }
 
         .uonix-brand-item img {
-            max-height: 56px !important;
-            min-height: 50px !important;
-            height: 54px !important;
+            max-height: 75px !important;
+            min-height: 55px !important;
+            height: 70px !important;
             width: auto !important;
             max-width: 90% !important;
             filter: grayscale(1) opacity(0.6);
@@ -676,7 +676,7 @@ function uonix_estilos_mega_menu_v14()
         }
 
         .uonix-brand-item:hover img {
-            filter: grayscale(0) opacity(1);
+            filter: grayscale(0) opacity(1) !important;
         }
 
         /* ==========================================================
@@ -811,6 +811,26 @@ function uonix_estilos_mega_menu_v14()
             .is-sticky .uonix-featured-img,
             .uonix-featured-img {
                 min-height: 180px !important;
+            }
+
+            /* 4. Ajuste para o rodapé de marcas */
+            #mega-menu-wrap-primary #mega-menu-primary li.mega-menu-row:has(.uonix-mega-brands-wrap) {
+                padding: 20px 24px 25px 24px !important;
+            }
+
+            .uonix-brands-grid {
+                gap: 12px !important;
+            }
+
+            .uonix-brand-item {
+                min-height: 90px !important;
+                height: 90px !important;
+                padding: 8px 14px !important;
+            }
+
+            .uonix-brand-item img {
+                height: 60px !important;
+                max-height: 65px !important;
             }
         }
     </style>
