@@ -611,27 +611,25 @@ function uonix_estilos_mega_menu_v14()
             transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
 
-        /* ==========================================================
-                                               MEGA MARCAS ROW
-                                               ========================================================== */
+        /* MEGA MARCAS ROW */
         #mega-menu-wrap-primary #mega-menu-primary li.mega-menu-row:has(.uonix-mega-brands-wrap) {
             background: #ffffff !important;
             border: 2px solid #e2e8f0 !important;
             border-top: 1px solid #f1f5f9 !important;
             border-radius: 0 0 8px 8px !important;
             margin-top: -2px !important;
-            padding: 22px 30px !important;
+            padding: 25px 40px !important;
             box-shadow: 0 12px 25px rgba(0, 0, 0, 0.06) !important;
             display: block !important;
         }
 
         .uonix-mega-brands-wrap .mega-block-title {
-            font-size: 16px !important;
+            font-size: 18px !important;
             color: #94a3b8 !important;
             text-transform: uppercase !important;
             letter-spacing: 1.2px !important;
-            margin-bottom: 16px !important;
-            margin-left: 4px !important;
+            margin-bottom: 20px !important;
+            margin-left: 5px !important;
             font-weight: 700 !important;
         }
 
@@ -639,7 +637,7 @@ function uonix_estilos_mega_menu_v14()
             display: grid !important;
             grid-template-columns: repeat(6, 1fr) !important;
             gap: 12px !important;
-            margin-bottom: 4px !important;
+            margin-bottom: 5px !important;
         }
 
         .uonix-brand-item {
@@ -662,11 +660,11 @@ function uonix_estilos_mega_menu_v14()
 
         .uonix-brand-item img {
             max-height: none !important;
-            min-height: 42px !important;
-            height: 42px !important;
+            min-height: 45px !important;
+            height: 45px !important;
             width: auto !important;
             filter: grayscale(1) opacity(0.6);
-            transition: 0.3s ease;
+            transition: 0.3s !important;
             object-fit: contain !important;
             flex-shrink: 0 !important;
         }
@@ -1271,7 +1269,7 @@ function uonix_gerar_grid_marcas_premium_v14()
     ob_start();
     ?>
     <div class="uonix-mega-brands-wrap">
-        <div class="mega-block-title">Compre por Fabricante</div>
+        <h4 class="mega-block-title">Trabalhamos com as melhores marcas:</h4>
         <div class="uonix-brands-grid">
             <?php
             foreach ($terms as $term):
@@ -1313,12 +1311,14 @@ function uonix_gerar_grid_marcas_premium_v14()
                     continue;
                 }
 
-                $link_final = '/produtos/swoof2/product_brand-' . $slug . '/#catalogo-produtos';
+                $link_final = get_term_link($term);
+                if (is_wp_error($link_final) || empty($link_final)) {
+                    $link_final = '/produtos/swoof2/product_brand-' . $slug . '/#catalogo-produtos';
+                }
                 ?>
                 <a href="<?php echo esc_url($link_final); ?>" class="uonix-brand-item"
                     title="Ver produtos <?php echo esc_attr($term->name); ?>">
-                    <img src="<?php echo esc_url($logo_url); ?>" alt="<?php echo esc_attr($term->name); ?>" loading="lazy"
-                        width="120" height="42">
+                    <img src="<?php echo esc_url($logo_url); ?>" alt="<?php echo esc_attr($term->name); ?>" loading="lazy">
                 </a>
             <?php endforeach; ?>
         </div>
