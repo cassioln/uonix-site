@@ -481,26 +481,36 @@ function uonix_estilos_mega_menu_v14()
         .uonix-stage-bottom-info {
             width: 100% !important;
             text-align: center !important;
-            margin-top: 6px !important;
-            padding: 6px 10px !important;
-            background: #ffffff !important;
-            border: 1px solid #e2e8f0 !important;
-            border-radius: 6px !important;
-            box-sizing: border-box !important;
-            box-shadow: 0 2px 6px rgba(14, 55, 128, 0.05) !important;
+            margin-top: 4px !important;
+            padding: 0 !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
             transition: all 0.2s ease !important;
         }
 
         .uonix-stage-dyn-title {
-            font-size: 15px !important;
+            font-size: 14.5px !important;
             font-weight: 800 !important;
             color: #0e3780 !important;
             display: block !important;
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
-            margin: 0 !important;
+            margin-bottom: 2px !important;
             line-height: 1.25 !important;
+        }
+
+        .uonix-stage-dyn-desc {
+            font-size: 11.5px !important;
+            color: #64748b !important;
+            line-height: 1.35 !important;
+            display: -webkit-box !important;
+            -webkit-line-clamp: 2 !important;
+            -webkit-box-orient: vertical !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            min-height: 28px !important;
         }
 
         /* ==========================================================
@@ -622,6 +632,7 @@ function uonix_estilos_mega_menu_v14()
                     var descElem = isFeatured ? null : panel.querySelector('.uonix-header-desc');
                     var brandElem = panel.querySelector('.uonix-header-brand-badge, .uonix-stage-brand-label');
                     var dynTitle = panel.querySelector('.uonix-stage-dyn-title');
+                    var dynDesc = panel.querySelector('.uonix-stage-dyn-desc');
                     var stageBottom = panel.querySelector('.uonix-stage-bottom-info');
 
                     var items = panel.querySelectorAll('.uonix-prod-stage-item');
@@ -655,6 +666,10 @@ function uonix_estilos_mega_menu_v14()
 
                             if (dynTitle && newTitle) {
                                 dynTitle.textContent = newTitle;
+                            }
+
+                            if (dynDesc && newDesc) {
+                                dynDesc.textContent = newDesc;
                             }
 
                             if (stageBottom) {
@@ -693,6 +708,10 @@ function uonix_estilos_mega_menu_v14()
 
                             if (dynTitle) {
                                 dynTitle.textContent = '';
+                            }
+
+                            if (dynDesc) {
+                                dynDesc.textContent = '';
                             }
 
                             items.forEach(function (i) { i.classList.remove('is-active'); });
@@ -887,6 +906,7 @@ function uonix_gerar_mega_menu_v14()
                                         </div>
                                         <div class="uonix-stage-bottom-info" style="display: none;">
                                             <span class="uonix-stage-dyn-title"></span>
+                                            <p class="uonix-stage-dyn-desc"></p>
                                         </div>
                                     </div>
                                 </div>
