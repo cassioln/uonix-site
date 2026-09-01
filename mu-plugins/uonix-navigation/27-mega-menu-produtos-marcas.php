@@ -17,10 +17,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Produtos Mega Menu
  */
 /**
- * UÔNIX: Master Premium V16.0 (Mega Menu Dinâmico com Header Interativo + Destaque Olhais)
- * - Disposição clássica no topo (Foto + Título + Breve Descrição + CTA)
- * - Ao passar o mouse nos produtos da grade (3 colunas), o cabeçalho se transforma exibindo a foto do produto, fabricante e descrição
- * - Categoria "Olhais de Ancoragem" com destaque nobre diferenciado
+ * UÔNIX: Master Premium V17.0 (Mega Menu Dinâmico com Descrição Completa e Posições Travadas)
+ * - Exibição da descrição completa da categoria e produtos sem cortes artificiais
+ * - Posição das grades de links 100% travada e estável em todos os estados de hover
+ * - Header interativo superior nas categorias normais e palco dinâmico nobre em Olhais
  * - Anti-Squash Absoluto para Header Fixo do Kadence
  */
 
@@ -135,7 +135,7 @@ function uonix_estilos_mega_menu_v14() {
             right: 0 !important; 
             bottom: 0 !important;
             height: 100% !important; 
-            padding: 24px 32px !important; 
+            padding: 22px 30px !important; 
             background: #ffffff !important; 
             display: flex !important; 
             flex-direction: column !important; 
@@ -165,22 +165,25 @@ function uonix_estilos_mega_menu_v14() {
            1. LAYOUT CATEGORIAS PADRÃO (FIXAÇÃO QUÍMICA, MECÂNICA, ACESSÓRIOS)
            ========================================================== */
         
-        /* PARTE SUPERIOR (HEADER DINÂMICO) */
+        /* PARTE SUPERIOR: HEADER DINÂMICO COM ALTURA TRAVADA */
         .uonix-dc-header { 
             display: flex !important; 
             align-items: center !important; 
-            gap: 28px !important; 
+            gap: 24px !important; 
             border-bottom: 1px solid #f1f5f9 !important; 
-            padding-bottom: 16px !important; 
-            margin-bottom: 12px !important; 
-            min-height: 155px !important; 
+            padding-bottom: 14px !important; 
+            margin-bottom: 10px !important; 
+            height: 152px !important;
+            min-height: 152px !important; 
+            max-height: 152px !important;
+            flex-shrink: 0 !important;
             box-sizing: border-box !important;
         }
 
         .uonix-dc-header-media {
-            width: 240px !important;
-            min-width: 240px !important;
-            height: 140px !important;
+            width: 230px !important;
+            min-width: 230px !important;
+            height: 136px !important;
             background: #f8fafc !important;
             border: 1px solid #edf2f7 !important;
             border-radius: 8px !important;
@@ -189,14 +192,15 @@ function uonix_estilos_mega_menu_v14() {
             justify-content: center !important;
             position: relative !important;
             overflow: hidden !important;
-            padding: 8px !important;
+            padding: 6px !important;
             box-sizing: border-box !important;
+            flex-shrink: 0 !important;
         }
 
         .uonix-header-brand-badge {
             position: absolute !important;
-            top: 8px !important;
-            left: 8px !important;
+            top: 7px !important;
+            left: 7px !important;
             font-size: 10px !important;
             font-weight: 800 !important;
             color: #0e3780 !important;
@@ -214,31 +218,40 @@ function uonix_estilos_mega_menu_v14() {
         .uonix-dc-info { 
             display: flex !important; 
             flex-direction: column !important; 
+            justify-content: space-between !important;
             align-items: flex-start !important; 
             flex: 1 !important;
+            height: 100% !important;
             min-width: 0 !important;
+            box-sizing: border-box !important;
         }
 
         .uonix-header-title { 
-            font-size: 25px !important; 
+            font-size: 24px !important; 
             text-transform: uppercase !important; 
             color: #0e3780 !important; 
             font-weight: 800 !important; 
-            margin: 0 0 6px 0 !important; 
+            margin: 0 !important; 
             letter-spacing: -0.3px !important;
             line-height: 1.15 !important;
         }
 
+        /* ÁREA DE DESCRIÇÃO DINÂMICA COM ALTURA RIGOROSAMENTE FIXA */
+        .uonix-header-desc-wrap {
+            height: 56px !important;
+            min-height: 56px !important;
+            max-height: 56px !important;
+            overflow-y: auto !important;
+            scrollbar-width: thin !important;
+            margin: 4px 0 !important;
+            width: 100% !important;
+        }
+
         .uonix-header-desc { 
-            font-size: 14.5px !important; 
+            font-size: 13.5px !important; 
             color: #64748b !important; 
-            margin: 0 0 10px 0 !important; 
-            line-height: 1.45 !important; 
-            display: -webkit-box !important;
-            -webkit-line-clamp: 2 !important;
-            -webkit-box-orient: vertical !important;
-            overflow: hidden !important;
-            min-height: 42px !important;
+            margin: 0 !important; 
+            line-height: 1.4 !important; 
             transition: color 0.2s ease !important;
         }
 
@@ -246,7 +259,7 @@ function uonix_estilos_mega_menu_v14() {
         .uonix-dc-products-grid.uonix-grid-3cols { 
             display: grid !important; 
             grid-template-columns: repeat(3, 1fr) !important; 
-            gap: 9px 15px !important; 
+            gap: 8px 14px !important; 
             flex: 1 !important;
             align-content: start !important;
             margin-top: 4px !important;
@@ -325,9 +338,9 @@ function uonix_estilos_mega_menu_v14() {
             display: inline-flex !important;
             align-items: center !important;
             gap: 6px !important;
-            font-size: 14px !important;
+            font-size: 13.5px !important;
             font-weight: 800 !important;
-            line-height: 1.4 !important;
+            line-height: 1.3 !important;
             color: #f76a0c !important;
             text-decoration: none !important;
             text-transform: uppercase !important;
@@ -343,14 +356,14 @@ function uonix_estilos_mega_menu_v14() {
            2. LAYOUT ESPECIAL DESTAQUE: OLHAIS DE ANCORAGEM (CATEGORIA 1)
            ========================================================== */
         .uonix-dc-panel-featured { 
-            padding: 26px 34px !important; 
+            padding: 24px 30px !important; 
             flex-direction: row !important; 
             align-items: stretch !important; 
-            gap: 36px !important; 
+            gap: 32px !important; 
         }
 
         .uonix-featured-text { 
-            flex: 1.2 !important; 
+            flex: 1.25 !important; 
             display: flex !important; 
             flex-direction: column !important; 
             justify-content: space-between !important; 
@@ -361,11 +374,11 @@ function uonix_estilos_mega_menu_v14() {
 
         .uonix-featured-header {
             width: 100% !important;
-            margin-bottom: 8px !important;
+            margin-bottom: 6px !important;
         }
 
         .uonix-featured-title { 
-            font-size: 28px !important; 
+            font-size: 26px !important; 
             color: #0e3780 !important; 
             font-weight: 800 !important; 
             text-transform: uppercase !important; 
@@ -374,25 +387,30 @@ function uonix_estilos_mega_menu_v14() {
             letter-spacing: -0.5px !important; 
         }
 
+        /* CONTAINER DE DESCRIÇÃO COMPLETA DA CATEGORIA EM OLHAIS */
+        .uonix-featured-desc-wrap {
+            height: 82px !important;
+            min-height: 82px !important;
+            max-height: 82px !important;
+            overflow-y: auto !important;
+            scrollbar-width: thin !important;
+            width: 100% !important;
+            padding-right: 4px !important;
+        }
+
         .uonix-featured-desc { 
-            font-size: 14.5px !important; 
+            font-size: 13.5px !important; 
             color: #64748b !important; 
             line-height: 1.45 !important; 
             margin: 0 !important; 
-            min-height: 42px !important;
-            max-height: 42px !important;
-            display: -webkit-box !important;
-            -webkit-line-clamp: 2 !important;
-            -webkit-box-orient: vertical !important;
-            overflow: hidden !important;
         }
         
         .uonix-featured-products { 
             display: flex !important; 
             flex-direction: column !important; 
-            gap: 9px !important; 
+            gap: 8px !important; 
             width: 100% !important; 
-            margin: 10px 0 !important; 
+            margin: 8px 0 !important; 
         }
 
         .uonix-featured-image-stage { 
@@ -401,17 +419,16 @@ function uonix_estilos_mega_menu_v14() {
             align-items: center !important; 
             justify-content: center !important; 
             height: 100% !important; 
-            min-height: 260px !important; 
+            min-height: 270px !important; 
         }
 
         .uonix-stage-frame {
             width: 100% !important;
             height: 100% !important;
-            min-height: 270px !important;
             background: #f8fafc !important;
             border: 1.5px solid #edf2f7 !important;
             border-radius: 12px !important;
-            padding: 16px !important;
+            padding: 14px !important;
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
@@ -455,7 +472,7 @@ function uonix_estilos_mega_menu_v14() {
             justify-content: center !important;
             width: 100% !important;
             overflow: hidden !important;
-            padding: 8px 0 !important;
+            padding: 4px 0 !important;
         }
 
         .uonix-stage-bottom-info {
@@ -465,13 +482,26 @@ function uonix_estilos_mega_menu_v14() {
         }
 
         .uonix-stage-dyn-title {
-            font-size: 12.5px !important;
+            font-size: 13px !important;
             font-weight: 700 !important;
             color: #0e3780 !important;
             display: block !important;
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
+            margin-bottom: 2px !important;
+        }
+
+        .uonix-stage-dyn-desc {
+            font-size: 11.5px !important;
+            color: #64748b !important;
+            line-height: 1.3 !important;
+            display: -webkit-box !important;
+            -webkit-line-clamp: 2 !important;
+            -webkit-box-orient: vertical !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            min-height: 30px !important;
         }
 
         /* ==========================================================
@@ -501,9 +531,9 @@ function uonix_estilos_mega_menu_v14() {
         .kadence-sticky-header .uonix-featured-img,
         .uonix-featured-img {
             width: 100% !important;
-            height: 190px !important;
-            min-height: 190px !important;
-            max-height: 200px !important;
+            height: 155px !important;
+            min-height: 155px !important;
+            max-height: 165px !important;
             object-fit: contain !important;
             background: transparent !important;
             border-radius: 6px !important;
@@ -592,6 +622,7 @@ function uonix_estilos_mega_menu_v14() {
                     var descElem   = isFeatured ? null : panel.querySelector('.uonix-header-desc');
                     var brandElem  = panel.querySelector('.uonix-header-brand-badge, .uonix-stage-brand-label');
                     var dynTitle   = panel.querySelector('.uonix-stage-dyn-title');
+                    var dynDesc    = panel.querySelector('.uonix-stage-dyn-desc');
 
                     var items = panel.querySelectorAll('.uonix-prod-stage-item');
                     var gridContainer = panel.querySelector('.uonix-dc-products-grid, .uonix-featured-products');
@@ -626,6 +657,10 @@ function uonix_estilos_mega_menu_v14() {
                                 dynTitle.textContent = newTitle;
                             }
 
+                            if (dynDesc && newDesc) {
+                                dynDesc.textContent = newDesc;
+                            }
+
                             items.forEach(function(i) { i.classList.remove('is-active'); });
                             item.classList.add('is-active');
                         });
@@ -654,6 +689,10 @@ function uonix_estilos_mega_menu_v14() {
 
                             if (dynTitle && defaultTitle) {
                                 dynTitle.textContent = defaultTitle;
+                            }
+
+                            if (dynDesc && defaultDesc) {
+                                dynDesc.textContent = defaultDesc;
                             }
 
                             items.forEach(function(i) { i.classList.remove('is-active'); });
@@ -700,10 +739,8 @@ function uonix_gerar_mega_menu_v14() {
                     $link_padrao = get_term_link($term) . '#catalogo-produtos';
                     $link_husky = '/produtos/swoof2/product_cat-' . $cat['slug'] . '/#catalogo-produtos';
                     
+                    // Descrição completa da categoria
                     $descricao = (!empty($term) && !empty($term->description)) ? wp_strip_all_tags($term->description) : 'Confira a nossa linha completa para fixação e ancoragem.';
-                    if ($is_featured) {
-                        $descricao = wp_trim_words($descricao, 14, '...');
-                    }
 
                     // Limite: 4 produtos na categoria destaque, 9 nas categorias padrão (3 colunas x 3 linhas)
                     $product_limit = $is_featured ? 4 : 9;
@@ -767,12 +804,12 @@ function uonix_gerar_mega_menu_v14() {
                                 $p_marca = 'UÔNIX';
                             }
 
-                            // Breve descrição do produto
+                            // Descrição do produto completa e limpa
                             $p_desc = get_the_excerpt($p_id);
                             if (empty($p_desc)) {
                                 $p_desc = wp_strip_all_tags(get_post_field('post_content', $p_id));
                             }
-                            $p_desc = wp_trim_words($p_desc, 12, '...');
+                            $p_desc = wp_strip_all_tags(strip_shortcodes($p_desc));
                             if (empty($p_desc)) {
                                 $p_desc = $descricao;
                             }
@@ -809,7 +846,9 @@ function uonix_gerar_mega_menu_v14() {
                                 <div class="uonix-featured-text">
                                     <div class="uonix-featured-header">
                                         <h5 class="uonix-featured-title"><?php echo esc_html($titulo_limpo); ?></h5>
-                                        <p class="uonix-featured-desc"><?php echo esc_html($descricao); ?></p>
+                                        <div class="uonix-featured-desc-wrap">
+                                            <p class="uonix-featured-desc"><?php echo esc_html($descricao); ?></p>
+                                        </div>
                                     </div>
                                     
                                     <div class="uonix-featured-products">
@@ -848,10 +887,11 @@ function uonix_gerar_mega_menu_v14() {
                                                  alt="<?php echo esc_attr($titulo_limpo); ?>"
                                                  loading="lazy" 
                                                  width="260" 
-                                                 height="190" />
+                                                 height="155" />
                                         </div>
                                         <div class="uonix-stage-bottom-info">
                                             <span class="uonix-stage-dyn-title"><?php echo esc_html($titulo_limpo); ?></span>
+                                            <p class="uonix-stage-dyn-desc">Dispositivo de Ancoragem Predial e Industrial em Aço Inox</p>
                                         </div>
                                     </div>
                                 </div>
@@ -866,7 +906,7 @@ function uonix_gerar_mega_menu_v14() {
                                  data-default-brand="UÔNIX"
                                  data-default-link="<?php echo esc_url($link_padrao); ?>">
                                 
-                                <!-- HEADER DINÂMICO SUPERIOR -->
+                                <!-- HEADER DINÂMICO SUPERIOR COM ALTURA TRAVADA -->
                                 <div class="uonix-dc-header">
                                     <div class="uonix-dc-header-media">
                                         <span class="uonix-header-brand-badge">UÔNIX</span>
@@ -874,12 +914,14 @@ function uonix_gerar_mega_menu_v14() {
                                              src="<?php echo esc_url($imagem_final); ?>" 
                                              alt="<?php echo esc_attr($titulo_limpo); ?>"
                                              loading="lazy" 
-                                             width="240" 
+                                             width="230" 
                                              height="124" />
                                     </div>
                                     <div class="uonix-dc-info">
                                         <h5 class="uonix-header-title"><?php echo esc_html($titulo_limpo); ?></h5>
-                                        <p class="uonix-header-desc"><?php echo esc_html($descricao); ?></p>
+                                        <div class="uonix-header-desc-wrap">
+                                            <p class="uonix-header-desc"><?php echo esc_html($descricao); ?></p>
+                                        </div>
                                         
                                         <a href="<?php echo esc_url($link_padrao); ?>" class="uonix-link-ver-linha">
                                             Ver toda a linha <?php echo esc_html($titulo_limpo); ?> &rarr;
