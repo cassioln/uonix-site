@@ -64,17 +64,18 @@ function uonix_estilos_mega_menu_v14()
             box-shadow: none !important;
         }
 
-        /* SIDEBAR LATERAL DE CATEGORIAS */
+        /* SIDEBAR LATERAL DE CATEGORIAS (DISTRIBUIÇÃO VERTICAL 100% DINÂMICA) */
         .uonix-dc-sidebar {
             width: clamp(260px, 20vw, 300px) !important;
-            flex-shrink: 0 !important;
+            flex: 0 0 clamp(260px, 20vw, 300px) !important;
             background: #f8fafc !important;
             display: flex !important;
             flex-direction: column !important;
             border-right: 1px solid #e2e8f0 !important;
             height: 100% !important;
-            min-height: 100% !important;
+            min-height: 420px !important;
             align-self: stretch !important;
+            box-sizing: border-box !important;
         }
 
         .uonix-dc-catalog-btn {
@@ -83,15 +84,16 @@ function uonix_estilos_mega_menu_v14()
             justify-content: center !important;
             background: #0e3780 !important;
             color: #ffffff !important;
-            padding: 16px 20px !important;
-            min-height: 56px !important;
+            padding: 0 20px !important;
             font-size: 15px !important;
             font-weight: 800 !important;
             text-decoration: none !important;
             text-transform: uppercase !important;
             letter-spacing: 0.5px !important;
             transition: all 0.3s ease !important;
-            flex-shrink: 0 !important;
+            flex: 1 1 0% !important;
+            min-height: 50px !important;
+            box-sizing: border-box !important;
         }
 
         .uonix-dc-catalog-btn:hover {
@@ -103,10 +105,12 @@ function uonix_estilos_mega_menu_v14()
             margin: 0 !important;
             padding: 0 !important;
             list-style: none !important;
-            flex: 1 !important;
+            flex: 4 1 0% !important;
             display: flex !important;
             flex-direction: column !important;
             height: 100% !important;
+            min-height: 0 !important;
+            box-sizing: border-box !important;
         }
 
         .uonix-dc-item {
@@ -114,8 +118,10 @@ function uonix_estilos_mega_menu_v14()
             margin: 0 !important;
             padding: 0 !important;
             flex: 1 1 0% !important;
+            min-height: 0 !important;
             display: flex !important;
             flex-direction: column !important;
+            box-sizing: border-box !important;
         }
 
         .uonix-dc-item:last-child {
@@ -128,7 +134,8 @@ function uonix_estilos_mega_menu_v14()
             justify-content: space-between !important;
             padding: 0 20px !important;
             height: 100% !important;
-            flex: 1 !important;
+            width: 100% !important;
+            flex: 1 1 100% !important;
             font-size: 16px !important;
             font-weight: 700 !important;
             color: #475569 !important;
@@ -136,6 +143,7 @@ function uonix_estilos_mega_menu_v14()
             transition: all 0.2s ease !important;
             border-left: 4px solid transparent !important;
             text-transform: uppercase !important;
+            box-sizing: border-box !important;
         }
 
         .uonix-dc-item:hover .uonix-dc-link,
@@ -669,6 +677,7 @@ function uonix_estilos_mega_menu_v14()
             .uonix-dc-sidebar {
                 width: 230px !important;
                 min-width: 230px !important;
+                flex: 0 0 230px !important;
             }
 
             .uonix-dc-panel {
