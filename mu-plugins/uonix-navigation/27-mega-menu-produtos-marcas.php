@@ -995,7 +995,6 @@ add_shortcode('uonix_vitrine_marcas', 'uonix_gerar_grid_marcas_premium_v14');
 
 function uonix_gerar_grid_marcas_premium_v14()
 {
-
     // Marcas que podem aparecer, por slug
     $marcas_visiveis = ['walsywa', 'ancora', 'tekbond', 'uonix'];
 
@@ -1005,12 +1004,12 @@ function uonix_gerar_grid_marcas_premium_v14()
     $taxonomy = 'product_brand';
 
     $args = [
-        'taxonomy' => $taxonomy,
+        'taxonomy'   => $taxonomy,
         'hide_empty' => false,
     ];
 
     if (!empty($marcas_visiveis)) {
-        $args['slug'] = $marcas_visiveis;
+        $args['slug']    = $marcas_visiveis;
         $args['orderby'] = 'slug__in';
     }
 
@@ -1024,29 +1023,6 @@ function uonix_gerar_grid_marcas_premium_v14()
         return '';
     }
 
-    $marcas_fixas = [
-        'uonix' => [
-            'nome' => 'Uônix',
-            'logo' => 'https://uonix.com.br/wp-content/uploads/2026/02/uonix.webp',
-            'link' => 'https://uonix.com.br/produtos/swoof2/product_brand-uonix/#catalogo-produtos',
-        ],
-        'walsywa' => [
-            'nome' => 'Walsywa',
-            'logo' => 'https://uonix.com.br/wp-content/uploads/2026/02/walsywa.webp',
-            'link' => 'https://uonix.com.br/produtos/swoof2/product_brand-walsywa/#catalogo-produtos',
-        ],
-        'ancora' => [
-            'nome' => 'Âncora',
-            'logo' => 'https://uonix.com.br/wp-content/uploads/2026/02/ancora.webp',
-            'link' => 'https://uonix.com.br/produtos/swoof2/product_brand-ancora/#catalogo-produtos',
-        ],
-        'tekbond' => [
-            'nome' => 'Tekbond',
-            'logo' => 'https://uonix.com.br/wp-content/uploads/2026/02/tekbond.webp',
-            'link' => 'https://uonix.com.br/produtos/swoof2/product_brand-tekbond/#catalogo-produtos',
-        ],
-    ];
-
     ob_start();
     ?>
     <div class="uonix-mega-brands-wrap">
@@ -1056,30 +1032,46 @@ function uonix_gerar_grid_marcas_premium_v14()
             foreach ($terms as $term):
                 $slug = $term->slug;
                 $logo_url = '';
-                $link_final = '';
 
-                if (isset($marcas_fixas[$slug])) {
-                    $logo_url = $marcas_fixas[$slug]['logo'];
-                    $link_final = $marcas_fixas[$slug]['link'];
+                // 1. Tentar obter pelo metadado de anexo do WordPress / Plugins de Marca
+                $thumb_id = get_term_meta($term->term_id, 'thumbnail_id', true);
+                if (!$thumb_id) {
+                    $thumb_id = get_term_meta($term->term_id, 'pwb_brand_image', true);
+                }
+                if (!$thumb_id) {
+                    $thumb_id = get_term_meta($term->term_id, 'image', true);
+                }
+                if (!$thumb_id) {
+                    $thumb_id = get_term_meta($term->term_id, 'brand_image', true);
                 }
 
-                if (empty($link_final)) {
-                    $link_final = '/produtos/swoof2/product_brand-' . $slug . '/#catalogo-produtos';
+                if ($thumb_id) {
+                    $logo_url = wp_get_attachment_url($thumb_id);
                 }
 
+                // 2. Fallback dinâmico com base na pasta de uploads do ambiente atual
                 if (empty($logo_url)) {
-                    $thumbnail_id = get_term_meta($term->term_id, 'thumbnail_id', true);
-                    if ($thumbnail_id) {
-                        $logo_url = wp_get_attachment_url($thumbnail_id);
+                    $upload_dir = wp_upload_dir();
+                    $base_upload_url = $upload_dir['baseurl'];
+                    $fallback_map = [
+                        'uonix'   => $base_upload_url . '/2026/02/uonix.webp',
+                        'walsywa' => $base_upload_url . '/2026/02/walsywa.webp',
+                        'ancora'  => $base_upload_url . '/2026/02/ancora.webp',
+                        'tekbond' => $base_upload_url . '/2026/02/tekbond.webp',
+                    ];
+                    if (isset($fallback_map[$slug])) {
+                        $logo_url = $fallback_map[$slug];
                     }
                 }
 
                 if (empty($logo_url)) {
                     continue;
                 }
+
+                $link_final = '/produtos/swoof2/product_brand-' . $slug . '/#catalogo-produtos';
                 ?>
                 <a href="<?php echo esc_url($link_final); ?>" class="uonix-brand-item"
-                    title="<?php echo esc_attr($term->name); ?>">
+                    title="Ver produtos <?php echo esc_attr($term->name); ?>">
                     <img src="<?php echo esc_url($logo_url); ?>" alt="<?php echo esc_attr($term->name); ?>" loading="lazy"
                         width="120" height="42">
                 </a>
