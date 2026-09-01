@@ -147,6 +147,7 @@ function uonix_estilos_mega_menu_v14()
         }
 
         .uonix-dc-item:hover .uonix-dc-link,
+        .uonix-dc-item:focus-within .uonix-dc-link,
         .uonix-dc-item.is-active-cat .uonix-dc-link {
             background: #ffffff !important;
             color: #0e3780 !important;
@@ -173,6 +174,7 @@ function uonix_estilos_mega_menu_v14()
             transition: opacity 0.15s ease, visibility 0.15s ease !important;
         }
 
+        .uonix-dc-item:focus-within .uonix-dc-panel,
         .uonix-dc-item.is-active-cat .uonix-dc-panel {
             opacity: 1 !important;
             visibility: visible !important;
@@ -359,6 +361,8 @@ function uonix_estilos_mega_menu_v14()
         }
 
         .uonix-prod-stage-item:hover,
+        .uonix-prod-stage-item:focus,
+        .uonix-prod-stage-item:focus-visible,
         .uonix-prod-stage-item.is-active {
             background: #f8fafc !important;
             border-color: #cbd5e1 !important;
@@ -366,14 +370,19 @@ function uonix_estilos_mega_menu_v14()
             color: #0e3780 !important;
             box-shadow: 0 3px 8px rgba(14, 55, 128, 0.06) !important;
             transform: translateX(3px) !important;
+            outline: none !important;
         }
 
         .uonix-prod-stage-item:hover .uonix-prod-bullet,
+        .uonix-prod-stage-item:focus .uonix-prod-bullet,
+        .uonix-prod-stage-item:focus-visible .uonix-prod-bullet,
         .uonix-prod-stage-item.is-active .uonix-prod-bullet {
             background: #f76a0c !important;
         }
 
         .uonix-prod-stage-item:hover .uonix-prod-hover-arrow,
+        .uonix-prod-stage-item:focus .uonix-prod-hover-arrow,
+        .uonix-prod-stage-item:focus-visible .uonix-prod-hover-arrow,
         .uonix-prod-stage-item.is-active .uonix-prod-hover-arrow {
             opacity: 1 !important;
             transform: translateX(0) !important;
@@ -859,15 +868,22 @@ function uonix_estilos_mega_menu_v14()
                         });
                     }
 
-                    // A aba em foco permanece a última aba acessada enquanto o menu estiver aberto
+                    function activateCategory(item) {
+                        catItems.forEach(function (i) { i.classList.remove('is-active-cat'); });
+                        item.classList.add('is-active-cat');
+                    }
+
+                    // A aba em foco/hover permanece a última aba acessada enquanto o menu estiver aberto
                     catItems.forEach(function (item) {
                         item.addEventListener('mouseenter', function () {
-                            catItems.forEach(function (i) { i.classList.remove('is-active-cat'); });
-                            item.classList.add('is-active-cat');
+                            activateCategory(item);
+                        });
+                        item.addEventListener('focusin', function () {
+                            activateCategory(item);
                         });
                     });
 
-                    // Ao sair completamente do menu de nível superior (fechamento), reseta para Olhais de Ancoragem
+                    // Ao sair completamente do menu de nível superior (fechamento/perda de foco), reseta para Olhais de Ancoragem
                     var topLevelMenuItem = wrapper.closest('li.mega-menu-item-has-children') ||
                         wrapper.closest('li.menu-item-has-children') ||
                         document.querySelector('#mega-menu-item-8190') ||
@@ -876,7 +892,15 @@ function uonix_estilos_mega_menu_v14()
                     if (topLevelMenuItem) {
                         topLevelMenuItem.addEventListener('mouseleave', function () {
                             setTimeout(function () {
-                                if (!topLevelMenuItem.matches(':hover') && !topLevelMenuItem.classList.contains('mega-toggle-on')) {
+                                if (!topLevelMenuItem.matches(':hover') && !topLevelMenuItem.matches(':focus-within') && !topLevelMenuItem.classList.contains('mega-toggle-on')) {
+                                    resetActiveCategory();
+                                }
+                            }, 120);
+                        });
+
+                        topLevelMenuItem.addEventListener('focusout', function () {
+                            setTimeout(function () {
+                                if (!topLevelMenuItem.contains(document.activeElement) && !topLevelMenuItem.matches(':hover') && !topLevelMenuItem.classList.contains('mega-toggle-on')) {
                                     resetActiveCategory();
                                 }
                             }, 120);
@@ -906,98 +930,114 @@ function uonix_estilos_mega_menu_v14()
                     var items = panel.querySelectorAll('.uonix-prod-stage-item');
                     var gridContainer = panel.querySelector('.uonix-dc-products-grid, .uonix-featured-products');
 
+                    function setPreview(item) {
+                        var newImg = item.getAttribute('data-img');
+                        var newTitle = item.getAttribute('data-title');
+                        var newDesc = item.getAttribute('data-desc');
+                        var newBrand = item.getAttribute('data-brand');
+
+                        if (imgElem && newImg && imgElem.src !== newImg) {
+                            imgElem.style.opacity = '0.25';
+                            imgElem.style.transform = 'scale(0.96)';
+                            setTimeout(function () {
+                                imgElem.src = newImg;
+                                imgElem.alt = newTitle || '';
+                                imgElem.style.opacity = '1';
+                                imgElem.style.transform = 'scale(1)';
+                            }, 70);
+                        }
+
+                        if (brandBadge && newBrand) {
+                            brandBadge.textContent = newBrand;
+                            brandBadge.style.display = 'inline-block';
+                        }
+
+                        if (stageTopTag) {
+                            stageTopTag.style.display = 'flex';
+                        }
+                        if (brandLabel && newBrand) {
+                            brandLabel.textContent = newBrand;
+                        }
+
+                        if (descElem && newDesc) {
+                            descElem.textContent = newDesc;
+                            descElem.classList.add('is-product-desc');
+                        }
+
+                        if (dynTitle && newTitle) {
+                            dynTitle.textContent = newTitle;
+                        }
+
+                        if (dynDesc && newDesc) {
+                            dynDesc.textContent = newDesc;
+                        }
+
+                        if (stageBottom) {
+                            stageBottom.style.display = 'block';
+                        }
+
+                        items.forEach(function (i) { i.classList.remove('is-active'); });
+                        item.classList.add('is-active');
+                    }
+
+                    function resetPreview() {
+                        if (imgElem && defaultImg && imgElem.src !== defaultImg) {
+                            imgElem.style.opacity = '0.25';
+                            imgElem.style.transform = 'scale(0.96)';
+                            setTimeout(function () {
+                                imgElem.src = defaultImg;
+                                imgElem.alt = defaultTitle || '';
+                                imgElem.style.opacity = '1';
+                                imgElem.style.transform = 'scale(1)';
+                            }, 70);
+                        }
+
+                        if (brandBadge) {
+                            brandBadge.style.display = 'none';
+                            brandBadge.textContent = '';
+                        }
+
+                        if (stageTopTag) {
+                            stageTopTag.style.display = 'none';
+                        }
+
+                        if (descElem && defaultDesc) {
+                            descElem.textContent = defaultDesc;
+                            descElem.classList.remove('is-product-desc');
+                        }
+
+                        if (stageBottom) {
+                            stageBottom.style.display = 'none';
+                        }
+
+                        if (dynTitle) {
+                            dynTitle.textContent = '';
+                        }
+
+                        if (dynDesc) {
+                            dynDesc.textContent = '';
+                        }
+
+                        items.forEach(function (i) { i.classList.remove('is-active'); });
+                    }
+
                     items.forEach(function (item) {
                         item.addEventListener('mouseenter', function () {
-                            var newImg = item.getAttribute('data-img');
-                            var newTitle = item.getAttribute('data-title');
-                            var newDesc = item.getAttribute('data-desc');
-                            var newBrand = item.getAttribute('data-brand');
-
-                            if (imgElem && newImg && imgElem.src !== newImg) {
-                                imgElem.style.opacity = '0.25';
-                                imgElem.style.transform = 'scale(0.96)';
-                                setTimeout(function () {
-                                    imgElem.src = newImg;
-                                    imgElem.alt = newTitle || '';
-                                    imgElem.style.opacity = '1';
-                                    imgElem.style.transform = 'scale(1)';
-                                }, 70);
-                            }
-
-                            if (brandBadge && newBrand) {
-                                brandBadge.textContent = newBrand;
-                                brandBadge.style.display = 'inline-block';
-                            }
-
-                            if (stageTopTag) {
-                                stageTopTag.style.display = 'flex';
-                            }
-                            if (brandLabel && newBrand) {
-                                brandLabel.textContent = newBrand;
-                            }
-
-                            if (descElem && newDesc) {
-                                descElem.textContent = newDesc;
-                                descElem.classList.add('is-product-desc');
-                            }
-
-                            if (dynTitle && newTitle) {
-                                dynTitle.textContent = newTitle;
-                            }
-
-                            if (dynDesc && newDesc) {
-                                dynDesc.textContent = newDesc;
-                            }
-
-                            if (stageBottom) {
-                                stageBottom.style.display = 'block';
-                            }
-
-                            items.forEach(function (i) { i.classList.remove('is-active'); });
-                            item.classList.add('is-active');
+                            setPreview(item);
+                        });
+                        item.addEventListener('focusin', function () {
+                            setPreview(item);
                         });
                     });
 
                     if (gridContainer) {
                         gridContainer.addEventListener('mouseleave', function () {
-                            if (imgElem && defaultImg && imgElem.src !== defaultImg) {
-                                imgElem.style.opacity = '0.25';
-                                imgElem.style.transform = 'scale(0.96)';
-                                setTimeout(function () {
-                                    imgElem.src = defaultImg;
-                                    imgElem.alt = defaultTitle || '';
-                                    imgElem.style.opacity = '1';
-                                    imgElem.style.transform = 'scale(1)';
-                                }, 70);
+                            resetPreview();
+                        });
+                        gridContainer.addEventListener('focusout', function (e) {
+                            if (!gridContainer.contains(e.relatedTarget)) {
+                                resetPreview();
                             }
-
-                            if (brandBadge) {
-                                brandBadge.style.display = 'none';
-                                brandBadge.textContent = '';
-                            }
-
-                            if (stageTopTag) {
-                                stageTopTag.style.display = 'none';
-                            }
-
-                            if (descElem && defaultDesc) {
-                                descElem.textContent = defaultDesc;
-                                descElem.classList.remove('is-product-desc');
-                            }
-
-                            if (stageBottom) {
-                                stageBottom.style.display = 'none';
-                            }
-
-                            if (dynTitle) {
-                                dynTitle.textContent = '';
-                            }
-
-                            if (dynDesc) {
-                                dynDesc.textContent = '';
-                            }
-
-                            items.forEach(function (i) { i.classList.remove('is-active'); });
                         });
                     }
                 });
