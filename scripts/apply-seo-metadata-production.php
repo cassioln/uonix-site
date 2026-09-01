@@ -234,9 +234,9 @@ function uonix_sync_post_title_and_meta( $slugs, $post_type, $clean_title, $titl
 }
 
 /**
- * Sincroniza metadados Rank Math de um termo (categoria) por slug.
+ * Sincroniza metadados Rank Math de um termo (categoria) por slug e opcionalmente sua descrição nativa.
  */
-function uonix_sync_term_meta( $slug, $taxonomy, $title, $desc, $focus_kw ) {
+function uonix_sync_term_meta( $slug, $taxonomy, $title, $desc, $focus_kw, $term_description = '' ) {
 	$term = get_term_by( 'slug', $slug, $taxonomy );
 	if ( ! $term || is_wp_error( $term ) ) {
 		echo "⚠️  [NÃO ENCONTRADO] Termo {$taxonomy}: '{$slug}'\n";
@@ -252,11 +252,24 @@ function uonix_sync_term_meta( $slug, $taxonomy, $title, $desc, $focus_kw ) {
 		return;
 	}
 
+	$desc_changed = false;
+	if ( ! empty( $term_description ) && $term->description !== $term_description ) {
+		$GLOBALS['uonix_changes']++;
+		$desc_changed = true;
+		if ( $GLOBALS['uonix_apply'] ) {
+			wp_update_term( $term_id, $taxonomy, array(
+				'description' => $term_description,
+			) );
+		}
+	} else {
+		$GLOBALS['uonix_noop']++;
+	}
+
 	$c1 = uonix_set_term_meta_if_changed( $term_id, 'rank_math_title', $title );
 	$c2 = uonix_set_term_meta_if_changed( $term_id, 'rank_math_description', $desc );
 	$c3 = uonix_set_term_meta_if_changed( $term_id, 'rank_math_focus_keyword', $focus_kw );
 
-	$changed = ( $c1 || $c2 || $c3 );
+	$changed = ( $desc_changed || $c1 || $c2 || $c3 );
 	$tag     = $GLOBALS['uonix_apply'] ? ( $changed ? 'ATUALIZADO' : 'sem mudança' ) : ( $changed ? 'MUDARIA' : 'sem mudança' );
 	echo "   [{$tag}] Categoria (ID {$term_id}) '{$slug}'\n";
 }
@@ -308,7 +321,8 @@ uonix_sync_post_meta(
 	'servicos', 'page',
 	'Serviços de Ancoragem Predial e Linhas de Vida NR-35 | Uônix',
 	'Serviços especializados em ancoragem predial: instalação de pontos, ensaios de arrancamento estático 1.500 kgf, projetos executivos e emissão de ART CREA em todo o Brasil.',
-	'serviços, serviços de ancoragem, instalação de ancoragem, ensaio de arrancamento'
+	'serviços, serviços de ancoragem, instalação de ancoragem, ensaio de arrancamento',
+	'Serviços de Ancoragem Predial'
 );
 
 uonix_sync_post_meta(
@@ -342,14 +356,14 @@ uonix_sync_post_meta(
 uonix_sync_post_meta(
 	array( 'politica-de-privacidade', 'privacidade' ), 'page',
 	'Política de Privacidade e Proteção de Dados | Uônix',
-	'Conheça nossa política de privacidade e conformidade com a LGPD no tratamento e proteção dos seus dados na Uônix.',
+	'Conheça nossa política de privacidade, tratamento e proteção de dados pessoais conforme a Lei Geral de Proteção de Dados (LGPD).',
 	'política de privacidade, privacidade uonix'
 );
 
 uonix_sync_post_meta(
 	array( 'trabalhe-conosco', 'trabalhe-na-uonix' ), 'page',
 	'Trabalhe na Uônix | Oportunidades em Engenharia e Segurança',
-	'Faça parte da equipe Uônix. Conheça nossas oportunidades nas áreas de engenharia, vendas técnicas e fabricação de sistemas de ancoragem.',
+	'Envie seu currículo para a Uônix. Oportunidades para engenheiros, técnicos de segurança do trabalho e profissionais do setor de fixação e ancoragem.',
 	'trabalhe na uônix, trabalhe conosco, vagas uonix'
 );
 
@@ -362,7 +376,8 @@ uonix_sync_term_meta(
 	'olhal-de-ancoragem', 'product_cat',
 	'Olhal de Ancoragem Inox 304 e 316 | Dispositivos de Ancoragem Uônix',
 	'Olhais e dispositivos de ancoragem tipo A1 fabricados em aço inox 304 e 316. Resistência atestada acima de 1.500 kgf conforme NR-35 e NBR 16325-1. Envio para todo o Brasil.',
-	'olhal de ancoragem, dispositivos de ancoragem, ancoragem inox'
+	'olhal de ancoragem, dispositivos de ancoragem, ancoragem inox',
+	'A Uônix é fabricante de olhais de ancoragem predial e industrial em aço inoxidável AISI 304 e AISI 316, desenvolvidos em rigorosa conformidade com as normas ABNT NBR 16325-1 (Tipo A1), NR-35 e NR-18. Nossos dispositivos de ancoragem são projetados para suportar forças superiores a 1.500 kgf (15 kN), garantindo máxima segurança para trabalhos em altura, fixação de linhas de vida, balancins e cadeirinhas de pintura. Compre direto da fábrica com laudos técnicos, rastreabilidade e envio para todo o Brasil.'
 );
 
 uonix_sync_term_meta(
@@ -524,7 +539,7 @@ $produtos_data = array(
 		'kw'          => 'barra roscada inox 304, barra roscada inox, haste roscada inox',
 	),
 	array(
-		'aliases'     => array( 'grampo-de-cabo-de-aco-galvanizado' ),
+		'aliases'     => array( 'grampo-para-cabo-de-aco', 'grampo-de-cabo-de-aco-galvanizado' ),
 		'clean_title' => 'Grampo de Cabo de Aço',
 		'title'       => 'Grampo para Cabo de Aço Galvanizado (Clip) | Uônix',
 		'desc'        => 'Grampo para cabo de aço galvanizado (clip) para fixação, emenda e laços em cabos. Sela e arco em U que comprimem o cabo com total segurança.',
