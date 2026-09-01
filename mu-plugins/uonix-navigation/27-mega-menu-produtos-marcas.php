@@ -33,8 +33,8 @@ function uonix_estilos_mega_menu_v14()
     ?>
     <style id="uonix-megamenu-hybrid-css">
         /* ==========================================================
-                                       MEGA MENU: ESTRUTURA E PAINÉIS PRINCIPAIS
-                                       ========================================================== */
+                                               MEGA MENU: ESTRUTURA E PAINÉIS PRINCIPAIS
+                                               ========================================================== */
         .uonix-dynamic-cats-wrapper,
         .uonix-dc-panel {
             pointer-events: none !important;
@@ -156,8 +156,8 @@ function uonix_estilos_mega_menu_v14()
         }
 
         /* ==========================================================
-                                       1. LAYOUT CATEGORIAS PADRÃO (FIXAÇÃO QUÍMICA, MECÂNICA, ACESSÓRIOS)
-                                       ========================================================== */
+                                               1. LAYOUT CATEGORIAS PADRÃO (FIXAÇÃO QUÍMICA, MECÂNICA, ACESSÓRIOS)
+                                               ========================================================== */
 
         /* PARTE SUPERIOR: HEADER DINÂMICO COM ALTURA TRAVADA E IMAGENS AMPLIADAS */
         .uonix-dc-header {
@@ -355,13 +355,18 @@ function uonix_estilos_mega_menu_v14()
         }
 
         /* ==========================================================
-                                       2. LAYOUT ESPECIAL DESTAQUE: OLHAIS DE ANCORAGEM (CATEGORIA 1)
-                                       ========================================================== */
+             2. LAYOUT ESPECIAL DESTAQUE: OLHAIS DE ANCORAGEM (CATEGORIA 1)
+            ========================================================== */
         .uonix-dc-panel-featured {
             padding: 24px 30px !important;
             flex-direction: row !important;
             align-items: stretch !important;
             gap: 32px !important;
+        }
+
+        .uonix-dc-panel-featured .uonix-link-ver-linha {
+            font-size: 17.5px !important;
+            margin-left: 18px !important;
         }
 
         .uonix-featured-text {
@@ -513,8 +518,8 @@ function uonix_estilos_mega_menu_v14()
         }
 
         /* ==========================================================
-                                       TRAVAS ABSOLUTAS CONTRA ACHATAMENTO NO MENU FIXO (ANTI-SQUASH)
-                                       ========================================================== */
+                                               TRAVAS ABSOLUTAS CONTRA ACHATAMENTO NO MENU FIXO (ANTI-SQUASH)
+                                               ========================================================== */
         #mega-menu-wrap-primary .uonix-dc-header-img,
         .is-sticky .uonix-dc-header-img,
         .site-header-sticky-inner .uonix-dc-header-img,
@@ -540,7 +545,7 @@ function uonix_estilos_mega_menu_v14()
         .uonix-featured-img {
             width: 100% !important;
             /* height: 200px !important;
-                    max-height: 215px !important; */
+                            max-height: 215px !important; */
             min-height: 200px !important;
             object-fit: contain !important;
             background: transparent !important;
@@ -550,8 +555,8 @@ function uonix_estilos_mega_menu_v14()
         }
 
         /* ==========================================================
-                                       MEGA MARCAS ROW
-                                       ========================================================== */
+                                               MEGA MARCAS ROW
+                                               ========================================================== */
         #mega-menu-wrap-primary #mega-menu-primary li.mega-menu-row:has(.uonix-mega-brands-wrap) {
             background: #ffffff !important;
             border: 2px solid #e2e8f0 !important;
