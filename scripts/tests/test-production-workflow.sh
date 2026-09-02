@@ -263,7 +263,7 @@ for marker in ('code-mutation-started', 'db-mutation-started'):
 require(production, r'^\s{2}authorize:\s*$', 'job de autorização local ausente')
 require(production, r'environment:\s*production-locaweb', 'Environment protegido de produção ausente')
 require(production, r'ENABLE_DEPLOY_PRODUCTION', 'guard persistente de produção ausente')
-require(production, r'PUBLICAR \$\{UONIX_REQUEST_SHA\} EM UONIX\.COM\.BR', 'confirmação não está vinculada ao SHA')
+require(production, r'PUBLICAR \$\{UONIX_REQUEST_SHA\}"', 'confirmação não está vinculada ao SHA')
 require(production, r'UONIX_REQUEST_REF.*?refs/heads/master|refs/heads/master.*?UONIX_REQUEST_REF', 'produção não restringe a ref master')
 
 canonical_values = (
@@ -364,7 +364,7 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
         'PATH': f'{fake_bin}:{os.environ.get("PATH", "")}',
         'UONIX_AUTH_TRANSPORT_LOG': str(marker),
         'UONIX_ENABLE_DEPLOY_PRODUCTION': 'true',
-        'UONIX_PRODUCTION_CONFIRMATION': f'PUBLICAR {sha} EM UONIX.COM.BR',
+        'UONIX_PRODUCTION_CONFIRMATION': f'PUBLICAR {sha}',
         'UONIX_REQUEST_SHA': sha,
         'UONIX_REQUEST_REF': 'refs/heads/master',
         'UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET': 'false',

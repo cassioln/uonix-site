@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: Digite PUBLICAR <SHA> EM UONIX.COM.BR
+        description: Digite PUBLICAR <SHA>
         required: true
         type: string
       migrate_variation_technical_sheet:
@@ -46,7 +46,7 @@ jobs:
           [ "$UONIX_REQUEST_REF" = 'refs/heads/master' ]
           case "$UONIX_REQUEST_SHA" in *[!0-9a-f]*|'') exit 1 ;; esac
           [ "${#UONIX_REQUEST_SHA}" -eq 40 ]
-          expected_confirmation="PUBLICAR ${UONIX_REQUEST_SHA} EM UONIX.COM.BR"
+          expected_confirmation="PUBLICAR ${UONIX_REQUEST_SHA}"
           [ "$UONIX_PRODUCTION_CONFIRMATION" = "$expected_confirmation" ]
           case "$UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET" in true|false) ;; *) exit 1 ;; esac
           [ "$LOCAWEB_SSH_HOST" = 'ftp.uonix.com.br' ]
