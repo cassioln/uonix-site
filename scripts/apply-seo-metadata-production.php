@@ -356,14 +356,14 @@ uonix_sync_post_meta(
 uonix_sync_post_meta(
 	array( 'politica-de-privacidade', 'privacidade' ), 'page',
 	'Política de Privacidade e Proteção de Dados | Uônix',
-	'Conheça nossa política de privacidade, tratamento e proteção de dados pessoais conforme a Lei Geral de Proteção de Dados (LGPD).',
+	'Conheça nossa política de privacidade e conformidade com a LGPD no tratamento e proteção dos seus dados na Uônix.',
 	'política de privacidade, privacidade uonix'
 );
 
 uonix_sync_post_meta(
 	array( 'trabalhe-conosco', 'trabalhe-na-uonix' ), 'page',
 	'Trabalhe na Uônix | Oportunidades em Engenharia e Segurança',
-	'Envie seu currículo para a Uônix. Oportunidades para engenheiros, técnicos de segurança do trabalho e profissionais do setor de fixação e ancoragem.',
+	'Faça parte da equipe Uônix. Conheça nossas oportunidades nas áreas de engenharia, vendas técnicas e fabricação de sistemas de ancoragem.',
 	'trabalhe na uônix, trabalhe conosco, vagas uonix'
 );
 
@@ -540,10 +540,59 @@ $produtos_data = array(
 	),
 	array(
 		'aliases'     => array( 'grampo-para-cabo-de-aco', 'grampo-de-cabo-de-aco-galvanizado' ),
-		'clean_title' => 'Grampo de Cabo de Aço',
+		'clean_title' => 'Grampo para cabo de aço',
 		'title'       => 'Grampo para Cabo de Aço Galvanizado (Clip) | Uônix',
 		'desc'        => 'Grampo para cabo de aço galvanizado (clip) para fixação, emenda e laços em cabos. Sela e arco em U que comprimem o cabo com total segurança.',
-		'kw'          => 'grampo de cabo de aço, grampo para cabo de aço, clip de cabo de aço',
+		'kw'          => 'grampo para cabo de aço, clip de cabo de aço, Grampo de Cabo de Aço',
+	),
+	array(
+		'aliases'     => array( 'cabo-de-aco', 'cabo-de-aco-6x19' ),
+		'clean_title' => 'Cabo de Aço',
+		'title'       => 'Cabo de Aço Galvanizado 6x19 para Ancoragem e Linha de Vida | Uônix',
+		'desc'        => 'Cabo de aço galvanizado 6x19 com alma de fibra ou aço para linhas de vida e ancoragem predial. Alta resistência à tração conforme normas de segurança.',
+		'kw'          => 'cabo de aço, cabo de aço 6x19, cabo de aço galvanizado',
+	),
+	array(
+		'aliases'     => array( 'esticador-forjado' ),
+		'clean_title' => 'Esticador Forjado',
+		'title'       => 'Esticador Forjado para Cabo de Aço e Linha de Vida | Uônix',
+		'desc'        => 'Esticador forjado olhal/manilha e olhal/olhal em aço inox 316 e galvanizado para tensionamento seguro de cabos de aço em linhas de vida horizontais e verticais.',
+		'kw'          => 'esticador forjado, tensor para cabo de aço, esticador inox 316',
+	),
+	array(
+		'aliases'     => array( 'sapatilha-para-cabo-de-aco' ),
+		'clean_title' => 'Sapatilha para Cabo de Aço',
+		'title'       => 'Sapatilha para Cabo de Aço Pesada Inox 316 | Uônix',
+		'desc'        => 'Sapatilha pesada para proteção de laços em cabos de aço contra desgaste e atrito. Fabricada em aço inox 316 para linhas de vida e pontos de ancoragem.',
+		'kw'          => 'sapatilha para cabo de aço, sapatilha pesada, sapatilha inox 316',
+	),
+	array(
+		'aliases'     => array( 'placa-de-identificacao-ancoragem', 'placa-de-identificacao' ),
+		'clean_title' => 'Placa de Identificação para Ponto de Ancoragem',
+		'title'       => 'Placa de Identificação para Ponto de Ancoragem NR-35 | Uônix',
+		'desc'        => 'Placa de identificação em alumínio para dispositivos de ancoragem predial conforme NR-18, NR-35 e NBR 16325-1. Rastreabilidade, inspeções e carga nominal.',
+		'kw'          => 'placa de identificação ancoragem, placa de ancoragem, identificação ponto de ancoragem, placa nr 35',
+	),
+	array(
+		'aliases'     => array( 'escova-de-nylon-pq', 'escova-de-nylon-para-limpeza-de-furos', 'escova-de-nylon-pequena' ),
+		'clean_title' => 'ESCOVA DE NYLON PQ',
+		'title'       => 'ESCOVA DE NYLON PQ | Uônix',
+		'desc'        => 'A escova de nylon para limpeza de furos é projetada para oferecer praticidade e eficiência na remoção de poeira e resíduos em furos de concreto.',
+		'kw'          => 'escova de nylon pq, escova de nylon',
+	),
+	array(
+		'aliases'     => array( 'escova-de-nylon-qde', 'escova-para-limpeza-de-furos-profissional', 'escova-de-nylon-grande' ),
+		'clean_title' => 'ESCOVA DE NYLON QDE',
+		'title'       => 'ESCOVA DE NYLON QDE | Uônix',
+		'desc'        => 'A escova de nylon para limpeza de furos com alça triangular de 10 cm em aço proporciona empunhadura firme e alta eficiência na preparação de furos.',
+		'kw'          => 'escova de nylon qde, escova de nylon grande',
+	),
+	array(
+		'aliases'     => array( 'limpador-de-furos', 'soprador-para-limpeza-de-furos', 'limpador-de-furos-manual' ),
+		'clean_title' => 'Limpador de Furos',
+		'title'       => 'Limpador de Furos Soprador Manual em PVC | Uônix',
+		'desc'        => 'Soprador e limpador manual de furos em concreto da Ancora. Garanta a limpeza perfeita para fixação de chumbadores químicos e mecânicos.',
+		'kw'          => 'limpador de furos, soprador para limpeza de furos, limpador de furos manual',
 	),
 	array(
 		'aliases'     => array( 'chumbador-de-expansao-com-prisioneiro' ),
@@ -551,6 +600,20 @@ $produtos_data = array(
 		'title'       => 'Chumbador de Expansão com Prisioneiro | Uônix',
 		'desc'        => 'Chumbador mecânico de expansão com prisioneiro para fixações estruturais pesadas em concreto maciço. Alta carga de tração e cisalhamento.',
 		'kw'          => 'chumbador de expansão com prisioneiro, chumbador de expansão, chumbador mecânico',
+	),
+	array(
+		'aliases'     => array( 'arruela-lisa-inox-304', 'arruela-comum-inox-304' ),
+		'clean_title' => 'Arruela Lisa Inox 304',
+		'title'       => 'Arruela Lisa Inox 304 1/2” | Uônix',
+		'desc'        => 'Arruela lisa comum em aço inox 304 1/2 polegada para distribuição de carga e aperto em fixações estruturais.',
+		'kw'          => 'arruela lisa inox 304, arruela comum 1/2, arruela inox 1/2',
+	),
+	array(
+		'aliases'     => array( 'arruela-de-pressao-inox', 'arruela-de-pressao' ),
+		'clean_title' => 'Arruela de Pressão Inox',
+		'title'       => 'Arruela de Pressão Inox 1/2” DIN 127 | Uônix',
+		'desc'        => 'Arruela de pressão helicoidal em aço inox 1/2 polegada para travamento anti-vibração em parafusos e porcas conforme norma DIN 127.',
+		'kw'          => 'arruela de pressão inox, arruela de pressão 1/2, arruela din 127',
 	),
 	array(
 		'aliases'     => array( 'chumbador-quimico-aqi380-pro' ),
