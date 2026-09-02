@@ -234,9 +234,9 @@ function uonix_sync_post_title_and_meta( $slugs, $post_type, $clean_title, $titl
 }
 
 /**
- * Sincroniza metadados Rank Math de um termo (categoria) por slug.
+ * Sincroniza metadados Rank Math de um termo (categoria) por slug e opcionalmente sua descrição nativa.
  */
-function uonix_sync_term_meta( $slug, $taxonomy, $title, $desc, $focus_kw ) {
+function uonix_sync_term_meta( $slug, $taxonomy, $title, $desc, $focus_kw, $term_description = '' ) {
 	$term = get_term_by( 'slug', $slug, $taxonomy );
 	if ( ! $term || is_wp_error( $term ) ) {
 		echo "⚠️  [NÃO ENCONTRADO] Termo {$taxonomy}: '{$slug}'\n";
@@ -252,11 +252,24 @@ function uonix_sync_term_meta( $slug, $taxonomy, $title, $desc, $focus_kw ) {
 		return;
 	}
 
+	$desc_changed = false;
+	if ( ! empty( $term_description ) && $term->description !== $term_description ) {
+		$GLOBALS['uonix_changes']++;
+		$desc_changed = true;
+		if ( $GLOBALS['uonix_apply'] ) {
+			wp_update_term( $term_id, $taxonomy, array(
+				'description' => $term_description,
+			) );
+		}
+	} else {
+		$GLOBALS['uonix_noop']++;
+	}
+
 	$c1 = uonix_set_term_meta_if_changed( $term_id, 'rank_math_title', $title );
 	$c2 = uonix_set_term_meta_if_changed( $term_id, 'rank_math_description', $desc );
 	$c3 = uonix_set_term_meta_if_changed( $term_id, 'rank_math_focus_keyword', $focus_kw );
 
-	$changed = ( $c1 || $c2 || $c3 );
+	$changed = ( $desc_changed || $c1 || $c2 || $c3 );
 	$tag     = $GLOBALS['uonix_apply'] ? ( $changed ? 'ATUALIZADO' : 'sem mudança' ) : ( $changed ? 'MUDARIA' : 'sem mudança' );
 	echo "   [{$tag}] Categoria (ID {$term_id}) '{$slug}'\n";
 }
@@ -308,7 +321,8 @@ uonix_sync_post_meta(
 	'servicos', 'page',
 	'Serviços de Ancoragem Predial e Linhas de Vida NR-35 | Uônix',
 	'Serviços especializados em ancoragem predial: instalação de pontos, ensaios de arrancamento estático 1.500 kgf, projetos executivos e emissão de ART CREA em todo o Brasil.',
-	'serviços, serviços de ancoragem, instalação de ancoragem, ensaio de arrancamento'
+	'serviços, serviços de ancoragem, instalação de ancoragem, ensaio de arrancamento',
+	'Serviços de Ancoragem Predial'
 );
 
 uonix_sync_post_meta(
@@ -362,7 +376,8 @@ uonix_sync_term_meta(
 	'olhal-de-ancoragem', 'product_cat',
 	'Olhal de Ancoragem Inox 304 e 316 | Dispositivos de Ancoragem Uônix',
 	'Olhais e dispositivos de ancoragem tipo A1 fabricados em aço inox 304 e 316. Resistência atestada acima de 1.500 kgf conforme NR-35 e NBR 16325-1. Envio para todo o Brasil.',
-	'olhal de ancoragem, dispositivos de ancoragem, ancoragem inox'
+	'olhal de ancoragem, dispositivos de ancoragem, ancoragem inox',
+	'A Uônix é fabricante de olhais de ancoragem predial e industrial em aço inoxidável AISI 304 e AISI 316, desenvolvidos em rigorosa conformidade com as normas ABNT NBR 16325-1 (Tipo A1), NR-35 e NR-18. Nossos dispositivos de ancoragem são projetados para suportar forças superiores a 1.500 kgf (15 kN), garantindo máxima segurança para trabalhos em altura, fixação de linhas de vida, balancins e cadeirinhas de pintura. Compre direto da fábrica com laudos técnicos, rastreabilidade e envio para todo o Brasil.'
 );
 
 uonix_sync_term_meta(
@@ -524,11 +539,60 @@ $produtos_data = array(
 		'kw'          => 'barra roscada inox 304, barra roscada inox, haste roscada inox',
 	),
 	array(
-		'aliases'     => array( 'grampo-de-cabo-de-aco-galvanizado' ),
-		'clean_title' => 'Grampo de Cabo de Aço',
+		'aliases'     => array( 'grampo-para-cabo-de-aco', 'grampo-de-cabo-de-aco-galvanizado' ),
+		'clean_title' => 'Grampo para cabo de aço',
 		'title'       => 'Grampo para Cabo de Aço Galvanizado (Clip) | Uônix',
 		'desc'        => 'Grampo para cabo de aço galvanizado (clip) para fixação, emenda e laços em cabos. Sela e arco em U que comprimem o cabo com total segurança.',
-		'kw'          => 'grampo de cabo de aço, grampo para cabo de aço, clip de cabo de aço',
+		'kw'          => 'grampo para cabo de aço, clip de cabo de aço, Grampo de Cabo de Aço',
+	),
+	array(
+		'aliases'     => array( 'cabo-de-aco', 'cabo-de-aco-6x19' ),
+		'clean_title' => 'Cabo de Aço',
+		'title'       => 'Cabo de Aço Galvanizado 6x19 para Ancoragem e Linha de Vida | Uônix',
+		'desc'        => 'Cabo de aço galvanizado 6x19 com alma de fibra ou aço para linhas de vida e ancoragem predial. Alta resistência à tração conforme normas de segurança.',
+		'kw'          => 'cabo de aço, cabo de aço 6x19, cabo de aço galvanizado',
+	),
+	array(
+		'aliases'     => array( 'esticador-forjado' ),
+		'clean_title' => 'Esticador Forjado',
+		'title'       => 'Esticador Forjado para Cabo de Aço e Linha de Vida | Uônix',
+		'desc'        => 'Esticador forjado olhal/manilha e olhal/olhal em aço inox 316 e galvanizado para tensionamento seguro de cabos de aço em linhas de vida horizontais e verticais.',
+		'kw'          => 'esticador forjado, tensor para cabo de aço, esticador inox 316',
+	),
+	array(
+		'aliases'     => array( 'sapatilha-para-cabo-de-aco' ),
+		'clean_title' => 'Sapatilha para Cabo de Aço',
+		'title'       => 'Sapatilha para Cabo de Aço Pesada Inox 316 | Uônix',
+		'desc'        => 'Sapatilha pesada para proteção de laços em cabos de aço contra desgaste e atrito. Fabricada em aço inox 316 para linhas de vida e pontos de ancoragem.',
+		'kw'          => 'sapatilha para cabo de aço, sapatilha pesada, sapatilha inox 316',
+	),
+	array(
+		'aliases'     => array( 'placa-de-identificacao-ancoragem', 'placa-de-identificacao' ),
+		'clean_title' => 'Placa de Identificação para Ponto de Ancoragem',
+		'title'       => 'Placa de Identificação para Ponto de Ancoragem NR-35 | Uônix',
+		'desc'        => 'Placa de identificação em alumínio para dispositivos de ancoragem predial conforme NR-18, NR-35 e NBR 16325-1. Rastreabilidade, inspeções e carga nominal.',
+		'kw'          => 'placa de identificação ancoragem, placa de ancoragem, identificação ponto de ancoragem, placa nr 35',
+	),
+	array(
+		'aliases'     => array( 'escova-de-nylon-pq', 'escova-de-nylon-para-limpeza-de-furos', 'escova-de-nylon-pequena' ),
+		'clean_title' => 'ESCOVA DE NYLON PQ',
+		'title'       => 'ESCOVA DE NYLON PQ | Uônix',
+		'desc'        => 'A escova de nylon para limpeza de furos é projetada para oferecer praticidade e eficiência na remoção de poeira e resíduos em furos de concreto.',
+		'kw'          => 'escova de nylon pq, escova de nylon',
+	),
+	array(
+		'aliases'     => array( 'escova-de-nylon-qde', 'escova-para-limpeza-de-furos-profissional', 'escova-de-nylon-grande' ),
+		'clean_title' => 'ESCOVA DE NYLON QDE',
+		'title'       => 'ESCOVA DE NYLON QDE | Uônix',
+		'desc'        => 'A escova de nylon para limpeza de furos com alça triangular de 10 cm em aço proporciona empunhadura firme e alta eficiência na preparação de furos.',
+		'kw'          => 'escova de nylon qde, escova de nylon grande',
+	),
+	array(
+		'aliases'     => array( 'limpador-de-furos', 'soprador-para-limpeza-de-furos', 'limpador-de-furos-manual' ),
+		'clean_title' => 'Limpador de Furos',
+		'title'       => 'Limpador de Furos Soprador Manual em PVC | Uônix',
+		'desc'        => 'Soprador e limpador manual de furos em concreto da Ancora. Garanta a limpeza perfeita para fixação de chumbadores químicos e mecânicos.',
+		'kw'          => 'limpador de furos, soprador para limpeza de furos, limpador de furos manual',
 	),
 	array(
 		'aliases'     => array( 'chumbador-de-expansao-com-prisioneiro' ),
@@ -536,6 +600,20 @@ $produtos_data = array(
 		'title'       => 'Chumbador de Expansão com Prisioneiro | Uônix',
 		'desc'        => 'Chumbador mecânico de expansão com prisioneiro para fixações estruturais pesadas em concreto maciço. Alta carga de tração e cisalhamento.',
 		'kw'          => 'chumbador de expansão com prisioneiro, chumbador de expansão, chumbador mecânico',
+	),
+	array(
+		'aliases'     => array( 'arruela-lisa-inox-304', 'arruela-comum-inox-304' ),
+		'clean_title' => 'Arruela Lisa Inox 304',
+		'title'       => 'Arruela Lisa Inox 304 1/2” | Uônix',
+		'desc'        => 'Arruela lisa comum em aço inox 304 1/2 polegada para distribuição de carga e aperto em fixações estruturais.',
+		'kw'          => 'arruela lisa inox 304, arruela comum 1/2, arruela inox 1/2',
+	),
+	array(
+		'aliases'     => array( 'arruela-de-pressao-inox', 'arruela-de-pressao' ),
+		'clean_title' => 'Arruela de Pressão Inox',
+		'title'       => 'Arruela de Pressão Inox 1/2” DIN 127 | Uônix',
+		'desc'        => 'Arruela de pressão helicoidal em aço inox 1/2 polegada para travamento anti-vibração em parafusos e porcas conforme norma DIN 127.',
+		'kw'          => 'arruela de pressão inox, arruela de pressão 1/2, arruela din 127',
 	),
 	array(
 		'aliases'     => array( 'chumbador-quimico-aqi380-pro' ),
