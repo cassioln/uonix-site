@@ -960,11 +960,11 @@ function uonix_gerar_nuvem_tags_global_v3() {
     if (empty($tags)) return '';
     
     $counts = wp_list_pluck($tags, 'count');
-    $min_count = min($counts); 
+    $min_count = min($counts);
     $max_count = max($counts);
     $divisor = max(1, $max_count - $min_count);
 
-    $min_size = 13; 
+    $min_size = 13;
     $max_size = 36;
 
     $word_list = array();
@@ -989,7 +989,7 @@ function uonix_gerar_nuvem_tags_global_v3() {
     ob_start(); ?>
     <div class="uonix-premium-box uonix-tags-widget">
         <h3 class="uonix-section-title">Assuntos</h3>
-        
+
         <div id="uonix-wordcloud-wrap" class="uonix-wordcloud-wrap"></div>
 
         <!-- Fallback Semântico e Acessível para SEO (Googlebot lê todos os links âncora) -->

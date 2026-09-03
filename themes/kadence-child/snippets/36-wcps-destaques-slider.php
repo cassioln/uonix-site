@@ -5,7 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /**
  * UÔNIX: Hook de Orçamento para Sliders WCPS
- * 
+ *
  * - Todas as opções do slider (1 coluna banner, autoplay, setas, paginação) e o CSS
  *   ficam configurados nativamente dentro do painel do plugin WCPS (wp-admin).
  * - O layout sem preço está configurado nativamente em WCPS > Layouts (ID 11188).
