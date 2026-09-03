@@ -44,9 +44,15 @@ final class Uonix_VTST_Table {
 
 		$attribute_columns       = self::attribute_columns( $product, $children );
 		$technical_columns       = array();
-		$rows                    = array();
+		$canonical_columns       = array();
+		$raw_rows                = array();
 		$has_valid_sheet         = false;
 		$inherited_single_values = self::parent_single_value_attributes( $product );
+
+		$canonical_inherited = array();
+		foreach ( $inherited_single_values as $inh_label => $inh_val ) {
+			$canonical_inherited[ self::canonical_key( $inh_label ) ] = $inh_val;
+		}
 
 		foreach ( $children as $child_id ) {
 			$variation = function_exists( 'wc_get_product' ) ? wc_get_product( $child_id ) : false;
@@ -62,60 +68,55 @@ final class Uonix_VTST_Table {
 				$has_valid_sheet = true;
 			}
 
-			$rows[] = array(
-				'attribute_cells'  => self::attribute_cells( $variation, $attribute_columns ),
-				'technical_values' => self::sheet_values( $sheet, $technical_columns ),
-				'has_valid_sheet'  => null !== $sheet,
+			$raw_rows[] = array(
+				'variation'       => $variation,
+				'raw_values'      => self::sheet_canonical_values( $sheet, $canonical_columns, $technical_columns ),
+				'has_valid_sheet' => null !== $sheet,
 			);
 		}
 
-		if ( ! $has_valid_sheet || empty( $rows ) ) {
+		if ( ! $has_valid_sheet || empty( $raw_rows ) ) {
 			return null;
 		}
 
 		foreach ( $inherited_single_values as $inherited_label => $inherited_val ) {
-			$found = false;
-			foreach ( $technical_columns as $existing_label ) {
-				if ( 0 === strcasecmp( $existing_label, $inherited_label ) ) {
-					$found = true;
-					break;
-				}
-			}
-			if ( ! $found ) {
-				$technical_columns[] = $inherited_label;
+			$canon = self::canonical_key( $inherited_label );
+			if ( ! isset( $canonical_columns[ $canon ] ) ) {
+				$canonical_columns[ $canon ] = $inherited_label;
+				$technical_columns[]         = $inherited_label;
 			}
 		}
-
-		foreach ( $rows as &$row ) {
-			foreach ( $technical_columns as $label ) {
-				if ( ! array_key_exists( $label, $row['technical_values'] ) ) {
-					$inherited_match = null;
-					foreach ( $inherited_single_values as $inh_label => $inh_val ) {
-						if ( 0 === strcasecmp( $inh_label, $label ) ) {
-							$inherited_match = $inh_val;
-							break;
-						}
-					}
-					if ( null !== $inherited_match ) {
-						$row['technical_values'][ $label ] = $inherited_match;
-					} else {
-						$row['technical_values'][ $label ] = self::EMPTY_VALUE;
-					}
-				}
-			}
-		}
-		unset( $row );
 
 		$global_tax_map = self::product_global_attribute_taxonomies( $product );
-		foreach ( $rows as &$row ) {
-			$row['technical_cells'] = array();
+		$rows           = array();
+
+		foreach ( $raw_rows as $raw_row ) {
+			$technical_values = array();
+			$technical_cells  = array();
+
 			foreach ( $technical_columns as $label ) {
-				$val      = isset( $row['technical_values'][ $label ] ) ? $row['technical_values'][ $label ] : '';
-				$taxonomy = self::match_global_taxonomy( $label, $global_tax_map );
-				$row['technical_cells'][ $label ] = self::attribute_cell( $taxonomy, $val );
+				$canon = self::canonical_key( $label );
+				if ( isset( $raw_row['raw_values'][ $canon ] ) && '' !== $raw_row['raw_values'][ $canon ] ) {
+					$val = $raw_row['raw_values'][ $canon ];
+				} elseif ( isset( $canonical_inherited[ $canon ] ) ) {
+					$val = $canonical_inherited[ $canon ];
+				} else {
+					$val = self::EMPTY_VALUE;
+				}
+
+				$taxonomy                   = self::match_global_taxonomy( $label, $global_tax_map );
+				$cell                       = self::attribute_cell( $taxonomy, $val );
+				$technical_values[ $label ] = $val;
+				$technical_cells[ $label ]  = $cell;
 			}
+
+			$rows[] = array(
+				'attribute_cells'  => self::attribute_cells( $raw_row['variation'], $attribute_columns ),
+				'technical_values' => $technical_values,
+				'technical_cells'  => $technical_cells,
+				'has_valid_sheet'  => $raw_row['has_valid_sheet'],
+			);
 		}
-		unset( $row );
 
 		return array(
 			'attribute_columns' => $attribute_columns,
@@ -364,11 +365,24 @@ final class Uonix_VTST_Table {
 	}
 
 	/**
-	 * @param array<string, mixed>|null $sheet Ficha normalizada.
-	 * @param array<int, string> $technical_columns Colunas encontradas por referência.
-	 * @return array<string, string>
+	 * Retorna chave canônica insensível a maiúsculas/minúsculas para agrupamento de rótulos.
+	 *
+	 * @param mixed $label Rótulo do campo.
+	 * @return string
 	 */
-	private static function sheet_values( $sheet, array &$technical_columns ) {
+	public static function canonical_key( $label ) {
+		return mb_strtolower( trim( (string) $label ), 'UTF-8' );
+	}
+
+	/**
+	 * Coleta valores da ficha técnica indexados por chave canônica e registra as colunas preservando o primeiro rótulo exibível.
+	 *
+	 * @param array<string, mixed>|null $sheet Ficha normalizada.
+	 * @param array<string, string> $canonical_columns Mapa de chave canônica para primeiro display label encontrado.
+	 * @param array<int, string> $technical_columns Colunas ordenadas por referência.
+	 * @return array<string, string> Mapa canonical_key => value
+	 */
+	private static function sheet_canonical_values( $sheet, array &$canonical_columns, array &$technical_columns ) {
 		$values = array();
 		if ( ! is_array( $sheet ) || empty( $sheet['sections'] ) || ! is_array( $sheet['sections'] ) ) {
 			return $values;
@@ -378,17 +392,32 @@ final class Uonix_VTST_Table {
 			foreach ( $section['items'] ?? array() as $item ) {
 				$label = isset( $item['label'] ) ? (string) $item['label'] : '';
 				$value = isset( $item['value'] ) ? (string) $item['value'] : '';
-				if ( '' === $label || '' === $value ) {
+				$canon = self::canonical_key( $label );
+				if ( '' === $canon || '' === $value ) {
 					continue;
 				}
-				if ( ! in_array( $label, $technical_columns, true ) ) {
-					$technical_columns[] = $label;
+				if ( ! isset( $canonical_columns[ $canon ] ) ) {
+					$canonical_columns[ $canon ] = $label;
+					$technical_columns[]         = $label;
 				}
-				$values[ $label ] = $value;
+				$values[ $canon ] = $value;
 			}
 		}
 
 		return $values;
+	}
+
+	/**
+	 * @param array<string, mixed>|null $sheet Ficha normalizada.
+	 * @param array<int, string> $technical_columns Colunas encontradas por referência.
+	 * @return array<string, string>
+	 */
+	private static function sheet_values( $sheet, array &$technical_columns ) {
+		$canonical_columns = array();
+		foreach ( $technical_columns as $col ) {
+			$canonical_columns[ self::canonical_key( $col ) ] = $col;
+		}
+		return self::sheet_canonical_values( $sheet, $canonical_columns, $technical_columns );
 	}
 
 	/**
@@ -400,8 +429,8 @@ final class Uonix_VTST_Table {
 	private static function has_duplicate_item_labels( array $sheet ) {
 		$labels = array();
 		foreach ( $sheet['sections'] as $section ) {
-			foreach ( $section['items'] as $item ) {
-				$label = mb_strtolower( trim( (string) $item['label'] ), 'UTF-8' );
+			foreach ( $section['items'] ?? array() as $item ) {
+				$label = self::canonical_key( isset( $item['label'] ) ? $item['label'] : '' );
 				if ( '' === $label ) {
 					continue;
 				}

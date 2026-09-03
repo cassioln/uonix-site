@@ -3480,4 +3480,50 @@ vts_assert_contains( '<a href="https://example.test/norma/nbr-16325" rel="tag">N
 vts_assert_contains( '<td>1 ano</td>', $inherited_tab_html, 'HTML renderiza atributo personalizado do produto como texto simples sem link' );
 vts_assert_not_contains( '>1 ano</a>', $inherited_tab_html, 'HTML nunca inclui tag de link para atributo local Garantia' );
 
+// 8. Teste comportamental contra colisão por caixa (norma vs Norma) e precedência de sobrescrita
+$case_sheet_1 = vts_valid_sheet();
+$case_sheet_1['sections'][0]['items'] = array(
+	array( 'label' => 'norma', 'value' => 'NBR 16325-sobrescrita' ),
+);
+$case_sheet_2 = vts_valid_sheet();
+$case_sheet_2['sections'][0]['items'] = array(
+	array( 'label' => 'Norma', 'value' => 'NBR 16325-v2' ),
+);
+$case_sheet_3 = null;
+
+$GLOBALS['vts_products'][20301] = new VTS_Fake_Table_Variation( 20301, array( 'pa_material' => 'inox' ), $case_sheet_1 );
+$GLOBALS['vts_products'][20302] = new VTS_Fake_Table_Variation( 20302, array( 'pa_material' => 'galvanizado' ), $case_sheet_2 );
+$GLOBALS['vts_products'][20303] = new VTS_Fake_Table_Variation( 20303, array( 'pa_material' => 'carbono' ), $case_sheet_3 );
+
+$case_parent = new VTS_Fake_Table_Product(
+	20300,
+	'variable',
+	array(
+		'pa_material' => $attr_material,
+		'pa_norma'    => $attr_norma,
+		'Garantia'    => $attr_custom,
+	),
+	array( 20301, 20302, 20303 )
+);
+$GLOBALS['vts_products'][20300] = $case_parent;
+$GLOBALS['vts_product_terms'][20300]['pa_norma'] = array( 'NBR 16325' );
+
+$case_matrix = Uonix_VTST_Table::build_matrix( $case_parent );
+vts_assert_true( null !== $case_matrix, 'matriz com rótulos em caixas diferentes é montada com sucesso' );
+vts_assert_same( 2, count( $case_matrix['technical_columns'] ), 'exatamente 2 colunas técnicas (norma e Garantia), sem duplicatas por caixa' );
+vts_assert_same( array( 'norma', 'Garantia' ), $case_matrix['technical_columns'], 'preserva apenas o primeiro rótulo exibível (norma) e unifica com herança' );
+
+vts_assert_same( 'NBR 16325-sobrescrita', $case_matrix['rows'][0]['technical_values']['norma'], 'variação 1 preserva a sobrescrita específica de norma' );
+vts_assert_same( '1 ano', $case_matrix['rows'][0]['technical_values']['Garantia'], 'variação 1 herda Garantia do produto pai' );
+
+vts_assert_same( 'NBR 16325-v2', $case_matrix['rows'][1]['technical_values']['norma'], 'variação 2 unifica na mesma coluna técnica com o valor específico' );
+vts_assert_same( '1 ano', $case_matrix['rows'][1]['technical_values']['Garantia'], 'variação 2 herda Garantia do produto pai' );
+
+vts_assert_same( 'NBR 16325', $case_matrix['rows'][2]['technical_values']['norma'], 'variação 3 herda o valor pai na coluna unificada' );
+vts_assert_same( '1 ano', $case_matrix['rows'][2]['technical_values']['Garantia'], 'variação 3 herda Garantia do produto pai' );
+
+vts_assert_same( 2, count( $case_matrix['rows'][0]['technical_values'] ), 'linha 1 não possui colunas extras ou valores herdados duplicados' );
+vts_assert_same( 2, count( $case_matrix['rows'][1]['technical_values'] ), 'linha 2 não possui colunas extras ou valores herdados duplicados' );
+vts_assert_same( 2, count( $case_matrix['rows'][2]['technical_values'] ), 'linha 3 não possui colunas extras ou valores herdados duplicados' );
+
 printf( "PASS: contratos da ficha técnica por variação. (%d asserções)\n", $GLOBALS['vts_assertions'] );
