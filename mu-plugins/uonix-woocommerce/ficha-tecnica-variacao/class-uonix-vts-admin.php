@@ -16,6 +16,7 @@ final class Uonix_VTS_Admin {
 		add_action( 'woocommerce_admin_process_variation_object', array( __CLASS__, 'save_variation' ), 10, 2 );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ), 10, 1 );
 		add_action( 'wp_ajax_uonix_get_variation_technical_sheet', array( __CLASS__, 'ajax_get_copy_sheet' ), 10, 0 );
+		add_action( 'wp_ajax_uonix_get_parent_attributes', array( __CLASS__, 'ajax_get_parent_attributes' ), 10, 0 );
 	}
 
 	/**
@@ -55,9 +56,10 @@ final class Uonix_VTS_Admin {
 			array(
 				'parentId'         => $parent_id,
 				'ajaxUrl'          => admin_url( 'admin-ajax.php' ),
-				'nonce'            => wp_create_nonce( 'uonix_variation_technical_sheet_copy' ),
-				'copyAction'       => 'uonix_get_variation_technical_sheet',
-				'copyOptions'      => self::copy_options( $parent_id ),
+				'nonce'                  => wp_create_nonce( 'uonix_variation_technical_sheet_copy' ),
+				'copyAction'             => 'uonix_get_variation_technical_sheet',
+				'parentAttributesAction' => 'uonix_get_parent_attributes',
+				'copyOptions'            => self::copy_options( $parent_id ),
 				'parentAttributes' => self::parent_non_variation_attributes( $parent_id ),
 				'strings'          => array(
 					'removeConfirm'   => 'Remover a ficha técnica desta variação ao salvar?',
@@ -277,6 +279,37 @@ final class Uonix_VTS_Admin {
 			return;
 		}
 		wp_send_json_success( array( 'sheet' => $result['sheet'] ) );
+	}
+
+	/**
+	 * Endpoint autenticado para recarregar atributos informativos atualizados do produto pai via AJAX.
+	 */
+	public static function ajax_get_parent_attributes() {
+		if ( false === check_ajax_referer( 'uonix_variation_technical_sheet_copy', 'nonce', false ) ) {
+			wp_send_json_error( array( 'code' => 'invalid_nonce' ), 403 );
+			return;
+		}
+
+		$parent_raw = isset( $_POST['parent_id'] ) ? wp_unslash( $_POST['parent_id'] ) : 0;
+		$parent_id  = is_scalar( $parent_raw ) ? absint( $parent_raw ) : 0;
+		if ( ! $parent_id ) {
+			wp_send_json_error( array( 'code' => 'invalid_request' ), 400 );
+			return;
+		}
+		if ( ! current_user_can( 'edit_post', $parent_id ) ) {
+			wp_send_json_error( array( 'code' => 'forbidden' ), 403 );
+			return;
+		}
+
+		if ( function_exists( 'clean_post_cache' ) ) {
+			clean_post_cache( $parent_id );
+		}
+		if ( function_exists( 'wc_delete_product_transients' ) ) {
+			wc_delete_product_transients( $parent_id );
+		}
+
+		$attributes = self::parent_non_variation_attributes( $parent_id );
+		wp_send_json_success( array( 'attributes' => $attributes ) );
 	}
 
 	/**

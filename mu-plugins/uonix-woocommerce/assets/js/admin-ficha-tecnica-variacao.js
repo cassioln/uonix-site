@@ -173,7 +173,7 @@
 
 	function refreshRootLabelSuggestions($root) {
 		const parentAttrs = Array.isArray(config.parentAttributes) ? config.parentAttributes : [];
-		if (parentAttrs.length === 0 || !$root || !$root.length) {
+		if (!$root || !$root.length) {
 			return;
 		}
 
@@ -223,8 +223,10 @@
 	}
 
 	function ensureItemDatalists($item) {
-		const parentAttrs = Array.isArray(config.parentAttributes) ? config.parentAttributes : [];
-		if (parentAttrs.length === 0) {
+		const $labelInput = $item.find('.uonix-vts-admin__item-label');
+		const $valueInput = $item.find('.uonix-vts-admin__item-value');
+
+		if ($labelInput.attr('list')) {
 			return;
 		}
 
@@ -232,10 +234,8 @@
 		const labelListId = 'uonix-vts-labels-' + datalistSequence;
 		const valueListId = 'uonix-vts-values-' + datalistSequence;
 
-		const $labelInput = $item.find('.uonix-vts-admin__item-label');
-		const $valueInput = $item.find('.uonix-vts-admin__item-value');
-
 		const $labelList = $('<datalist>', { id: labelListId });
+		const parentAttrs = Array.isArray(config.parentAttributes) ? config.parentAttributes : [];
 		parentAttrs.forEach(function (attr) {
 			if (attr && attr.label) {
 				const opt = document.createElement('option');
@@ -251,12 +251,16 @@
 
 		$item.append($labelList).append($valueList);
 
+		function getParentAttrs() {
+			return Array.isArray(config.parentAttributes) ? config.parentAttributes : [];
+		}
+
 		function getMatchedAttribute() {
 			const currentLabel = String($labelInput.val() || '').trim().toLowerCase();
 			if (!currentLabel) {
 				return null;
 			}
-			return parentAttrs.find(function (attr) {
+			return getParentAttrs().find(function (attr) {
 				return String(attr && attr.label || '').trim().toLowerCase() === currentLabel;
 			}) || null;
 		}
@@ -511,6 +515,65 @@
 		$root.find('.uonix-vts-admin__copy').prop('disabled', $select.find('option').length < 2);
 	}
 
+	let isReloadingAttributes = false;
+
+	function isSaveAttributesRequest(data) {
+		if (typeof data === 'string') {
+			return data.indexOf('woocommerce_save_attributes') !== -1;
+		}
+		if (data && typeof data === 'object' && typeof data.get === 'function') {
+			return data.get('action') === 'woocommerce_save_attributes';
+		}
+		if (data && typeof data === 'object' && data.action === 'woocommerce_save_attributes') {
+			return true;
+		}
+		return false;
+	}
+
+	function updateAllVariationDatalists() {
+		$('.uonix-vts-admin').each(function () {
+			const $root = $(this);
+			$root.find('.uonix-vts-admin__item').each(function () {
+				ensureItemDatalists($(this));
+			});
+			$root.find('.uonix-vts-admin__item-label').each(function () {
+				$(this).triggerHandler('input');
+			});
+			refreshRootLabelSuggestions($root);
+		});
+	}
+
+	function reloadParentAttributes(callback) {
+		if (!config.ajaxUrl || !config.nonce || !config.parentId || isReloadingAttributes) {
+			if (typeof callback === 'function') {
+				callback();
+			}
+			return;
+		}
+
+		isReloadingAttributes = true;
+		$.ajax({
+			url: config.ajaxUrl,
+			type: 'POST',
+			dataType: 'json',
+			data: {
+				action: config.parentAttributesAction || 'uonix_get_parent_attributes',
+				nonce: config.nonce,
+				parent_id: config.parentId
+			}
+		}).done(function (response) {
+			if (response && response.success && response.data && Array.isArray(response.data.attributes)) {
+				config.parentAttributes = response.data.attributes;
+				updateAllVariationDatalists();
+			}
+		}).always(function () {
+			isReloadingAttributes = false;
+			if (typeof callback === 'function') {
+				callback();
+			}
+		});
+	}
+
 	function initAll() {
 		$('.uonix-vts-admin').each(function () {
 			const $root = $(this);
@@ -672,11 +735,32 @@
 	$('#woocommerce-product-data')
 		.on(
 			'woocommerce_variations_loaded woocommerce_variations_added',
-			initAll
+			function () {
+				initAll();
+				reloadParentAttributes();
+			}
 		)
 		.on(
 			'woocommerce_variations_saved',
 			reconcileSaved
+		)
+		.on(
+			'click',
+			'.variations_tab a, a[href="#variable_product_options"]',
+			function () {
+				reloadParentAttributes();
+			}
 		);
+
+	$(document).ajaxSuccess(function (event, xhr, settings) {
+		if (settings && isSaveAttributesRequest(settings.data)) {
+			reloadParentAttributes();
+		}
+	});
+
+	$(document.body).on('woocommerce_attributes_saved', function () {
+		reloadParentAttributes();
+	});
+
 	$(initAll);
 })(jQuery);

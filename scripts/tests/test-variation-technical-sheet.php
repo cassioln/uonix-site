@@ -1171,6 +1171,15 @@ vts_assert_hook(
 
 vts_assert_hook(
 	'vts_actions',
+	'wp_ajax_uonix_get_parent_attributes',
+	array( 'Uonix_VTS_Admin', 'ajax_get_parent_attributes' ),
+	10,
+	0,
+	'endpoint AJAX de atributos informativos registrado sem argumentos'
+);
+
+vts_assert_hook(
+	'vts_actions',
 	'woocommerce_product_after_variable_attributes',
 	array( 'Uonix_VTS_Admin', 'render_editor' ),
 	10,
@@ -1265,6 +1274,33 @@ $_POST = array( 'source_id' => '10411', 'parent_id' => '10382' );
 $ajax_without_sheet = vts_capture_json_response( array( 'Uonix_VTS_Admin', 'ajax_get_copy_sheet' ) );
 vts_assert_same( false, $ajax_without_sheet['success'], 'origem sem ficha falha também no endpoint' );
 vts_assert_same( array( 'code' ), array_keys( $ajax_without_sheet['data'] ), 'origem sem ficha não expõe outros dados via AJAX' );
+
+$_POST = array(
+	'parent_id' => '10382',
+);
+$GLOBALS['vts_nonce_valid'] = true;
+$GLOBALS['vts_editable_posts'][10382] = true;
+$ajax_attrs_success = vts_capture_json_response( array( 'Uonix_VTS_Admin', 'ajax_get_parent_attributes' ) );
+vts_assert_same( true, $ajax_attrs_success['success'], 'endpoint de atributos retorna sucesso' );
+vts_assert_same( array( 'attributes' ), array_keys( $ajax_attrs_success['data'] ), 'endpoint retorna lista de atributos' );
+
+$GLOBALS['vts_nonce_valid'] = false;
+$ajax_attrs_bad_nonce = vts_capture_json_response( array( 'Uonix_VTS_Admin', 'ajax_get_parent_attributes' ) );
+vts_assert_same( false, $ajax_attrs_bad_nonce['success'], 'nonce inválido é recusado no endpoint de atributos' );
+vts_assert_same( 403, $ajax_attrs_bad_nonce['status'], 'nonce inválido responde 403' );
+
+$GLOBALS['vts_nonce_valid'] = true;
+$GLOBALS['vts_editable_posts'][10382] = false;
+$ajax_attrs_forbidden = vts_capture_json_response( array( 'Uonix_VTS_Admin', 'ajax_get_parent_attributes' ) );
+vts_assert_same( false, $ajax_attrs_forbidden['success'], 'usuário sem edit_post é recusado no endpoint de atributos' );
+vts_assert_same( 403, $ajax_attrs_forbidden['status'], 'falta de capacidade responde 403' );
+
+$_POST = array();
+$ajax_attrs_invalid = vts_capture_json_response( array( 'Uonix_VTS_Admin', 'ajax_get_parent_attributes' ) );
+vts_assert_same( false, $ajax_attrs_invalid['success'], 'falta de parent_id é recusada' );
+vts_assert_same( 400, $ajax_attrs_invalid['status'], 'falta de parent_id responde 400' );
+
+$GLOBALS['vts_editable_posts'][10382] = true;
 $_POST = array();
 
 $GLOBALS['vts_current_screen']  = (object) array( 'post_type' => 'product' );
@@ -3371,6 +3407,11 @@ vts_assert_contains( 'ensureItemDatalists($item);', $admin_js, 'cada novo item r
 vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--tagged', $admin_css, 'CSS possui estilo visual exclusivo de tag para o rótulo' );
 vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__item-value.uonix-vts-admin__item-value--tagged', $admin_css, 'CSS possui estilo visual exclusivo de tag para o valor' );
 vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--duplicate', $admin_css, 'CSS possui estilo visual exclusivo de erro para rótulo duplicado' );
+vts_assert_contains( 'function reloadParentAttributes(callback)', $admin_js, 'script possui rotina para recarregar atributos via AJAX' );
+vts_assert_contains( 'function isSaveAttributesRequest(data)', $admin_js, 'script detecta requisições de salvamento de atributos' );
+vts_assert_contains( 'woocommerce_save_attributes', $admin_js, 'script observa o salvamento nativo de atributos do WooCommerce' );
+vts_assert_contains( 'woocommerce_attributes_saved', $admin_js, 'script observa o evento de atributos salvos' );
+vts_assert_contains( 'a[href="#variable_product_options"]', $admin_js, 'script recarrega atributos ao clicar na aba de variações' );
 
 // 3. attribute_columns ignora atributos não variantes
 $table_attr_cols = Uonix_VTST_Table::attribute_columns( $parent_with_attrs, array( 20201, 20202 ) );
