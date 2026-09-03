@@ -106,6 +106,17 @@ final class Uonix_VTST_Table {
 		}
 		unset( $row );
 
+		$global_tax_map = self::product_global_attribute_taxonomies( $product );
+		foreach ( $rows as &$row ) {
+			$row['technical_cells'] = array();
+			foreach ( $technical_columns as $label ) {
+				$val      = isset( $row['technical_values'][ $label ] ) ? $row['technical_values'][ $label ] : '';
+				$taxonomy = self::match_global_taxonomy( $label, $global_tax_map );
+				$row['technical_cells'][ $label ] = self::attribute_cell( $taxonomy, $val );
+			}
+		}
+		unset( $row );
+
 		return array(
 			'attribute_columns' => $attribute_columns,
 			'technical_columns' => $technical_columns,
@@ -175,7 +186,17 @@ final class Uonix_VTST_Table {
 				echo 0 === $index ? '</th>' : '</td>';
 			}
 			foreach ( $matrix['technical_columns'] as $label ) {
-				echo '<td>' . esc_html( $row['technical_values'][ $label ] ) . '</td>';
+				$cell = isset( $row['technical_cells'][ $label ] ) ? $row['technical_cells'][ $label ] : array(
+					'text' => ( isset( $row['technical_values'][ $label ] ) ? $row['technical_values'][ $label ] : '' ),
+					'url'  => '',
+				);
+				echo '<td>';
+				if ( '' !== $cell['url'] ) {
+					echo '<a href="' . esc_url( $cell['url'] ) . '" rel="tag">' . esc_html( $cell['text'] ) . '</a>';
+				} else {
+					echo esc_html( $cell['text'] );
+				}
+				echo '</td>';
 			}
 			echo '</tr>';
 		}
@@ -411,11 +432,14 @@ final class Uonix_VTST_Table {
 	 * @return array<string, string>
 	 */
 	private static function attribute_cell( $taxonomy, $value ) {
-		if ( '' === $value ) {
+		if ( '' === $value || self::EMPTY_VALUE === $value ) {
 			return array( 'text' => self::EMPTY_VALUE, 'url' => '' );
 		}
-		if ( function_exists( 'taxonomy_exists' ) && taxonomy_exists( $taxonomy ) && function_exists( 'get_term_by' ) ) {
+		if ( '' !== $taxonomy && function_exists( 'taxonomy_exists' ) && taxonomy_exists( $taxonomy ) && function_exists( 'get_term_by' ) ) {
 			$term = get_term_by( 'slug', $value, $taxonomy );
+			if ( ! $term || ( function_exists( 'is_wp_error' ) && is_wp_error( $term ) ) ) {
+				$term = get_term_by( 'name', $value, $taxonomy );
+			}
 			if ( $term && ( ! function_exists( 'is_wp_error' ) || ! is_wp_error( $term ) ) && isset( $term->name ) ) {
 				$url = function_exists( 'get_term_link' ) ? get_term_link( $term ) : '';
 				return array(
@@ -425,6 +449,88 @@ final class Uonix_VTST_Table {
 			}
 		}
 		return array( 'text' => $value, 'url' => '' );
+	}
+
+	/**
+	 * Mapeia atributos globais (taxonomias) do produto para seus respectivos nomes de taxonomia.
+	 * Atributos locais/personalizados do produto (não globais) são explicitamente excluídos.
+	 *
+	 * @param mixed $product Produto.
+	 * @return array<string, string> Mapa [rótulo_normalizado => taxonomia]
+	 */
+	public static function product_global_attribute_taxonomies( $product ) {
+		if ( ! is_object( $product ) || ! method_exists( $product, 'get_attributes' ) ) {
+			return array();
+		}
+		$attributes = $product->get_attributes();
+		if ( ! is_array( $attributes ) ) {
+			return array();
+		}
+
+		$global_map = array();
+		$custom_set = array();
+
+		foreach ( $attributes as $name => $attribute ) {
+			if ( ! is_object( $attribute ) ) {
+				continue;
+			}
+
+			$attr_name = method_exists( $attribute, 'get_name' ) ? (string) $attribute->get_name() : (string) $name;
+			$label     = '';
+			if ( method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy() ) {
+				$tax_obj = method_exists( $attribute, 'get_taxonomy_object' ) ? $attribute->get_taxonomy_object() : null;
+				if ( $tax_obj && isset( $tax_obj->attribute_label ) && '' !== trim( (string) $tax_obj->attribute_label ) ) {
+					$label = (string) $tax_obj->attribute_label;
+				} elseif ( function_exists( 'wc_attribute_label' ) ) {
+					$label = (string) wc_attribute_label( $attr_name );
+				}
+			} else {
+				$label = $attr_name;
+			}
+
+			$label = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( $label, true ) : strip_tags( $label );
+			$label = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $label ) : trim( $label );
+
+			$is_global = method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy();
+
+			if ( ! $is_global ) {
+				if ( '' !== $label ) {
+					$custom_set[ mb_strtolower( $label, 'UTF-8' ) ] = true;
+				}
+				$custom_set[ mb_strtolower( $attr_name, 'UTF-8' ) ] = true;
+				continue;
+			}
+
+			$taxonomy = $attr_name;
+			if ( '' !== $label ) {
+				$global_map[ mb_strtolower( $label, 'UTF-8' ) ] = $taxonomy;
+			}
+			$global_map[ mb_strtolower( $taxonomy, 'UTF-8' ) ] = $taxonomy;
+			if ( 0 === strpos( $taxonomy, 'pa_' ) ) {
+				$global_map[ mb_strtolower( substr( $taxonomy, 3 ), 'UTF-8' ) ] = $taxonomy;
+			}
+		}
+
+		foreach ( $custom_set as $custom_key => $_ ) {
+			unset( $global_map[ $custom_key ] );
+		}
+
+		return $global_map;
+	}
+
+	/**
+	 * Localiza a taxonomia global associada a um rótulo, se for atributo global do produto.
+	 *
+	 * @param string $label Rótulo do campo técnico.
+	 * @param array<string, string> $global_tax_map Mapa de taxonomias globais.
+	 * @return string Nome da taxonomia ou vazio.
+	 */
+	public static function match_global_taxonomy( $label, array $global_tax_map ) {
+		$normalized = mb_strtolower( trim( (string) $label ), 'UTF-8' );
+		if ( '' !== $normalized && isset( $global_tax_map[ $normalized ] ) ) {
+			return $global_tax_map[ $normalized ];
+		}
+		return '';
 	}
 
 	/**

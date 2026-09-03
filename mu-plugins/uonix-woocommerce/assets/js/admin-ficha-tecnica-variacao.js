@@ -218,7 +218,54 @@
 			}
 		}
 
-		$labelInput.on('input change', updateValueSuggestions);
+		function updateTagState() {
+			const currentVal = String($labelInput.val() || '');
+			const currentTrim = currentVal.trim().toLowerCase();
+			const matched = parentAttrs.find(function (attr) {
+				return String(attr && attr.label || '').trim().toLowerCase() === currentTrim;
+			});
+			if (matched && currentTrim !== '') {
+				$labelInput.addClass('uonix-vts-admin__item-label--tagged');
+				$labelInput.attr('title', 'Atributo vinculado do produto: ' + matched.label + ' (apagar limpa a tag)');
+			} else {
+				$labelInput.removeClass('uonix-vts-admin__item-label--tagged');
+				$labelInput.removeAttr('title');
+			}
+		}
+
+		function clearTagAndValue() {
+			$labelInput.val('');
+			$labelInput.removeClass('uonix-vts-admin__item-label--tagged');
+			$labelInput.removeAttr('title');
+			updateValueSuggestions();
+			$labelInput.trigger('input').trigger('change');
+		}
+
+		$labelInput.on('keydown', function (e) {
+			if ($labelInput.hasClass('uonix-vts-admin__item-label--tagged')) {
+				if (e.key === 'Backspace' || e.key === 'Delete' || e.keyCode === 8 || e.keyCode === 46) {
+					e.preventDefault();
+					clearTagAndValue();
+				}
+			}
+		});
+
+		$labelInput.on('beforeinput', function (e) {
+			if ($labelInput.hasClass('uonix-vts-admin__item-label--tagged')) {
+				const inputType = e.originalEvent && e.originalEvent.inputType;
+				if (inputType === 'deleteContentBackward' || inputType === 'deleteContentForward' || inputType === 'deleteByCut') {
+					e.preventDefault();
+					clearTagAndValue();
+				}
+			}
+		});
+
+		$labelInput.on('input change', function () {
+			updateTagState();
+			updateValueSuggestions();
+		});
+
+		updateTagState();
 		updateValueSuggestions();
 	}
 

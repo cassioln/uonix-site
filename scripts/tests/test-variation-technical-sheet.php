@@ -548,14 +548,25 @@ function taxonomy_exists( $taxonomy ) {
 }
 
 function get_term_by( $field, $value, $taxonomy ) {
-	if ( 'slug' !== $field || ! isset( $GLOBALS['vts_terms'][ $taxonomy ][ $value ] ) ) {
-		return false;
+	if ( 'slug' === $field && isset( $GLOBALS['vts_terms'][ $taxonomy ][ $value ] ) ) {
+		return (object) array(
+			'name'     => $GLOBALS['vts_terms'][ $taxonomy ][ $value ],
+			'slug'     => $value,
+			'taxonomy' => $taxonomy,
+		);
 	}
-	return (object) array(
-		'name'     => $GLOBALS['vts_terms'][ $taxonomy ][ $value ],
-		'slug'     => $value,
-		'taxonomy' => $taxonomy,
-	);
+	if ( 'name' === $field && isset( $GLOBALS['vts_terms'][ $taxonomy ] ) ) {
+		foreach ( $GLOBALS['vts_terms'][ $taxonomy ] as $slug => $name ) {
+			if ( 0 === strcasecmp( (string) $name, (string) $value ) ) {
+				return (object) array(
+					'name'     => $name,
+					'slug'     => $slug,
+					'taxonomy' => $taxonomy,
+				);
+			}
+		}
+	}
+	return false;
 }
 
 function is_wp_error( $value ) {
@@ -3315,6 +3326,9 @@ $GLOBALS['vts_products'][20200] = $parent_with_attrs;
 $GLOBALS['vts_product_terms'][20200]['pa_material'] = array( 'Inox', 'Galvanizado' );
 $GLOBALS['vts_product_terms'][20200]['pa_corpo']    = array( '4"', '6"' );
 $GLOBALS['vts_product_terms'][20200]['pa_norma']    = array( 'NBR 16325' );
+$GLOBALS['vts_terms']['pa_corpo']['4-pol']          = '4"';
+$GLOBALS['vts_terms']['pa_corpo']['6-pol']          = '6"';
+$GLOBALS['vts_terms']['pa_norma']['nbr-16325']      = 'NBR 16325';
 
 // 1. parent_non_variation_attributes no admin
 $admin_parent_attrs = Uonix_VTS_Admin::parent_non_variation_attributes( 20200 );
@@ -3330,7 +3344,12 @@ vts_assert_same( array( '1 ano' ), $admin_parent_attrs[2]['options'], 'opções 
 vts_assert_contains( 'function ensureItemDatalists($item)', $admin_js, 'script inclui vinculador de datalists para autocomplete' );
 vts_assert_contains( 'parentAttrs = Array.isArray(config.parentAttributes)', $admin_js, 'script valida atributos do pai como array' );
 vts_assert_contains( 'updateValueSuggestions()', $admin_js, 'script sincroniza sugestões dinamicamente no input/change' );
+vts_assert_contains( 'function updateTagState()', $admin_js, 'script detecta quando o rótulo usa uma sugestão de atributo' );
+vts_assert_contains( 'uonix-vts-admin__item-label--tagged', $admin_js, 'script adiciona classe visual de tag ao rótulo vinculado' );
+vts_assert_contains( 'function clearTagAndValue()', $admin_js, 'script possui rotina de limpeza atômica ao apagar letra da tag' );
+vts_assert_contains( 'deleteContentBackward', $admin_js, 'script suporta exclusão atômica da tag em teclados virtuais' );
 vts_assert_contains( 'ensureItemDatalists($item);', $admin_js, 'cada novo item recebe os datalists' );
+vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--tagged', $admin_css, 'CSS possui estilo visual exclusivo de tag para o rótulo' );
 
 // 3. attribute_columns ignora atributos não variantes
 $table_attr_cols = Uonix_VTST_Table::attribute_columns( $parent_with_attrs, array( 20201, 20202 ) );
@@ -3373,5 +3392,30 @@ vts_assert_same( '1 ano', $inherited_matrix['rows'][0]['technical_values']['Gara
 vts_assert_same( '6"', $inherited_matrix['rows'][1]['technical_values']['Corpo'], 'variação 2 usa valor 6" da ficha técnica' );
 vts_assert_same( 'NBR 16325-1', $inherited_matrix['rows'][1]['technical_values']['Norma'], 'variação 2 preserva sobrescrita da ficha técnica' );
 vts_assert_same( '1 ano', $inherited_matrix['rows'][1]['technical_values']['Garantia'], 'variação 2 herda automaticamente Garantia do produto pai' );
+
+// 6. Células técnicas com links taxonômicos de atributos globais vs texto simples em locais
+vts_assert_same( 'https://example.test/corpo/4-pol', $inherited_matrix['rows'][0]['technical_cells']['Corpo']['url'], 'atributo global Corpo ganha link de tag na variação 1' );
+vts_assert_same( '4"', $inherited_matrix['rows'][0]['technical_cells']['Corpo']['text'], 'texto do termo Corpo é mantido na variação 1' );
+vts_assert_same( 'https://example.test/corpo/6-pol', $inherited_matrix['rows'][1]['technical_cells']['Corpo']['url'], 'atributo global Corpo ganha link de tag na variação 2' );
+vts_assert_same( '6"', $inherited_matrix['rows'][1]['technical_cells']['Corpo']['text'], 'texto do termo Corpo é mantido na variação 2' );
+
+vts_assert_same( 'https://example.test/norma/nbr-16325', $inherited_matrix['rows'][0]['technical_cells']['Norma']['url'], 'atributo global herdado Norma ganha link de tag' );
+vts_assert_same( '', $inherited_matrix['rows'][1]['technical_cells']['Norma']['url'], 'valor sobrescrito não existente como termo não gera link' );
+
+vts_assert_same( '', $inherited_matrix['rows'][0]['technical_cells']['Garantia']['url'], 'atributo personalizado do produto não possui taxonomia e não ganha link' );
+vts_assert_same( '1 ano', $inherited_matrix['rows'][0]['technical_cells']['Garantia']['text'], 'texto do atributo personalizado Garantia é preservado' );
+vts_assert_same( '', $inherited_matrix['rows'][1]['technical_cells']['Garantia']['url'], 'atributo personalizado Garantia na variação 2 não ganha link' );
+
+// 7. Renderização HTML com rel="tag" em atributos globais e texto simples em locais
+$GLOBALS['product'] = $parent_with_attrs;
+ob_start();
+Uonix_VTST_Table::render_tab( Uonix_VTST_Table::TAB_KEY, array() );
+$inherited_tab_html = ob_get_clean();
+
+vts_assert_contains( '<a href="https://example.test/corpo/4-pol" rel="tag">4&quot;</a>', $inherited_tab_html, 'HTML renderiza link com rel tag para atributo global Corpo' );
+vts_assert_contains( '<a href="https://example.test/corpo/6-pol" rel="tag">6&quot;</a>', $inherited_tab_html, 'HTML renderiza link com rel tag para variação 2 de Corpo' );
+vts_assert_contains( '<a href="https://example.test/norma/nbr-16325" rel="tag">NBR 16325</a>', $inherited_tab_html, 'HTML renderiza link com rel tag para atributo global herdado Norma' );
+vts_assert_contains( '<td>1 ano</td>', $inherited_tab_html, 'HTML renderiza atributo personalizado do produto como texto simples sem link' );
+vts_assert_not_contains( '>1 ano</a>', $inherited_tab_html, 'HTML nunca inclui tag de link para atributo local Garantia' );
 
 printf( "PASS: contratos da ficha técnica por variação. (%d asserções)\n", $GLOBALS['vts_assertions'] );

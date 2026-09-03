@@ -86,6 +86,27 @@
 	margin: 0;
 }
 
+.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--tagged {
+	background-color: #f0f6fc !important;
+	border-color: #2271b1 !important;
+	color: #0c4a6e !important;
+	font-weight: 600 !important;
+	border-radius: 4px !important;
+	box-shadow: 0 0 0 1px #2271b1 !important;
+	background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%232271b1"><path fill-rule="evenodd" d="M17.707 9.293l-7-7A1 1 0 0010 2H4a2 2 0 00-2 2v6a1 1 0 00.293.707l7 7a1 1 0 001.414 0l7-7a1 1 0 000-1.414zM5.5 7a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" clip-rule="evenodd"/></svg>') !important;
+	background-repeat: no-repeat !important;
+	background-position: 8px center !important;
+	background-size: 14px 14px !important;
+	padding-left: 28px !important;
+	transition: all 0.15s ease-in-out;
+}
+
+.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--tagged:focus {
+	border-color: #004377 !important;
+	box-shadow: 0 0 0 2px #2271b1 !important;
+	background-color: #e7f1fb !important;
+}
+
 .uonix-vts-admin__actions {
 	display: flex;
 	gap: 4px;
