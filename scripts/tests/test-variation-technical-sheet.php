@@ -263,6 +263,10 @@ function wc_get_product( $product_id ) {
 	return $GLOBALS['vts_products'][ $product_id ] ?? false;
 }
 
+function wc_get_product_terms( $product_id, $taxonomy, $args = array() ) {
+	return $GLOBALS['vts_product_terms'][ $product_id ][ $taxonomy ] ?? array();
+}
+
 function get_posts( $args = array() ) {
 	$GLOBALS['vts_get_posts_calls'][] = $args;
 	$query = isset( $args['meta_query'][0] ) && is_array( $args['meta_query'][0] )
@@ -773,12 +777,14 @@ final class VTS_Fake_Table_Variation {
 }
 
 final class VTS_Fake_Admin_Parent {
+	private $attributes;
 	private $children;
 	private $id;
 
-	public function __construct( $id, array $children ) {
-		$this->id       = $id;
-		$this->children = $children;
+	public function __construct( $id, array $children, array $attributes = array() ) {
+		$this->id         = $id;
+		$this->children   = $children;
+		$this->attributes = $attributes;
 	}
 
 	public function get_id() {
@@ -787,6 +793,49 @@ final class VTS_Fake_Admin_Parent {
 
 	public function get_children() {
 		return $this->children;
+	}
+
+	public function get_attributes() {
+		return $this->attributes;
+	}
+}
+
+final class VTS_Fake_Product_Attribute {
+	private $name;
+	private $is_variation;
+	private $is_taxonomy;
+	private $options;
+	private $label;
+
+	public function __construct( $name, $is_variation = true, array $options = array(), $is_taxonomy = false, $label = '' ) {
+		$this->name         = $name;
+		$this->is_variation = (bool) $is_variation;
+		$this->options      = $options;
+		$this->is_taxonomy  = (bool) $is_taxonomy;
+		$this->label        = $label;
+	}
+
+	public function get_name() {
+		return $this->name;
+	}
+
+	public function get_variation() {
+		return $this->is_variation;
+	}
+
+	public function is_taxonomy() {
+		return $this->is_taxonomy;
+	}
+
+	public function get_options() {
+		return $this->options;
+	}
+
+	public function get_taxonomy_object() {
+		if ( '' !== $this->label ) {
+			return (object) array( 'attribute_label' => $this->label );
+		}
+		return null;
 	}
 }
 
@@ -1245,6 +1294,7 @@ vts_assert_same( 'https://example.test/wp-admin/admin-ajax.php', $admin_config['
 vts_assert_same( 'nonce:uonix_variation_technical_sheet_copy', $admin_config['data']['nonce'], 'configuração inclui nonce dedicado à cópia' );
 vts_assert_same( 'uonix_get_variation_technical_sheet', $admin_config['data']['copyAction'], 'configuração inclui action AJAX estável' );
 vts_assert_same( $copy_options, $admin_config['data']['copyOptions'], 'opções irmãs são localizadas uma única vez por produto' );
+vts_assert_true( array_key_exists( 'parentAttributes', $admin_config['data'] ), 'configuração inclui parentAttributes para autocomplete' );
 vts_assert_same( 'uonix_variation_technical_sheet_copy', $GLOBALS['vts_created_nonces'][0], 'nonce usa ação dedicada' );
 vts_assert_same( 'Remover a ficha técnica desta variação ao salvar?', $admin_config['data']['strings']['removeConfirm'], 'confirmação de remoção é localizada' );
 vts_assert_same( 'Não foi possível carregar a ficha técnica salva.', $admin_config['data']['strings']['payloadError'], 'erro de hidratação é localizado' );
@@ -3238,5 +3288,85 @@ vts_assert_same(
 	Uonix_VTST_Table::build_matrix( $duplicate_torque_product ),
 	'ficha com rótulos técnicos duplicados não gera tabela ambígua'
 );
+
+// Contratos de atributos informativos (não variantes): Autocomplete e Herança de Valor Único (Opções B + C)
+$attr_material = new VTS_Fake_Product_Attribute( 'pa_material', true, array( 'Inox', 'Galvanizado' ), true, 'Material' );
+$attr_corpo    = new VTS_Fake_Product_Attribute( 'pa_corpo', false, array( '4"', '6"' ), true, 'Corpo' );
+$attr_norma    = new VTS_Fake_Product_Attribute( 'pa_norma', false, array( 'NBR 16325' ), true, 'Norma' );
+$attr_custom   = new VTS_Fake_Product_Attribute( 'Garantia', false, array( '1 ano' ), false, 'Garantia' );
+
+$parent_with_attrs = new VTS_Fake_Table_Product(
+	20200,
+	'variable',
+	array(
+		'pa_material' => $attr_material,
+		'pa_corpo'    => $attr_corpo,
+		'pa_norma'    => $attr_norma,
+		'garantia'    => $attr_custom,
+	),
+	array( 20201, 20202 )
+);
+$GLOBALS['vts_products'][20200] = $parent_with_attrs;
+$GLOBALS['vts_product_terms'][20200]['pa_material'] = array( 'Inox', 'Galvanizado' );
+$GLOBALS['vts_product_terms'][20200]['pa_corpo']    = array( '4"', '6"' );
+$GLOBALS['vts_product_terms'][20200]['pa_norma']    = array( 'NBR 16325' );
+
+// 1. parent_non_variation_attributes no admin
+$admin_parent_attrs = Uonix_VTS_Admin::parent_non_variation_attributes( 20200 );
+vts_assert_same( 3, count( $admin_parent_attrs ), 'apenas atributos não usados para variação são listados no admin' );
+vts_assert_same( 'Corpo', $admin_parent_attrs[0]['label'], 'primeiro atributo não variante é Corpo' );
+vts_assert_same( array( '4"', '6"' ), $admin_parent_attrs[0]['options'], 'opções de Corpo incluem 4" e 6"' );
+vts_assert_same( 'Norma', $admin_parent_attrs[1]['label'], 'segundo atributo não variante é Norma' );
+vts_assert_same( array( 'NBR 16325' ), $admin_parent_attrs[1]['options'], 'opção única de Norma é preservada' );
+vts_assert_same( 'Garantia', $admin_parent_attrs[2]['label'], 'atributo customizado não variante é incluído' );
+vts_assert_same( array( '1 ano' ), $admin_parent_attrs[2]['options'], 'opções do atributo customizado são incluídas' );
+
+// 2. JavaScript datalist autocomplete
+vts_assert_contains( 'function ensureItemDatalists($item)', $admin_js, 'script inclui vinculador de datalists para autocomplete' );
+vts_assert_contains( 'parentAttrs = Array.isArray(config.parentAttributes)', $admin_js, 'script valida atributos do pai como array' );
+vts_assert_contains( 'updateValueSuggestions()', $admin_js, 'script sincroniza sugestões dinamicamente no input/change' );
+vts_assert_contains( 'ensureItemDatalists($item);', $admin_js, 'cada novo item recebe os datalists' );
+
+// 3. attribute_columns ignora atributos não variantes
+$table_attr_cols = Uonix_VTST_Table::attribute_columns( $parent_with_attrs, array( 20201, 20202 ) );
+vts_assert_same( 1, count( $table_attr_cols ), 'colunas de atributos incluem somente os atributos de variação' );
+vts_assert_same( 'pa_material', $table_attr_cols[0]['key'], 'somente pa_material é coluna de atributo' );
+
+// 4. parent_single_value_attributes identifica somente valores únicos
+$single_value_attrs = Uonix_VTST_Table::parent_single_value_attributes( $parent_with_attrs );
+vts_assert_same( 2, count( $single_value_attrs ), 'apenas atributos não variantes com valor único são selecionados para herança' );
+vts_assert_same( 'NBR 16325', $single_value_attrs['Norma'], 'Norma tem valor único NBR 16325' );
+vts_assert_same( '1 ano', $single_value_attrs['Garantia'], 'Garantia tem valor único 1 ano' );
+vts_assert_false( isset( $single_value_attrs['Corpo'] ), 'Corpo não tem valor único pois possui 4" e 6"' );
+
+// 5. build_matrix com herança e preenchimento de atributos
+$var_sheet_1 = vts_valid_sheet();
+$var_sheet_1['sections'][0]['items'] = array(
+	array( 'label' => 'Corpo', 'value' => '4"' ),
+);
+$var_sheet_2 = vts_valid_sheet();
+$var_sheet_2['sections'][0]['items'] = array(
+	array( 'label' => 'Corpo', 'value' => '6"' ),
+	array( 'label' => 'Norma', 'value' => 'NBR 16325-1' ), // Sobrescrita explícita
+);
+
+$GLOBALS['vts_products'][20201] = new VTS_Fake_Table_Variation( 20201, array( 'pa_material' => 'inox' ), $var_sheet_1 );
+$GLOBALS['vts_products'][20202] = new VTS_Fake_Table_Variation( 20202, array( 'pa_material' => 'galvanizado' ), $var_sheet_2 );
+
+$inherited_matrix = Uonix_VTST_Table::build_matrix( $parent_with_attrs );
+vts_assert_true( null !== $inherited_matrix, 'matriz com herança de atributos é montada com sucesso' );
+vts_assert_same( 1, count( $inherited_matrix['attribute_columns'] ), 'apenas 1 coluna de atributo variante (Material)' );
+vts_assert_same( 3, count( $inherited_matrix['technical_columns'] ), 'colunas técnicas têm Corpo, Norma e Garantia' );
+vts_assert_same( array( 'Corpo', 'Norma', 'Garantia' ), $inherited_matrix['technical_columns'], 'ordem das colunas técnicas é estável' );
+
+// Linha 1 (Inox)
+vts_assert_same( '4"', $inherited_matrix['rows'][0]['technical_values']['Corpo'], 'variação 1 usa valor 4" da ficha técnica' );
+vts_assert_same( 'NBR 16325', $inherited_matrix['rows'][0]['technical_values']['Norma'], 'variação 1 herda automaticamente Norma do produto pai' );
+vts_assert_same( '1 ano', $inherited_matrix['rows'][0]['technical_values']['Garantia'], 'variação 1 herda automaticamente Garantia do produto pai' );
+
+// Linha 2 (Galvanizado)
+vts_assert_same( '6"', $inherited_matrix['rows'][1]['technical_values']['Corpo'], 'variação 2 usa valor 6" da ficha técnica' );
+vts_assert_same( 'NBR 16325-1', $inherited_matrix['rows'][1]['technical_values']['Norma'], 'variação 2 preserva sobrescrita da ficha técnica' );
+vts_assert_same( '1 ano', $inherited_matrix['rows'][1]['technical_values']['Garantia'], 'variação 2 herda automaticamente Garantia do produto pai' );
 
 printf( "PASS: contratos da ficha técnica por variação. (%d asserções)\n", $GLOBALS['vts_assertions'] );

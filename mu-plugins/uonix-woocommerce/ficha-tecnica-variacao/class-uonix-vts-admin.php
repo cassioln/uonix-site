@@ -53,12 +53,13 @@ final class Uonix_VTS_Admin {
 			'uonix-vts-admin',
 			'uonixVtsAdmin',
 			array(
-				'parentId'   => $parent_id,
-				'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
-				'nonce'      => wp_create_nonce( 'uonix_variation_technical_sheet_copy' ),
-				'copyAction' => 'uonix_get_variation_technical_sheet',
-				'copyOptions' => self::copy_options( $parent_id ),
-				'strings'    => array(
+				'parentId'         => $parent_id,
+				'ajaxUrl'          => admin_url( 'admin-ajax.php' ),
+				'nonce'            => wp_create_nonce( 'uonix_variation_technical_sheet_copy' ),
+				'copyAction'       => 'uonix_get_variation_technical_sheet',
+				'copyOptions'      => self::copy_options( $parent_id ),
+				'parentAttributes' => self::parent_non_variation_attributes( $parent_id ),
+				'strings'          => array(
 					'removeConfirm'   => 'Remover a ficha técnica desta variação ao salvar?',
 					'payloadError'    => 'Não foi possível carregar a ficha técnica salva.',
 					'copyConfirm'     => 'Substituir a ficha atual pela ficha selecionada?',
@@ -67,6 +68,92 @@ final class Uonix_VTS_Admin {
 				),
 			)
 		);
+	}
+
+	/**
+	 * Retorna os atributos informativos do produto pai que não são usados para variação.
+	 *
+	 * @param mixed $parent_id Produto variável pai.
+	 * @return array<int, array{label:string,options:array<int, string>}>
+	 */
+	public static function parent_non_variation_attributes( $parent_id ) {
+		$parent_id = absint( $parent_id );
+		if ( ! $parent_id || ! function_exists( 'wc_get_product' ) ) {
+			return array();
+		}
+
+		$product = wc_get_product( $parent_id );
+		if ( ! is_object( $product ) || ! method_exists( $product, 'get_attributes' ) ) {
+			return array();
+		}
+
+		$attributes = $product->get_attributes();
+		if ( ! is_array( $attributes ) ) {
+			return array();
+		}
+
+		$results     = array();
+		$seen_labels = array();
+
+		foreach ( $attributes as $name => $attribute ) {
+			if ( is_object( $attribute ) && method_exists( $attribute, 'get_variation' ) && $attribute->get_variation() ) {
+				continue;
+			}
+
+			$label = '';
+			if ( is_object( $attribute ) && method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy() ) {
+				$tax = method_exists( $attribute, 'get_taxonomy_object' ) ? $attribute->get_taxonomy_object() : null;
+				if ( $tax && isset( $tax->attribute_label ) && '' !== trim( (string) $tax->attribute_label ) ) {
+					$label = (string) $tax->attribute_label;
+				} elseif ( function_exists( 'wc_attribute_label' ) && method_exists( $attribute, 'get_name' ) ) {
+					$label = (string) wc_attribute_label( $attribute->get_name() );
+				}
+			} elseif ( is_object( $attribute ) && method_exists( $attribute, 'get_name' ) ) {
+				$label = (string) $attribute->get_name();
+			} else {
+				$label = (string) $name;
+			}
+
+			$label = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( $label, true ) : strip_tags( $label );
+			$label = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $label ) : trim( $label );
+			$lower = function_exists( 'mb_strtolower' ) ? mb_strtolower( $label, 'UTF-8' ) : strtolower( $label );
+			if ( '' === $label || isset( $seen_labels[ $lower ] ) ) {
+				continue;
+			}
+
+			$options = array();
+			if ( is_object( $attribute ) && method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy() && function_exists( 'wc_get_product_terms' ) && method_exists( $attribute, 'get_name' ) && method_exists( $product, 'get_id' ) ) {
+				$terms = wc_get_product_terms( $product->get_id(), $attribute->get_name(), array( 'fields' => 'names' ) );
+				if ( is_array( $terms ) ) {
+					foreach ( $terms as $term ) {
+						$val = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( (string) $term, true ) : strip_tags( (string) $term );
+						$val = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $val ) : trim( $val );
+						if ( '' !== $val ) {
+							$options[] = $val;
+						}
+					}
+				}
+			} elseif ( is_object( $attribute ) && method_exists( $attribute, 'get_options' ) ) {
+				$raw_options = $attribute->get_options();
+				if ( is_array( $raw_options ) ) {
+					foreach ( $raw_options as $raw ) {
+						$val = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( (string) $raw, true ) : strip_tags( (string) $raw );
+						$val = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $val ) : trim( $val );
+						if ( '' !== $val ) {
+							$options[] = $val;
+						}
+					}
+				}
+			}
+
+			$results[] = array(
+				'label'   => $label,
+				'options' => array_values( array_unique( $options ) ),
+			);
+			$seen_labels[ $lower ] = true;
+		}
+
+		return $results;
 	}
 
 	/**

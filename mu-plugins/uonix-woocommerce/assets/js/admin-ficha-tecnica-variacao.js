@@ -169,6 +169,59 @@
 		refreshMoveButtons($root);
 	}
 
+	let datalistSequence = 0;
+
+	function ensureItemDatalists($item) {
+		const parentAttrs = Array.isArray(config.parentAttributes) ? config.parentAttributes : [];
+		if (parentAttrs.length === 0) {
+			return;
+		}
+
+		datalistSequence++;
+		const labelListId = 'uonix-vts-labels-' + datalistSequence;
+		const valueListId = 'uonix-vts-values-' + datalistSequence;
+
+		const $labelInput = $item.find('.uonix-vts-admin__item-label');
+		const $valueInput = $item.find('.uonix-vts-admin__item-value');
+
+		const $labelList = $('<datalist>', { id: labelListId });
+		parentAttrs.forEach(function (attr) {
+			if (attr && attr.label) {
+				const opt = document.createElement('option');
+				opt.value = String(attr.label);
+				$labelList[0].appendChild(opt);
+			}
+		});
+
+		const $valueList = $('<datalist>', { id: valueListId });
+
+		$labelInput.attr('list', labelListId);
+		$valueInput.attr('list', valueListId);
+
+		$item.append($labelList).append($valueList);
+
+		function updateValueSuggestions() {
+			const currentLabel = String($labelInput.val() || '').trim().toLowerCase();
+			$valueList.empty();
+			if (!currentLabel) {
+				return;
+			}
+			const matched = parentAttrs.find(function (attr) {
+				return String(attr && attr.label || '').trim().toLowerCase() === currentLabel;
+			});
+			if (matched && Array.isArray(matched.options)) {
+				matched.options.forEach(function (val) {
+					const opt = document.createElement('option');
+					opt.value = String(val);
+					$valueList[0].appendChild(opt);
+				});
+			}
+		}
+
+		$labelInput.on('input change', updateValueSuggestions);
+		updateValueSuggestions();
+	}
+
 	function appendItem($root, $items, item) {
 		const template = $root.find('.uonix-vts-admin__item-template')[0];
 		if (!template || !template.content) {
@@ -178,6 +231,7 @@
 		const $item = $(fragment).find('.uonix-vts-admin__item');
 		$item.find('.uonix-vts-admin__item-label').val(String(item.label || ''));
 		$item.find('.uonix-vts-admin__item-value').val(String(item.value || ''));
+		ensureItemDatalists($item);
 		$items.append($item);
 	}
 

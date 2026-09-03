@@ -42,10 +42,11 @@ final class Uonix_VTST_Table {
 			return null;
 		}
 
-		$attribute_columns = self::attribute_columns( $product, $children );
-		$technical_columns = array();
-		$rows              = array();
-		$has_valid_sheet   = false;
+		$attribute_columns       = self::attribute_columns( $product, $children );
+		$technical_columns       = array();
+		$rows                    = array();
+		$has_valid_sheet         = false;
+		$inherited_single_values = self::parent_single_value_attributes( $product );
 
 		foreach ( $children as $child_id ) {
 			$variation = function_exists( 'wc_get_product' ) ? wc_get_product( $child_id ) : false;
@@ -62,9 +63,9 @@ final class Uonix_VTST_Table {
 			}
 
 			$rows[] = array(
-				'attribute_cells' => self::attribute_cells( $variation, $attribute_columns ),
+				'attribute_cells'  => self::attribute_cells( $variation, $attribute_columns ),
 				'technical_values' => self::sheet_values( $sheet, $technical_columns ),
-				'has_valid_sheet' => null !== $sheet,
+				'has_valid_sheet'  => null !== $sheet,
 			);
 		}
 
@@ -72,10 +73,34 @@ final class Uonix_VTST_Table {
 			return null;
 		}
 
+		foreach ( $inherited_single_values as $inherited_label => $inherited_val ) {
+			$found = false;
+			foreach ( $technical_columns as $existing_label ) {
+				if ( 0 === strcasecmp( $existing_label, $inherited_label ) ) {
+					$found = true;
+					break;
+				}
+			}
+			if ( ! $found ) {
+				$technical_columns[] = $inherited_label;
+			}
+		}
+
 		foreach ( $rows as &$row ) {
 			foreach ( $technical_columns as $label ) {
 				if ( ! array_key_exists( $label, $row['technical_values'] ) ) {
-					$row['technical_values'][ $label ] = self::EMPTY_VALUE;
+					$inherited_match = null;
+					foreach ( $inherited_single_values as $inh_label => $inh_val ) {
+						if ( 0 === strcasecmp( $inh_label, $label ) ) {
+							$inherited_match = $inh_val;
+							break;
+						}
+					}
+					if ( null !== $inherited_match ) {
+						$row['technical_values'][ $label ] = $inherited_match;
+					} else {
+						$row['technical_values'][ $label ] = self::EMPTY_VALUE;
+					}
 				}
 			}
 		}
@@ -159,16 +184,96 @@ final class Uonix_VTST_Table {
 	}
 
 	/**
+	 * Retorna atributos informativos do produto pai que possuem exatamente um valor (para herança).
+	 *
+	 * @param mixed $product Produto pai.
+	 * @return array<string, string>
+	 */
+	public static function parent_single_value_attributes( $product ) {
+		if ( ! is_object( $product ) || ! method_exists( $product, 'get_attributes' ) ) {
+			return array();
+		}
+
+		$parent_attributes = $product->get_attributes();
+		if ( ! is_array( $parent_attributes ) ) {
+			return array();
+		}
+
+		$single_values = array();
+
+		foreach ( $parent_attributes as $name => $attribute ) {
+			if ( is_object( $attribute ) && method_exists( $attribute, 'get_variation' ) && $attribute->get_variation() ) {
+				continue;
+			}
+
+			$label = '';
+			if ( is_object( $attribute ) && method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy() ) {
+				$tax = method_exists( $attribute, 'get_taxonomy_object' ) ? $attribute->get_taxonomy_object() : null;
+				if ( $tax && isset( $tax->attribute_label ) && '' !== trim( (string) $tax->attribute_label ) ) {
+					$label = (string) $tax->attribute_label;
+				} elseif ( function_exists( 'wc_attribute_label' ) && method_exists( $attribute, 'get_name' ) ) {
+					$label = (string) wc_attribute_label( $attribute->get_name() );
+				}
+			} elseif ( is_object( $attribute ) && method_exists( $attribute, 'get_name' ) ) {
+				$label = (string) $attribute->get_name();
+			} else {
+				$label = (string) $name;
+			}
+
+			$label = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( $label, true ) : strip_tags( $label );
+			$label = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $label ) : trim( $label );
+			if ( '' === $label ) {
+				continue;
+			}
+
+			$options = array();
+			if ( is_object( $attribute ) && method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy() && function_exists( 'wc_get_product_terms' ) && method_exists( $attribute, 'get_name' ) && method_exists( $product, 'get_id' ) ) {
+				$terms = wc_get_product_terms( $product->get_id(), $attribute->get_name(), array( 'fields' => 'names' ) );
+				if ( is_array( $terms ) ) {
+					foreach ( $terms as $term ) {
+						$val = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( (string) $term, true ) : strip_tags( (string) $term );
+						$val = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $val ) : trim( $val );
+						if ( '' !== $val ) {
+							$options[] = $val;
+						}
+					}
+				}
+			} elseif ( is_object( $attribute ) && method_exists( $attribute, 'get_options' ) ) {
+				$raw_options = $attribute->get_options();
+				if ( is_array( $raw_options ) ) {
+					foreach ( $raw_options as $raw ) {
+						$val = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( (string) $raw, true ) : strip_tags( (string) $raw );
+						$val = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $val ) : trim( $val );
+						if ( '' !== $val ) {
+							$options[] = $val;
+						}
+					}
+				}
+			}
+
+			$unique_options = array_values( array_unique( $options ) );
+			if ( 1 === count( $unique_options ) ) {
+				$single_values[ $label ] = $unique_options[0];
+			}
+		}
+
+		return $single_values;
+	}
+
+	/**
 	 * @param mixed $product Produto pai.
 	 * @param array<int, mixed> $children IDs das variações.
 	 * @return array<int, array<string, string>>
 	 */
-	private static function attribute_columns( $product, array $children ) {
+	public static function attribute_columns( $product, array $children ) {
 		$parent_attributes = method_exists( $product, 'get_attributes' ) ? $product->get_attributes() : array();
 		$columns           = array();
 
 		if ( is_array( $parent_attributes ) ) {
 			foreach ( $parent_attributes as $name => $attribute ) {
+				if ( is_object( $attribute ) && method_exists( $attribute, 'get_variation' ) && ! $attribute->get_variation() ) {
+					continue;
+				}
 				$name = self::attribute_name( $name, $attribute );
 				if ( '' !== $name ) {
 					$columns[ $name ] = self::attribute_column( $name );
