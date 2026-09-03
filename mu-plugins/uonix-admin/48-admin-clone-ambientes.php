@@ -31,7 +31,7 @@ function uox_clone_env_labels() {
 
 function uox_clone_env_details() {
 	return array(
-		'prod'  => array( 'url' => 'https://site.uonix.com.br', 'host' => 'Locaweb' ),
+		'prod'  => array( 'url' => 'https://uonix.com.br', 'host' => 'Locaweb' ),
 		'qa'    => array( 'url' => 'https://uonix.ksio.dev', 'host' => 'HostGator / public_html' ),
 		'dev'   => array( 'url' => 'https://test.uonix.ksio.dev', 'host' => 'HostGator / dev_uonix' ),
 		'local' => array( 'url' => 'http://localhost:8080', 'host' => 'Podman no Mac' ),

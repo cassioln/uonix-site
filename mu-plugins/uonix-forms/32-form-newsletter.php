@@ -29,6 +29,46 @@ if ( ! defined( 'ABSPATH' ) ) {
 // ==============================================================================
 add_shortcode('uonix_form_newsletter', 'uonix_gerar_form_newsletter_html');
 
+/**
+ * Normaliza o referer para o caminho relativo esperado pelo Fluent Forms.
+ *
+ * O Fluent Forms chama site_url() ao persistir _wp_http_referer. Passar uma
+ * URL absoluta aqui gera uma origem duplicada, como
+ * https://uonix.com.br/https://uonix.com.br/.
+ *
+ * @return string Caminho interno com query string opcional.
+ */
+function uonix_newsletter_referer_path() {
+    $referer = wp_get_referer();
+    if ( ! is_string( $referer ) || '' === $referer ) {
+        return '/';
+    }
+
+    $parts = wp_parse_url( $referer );
+    if ( false === $parts || ! is_array( $parts ) ) {
+        return '/';
+    }
+
+    $site_host = wp_parse_url( home_url( '/' ), PHP_URL_HOST );
+    $referer_host = isset( $parts['host'] ) ? $parts['host'] : '';
+    if ( '' !== $referer_host && ( ! is_string( $site_host ) || strtolower( $referer_host ) !== strtolower( $site_host ) ) ) {
+        return '/';
+    }
+
+    $path = isset( $parts['path'] ) && is_string( $parts['path'] ) && '' !== $parts['path']
+        ? $parts['path']
+        : '/';
+    if ( '/' !== $path[0] ) {
+        return '/';
+    }
+
+    if ( isset( $parts['query'] ) && is_string( $parts['query'] ) && '' !== $parts['query'] ) {
+        $path .= '?' . $parts['query'];
+    }
+
+    return $path;
+}
+
 function uonix_gerar_form_newsletter_html($atts) {
     $a = shortcode_atts(array(
         'layout' => 'default' 
@@ -358,18 +398,44 @@ function uonix_gerar_form_newsletter_html($atts) {
 
             if (hasError) return;
 
+            // Bloqueio preventivo do Turnstile: o formulário já valida e-mail e termo
+            // localmente, mas deixava o captcha ir e voltar do servidor. Detectar aqui
+            // poupa a ida-e-volta e mostra o problema onde a ação é necessária.
+            //
+            // Se o campo NÃO existir no DOM (widget não carregou, Cloudflare fora do
+            // ar), não bloqueia: travar no cliente deixaria o site sem captar nada. A
+            // validação do servidor continua sendo a barreira real.
+            const tsCampo = form.querySelector('[name="cf-turnstile-response"]');
+            if (tsCampo && !(tsCampo.value || '').trim()) {
+                feedbackError.textContent = 'Confirme a verificação de segurança para continuar.';
+                feedbackError.style.display = 'block';
+                const tsWrap = form.querySelector('.cf-turnstile, .uonix-turnstile-widget');
+                if (tsWrap && typeof tsWrap.scrollIntoView === 'function') {
+                    tsWrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                return;
+            }
+
             btn.disabled = true;
             btn.innerHTML = '<span>Processando...</span>';
-            
+
             const formData = new FormData(form);
             formData.append('action', 'uonix_processar_newsletter_customizada');
 
+            // Watchdog: uma conexão que abre e nunca responde não dispara `.catch()`,
+            // então o botão ficaria desabilitado para sempre. AbortController garante
+            // que o fetch termina e o fluxo de erro roda.
+            const tsAbort = new AbortController();
+            const tsTimer = setTimeout(function () { tsAbort.abort(); }, 20000);
+
             fetch(window.location.origin + '/wp-admin/admin-ajax.php', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: tsAbort.signal
             })
             .then(response => response.json())
             .then(data => {
+                clearTimeout(tsTimer);
                 if (data.success) {
                     formFieldsBlock.style.display = 'none';
                     successBlock.style.display = 'flex'; 
@@ -382,8 +448,11 @@ function uonix_gerar_form_newsletter_html($atts) {
                 }
             })
             .catch(error => {
+                clearTimeout(tsTimer);
                 feedbackError.style.display = 'block';
-                feedbackError.innerHTML = '⚠ Falha na conexão. Tente novamente.';
+                feedbackError.innerHTML = error && error.name === 'AbortError'
+                    ? '⚠ A conexão demorou demais. Tente novamente.'
+                    : '⚠ Falha na conexão. Tente novamente.';
                 resetUonixTurnstile();
                 btn.disabled = false;
                 btn.innerHTML = '<span>Assinar</span>';
@@ -434,7 +503,7 @@ function uonix_processar_newsletter_handler() {
 
     $embedded_post_id = (int) get_option('page_on_front');
     if ($embedded_post_id <= 0) { $embedded_post_id = (int) url_to_postid(home_url('/')); }
-    $referer_path = wp_get_referer() ?: '/';
+    $referer_path = uonix_newsletter_referer_path();
 
     try {
         /** @var \FluentForm\App\Services\Form\SubmissionHandlerService $submissionHandler */

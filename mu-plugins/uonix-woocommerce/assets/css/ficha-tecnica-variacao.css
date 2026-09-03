@@ -14,10 +14,23 @@
 .uonix-vts__item strong { margin-bottom: 3px; color: #64748b; font-size: 11px; font-weight: 800; line-height: 1.05; }
 .uonix-vts__item span { color: #0f172a; font-size: 15px; font-weight: 800; line-height: 1.05; overflow-wrap: anywhere; }
 .uonix-vts__grid--compact .uonix-vts__item span { font-size: 17px; }
+.uonix-vtst-diagram { max-width: 100%; margin: 0 0 24px; text-align: center; }
+.uonix-vtst-diagram__image { display: block; width: auto !important; max-width: min(100%, 500px) !important; height: auto !important; margin: 0 auto; }
+.uonix-vtst-table { width: 100% !important; margin: 0 !important; overflow: hidden; color: #0f172a; background: #fff; border: 1px solid #dbe3ef !important; border-collapse: separate !important; border-spacing: 0; border-radius: 8px; box-shadow: 0 1px 5px rgba(15, 23, 42, .035); font-size: 14px; }
+.uonix-vtst-table thead th { padding: 10px 12px !important; color: #1e293b; background: #f1f5f9 !important; border: 0 !important; border-bottom: 1px solid #dbe3ef !important; font-size: 12px; font-weight: 800; line-height: 1.15; text-align: left; text-transform: uppercase; vertical-align: middle; white-space: nowrap; }
+.uonix-vtst-table tbody th,
+.uonix-vtst-table tbody td { padding: 10px 12px !important; color: #0f172a !important; background: #fff !important; border: 0 !important; border-bottom: 1px solid #dbe3ef !important; font-size: 15px; font-style: normal !important; font-weight: 700; line-height: 1.2; text-align: left; vertical-align: middle; }
+.uonix-vtst-table tbody th { color: #64748b !important; font-size: 13px; font-weight: 800; }
+.uonix-vtst-table tbody tr:last-child th,
+.uonix-vtst-table tbody tr:last-child td { border-bottom: 0 !important; }
+.uonix-vtst-table a { display: inline-block; padding: 2px 4px; color: #1e40af !important; font-weight: 800; text-decoration: underline; text-decoration-color: #93c5fd; text-underline-offset: 2px; transition: color .15s ease, background .15s ease, text-decoration-color .15s ease; }
+.uonix-vtst-table a:hover,
+.uonix-vtst-table a:focus-visible { color: #1e3a8a !important; background: #eff6ff; text-decoration-color: currentColor; outline: none; }
 
 @media (max-width: 600px) {
   .uonix-vts__header { align-items: flex-start; flex-direction: column; gap: 3px; padding: 7px 10px; }
   .uonix-vts__title { font-size: 15px; white-space: normal; }
   .uonix-vts__subtitle { font-size: 11px; text-align: left; }
   .uonix-vts__grid--detailed { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .uonix-vtst-table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
 }

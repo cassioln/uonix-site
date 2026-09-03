@@ -21,7 +21,7 @@ podman-compose -p uonix-local -f local/compose.yml --profile tools run --rm --no
 
 O Compose define explicitamente `WP_ENVIRONMENT_TYPE=local`, mantém indexação e analytics desativados e entrega todo e-mail ao Mailpit.
 
-A topologia canônica é: produção provisória em `https://site.uonix.com.br/`, QA em `https://uonix.ksio.dev/`, DEV em `https://test.uonix.ksio.dev/` e este ambiente local em `http://localhost:8080/`. Consulte [docs/ambientes.md](../docs/ambientes.md) antes de importar ou clonar dados.
+A topologia canônica é: produção em `https://uonix.com.br/`, QA em `https://uonix.ksio.dev/`, DEV em `https://test.uonix.ksio.dev/` e este ambiente local em `http://localhost:8080/`. Consulte [docs/ambientes.md](../docs/ambientes.md) antes de importar ou clonar dados.
 
 ## Acessos
 

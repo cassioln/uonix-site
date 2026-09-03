@@ -8,7 +8,7 @@ Essa proteção não depende do Loginizer Pro.
 - `local`: Turnstile fica desativado automaticamente.
 - QA (`WP_ENVIRONMENT_TYPE=staging`, `https://uonix.ksio.dev/`): usa somente chaves de teste configuradas fora do Git.
 - DEV (`WP_ENVIRONMENT_TYPE=development`, `https://test.uonix.ksio.dev/`): usa somente chaves de teste configuradas fora do Git.
-- Produção provisória (`WP_ENVIRONMENT_TYPE=production`, `https://site.uonix.com.br/`): pode usar chaves próprias configuradas fora do Git.
+- Produção (`WP_ENVIRONMENT_TYPE=production`, `https://uonix.com.br/`): pode usar chaves próprias configuradas fora do Git. A allowlist do Turnstile cobre `uonix.com.br`.
 
 ## Chaves
 

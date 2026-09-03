@@ -5,14 +5,25 @@
 
 ## 1. Fronteira operacional
 
+> **⚠️ ESTADO HISTÓRICO — o cutover foi concluído em 2026-08-15.**
+>
+> A tabela abaixo e as seções seguintes descrevem a topologia **durante** a migração, quando
+> o site novo atendia em `site.uonix.com.br` e `uonix.com.br` ainda servia o site do Criador
+> de Sites. Ficam preservadas como registro do que foi feito e por quê.
+>
+> **Topologia atual:** produção é `uonix.com.br`, com indexação liberada. O domínio de
+> trânsito `site.uonix.com.br` foi removido do painel e **não resolve mais em DNS** (medido).
+> A referência canônica é `docs/ambientes.md`; em caso de conflito, ele prevalece.
+
 | Ambiente | URL | Host | Branch |
 | --- | --- | --- | --- |
-| Produção provisória | `site.uonix.com.br` | Locaweb | `master` |
+| Produção provisória (histórico) | `site.uonix.com.br` | Locaweb | `master` |
 | QA | `uonix.ksio.dev` | HostGator | `qa` |
 | DEV | `test.uonix.ksio.dev` | HostGator | `dev` |
 | Local | `localhost:8080` | Podman | `local` |
 
-**`uonix.com.br` é o site antigo, em produção real, e está intocável.** Enquanto o
+**[Histórico, válido até 2026-08-15] `uonix.com.br` é o site antigo, em produção real, e
+está intocável.** Enquanto o
 site novo não estiver nesse domínio, `site.uonix.com.br` não é produção definitiva:
 desenvolvimento e teste nele são liberados.
 
@@ -107,8 +118,33 @@ mudança de workflow contorna. **Deploy automatizado para QA e DEV está bloquea
 infraestrutura**, não por código. Resolver exige liberar os IPs de saída dos runners
 no cPanel ou usar runner self-hosted.
 
-A Locaweb **não** tem essa restrição: runners autenticam e publicam normalmente
-(comprovado nos runs `30679406274` e `30683187557`).
+> Atualização 2026-08-25: no dry-run `prod->dev` pelo CI (run `32889424957`) o passo
+> "Validando ambiente: dev" **passou** — o HostGator aceitou a conexão SSH do runner.
+> Isso sugere que o bloqueio acima pode ter mudado (IP do runner liberado, ou o
+> HostGator deixou de recusar). ATENÇÃO: o dry-run só faz SSH de validação; o
+> `--execute` faz `rsync` pesado para o HostGator. Antes de confiar em deploy/clone
+> automatizado com destino QA/DEV, rodar um `--execute` real e confirmar que o rsync
+> não volta a dar `Connection refused`/`code 255`. Até essa confirmação, tratar o
+> deploy automatizado para HostGator como não comprovado.
+
+A Locaweb **não** filtra runners por IP: eles autenticam e publicam normalmente
+com a senha correta (comprovado nos runs `30679406274`, `30683187557` e, após a
+correção de 2026-08-25, no run `32889357016`, em que o runner Azure autenticou e
+executou `whoami` na Locaweb; e no dry-run `prod->dev` completo pelo CI, run
+`32889424957`, que validou prod E dev e concluiu sem alterações).
+
+> Armadilha diagnosticada em 2026-08-25 (não repetir o erro): o CI de clone
+> começou a falhar com `Permission denied (publickey,password)` ao validar `prod`.
+> A causa **não** era filtro de IP — era a senha do **GitHub Environment secret**
+> `LOCAWEB_SSH_PASSWORD` (environment `clone-operations`) estar **desatualizada**:
+> a senha da Locaweb foi trocada, o `.env` local foi atualizado, mas o environment
+> secret não. Dois passwords de 14 bytes com hashes diferentes enganam qualquer
+> comparação por comprimento — **compare por SHA256**. Environment secrets têm
+> precedência sobre repo secrets; atualize com
+> `gh secret set LOCAWEB_SSH_PASSWORD --env clone-operations` (e `--env production-locaweb`).
+> O mesmo vale para `LOCAWEB_SSH_KNOWN_HOSTS` (que também estava sem a chave ED25519
+> no environment). Sempre que o CI der `Permission denied` na Locaweb, confira
+> primeiro se o env secret bate (por hash) com a credencial local que funciona.
 
 ## 7. Peculiaridades do ambiente Locaweb
 
@@ -239,7 +275,7 @@ Descoberto em 2026-08-03, depois de aplicar o bloco em QA e o header não aparec
 
 | Camada | Onde | Como invalidar |
 | --- | --- | --- |
-| SpeedyCache | `wp-content/cache/speedycache` | `wp cache flush` + remover arquivos |
+| ~~SpeedyCache~~ | ~~`wp-content/cache/speedycache`~~ | **EXTINTO** — plugin removido de produção. WP Rocket também foi removido em 2026-08-15. Nenhum cache de página ativo hoje; a única camada é `pods-alternative-cache` (cache de objeto do Pods). |
 | Cloudflare (borda) | fora do servidor | purga na conta, ou esperar expirar |
 | navegador/CDN cliente | — | `?query` para bypass |
 
@@ -569,3 +605,82 @@ home.
 - Nenhuma credencial em log, ticket ou documentação.
 - Cutover de `uonix.com.br`, SMTP real e checkout transacional ficam fora de qualquer
   execução automatizada.
+
+## 19. Aprendizados da migração (registrado em 2026-08-17)
+
+Cada item abaixo custou uma investigação. Estão aqui para que a próxima migração não pague
+o mesmo preço.
+
+### O que a medição revelou — e que a suposição não teria revelado
+
+**`wp option update` falha em SILÊNCIO quando `WP_HOME`/`WP_SITEURL` são constantes.**
+O comando retorna sucesso e o banco não muda: a constante do `wp-config.php` sempre vence.
+Em troca de domínio, editar o `wp-config.php` primeiro e corrigir o banco com `UPDATE` SQL
+direto. Conferir por releitura, nunca pelo código de saída.
+
+**403 no vhost novo antes da propagação.** O host devolve 403 enquanto o domínio não está
+associado ao plano — não é erro de permissão de arquivo. Diagnosticar pelo painel do host,
+não pelo `.htaccess`.
+
+**187 URLs do domínio antigo no banco, 33 delas órfãs.** Buscar só em `post_content` não
+basta: URLs vivem em `options` (serializadas), `postmeta` e `termmeta`. E options
+serializadas exigem alteração via PHP — o comprimento da string faz parte do dado
+(`s:38:"http://..."`), então um `UPDATE ... REPLACE` cru corrompe a option e pode derrubar
+o tema.
+
+**GTM e AdOpt desapareceram uma vez sem erro visível.** Nenhum log, nenhuma tela branca —
+apenas pararam de sair no HTML. Validar presença explicitamente (grep pelo ID do
+container), nunca por ausência de erro.
+
+**O Turnstile é lazy: `curl | grep` dá falso negativo.** O widget está no HTML, mas o
+`api.js` só carrega após interação com o formulário. Um teste por `curl` conclui
+"não está lá" incorretamente. A validação tem de ser funcional, com navegador real.
+
+**O PHP do host segfaulta (rc=139) em qualquer arquivo, até em `<?php echo 1;`.** Não é o
+código: é o binário. Para `php -l` e testes, usar container (`docker run php:8.3-cli`).
+
+**fail2ban bane por VOLUME de conexões, não por senha errada.** Dezenas de comandos SSH
+curtos em sequência disparam o bloqueio. Padrão que funciona: `scp` de um script + UMA
+conexão para executá-lo. Uma sessão SSH pendurada (socket em `CLOSED`) também conta.
+
+**`AddHandler php80-script` no `.htaccess` é o que define a versão do PHP.** Sem essa
+linha o host cai para PHP 5.2.17 e endpoints `/api/*` retornam 500 sem log. Se o PHP
+"voltar no tempo" após uma alteração no `.htaccess`, é a primeira coisa a conferir.
+
+**MySQL em UTC-3 e PHP gravando em UTC.** Comparações de data ficam com 3h de diferença.
+Usar `UTC_TIMESTAMP()` no SQL e `gmdate()` no PHP, de forma consistente.
+
+### Sobre ordem de inicialização de plugins
+
+O Pods registra o CPT em `init` prioridade **11**; o Rank Math consulta os post types em
+`init` prioridade **10**. Resultado: o rótulo do CPT aparece vazio nas abas de configuração
+do Rank Math, embora os dados no banco estejam perfeitos. Não é encoding — é o INSTANTE da
+leitura. Antes de investigar dados, verificar a ordem dos hooks.
+
+### Sobre testes que dão falsa confiança
+
+Nove asserções escritas durante esta migração não provavam o que anunciavam. Cinco
+famílias distintas:
+
+1. **por nome** — o identificador existe em comentário, na definição, ou em outro
+   consumidor do mesmo hook
+2. **por contagem** — "aparece 2x" não é "aparece nos dois lugares certos"
+3. **por código inativo** — buscar texto no fonte não distingue código que roda de
+   `// código comentado`
+4. **dimensão sem caso** — lista de N itens com asserção só do primeiro: remover qualquer
+   outro passa verde
+5. **ramo inteiro sem cenário** — o mais grave, porque é invisível. Se todos os cenários
+   forçam o mesmo lado do `if`, o outro ramo pode ser zerado sem nada reclamar. E costuma
+   ser o ramo de produção.
+
+Regra que ficou: **rodar a mutação e ver `exit=1`**, em vez de supor que veria. Detalhes e
+checklist na skill `test-validity-and-mutation-proof`.
+
+### Armadilhas de bash que custaram tempo
+
+- `if ! cmd` e `( set -e; f ) || true` **desligam o errexit**. Para detectar que uma função
+  aborta, só `bash -c` em processo separado funciona.
+- Arquivo temporário com nome fixo + chamadas em paralelo = exit code de outra execução.
+  Levou a caçar um bug que não existia. Usar nomes únicos.
+- Um worktree removido por outro processo deixa o `cwd` da sessão inválido, e os erros
+  seguintes apontam para o lugar errado. Passar `workdir` explícito.

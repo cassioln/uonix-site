@@ -77,6 +77,7 @@ require(production, r'cancel-in-progress:\s*false', 'produção não pode cancel
 # da escrita no banco, e o rollback precisa saber quais domínios foram alterados.
 production_backup_step = named_step_run(production, 'Back up managed remote paths')
 production_publish_step = named_step_run(production, 'Publish only managed paths and verify manifest')
+production_smoke_step = named_step_run(production, 'Clear cache and run smoke tests')
 production_migration_step = named_step_run(production, 'Migrate legacy variation technical sheets')
 production_rollback_step = named_step_run(production, 'Roll back managed code after failure')
 production_release_step = named_step_run(production, 'Release exclusive production lock')
@@ -109,6 +110,38 @@ require(
 )
 if not migration_index < rollback_index < release_index:
     raise AssertionError('rollback deve ser o último gate antes da liberação do lock')
+
+# Pós-cutover: https://uonix.com.br é produção definitiva e indexável. O smoke e
+# o rollback não podem mais exigir o estado histórico de noindex usado durante a
+# transição em site.uonix.com.br; essa divergência bloqueia publicação e mantém o
+# lock remoto mesmo após o código ser restaurado com sucesso.
+for label, step in (
+    ('smoke', production_smoke_step),
+    ('rollback', production_rollback_step),
+):
+    for pattern in (
+        r'!\s*defined\(\s*"UONIX_ALLOW_INDEXING"\s*\)',
+        r'true\s*!==\s*UONIX_ALLOW_INDEXING',
+        r'!\s*function_exists\(\s*"uonix_environment_allows_indexing"\s*\)',
+        r'!\s*uonix_environment_allows_indexing\(\)',
+        r'"1"\s*!==\s*\(string\)\s*get_option\(\s*"blog_public"\s*\)',
+    ):
+        require(
+            step,
+            pattern,
+            f'{label} precisa validar produção indexável (true/true/1) após o cutover',
+        )
+    forbid(
+        step,
+        r'false\s*!==\s*UONIX_ALLOW_INDEXING|"0"\s*!==\s*\(string\)\s*get_option\(\s*"blog_public"\s*\)',
+        f'{label} não pode voltar a exigir produção noindex após o cutover',
+    )
+    require(
+        step,
+        r"if tr -d .*?grep -Eiq '\^X-Robots-Tag:\.\*\(noindex\|nofollow\|noarchive\)'; then.*?exit 1.*?fi",
+        f'{label} HTTP precisa rejeitar cabeçalho noindex/nofollow/noarchive em produção',
+    )
+
 forbid(
     production,
     r'- name: Retain .*backups|tail -n \+31.*?rm -rf',
@@ -122,7 +155,7 @@ require(
 for marker in ('code-mutation-started', 'db-mutation-started'):
     if marker not in production:
         raise AssertionError(f'marcador remoto de mutação ausente: {marker}')
-if production_publish_step.index('code-mutation-started') > production_publish_step.index('rsync -az --delete'):
+if production_publish_step.index('code-mutation-started') > production_publish_step.index('rsync_retry -az --delete'):
     raise AssertionError('marcador de código precisa existir antes do primeiro rsync mutável')
 publish_code = '\n'.join(
     line for line in production_publish_step.splitlines()
@@ -141,7 +174,7 @@ allowlist_index = publish_code.index('expected_modules=()')
 name_guard_index = publish_code.index('uonix-*[!A-Za-z0-9._-]*')
 empty_gate_index = publish_code.index('${#expected_modules[@]}" -eq 0')
 marker_index = publish_code.index('bash -s -- "$operation_lock" "$DEPLOY_RUN_ID"')
-first_rsync_index = publish_code.index('rsync -az')
+first_rsync_index = publish_code.index('rsync_retry -az')
 if not allowlist_index < name_guard_index < empty_gate_index < marker_index < first_rsync_index:
     raise AssertionError(
         'allowlist de produção precisa ser validada antes do marcador e do primeiro rsync mutável'
@@ -153,12 +186,12 @@ require(
 )
 require(
     publish_code,
-    r'rsync\s+-az\s+--chmod=F600\s+\\\s+-e\s+"\$ssh_transport"\s+\\\s+\.deploy/manifest\.sha256\s+\\\s+"\$remote:\$BACKUP_DIR/manifest\.expected\.sha256"',
+    r'rsync_retry\s+-az\s+--chmod=F600\s+\\\s+-e\s+"\$ssh_transport"\s+\\\s+\.deploy/manifest\.sha256\s+\\\s+"\$remote:\$BACKUP_DIR/manifest\.expected\.sha256"',
     'transporte do manifesto esperado precisa publicá-lo explicitamente em modo 0600',
 )
 require(
     publish_code,
-    r'test ! -e "\$manifest"\s+test ! -L "\$manifest"\s+\(\s*set -o noclobber;\s*umask 077;\s*:\s*>\s*"\$manifest"\s*\)\s+chmod 600 "\$manifest"\s+test -f "\$manifest"\s+test ! -L "\$manifest"\s+test ! -s "\$manifest"\s+test "\$\(file_mode "\$manifest"\)" = 600',
+    r'\(\s*set -o noclobber;\s*umask 077;\s*:\s*>\s*"\$manifest"\s*\)\s+chmod 600 "\$manifest".*?test -f "\$manifest"\s+test ! -L "\$manifest"\s+test ! -s "\$manifest"\s+test "\$\(file_mode "\$manifest"\)" = 600',
     'path do manifesto esperado precisa ser reservado exclusivamente, vazio, regular e 0600 antes do rsync',
 )
 require(
@@ -178,7 +211,7 @@ require(
 )
 manifest_hash_index = publish_code.index('expected_manifest_checksum="$(sha256sum .deploy/manifest.sha256')
 manifest_reserve_index = publish_code.index('bash -s -- "$BACKUP_DIR/manifest.expected.sha256"')
-manifest_rsync_index = publish_code.index('rsync -az --chmod=F600')
+manifest_rsync_index = publish_code.index('rsync_retry -az --chmod=F600')
 manifest_compare_index = publish_code.index('test "$actual_manifest_checksum" = "$expected_manifest_checksum"')
 if not manifest_hash_index < manifest_reserve_index < manifest_rsync_index < manifest_compare_index:
     raise AssertionError('hash local, reserva exclusiva, transporte e comparação remota estão fora de ordem')
@@ -230,17 +263,17 @@ for marker in ('code-mutation-started', 'db-mutation-started'):
 require(production, r'^\s{2}authorize:\s*$', 'job de autorização local ausente')
 require(production, r'environment:\s*production-locaweb', 'Environment protegido de produção ausente')
 require(production, r'ENABLE_DEPLOY_PRODUCTION', 'guard persistente de produção ausente')
-require(production, r'PUBLICAR \$\{UONIX_REQUEST_SHA\} EM SITE\.UONIX\.COM\.BR', 'confirmação não está vinculada ao SHA')
+require(production, r'PUBLICAR \$\{UONIX_REQUEST_SHA\}"', 'confirmação não está vinculada ao SHA')
 require(production, r'UONIX_REQUEST_REF.*?refs/heads/master|refs/heads/master.*?UONIX_REQUEST_REF', 'produção não restringe a ref master')
 
 canonical_values = (
-    'ftp.site.uonix.com.br',
+    'ftp.uonix.com.br',
     'siteuonix1',
     '/home/storage/f/34/12/siteuonix1',
     '/home/storage/f/34/12/siteuonix1/public_html',
     '/usr/bin/php85',
     '/home/storage/f/34/12/siteuonix1/bin/wp-cli.phar',
-    'https://site.uonix.com.br',
+    'https://uonix.com.br',
 )
 for value in canonical_values:
     if value not in production:
@@ -331,18 +364,18 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
         'PATH': f'{fake_bin}:{os.environ.get("PATH", "")}',
         'UONIX_AUTH_TRANSPORT_LOG': str(marker),
         'UONIX_ENABLE_DEPLOY_PRODUCTION': 'true',
-        'UONIX_PRODUCTION_CONFIRMATION': f'PUBLICAR {sha} EM SITE.UONIX.COM.BR',
+        'UONIX_PRODUCTION_CONFIRMATION': f'PUBLICAR {sha}',
         'UONIX_REQUEST_SHA': sha,
         'UONIX_REQUEST_REF': 'refs/heads/master',
         'UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET': 'false',
-        'LOCAWEB_SSH_HOST': 'ftp.site.uonix.com.br',
+        'LOCAWEB_SSH_HOST': 'ftp.uonix.com.br',
         'LOCAWEB_SSH_PORT': '22',
         'LOCAWEB_SSH_USER': 'siteuonix1',
         'LOCAWEB_ACCOUNT_ROOT': '/home/storage/f/34/12/siteuonix1',
         'LOCAWEB_DOCUMENT_ROOT': '/home/storage/f/34/12/siteuonix1/public_html',
         'LOCAWEB_PHP_BIN': '/usr/bin/php85',
         'LOCAWEB_WP_BIN': '/home/storage/f/34/12/siteuonix1/bin/wp-cli.phar',
-        'TARGET_URL': 'https://site.uonix.com.br',
+        'TARGET_URL': 'https://uonix.com.br',
     }
 
     def run(overrides):
@@ -358,7 +391,9 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
         {'UONIX_PRODUCTION_CONFIRMATION': 'PUBLICAR OUTRO SHA'},
         {'UONIX_REQUEST_REF': 'refs/heads/qa'},
         {'LOCAWEB_DOCUMENT_ROOT': '/outro/site'},
-        {'TARGET_URL': 'https://uonix.com.br'},
+        # Domínio de trânsito removido no cutover de 2026-08-15: produção agora é
+        # uonix.com.br, então site.uonix.com.br passou a ser um alvo inválido.
+        {'TARGET_URL': 'https://site.uonix.com.br'},
         {'LOCAWEB_SSH_HOST': 'outro.example.invalid'},
     )
     for override in probes:

@@ -47,7 +47,7 @@ test('uses the canonical remote environments when no PageSpeed URL is supplied',
   assert.deepEqual(
     results.map((result) => result.requestedUrl),
     [
-      'https://site.uonix.com.br/',
+      'https://uonix.com.br/',
       'https://uonix.ksio.dev/',
       'https://test.uonix.ksio.dev/',
     ]
@@ -60,7 +60,7 @@ test('help identifies the canonical QA, DEV and provisional production targets',
     encoding: 'utf8',
   });
 
-  assert.match(help, /site\.uonix\.com\.br/);
+  assert.match(help, /\buonix\.com\.br/);
   assert.match(help, /uonix\.ksio\.dev/);
   assert.match(help, /test\.uonix\.ksio\.dev/);
   assert.doesNotMatch(help, /qa\.uonix\.ksio\.dev/);

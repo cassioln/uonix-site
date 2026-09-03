@@ -150,27 +150,29 @@ add_action( 'admin_bar_menu', function( $wp_admin_bar ) {
     $wp_admin_bar->remove_node( 'menus' );
     $wp_admin_bar->remove_node( 'appearance' );
 
-    // Garante que o nome do site continue clicável e leve direto ao painel
+    // Garante que o nome do site continue clicável e com o link correto
+    // Dentro do painel: leva para a HOME.
+    // No frontend: leva para o painel.
     $site_node = $wp_admin_bar->get_node( 'site-name' );
 
-	// Dentro do painel: leva para a HOME.
-	// No frontend: leva para o painel.
-	$site_node = $wp_admin_bar->get_node( 'site-name' );
+    if ( $site_node ) {
+        $destino_site_name = is_admin()
+            ? home_url( '/' )
+            : admin_url( 'index.php' );
 
-	if ( $site_node ) {
-		$destino_site_name = is_admin()
-			? home_url( '/' )
-			: admin_url( 'index.php' );
+        $existing_class = ! empty( $site_node->meta['class'] ) ? $site_node->meta['class'] : '';
+        $classes        = array_filter( array_unique( array_merge( explode( ' ', $existing_class ), array( 'uonix-editor-site-link' ) ) ) );
 
-		$wp_admin_bar->add_node( array(
-			'id'    => 'site-name',
-			'title' => $site_node->title,
-			'href'  => $destino_site_name,
-			'meta'  => array(
-				'class' => 'uonix-editor-site-link',
-			),
-		) );
-	}
+        $meta          = (array) $site_node->meta;
+        $meta['class'] = implode( ' ', $classes );
+
+        $wp_admin_bar->add_node( array(
+            'id'    => 'site-name',
+            'title' => $site_node->title,
+            'href'  => $destino_site_name,
+            'meta'  => $meta,
+        ) );
+    }
 
     // Remove o menu principal "Fluent Forms" da barra superior
     $wp_admin_bar->remove_node( 'fluent_form' );
@@ -220,6 +222,11 @@ function uonix_editor_admin_bar_front_css() {
         #wpadminbar #wp-admin-bar-site-name:hover .ab-sub-wrapper,
         #wpadminbar #wp-admin-bar-site-name.hover .ab-sub-wrapper {
             display: none !important;
+        }
+
+        #wpadminbar #wp-admin-bar-site-name > .ab-item img.site-icon,
+        #wpadminbar .site-icon {
+            background: transparent !important;
         }
     </style>';
 }

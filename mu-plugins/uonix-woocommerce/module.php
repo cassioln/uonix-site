@@ -19,10 +19,13 @@ uonix_mu_require_files(
 		'17-woocommerce-checkout-design.php',
 		'18-produto-alertas-variacao.php',
 		'20-catalogo-titulos-produtos.php',
+		'21-admin-variacao-preco-padrao.php',
 		'22-ficha-tecnica-variacao.php',
+		'27-tabela-fichas-tecnicas-variacoes.php',
 		'23-rfq-produto-padrao.php',
 		'24-admin-resumo-editor-estavel.php',
 		'25-admin-resumo-fixo.php',
+		'26-turnstile-store-api-checkout.php',
 	),
 	'uonix-woocommerce'
 );

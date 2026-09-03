@@ -53,7 +53,7 @@ check_workflow() {
   module_line="$(
     awk '
       /^[[:space:]]*for module(_name)? in/ { in_loop = 1; loop_start = NR }
-      in_loop && /rsync -az/ { print loop_start; exit }
+      in_loop && /rsync(_retry)? -az/ { print loop_start; exit }
       /^[[:space:]]*done[[:space:]]*$/ { in_loop = 0 }
     ' "$path"
   )"

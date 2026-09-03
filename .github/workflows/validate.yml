@@ -39,6 +39,12 @@ jobs:
       - name: Test e-mail policy
         run: php scripts/tests/test-email-policy.php
 
+      - name: Test social links use https
+        run: php scripts/tests/test-social-links-https.php
+
+      - name: Test noindex on flow pages
+        run: php scripts/tests/test-noindex-paginas-de-fluxo.php
+
       - name: Test indexing policy
         run: php scripts/tests/test-indexing-policy.php
 
@@ -54,6 +60,9 @@ jobs:
       - name: Test login Turnstile contract
         run: php scripts/tests/test-login-turnstile.php
 
+      - name: Test Store API checkout Turnstile guard
+        run: php scripts/tests/test-turnstile-store-api-checkout.php
+
       - name: Test login visual scope
         run: php scripts/tests/test-login-visual-scope.php
 
@@ -65,6 +74,9 @@ jobs:
 
       - name: Test RFQ product default
         run: php scripts/tests/test-rfq-product-default.php
+
+      - name: Test variation default regular price
+        run: php scripts/tests/test-variacao-preco-padrao.php
 
       - name: Test product excerpt editor enqueue
         run: php scripts/tests/test-product-excerpt-editor.php
@@ -78,11 +90,28 @@ jobs:
       - name: Test variation technical sheet
         run: php scripts/tests/test-variation-technical-sheet.php
 
+      - name: Test newsletter source URL
+        run: php scripts/tests/test-newsletter-source-url.php
+
       - name: Test managed code has no implicit schema mutations
         run: php scripts/tests/test-managed-code-no-schema-mutations.php
 
+      - name: Test SEO Organization schema enrichment
+        run: php scripts/tests/test-seo-organization-schema.php
+
+      - name: Test SEO service breadcrumb schema
+        run: php scripts/tests/test-seo-servico-breadcrumb-schema.php
+
+      - name: Test SEO Product schema enhancement
+        run: php scripts/tests/test-seo-product-schema-enhancement.php
+
+      - name: Lint SEO metadata sync script
+        run: php -l scripts/apply-seo-metadata-production.php
+
       - name: Validate variation technical sheet admin script
-        run: node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
+        run: |
+          node --check mu-plugins/uonix-woocommerce/assets/js/admin-ficha-tecnica-variacao.js
+          node --check mu-plugins/uonix-woocommerce/assets/js/admin-vtst-diagram-image.js
 
       - name: Test clone administration panel
         run: php scripts/tests/test-clone-admin.php
@@ -140,6 +169,9 @@ jobs:
 
       - name: Test SSH transport
         run: bash scripts/tests/test-ssh-transport.sh
+
+      - name: Test SSH retry (transport-only backoff)
+        run: bash scripts/tests/test-ssh-retry.sh
 
       - name: Test database backup contract
         run: bash scripts/tests/test-database-backup.sh
@@ -238,6 +270,9 @@ jobs:
       - name: Test clone safety boundaries
         run: bash scripts/tests/test-clone-safety.sh
 
+      - name: Test clear_cache real execution
+        run: bash scripts/tests/test-clear-cache-execucao-real.sh
+
       - name: Test deploy bundle
         run: bash scripts/tests/test-deploy-bundle.sh
 
@@ -251,6 +286,18 @@ jobs:
 
       - name: Test PageSpeed check script
         run: node --test scripts/tests/test-pagespeed-check.mjs
+
+      - name: Test checkout Turnstile UX guard
+        run: node scripts/tests/test-checkout-turnstile-ux.js
+
+      - name: Test Turnstile consistency across surfaces
+        run: node scripts/tests/test-turnstile-consistencia.js
+
+      - name: Test Turnstile re-render after checkout AJAX
+        run: node scripts/tests/test-turnstile-rerender-checkout.js
+
+      - name: Test watchdog cleared by real execution
+        run: node scripts/tests/test-watchdog-execucao-real.js
 
       - name: Test email migration passfile tooling
         run: python3 -m unittest discover --start-directory scripts/email-migration --pattern 'test_*.py' --verbose

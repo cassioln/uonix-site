@@ -20,11 +20,125 @@ if ( ! defined( 'ABSPATH' ) ) {
  * UÔNIX: Integração Master (GTM + AdOpt LGPD)
  * ---------------------------------------------------------
  * - Ordem de carregamento: AdOpt (Consentimento) -> GTM (Tags).
- * - Implementação direta via código para máxima performance (Sem plugins).
+ * - O Site Kit pode assumir a emissão do GTM; o AdOpt continua neste MU-plugin.
+ * - AdOpt via código; GTM próprio apenas como fallback ao Site Kit.
  * - Suporte nativo ao Google Consent Mode v2.
  * - Banner AdOpt movido para um container controlado para blindar CSS.
  * - UI Enterprise (Design System Uônix + Flexbox Grid).
  */
+
+if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
+    /**
+     * O Google Site Kit está injetando GA4/GTM por conta própria?
+     *
+     * POR QUE ISSO EXISTE
+     *
+     * Este arquivo injeta o container GTM apenas como fallback. Quando o módulo Tag
+     * Manager do Site Kit está ativo, ele passa a ser o responsável pelo container e
+     * este MU-plugin preserva somente a camada AdOpt/LGPD. Se Analytics ou Ads do Site
+     * Kit emitirem tags diretamente ao mesmo tempo que o GTM, o GA4 pode chegar por dois
+     * caminhos e tudo conta em dobro: pageviews, conversões e taxa de rejeição ficam
+     * contaminados silenciosamente.
+     *
+     * Registro histórico de 2026-08-16: o Site Kit estava ativo com `useSnippet = true`
+     * nas três options (analytics-4, tagmanager, adsense), mas sem IDs. Esse registro não
+     * representa o estado atual e não substitui a leitura das options antes de um corte.
+     *
+     * Esta função identifica quem está emitindo medição para que o renderer nunca duplique
+     * o container; a decisão preserva o AdOpt quando a origem for o módulo Tag Manager.
+     *
+     * `useSnippet = true` é o DEFAULT do plugin, não uma escolha — por isso ele sozinho
+     * não indica nada. O que importa é ter useSnippet TRUE **e** um ID preenchido.
+     *
+     * @param array|null $options Options do Site Kit (injetável para teste).
+     * @return string ''  quando não injeta; nome do módulo quando injeta.
+     */
+    function uonix_site_kit_injeta_medicao( $options = null ) {
+        /*
+         * Módulo => campos cuja presença significa "tem tag para emitir".
+         *
+         * Lista derivada dos Tag_Guard REAIS do pacote Site Kit 1.186.0 fornecido para
+         * esta migração, verificada arquivo por arquivo — não de memória:
+         *
+         *   Analytics_4/Tag_Guard.php:33
+         *     return ! empty( $settings['useSnippet'] ) && ! empty( $settings['measurementID'] );
+         *
+         *   Tag_Manager/Tag_Guard.php:55
+         *     $container_id = $this->is_amp ? $settings['ampContainerID'] : $settings['containerID'];
+         *
+         * `ampContainerID` é o campo consultado quando a requisição é AMP. Hoje não há
+         * plugin AMP instalado, então é inalcançável — mas esta guarda existe justamente
+         * para o cenário "alguém reinstala/instala depois".
+         *
+         * `googleTagID` não entra: embora seja usado na composição posterior da Google tag,
+         * o Tag_Guard exige `measurementID` antes de registrar qualquer tag. Tratá-lo
+         * sozinho como injeção desligaria o fallback GTM por falso positivo.
+         *
+         * NÃO inclua `gtagContainerID`: verificado, tem ZERO ocorrências em includes/ do
+         * plugin. Era campo inventado. `webDataStreamID` também saiu: existe em Settings
+         * mas NÃO participa de nenhuma decisão de emitir tag (nem no Tag_Guard nem no
+         * Web_Tag) — cobri-lo dava falsa sensação de completude.
+         */
+        $modulos = array(
+            'analytics-4' => array( 'measurementID' ),
+            'tagmanager'  => array( 'containerID', 'ampContainerID' ),
+        );
+
+        foreach ( $modulos as $modulo => $campos_id ) {
+            $chave = 'googlesitekit_' . $modulo . '_settings';
+
+            if ( null !== $options ) {
+                $settings = isset( $options[ $chave ] ) ? $options[ $chave ] : null;
+            } else {
+                $settings = function_exists( 'get_option' ) ? get_option( $chave ) : null;
+            }
+
+            if ( ! is_array( $settings ) ) {
+                continue;
+            }
+
+            // Sem useSnippet o Site Kit não coloca tag no site, só lê dados.
+            if ( empty( $settings['useSnippet'] ) ) {
+                continue;
+            }
+
+            foreach ( $campos_id as $campo ) {
+                if ( ! empty( $settings[ $campo ] ) && '' !== trim( (string) $settings[ $campo ] ) ) {
+                    return $modulo;
+                }
+            }
+        }
+
+        /*
+         * O módulo Ads é tratado SEPARADAMENTE porque NÃO tem gate de `useSnippet`.
+         *
+         *   Ads.php:337 register_tag() injeta assim que `conversionID` existe — não há
+         *   opção de "colocar o snippet no site" para desmarcar.
+         *
+         * Ele emite gtag.js de conversão (AW-*), que compartilha o mesmo objeto
+         * `gtag`/dataLayer do GA4. Se o container GTM também emitir gtag, há dois
+         * carregamentos concorrentes do mesmo script — daí o Ads contar, ao contrário do
+         * AdSense (que serve anúncio, não medição).
+         */
+        $chave_ads = 'googlesitekit_ads_settings';
+
+        if ( null !== $options ) {
+            $ads = isset( $options[ $chave_ads ] ) ? $options[ $chave_ads ] : null;
+        } else {
+            $ads = function_exists( 'get_option' ) ? get_option( $chave_ads ) : null;
+        }
+
+        if ( is_array( $ads ) ) {
+            foreach ( array( 'conversionID', 'paxConversionID' ) as $campo ) {
+                if ( ! empty( $ads[ $campo ] ) && '' !== trim( (string) $ads[ $campo ] ) ) {
+                    return 'ads';
+                }
+            }
+        }
+
+        return '';
+    }
+}
 
 if ( ! function_exists( 'uonix_analytics_configuration' ) ) {
     /**
@@ -57,6 +171,19 @@ if ( ! function_exists( 'uonix_analytics_configuration' ) ) {
             return false;
         }
 
+        /*
+         * O Site Kit deve assumir somente a emissão do container GTM existente. Nesse
+         * caso, a configuração continua válida para o AdOpt; o renderer decide, em
+         * separado, não duplicar GTM/noscript.
+         *
+         * Analytics ou Ads emitidos diretamente pelo Site Kit continuam sendo um conflito:
+         * compartilham gtag/dataLayer com o GA4 que vive no GTM e poderiam duplicar a
+         * coleta. Para esses módulos, mantemos o recuo fail-closed já existente.
+         */
+        if ( in_array( uonix_site_kit_injeta_medicao(), array( 'analytics-4', 'ads' ), true ) ) {
+            return false;
+        }
+
         return array(
             'gtm_container_id' => $gtm_container_id,
             'adopt_website_id' => $adopt_website_id,
@@ -81,15 +208,70 @@ if ( ! function_exists( 'uonix_analytics_configuration_is_complete' ) ) {
     }
 }
 
+if ( ! function_exists( 'uonix_analytics_should_render_gtm' ) ) {
+    /**
+     * Determina se este MU-plugin ainda é responsável por emitir o container GTM.
+     *
+     * O Site Kit pode assumir o mesmo container. A presença de qualquer tag de medição
+     * emitida pelo Site Kit bloqueia o fallback próprio para nunca haver dois snippets
+     * concorrentes. Na rota esperada de Tag Manager, os callbacks mantêm o AdOpt em
+     * separado.
+     *
+     * @param mixed $configuration Configuração candidata.
+     * @return bool
+     */
+    function uonix_analytics_should_render_gtm( $configuration ) {
+        return uonix_analytics_configuration_is_complete( $configuration )
+            && '' === uonix_site_kit_injeta_medicao();
+    }
+}
+
 if ( ! function_exists( 'uonix_analytics_admin_notice' ) ) {
     /**
      * Avisa sobre configuração incompleta sem exibir qualquer identificador.
      */
     function uonix_analytics_admin_notice() {
+        /*
+         * Restrito a quem pode agir sobre o aviso. Antes rodava para qualquer usuário
+         * logado no admin — um assinante veria a mensagem sem poder fazer nada.
+         * Levantado na revisão do PR #110.
+         */
+        if ( function_exists( 'current_user_can' ) && ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+
         $environment = defined( 'UONIX_ENV' ) ? UONIX_ENV : null;
         $enabled     = defined( 'UONIX_ANALYTICS_ENABLED' ) ? UONIX_ANALYTICS_ENABLED : false;
 
-        if ( 'production' !== $environment || true !== $enabled || false !== uonix_analytics_configuration() ) {
+        if ( 'production' !== $environment || true !== $enabled ) {
+            return;
+        }
+
+        $modulo       = uonix_site_kit_injeta_medicao();
+        $configuration = uonix_analytics_configuration();
+
+        // Caminho esperado da migração: Site Kit emite o container GTM já existente e
+        // este MU-plugin preserva exclusivamente o AdOpt/LGPD.
+        if ( 'tagmanager' === $modulo && false !== $configuration ) {
+            return;
+        }
+
+        if ( '' !== $modulo ) {
+            echo '<div class="notice notice-warning"><p><strong>'
+                . esc_html( 'Container GTM suspenso para evitar contagem dupla.' )
+                . '</strong> '
+                . esc_html( sprintf(
+                    'O módulo "%s" do Google Site Kit está injetando medição diretamente. '
+                    . 'Para não duplicar pageviews e conversões, o fallback GTM e o AdOpt foram bloqueados de forma fail-closed. '
+                    . 'Para preservar GA4 e Meta Pixel no mesmo container, desmarque a colocação de código de Analytics/Ads '
+                    . 'e habilite somente o módulo Tag Manager com o container GTM existente.',
+                    $modulo
+                ) )
+                . '</p></div>';
+            return;
+        }
+
+        if ( false !== $configuration ) {
             return;
         }
 
@@ -111,6 +293,7 @@ function uonix_render_analytics_head( $configuration = null ) {
 
     $gtm_container_id = $configuration['gtm_container_id'];
     $adopt_website_id = $configuration['adopt_website_id'];
+    $render_gtm       = uonix_analytics_should_render_gtm( $configuration );
     ?>
     
     <meta name="adopt-website-id" content="<?php echo esc_attr( $adopt_website_id ); ?>" />
@@ -252,12 +435,17 @@ function uonix_render_analytics_head( $configuration = null ) {
             text-decoration: underline !important;
         }
 
-        /* Container dos Botões Principais */
-        #uonix-cookie-root #cookie-banner div:has(> #adopt-reject-all-button) {
+        /* Container dos Botões Principais.
+           Mira o container pelos DOIS estados do AdOpt: quando o botão do meio
+           vem com id (#adopt-reject-all-button) e quando vem sem id — nesse caso
+           o "Aceitar" (#adopt-accept-all-button) sempre existe e ancora o gap,
+           evitando que os botões fiquem colados se o AdOpt trocar o markup. */
+        #uonix-cookie-root #cookie-banner div:has(> #adopt-reject-all-button),
+        #uonix-cookie-root #cookie-banner div:has(> #adopt-accept-all-button) {
             display: flex !important; 
             align-items: center !important; 
             justify-content: flex-end !important; 
-            gap: 10px !important; 
+            gap: 12px !important; 
             width: 100% !important;
             margin-top: 16px !important;
             flex-wrap: wrap !important;
@@ -300,6 +488,15 @@ function uonix_render_analytics_head( $configuration = null ) {
         #uonix-cookie-root #preference-banner div > button:nth-last-of-type(2),
         #uonix-cookie-root #preference-banner div > button:last-of-type {
             appearance: none !important; border-radius: 8px !important; font-weight: 700 !important; font-size: 13px !important; padding: 10px 18px !important; cursor: pointer !important; border: none !important; white-space: nowrap !important;
+        }
+
+        /* Fallback de arredondamento para o botão de recusa quando o AdOpt o
+           serve SEM id (estados antigos rotulavam "Não venda"). Mira por exclusão
+           — não é "Minhas opções" nem "Aceitar" — para casar com o botão do meio
+           mesmo sem id; quando ele vem com #adopt-reject-all-button, a regra
+           "Rejeitar" abaixo já o cobre. Mantém o mesmo raio do Aceitar. */
+        #uonix-cookie-root #cookie-banner div:has(> #adopt-accept-all-button) > button:not(#adopt-preferences-button):not(#adopt-accept-all-button) {
+            border-radius: 8px !important;
         }
 
         /* Rejeitar */
@@ -434,11 +631,13 @@ function uonix_render_analytics_head( $configuration = null ) {
         }
     </style>
 
-    <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-    new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-    j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-    'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-    })(window,document,'script','dataLayer',<?php echo wp_json_encode( $gtm_container_id ); ?>);</script>
+    <?php if ( $render_gtm ) : ?>
+        <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+        new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+        j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+        'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+        })(window,document,'script','dataLayer',<?php echo wp_json_encode( $gtm_container_id ); ?>);</script>
+    <?php endif; ?>
     <?php
 }
 }
@@ -453,17 +652,50 @@ function uonix_render_analytics_body( $configuration = null ) {
     if ( is_admin() || ! uonix_analytics_configuration_is_complete( $configuration ) ) return;
 
     $gtm_container_id = $configuration['gtm_container_id'];
+    $render_gtm       = uonix_analytics_should_render_gtm( $configuration );
     ?>
     
     <div id="uonix-cookie-root" aria-live="polite"></div>
 
-    <noscript><iframe src="<?php echo esc_url( 'https://www.googletagmanager.com/ns.html?id=' . rawurlencode( $gtm_container_id ) ); ?>"
-    height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+    <?php if ( $render_gtm ) : ?>
+        <noscript><iframe src="<?php echo esc_url( 'https://www.googletagmanager.com/ns.html?id=' . rawurlencode( $gtm_container_id ) ); ?>"
+        height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+    <?php endif; ?>
 
     <script>
     (function() {
         if (window.__uonixCookieRootInit) return;
         window.__uonixCookieRootInit = true;
+
+        function normalizeRejectLabel(cookieBanner) {
+            /*
+             * O AdOpt, dependendo da configuração/versão servida, rotula o botão
+             * de recusa como "Rejeitar" (com id #adopt-reject-all-button) OU como
+             * "Não venda"/"Não vender" (sem id). Este site padroniza em "Rejeitar".
+             *
+             * Mira o botão por EXCLUSÃO — não é "Minhas opções" nem "Aceitar" —,
+             * exatamente o mesmo critério que o CSS usa, para funcionar mesmo
+             * quando a classe é dinâmica e o id não existe. Só reescreve quando o
+             * texto atual é uma variante de "Não venda/vender"; nunca mexe se já
+             * estiver correto.
+             */
+            if (!cookieBanner) return;
+            var accept = document.getElementById('adopt-accept-all-button');
+            var container = accept ? accept.parentElement : cookieBanner;
+            if (!container) return;
+
+            var buttons = container.querySelectorAll('button');
+            for (var i = 0; i < buttons.length; i++) {
+                var b = buttons[i];
+                if (b.id === 'adopt-preferences-button' || b.id === 'adopt-accept-all-button') {
+                    continue;
+                }
+                var txt = (b.textContent || '').trim();
+                if (/^n[ãa]o\s+vend/i.test(txt)) {
+                    b.textContent = 'Rejeitar';
+                }
+            }
+        }
 
         function mountCookieElements() {
             var root = document.getElementById('uonix-cookie-root');
@@ -479,6 +711,8 @@ function uonix_render_analytics_body( $configuration = null ) {
             if (preferenceBanner && preferenceBanner.parentElement !== root) {
                 root.appendChild(preferenceBanner);
             }
+
+            normalizeRejectLabel(cookieBanner);
 
             return !!(cookieBanner || preferenceBanner);
         }

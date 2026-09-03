@@ -80,7 +80,7 @@ function uox_render_dados_page() {
                 'social_facebook' => ['label' => 'Facebook', 'default' => 'https://web.facebook.com/Uonix.Montagens/'],
                 'social_instagram'=> ['label' => 'Instagram', 'default' => 'https://www.instagram.com/uonix.montagens/'],
                 'social_linkedin' => ['label' => 'LinkedIn', 'default' => 'https://www.linkedin.com/company/uonix-montagens-e-consultoria-tecnica/'],
-                'social_youtube'  => ['label' => 'YouTube', 'default' => 'http://www.youtube.com/@uonixmontagens'],
+                'social_youtube'  => ['label' => 'YouTube', 'default' => 'https://www.youtube.com/@uonixmontagens'],
                 'social_x'        => ['label' => 'X (Twitter)', 'default' => ''],
             ]
         ],
