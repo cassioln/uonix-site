@@ -234,7 +234,50 @@ add_action('wp_footer', function() {
             z-index: 5 !important;
         }
 
-        /* 3. DROPDOWN AUTOCOMPLETE (VISUAL PROFISSIONAL) */
+        /* 3. DROPDOWN AUTOCOMPLETE (VISUAL PROFISSIONAL) & CONTROLE DE CAMADAS (STACKING CONTEXT) */
+        .woof_text_search_container {
+            position: relative !important;
+            z-index: 99999 !important;
+        }
+
+        /* Eleva as colunas e linha que envelopam a busca */
+        .wp-block-kadence-column:has(.woof_text_search_container),
+        .kadence-column7150_2a56fa-f9,
+        .kadence-column7150_c66229-c0 {
+            position: relative !important;
+            z-index: 99999 !important;
+        }
+
+        .wp-block-kadence-rowlayout:has(.woof_text_search_container),
+        .kb-row-layout-id7150_219091-69 {
+            position: relative !important;
+            z-index: 100 !important;
+        }
+
+        /* Garante que o painel de tags ativas e o grid fiquem abaixo do dropdown */
+        .woof_products_top_panel,
+        .woof_products_top_panel_ul,
+        .woof_products_top_panel_content,
+        .kadence-column7150_6a9c4f-25 {
+            position: relative !important;
+            z-index: 10 !important;
+        }
+
+        .kadence-column7150_82068b-b2,
+        ul.products.product-archive {
+            position: relative !important;
+            z-index: 5 !important;
+        }
+
+        /* Garante que o bloco de FAQ fique abaixo dos resultados de busca */
+        #faq,
+        [id="faq"],
+        .kb-row-layout-wrap#faq,
+        .kb-row-layout-id2859_1404ed-e8 {
+            position: relative !important;
+            z-index: 1 !important;
+        }
+
         .woof_husky_txt-container {
             background-color: #ffffff !important;
             border: 1px solid #e2e8f0 !important;
@@ -242,7 +285,8 @@ add_action('wp_footer', function() {
             box-shadow: 0 10px 25px rgba(0,0,0,0.1) !important;
             margin-top: 5px !important;
             padding: 10px 0 !important;
-            z-index: 9999 !important;
+            position: absolute !important;
+            z-index: 999999 !important;
         }
 
         /* Itens da Lista */
