@@ -47,9 +47,9 @@ add_action('wp_head', function() {
      * durante a fração de segundo antes do JS do Kadence (kt-tabs.min.js) rodar.
      */
     #tabs-produtos-banner .kt-tabs-wrap:not(.initialized) > .kt-tabs-content-wrap > .kt-tab-inner-content:not(:first-child),
-    .kt-tabs-wrap.kt-active-tab-1:not(.initialized) > .kt-tabs-content-wrap > .kt-tab-inner-content:not(.kt-inner-tab-1),
-    .kt-tabs-wrap.kt-active-tab-2:not(.initialized) > .kt-tabs-content-wrap > .kt-tab-inner-content:not(.kt-inner-tab-2),
-    .kt-tabs-wrap.kt-active-tab-3:not(.initialized) > .kt-tabs-content-wrap > .kt-tab-inner-content:not(.kt-inner-tab-3) {
+    #tabs-produtos-banner .kt-tabs-wrap.kt-active-tab-1:not(.initialized) > .kt-tabs-content-wrap > .kt-tab-inner-content:not(.kt-inner-tab-1),
+    #tabs-produtos-banner .kt-tabs-wrap.kt-active-tab-2:not(.initialized) > .kt-tabs-content-wrap > .kt-tab-inner-content:not(.kt-inner-tab-2),
+    #tabs-produtos-banner .kt-tabs-wrap.kt-active-tab-3:not(.initialized) > .kt-tabs-content-wrap > .kt-tab-inner-content:not(.kt-inner-tab-3) {
         display: none !important;
     }
     </style>
