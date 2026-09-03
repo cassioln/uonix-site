@@ -3140,8 +3140,13 @@ vts_assert_contains( 'min-width: 32px', $admin_css, 'controles possuem largura m
 vts_assert_contains( 'min-height: 32px', $admin_css, 'controles neutralizam a altura mínima do WordPress' );
 vts_assert_same(
 	1,
-	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__icon-button \.dashicons\s*\{[^}]*line-height:\s*8px;[^}]*\}~s', $admin_css ),
-	'ícones dos botões quadrados vencem o line-height global do WordPress'
+	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__icon-button \.dashicons\s*\{[^}]*line-height:\s*20px(?:\s*!important)?\s*;[^}]*\}~s', $admin_css ),
+	'ícones dos botões quadrados têm dimensões e line-height alinhados'
+);
+vts_assert_same(
+	1,
+	preg_match( '~\.uonix-vts-admin \.uonix-vts-admin__icon-button \.dashicons::before\s*\{[^}]*line-height:\s*20px(?:\s*!important)?\s*;[^}]*\}~s', $admin_css ),
+	'pseudo-elemento de ícone é centralizado de forma estável'
 );
 vts_assert_same(
 	1,
