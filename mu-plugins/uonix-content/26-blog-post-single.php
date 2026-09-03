@@ -236,15 +236,40 @@ function uonix_estilos_premium_master() {
         z-index: 0 !important;
     }
 
-   /* =========================================================
-       1. TAGS GLOBAIS E SIDEBAR (Estilo Nuvem Tipográfica Premium)
+    /* =========================================================
+       1. TAGS GLOBAIS E SIDEBAR (Estilo Mosaico Denso WordCloud2)
        ========================================================= */
-		.uonix-tags-cloud-typographic {
-				display: block;
-				text-align: center;
-				line-height: 1.1;
-				padding: 10px 0;
-			}
+    .uonix-tags-widget .uonix-wordcloud-wrap {
+        width: 100%;
+        position: relative;
+        min-height: 280px;
+        overflow: visible;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    .uonix-wordcloud-wrap span {
+        transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.18s ease, box-shadow 0.22s ease !important;
+        cursor: pointer !important;
+        will-change: transform;
+        border-radius: 4px;
+    }
+
+    /* A palavra selecionada ganha destaque, fundo translúcido e projeta-se para a frente */
+    .uonix-wordcloud-wrap span.is-active-word {
+        z-index: 100 !important;
+        background: rgba(255, 255, 255, 0.9) !important;
+        box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.9), 0 6px 20px rgba(14, 55, 128, 0.18) !important;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+    }
+
+    .uonix-tags-cloud-typographic {
+        display: block;
+        text-align: center;
+        line-height: 1.1;
+        padding: 10px 0;
+    }
 
     .uonix-tag-text {
         display: inline-block;
@@ -922,50 +947,169 @@ function uonix_gerar_sidebar_posts() {
     <?php return ob_get_clean();
 }
 
-/* 2.2 Nuvem de Assuntos (Visual Tipográfico) */
+/* 2.2 Nuvem de Assuntos (Visual Tipográfico WordCloud2) */
 add_shortcode('uonix_global_tags', 'uonix_gerar_nuvem_tags_global_v3');
 function uonix_gerar_nuvem_tags_global_v3() {
-    // Limite de 20 tags para dar volume na nuvem sem poluir.
-    $tags = get_tags(array('orderby' => 'count', 'order' => 'DESC', 'hide_empty' => true, 'number' => 20));
+    // 28 tags para volume ideal no mosaico denso estilo quebra-cabeça
+    $tags = get_tags(array(
+        'orderby'    => 'count',
+        'order'      => 'DESC',
+        'hide_empty' => true,
+        'number'     => 28
+    ));
     if (empty($tags)) return '';
     
     $counts = wp_list_pluck($tags, 'count');
-    $min_count = min($counts); $max_count = max($counts);
-    
-    // Contraste extremo de tamanhos (O segredo desse visual)
-    $min_size = 14; $max_size = 40;
-    
-    // Paleta de Cores Uônix para o sorteio
-    $cores_uonix = array(
-        '#0e3780', // Azul Marinho
-        '#f76a0c', // Laranja
-        '#1e293b', // Chumbo Escuro
-        '#475569', // Cinza Médio
-        '#15459e', // Azul Mais Claro
-        '#ea580c'  // Laranja Mais Escuro
+    $min_count = min($counts);
+    $max_count = max($counts);
+    $divisor = max(1, $max_count - $min_count);
+
+    $min_size = 13;
+    $max_size = 36;
+
+    $word_list = array();
+    foreach ($tags as $tag) {
+        $size = round($min_size + (($tag->count - $min_count) * ($max_size - $min_size) / $divisor));
+        $word_list[] = array(
+            mb_strtoupper($tag->name, 'UTF-8'),
+            $size,
+            esc_url(get_tag_link($tag->term_id))
+        );
+    }
+
+    // Registra o script local do WordCloud2
+    wp_enqueue_script(
+        'uonix-wordcloud2',
+        get_stylesheet_directory_uri() . '/assets/js/wordcloud2.min.js',
+        array(),
+        '1.2.2',
+        true
     );
-    
-    // Embaralha a ordem das tags para as grandes não ficarem todas juntas no topo
-    shuffle($tags);
 
     ob_start(); ?>
     <div class="uonix-premium-box uonix-tags-widget">
         <h3 class="uonix-section-title">Assuntos</h3>
-        <div class="uonix-tags-cloud-typographic">
-            <?php foreach ($tags as $tag) : 
-                $divisor = max(1, $max_count - $min_count);
-                // Calcula o tamanho da palavra com base nos artigos escritos
-                $size = round($min_size + (($tag->count - $min_count) * ($max_size - $min_size) / $divisor));
-                
-                // Sorteia uma cor da paleta da Uônix
-                $cor = $cores_uonix[array_rand($cores_uonix)];
-            ?>
-                <a href="<?php echo esc_url(get_tag_link($tag->term_id)); ?>" class="uonix-tag-text" style="font-size: <?php echo esc_attr($size); ?>px; color: <?php echo esc_attr($cor); ?>;">
-                    <?php echo esc_html(mb_strtoupper($tag->name, 'UTF-8')); ?>
-                </a>
+
+        <div id="uonix-wordcloud-wrap" class="uonix-wordcloud-wrap"></div>
+
+        <!-- Fallback Semântico e Acessível para SEO (Googlebot lê todos os links âncora) -->
+        <div class="uonix-tags-seo-fallback screen-reader-text" style="position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important;">
+            <?php foreach ($tags as $tag) : ?>
+                <a href="<?php echo esc_url(get_tag_link($tag->term_id)); ?>"><?php echo esc_html($tag->name); ?></a>
             <?php endforeach; ?>
         </div>
     </div>
+
+    <script id="uonix-wordcloud-init">
+    (function() {
+        var wordList = <?php echo json_encode($word_list); ?>;
+        var colors = ['#0e3780', '#f76a0c', '#1e293b', '#475569', '#15459e', '#ea580c', '#2563eb', '#c2410c'];
+
+        function renderCloud() {
+            var wrap = document.getElementById('uonix-wordcloud-wrap');
+            if (!wrap || !window.WordCloud) return;
+
+            wrap.innerHTML = '';
+            var width = wrap.clientWidth || 300;
+            if (width < 50) width = 300;
+            wrap.style.height = '280px';
+
+            window.WordCloud(wrap, {
+                list: wordList,
+                gridSize: 6,
+                weightFactor: function(size) {
+                    return size * 1.05 * (width / 310);
+                },
+                fontFamily: 'Barlow Semi Condensed, Impact, sans-serif',
+                fontWeight: '800',
+                color: function() {
+                    return colors[Math.floor(Math.random() * colors.length)];
+                },
+                rotateRatio: 0.35,
+                rotationSteps: 2,
+                minRotation: -Math.PI / 2,
+                maxRotation: 0,
+                backgroundColor: 'transparent',
+                drawOutOfBound: false,
+                shrinkToFit: true,
+                ellipticity: 0.7
+            });
+
+            // Configura a interação física de trazer a palavra para mais perto
+            wrap.addEventListener('wordcloudstop', function onStop() {
+                wrap.removeEventListener('wordcloudstop', onStop);
+                setupWordInteractions();
+            });
+
+            setTimeout(setupWordInteractions, 300);
+        }
+
+        function setupWordInteractions() {
+            var wrap = document.getElementById('uonix-wordcloud-wrap');
+            if (!wrap) return;
+            var spans = wrap.querySelectorAll('span');
+            if (!spans.length) return;
+
+            spans.forEach(function(s) {
+                if (s.dataset.hasWordCloudEvents) return;
+                s.dataset.hasWordCloudEvents = '1';
+
+                // Salva o transform original de rotação
+                s.dataset.origTransform = s.style.transform || '';
+
+                // Mapeia o link correspondente
+                var text = s.innerText.trim();
+                var match = wordList.find(function(item) {
+                    return item[0] === text;
+                });
+                if (match && match[2]) {
+                    s.dataset.url = match[2];
+                }
+
+                // Efeito dinâmico: traz a palavra selecionada para mais perto (pop zoom) sem mexer na opacidade
+                s.addEventListener('mouseenter', function() {
+                    s.classList.add('is-active-word');
+                    var base = s.dataset.origTransform ? s.dataset.origTransform + ' ' : '';
+                    s.style.transform = base + 'scale(1.22)';
+                });
+
+                s.addEventListener('mouseleave', function() {
+                    s.classList.remove('is-active-word');
+                    s.style.transform = s.dataset.origTransform;
+                });
+
+                // Clique para navegar
+                s.addEventListener('click', function() {
+                    if (s.dataset.url) {
+                        window.location.href = s.dataset.url;
+                    }
+                });
+            });
+        }
+
+        function tryInit(attempts) {
+            if (window.WordCloud) {
+                renderCloud();
+            } else if (attempts > 0) {
+                setTimeout(function() { tryInit(attempts - 1); }, 80);
+            }
+        }
+
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            tryInit(30);
+        } else {
+            document.addEventListener('DOMContentLoaded', function() {
+                tryInit(30);
+            });
+        }
+
+        var resizeTimer;
+        window.addEventListener('resize', function() {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(renderCloud, 250);
+        });
+    })();
+    </script>
     <?php return ob_get_clean();
 }
 
