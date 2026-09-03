@@ -401,7 +401,10 @@ final class Uonix_VTST_Table {
 		$labels = array();
 		foreach ( $sheet['sections'] as $section ) {
 			foreach ( $section['items'] as $item ) {
-				$label = (string) $item['label'];
+				$label = mb_strtolower( trim( (string) $item['label'] ), 'UTF-8' );
+				if ( '' === $label ) {
+					continue;
+				}
 				if ( isset( $labels[ $label ] ) ) {
 					return true;
 				}

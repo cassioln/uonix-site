@@ -3305,6 +3305,19 @@ vts_assert_same(
 	'ficha com rótulos técnicos duplicados não gera tabela ambígua'
 );
 
+$duplicate_case_sheet = vts_valid_sheet();
+$duplicate_case_sheet['sections'][0]['items'] = array(
+	array( 'label' => 'Torque', 'value' => '8 N·m' ),
+	array( 'label' => 'torque', 'value' => '0,8 kgf·m' ),
+);
+$GLOBALS['vts_products'][20105] = new VTS_Fake_Table_Variation( 20105, array( 'pa_material' => 'galvanizado' ), $duplicate_case_sheet );
+$duplicate_case_product = new VTS_Fake_Table_Product( 20106, 'variable', array( 'pa_material' => array() ), array( 20105 ) );
+vts_assert_same(
+	null,
+	Uonix_VTST_Table::build_matrix( $duplicate_case_product ),
+	'ficha com rótulos técnicos duplicados em caixa diferente também não gera tabela ambígua'
+);
+
 // Contratos de atributos informativos (não variantes): Autocomplete e Herança de Valor Único (Opções B + C)
 $attr_material = new VTS_Fake_Product_Attribute( 'pa_material', true, array( 'Inox', 'Galvanizado' ), true, 'Material' );
 $attr_corpo    = new VTS_Fake_Product_Attribute( 'pa_corpo', false, array( '4"', '6"' ), true, 'Corpo' );
@@ -3351,9 +3364,13 @@ vts_assert_contains( 'uonix-vts-admin__item-value--tagged', $admin_js, 'script a
 vts_assert_contains( 'function clearLabelTag()', $admin_js, 'script possui rotina de limpeza atômica ao apagar letra do rótulo tag' );
 vts_assert_contains( 'function clearValueTag()', $admin_js, 'script possui rotina de limpeza atômica ao apagar letra do valor tag' );
 vts_assert_contains( 'deleteContentBackward', $admin_js, 'script suporta exclusão atômica da tag em teclados virtuais' );
+vts_assert_contains( 'function refreshRootLabelSuggestions($root)', $admin_js, 'script filtra dinamicamente atributos já usados das sugestões dos outros itens' );
+vts_assert_contains( 'function checkDuplicateInRoot()', $admin_js, 'script detecta tentativa de duplicar rótulo na mesma variação' );
+vts_assert_contains( 'uonix-vts-admin__item-label--duplicate', $admin_js, 'script sinaliza visualmente rótulo duplicado' );
 vts_assert_contains( 'ensureItemDatalists($item);', $admin_js, 'cada novo item recebe os datalists' );
 vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--tagged', $admin_css, 'CSS possui estilo visual exclusivo de tag para o rótulo' );
 vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__item-value.uonix-vts-admin__item-value--tagged', $admin_css, 'CSS possui estilo visual exclusivo de tag para o valor' );
+vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--duplicate', $admin_css, 'CSS possui estilo visual exclusivo de erro para rótulo duplicado' );
 
 // 3. attribute_columns ignora atributos não variantes
 $table_attr_cols = Uonix_VTST_Table::attribute_columns( $parent_with_attrs, array( 20201, 20202 ) );

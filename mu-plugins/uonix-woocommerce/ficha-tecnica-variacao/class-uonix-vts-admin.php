@@ -65,6 +65,7 @@ final class Uonix_VTS_Admin {
 					'copyConfirm'     => 'Substituir a ficha atual pela ficha selecionada?',
 					'copyError'       => 'Não foi possível copiar a ficha selecionada.',
 					'copyPlaceholder' => 'Selecione uma variação',
+					'duplicateLabel'  => 'O rótulo "%s" já está sendo utilizado nesta variação.',
 				),
 			)
 		);

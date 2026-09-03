@@ -171,6 +171,57 @@
 
 	let datalistSequence = 0;
 
+	function refreshRootLabelSuggestions($root) {
+		const parentAttrs = Array.isArray(config.parentAttributes) ? config.parentAttributes : [];
+		if (parentAttrs.length === 0 || !$root || !$root.length) {
+			return;
+		}
+
+		const $items = $root.find('.uonix-vts-admin__item');
+		const itemData = [];
+
+		$items.each(function () {
+			const $item = $(this);
+			const $labelInput = $item.find('.uonix-vts-admin__item-label');
+			const labelVal = String($labelInput.val() || '').trim().toLowerCase();
+			itemData.push({
+				$item: $item,
+				$labelInput: $labelInput,
+				label: labelVal
+			});
+		});
+
+		itemData.forEach(function (current) {
+			const listId = current.$labelInput.attr('list');
+			if (!listId) {
+				return;
+			}
+			const $list = current.$item.find('#' + listId);
+			if (!$list.length) {
+				return;
+			}
+
+			const otherLabels = new Set();
+			itemData.forEach(function (other) {
+				if (other.$item[0] !== current.$item[0] && other.label) {
+					otherLabels.add(other.label);
+				}
+			});
+
+			$list.empty();
+			parentAttrs.forEach(function (attr) {
+				if (attr && attr.label) {
+					const attrLower = String(attr.label).trim().toLowerCase();
+					if (!otherLabels.has(attrLower)) {
+						const opt = document.createElement('option');
+						opt.value = String(attr.label);
+						$list[0].appendChild(opt);
+					}
+				}
+			});
+		});
+	}
+
 	function ensureItemDatalists($item) {
 		const parentAttrs = Array.isArray(config.parentAttributes) ? config.parentAttributes : [];
 		if (parentAttrs.length === 0) {
@@ -208,6 +259,35 @@
 			return parentAttrs.find(function (attr) {
 				return String(attr && attr.label || '').trim().toLowerCase() === currentLabel;
 			}) || null;
+		}
+
+		function checkDuplicateInRoot() {
+			const currentVal = String($labelInput.val() || '').trim();
+			if (!currentVal) {
+				$labelInput.removeClass('uonix-vts-admin__item-label--duplicate');
+				return false;
+			}
+			const currentLower = currentVal.toLowerCase();
+			const $root = $item.closest('.uonix-vts-admin');
+			let isDuplicate = false;
+
+			$root.find('.uonix-vts-admin__item').each(function () {
+				if (this !== $item[0]) {
+					const otherVal = String($(this).find('.uonix-vts-admin__item-label').val() || '').trim().toLowerCase();
+					if (otherVal === currentLower) {
+						isDuplicate = true;
+						return false;
+					}
+				}
+			});
+
+			if (isDuplicate) {
+				$labelInput.addClass('uonix-vts-admin__item-label--duplicate');
+				$labelInput.attr('title', 'Rótulo duplicado nesta variação');
+			} else {
+				$labelInput.removeClass('uonix-vts-admin__item-label--duplicate');
+			}
+			return isDuplicate;
 		}
 
 		function updateValueSuggestions() {
@@ -256,7 +336,7 @@
 
 		function clearLabelTag() {
 			$labelInput.val('');
-			$labelInput.removeClass('uonix-vts-admin__item-label--tagged');
+			$labelInput.removeClass('uonix-vts-admin__item-label--tagged uonix-vts-admin__item-label--duplicate');
 			$labelInput.removeAttr('title');
 			updateValueSuggestions();
 			updateValueTagState();
@@ -289,10 +369,39 @@
 			}
 		});
 
-		$labelInput.on('input change', function () {
+		$labelInput.on('input', function () {
+			checkDuplicateInRoot();
 			updateLabelTagState();
 			updateValueSuggestions();
 			updateValueTagState();
+			const $root = $item.closest('.uonix-vts-admin');
+			if ($root.length) {
+				refreshRootLabelSuggestions($root);
+			}
+		});
+
+		$labelInput.on('change', function () {
+			const isDup = checkDuplicateInRoot();
+			if (isDup) {
+				const currentVal = String($labelInput.val() || '').trim();
+				const msg = config.strings && config.strings.duplicateLabel
+					? config.strings.duplicateLabel.replace('%s', currentVal)
+					: 'O rótulo "' + currentVal + '" já está sendo utilizado nesta variação.';
+				window.alert(msg);
+				clearLabelTag();
+				const $root = $item.closest('.uonix-vts-admin');
+				if ($root.length) {
+					refreshRootLabelSuggestions($root);
+				}
+				return;
+			}
+			updateLabelTagState();
+			updateValueSuggestions();
+			updateValueTagState();
+			const $root = $item.closest('.uonix-vts-admin');
+			if ($root.length) {
+				refreshRootLabelSuggestions($root);
+			}
 		});
 
 		$valueInput.on('keydown', function (e) {
@@ -334,6 +443,7 @@
 		$item.find('.uonix-vts-admin__item-value').val(String(item.value || ''));
 		ensureItemDatalists($item);
 		$items.append($item);
+		refreshRootLabelSuggestions($root);
 	}
 
 	function appendSection($root, section) {
@@ -359,6 +469,7 @@
 			appendSection($root, section);
 		});
 		initSortable($root);
+		refreshRootLabelSuggestions($root);
 	}
 
 	function showPayloadError($root) {
@@ -502,12 +613,14 @@
 			const $root = $(this).closest('.uonix-vts-admin');
 			$(this).closest('.uonix-vts-admin__item').remove();
 			refreshMoveButtons($root);
+			refreshRootLabelSuggestions($root);
 			syncAndMarkChanged($root);
 		})
 		.on('click', '.uonix-vts-admin__remove-section', function () {
 			const $root = $(this).closest('.uonix-vts-admin');
 			$(this).closest('.uonix-vts-admin__section').remove();
 			refreshMoveButtons($root);
+			refreshRootLabelSuggestions($root);
 			syncAndMarkChanged($root);
 		})
 		.on('click', '.uonix-vts-admin__copy', function () {

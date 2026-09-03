@@ -109,6 +109,13 @@
 	background-color: #e7f1fb !important;
 }
 
+.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--duplicate {
+	border-color: #d63638 !important;
+	box-shadow: 0 0 0 1px #d63638 !important;
+	background-color: #fcf0f0 !important;
+	color: #b32d2e !important;
+}
+
 .uonix-vts-admin__actions {
 	display: flex;
 	gap: 4px;
