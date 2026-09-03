@@ -222,12 +222,23 @@ $sql_meta = $wpdb->prepare(
 );
 $other_meta = $wpdb->get_results( $sql_meta );
 
-// C) Busca em options (excluindo transients)
+// C) Busca em options (excluindo configurações internas do próprio plugin, transients e histórico)
+$excluded_option_patterns = array(
+	'%transient%',
+	'recently_activated',
+	'gutenkit_%',
+	'gutenkit-%',
+	'popup-builder-block%',
+	'compressx_%',
+	'rank_math_%',
+);
+$where_not = '';
+foreach ( $excluded_option_patterns as $ex ) {
+	$where_not .= ' AND option_name NOT LIKE "' . esc_sql( $ex ) . '"';
+}
 $sql_options = $wpdb->prepare(
-	"SELECT option_name FROM {$wpdb->options} WHERE option_value LIKE %s AND option_name NOT LIKE %s AND option_name NOT LIKE %s",
-	'%' . $wpdb->esc_like( 'gutenkit' ) . '%',
-	'%' . $wpdb->esc_like( '_transient' ) . '%',
-	'%' . $wpdb->esc_like( 'gutenkit_installed' ) . '%'
+	"SELECT option_name FROM {$wpdb->options} WHERE option_value LIKE %s {$where_not}",
+	'%' . $wpdb->esc_like( 'gutenkit' ) . '%'
 );
 $other_options = $wpdb->get_results( $sql_options );
 
@@ -249,13 +260,21 @@ if ( ! empty( $other_meta ) ) {
 	}
 }
 
+if ( ! empty( $other_options ) ) {
+	$has_global_occurrences = true;
+	echo "❌ GATE BLOQUEADO: Foram encontradas configurações/widgets dependentes de GutenKit em options:\n";
+	foreach ( $other_options as $o ) {
+		echo "   - option_name: {$o->option_name}\n";
+	}
+}
+
 if ( $has_global_occurrences ) {
 	echo "\n❌ ERRO CRÍTICO (GATE FAIL-CLOSED): O plugin gutenkit-blocks-addon NÃO pode ser desativado globalmente pois ainda há dependências no banco de dados. Limpe essas dependências antes de tentar desativar o plugin.\n";
 	$GLOBALS['uonix_errors']++;
 	exit( 1 );
 }
 
-echo "   ✅ [INVENTÁRIO OK] Zero blocos gutenkit/* encontrados fora da página {$target_post_id}. Desativação global permitida.\n";
+echo "   ✅ [INVENTÁRIO OK] Zero blocos gutenkit/* e zero dependências em options encontrados fora da página {$target_post_id}. Desativação global permitida.\n";
 
 // -----------------------------------------------------------------------------
 // 3. DESATIVAÇÃO CONTROLADA DO PLUGIN gutenkit-blocks-addon
