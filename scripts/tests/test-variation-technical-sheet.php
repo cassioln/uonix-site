@@ -3344,12 +3344,16 @@ vts_assert_same( array( '1 ano' ), $admin_parent_attrs[2]['options'], 'opções 
 vts_assert_contains( 'function ensureItemDatalists($item)', $admin_js, 'script inclui vinculador de datalists para autocomplete' );
 vts_assert_contains( 'parentAttrs = Array.isArray(config.parentAttributes)', $admin_js, 'script valida atributos do pai como array' );
 vts_assert_contains( 'updateValueSuggestions()', $admin_js, 'script sincroniza sugestões dinamicamente no input/change' );
-vts_assert_contains( 'function updateTagState()', $admin_js, 'script detecta quando o rótulo usa uma sugestão de atributo' );
+vts_assert_contains( 'function updateLabelTagState()', $admin_js, 'script detecta quando o rótulo usa uma sugestão de atributo' );
+vts_assert_contains( 'function updateValueTagState()', $admin_js, 'script detecta quando o valor usa uma opção do atributo vinculado' );
 vts_assert_contains( 'uonix-vts-admin__item-label--tagged', $admin_js, 'script adiciona classe visual de tag ao rótulo vinculado' );
-vts_assert_contains( 'function clearTagAndValue()', $admin_js, 'script possui rotina de limpeza atômica ao apagar letra da tag' );
+vts_assert_contains( 'uonix-vts-admin__item-value--tagged', $admin_js, 'script adiciona classe visual de tag ao valor vinculado' );
+vts_assert_contains( 'function clearLabelTag()', $admin_js, 'script possui rotina de limpeza atômica ao apagar letra do rótulo tag' );
+vts_assert_contains( 'function clearValueTag()', $admin_js, 'script possui rotina de limpeza atômica ao apagar letra do valor tag' );
 vts_assert_contains( 'deleteContentBackward', $admin_js, 'script suporta exclusão atômica da tag em teclados virtuais' );
 vts_assert_contains( 'ensureItemDatalists($item);', $admin_js, 'cada novo item recebe os datalists' );
 vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--tagged', $admin_css, 'CSS possui estilo visual exclusivo de tag para o rótulo' );
+vts_assert_contains( '.uonix-vts-admin .uonix-vts-admin__item-value.uonix-vts-admin__item-value--tagged', $admin_css, 'CSS possui estilo visual exclusivo de tag para o valor' );
 
 // 3. attribute_columns ignora atributos não variantes
 $table_attr_cols = Uonix_VTST_Table::attribute_columns( $parent_with_attrs, array( 20201, 20202 ) );

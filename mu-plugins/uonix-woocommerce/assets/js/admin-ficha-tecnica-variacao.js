@@ -200,15 +200,19 @@
 
 		$item.append($labelList).append($valueList);
 
-		function updateValueSuggestions() {
+		function getMatchedAttribute() {
 			const currentLabel = String($labelInput.val() || '').trim().toLowerCase();
-			$valueList.empty();
 			if (!currentLabel) {
-				return;
+				return null;
 			}
-			const matched = parentAttrs.find(function (attr) {
+			return parentAttrs.find(function (attr) {
 				return String(attr && attr.label || '').trim().toLowerCase() === currentLabel;
-			});
+			}) || null;
+		}
+
+		function updateValueSuggestions() {
+			$valueList.empty();
+			const matched = getMatchedAttribute();
 			if (matched && Array.isArray(matched.options)) {
 				matched.options.forEach(function (val) {
 					const opt = document.createElement('option');
@@ -218,13 +222,9 @@
 			}
 		}
 
-		function updateTagState() {
-			const currentVal = String($labelInput.val() || '');
-			const currentTrim = currentVal.trim().toLowerCase();
-			const matched = parentAttrs.find(function (attr) {
-				return String(attr && attr.label || '').trim().toLowerCase() === currentTrim;
-			});
-			if (matched && currentTrim !== '') {
+		function updateLabelTagState() {
+			const matched = getMatchedAttribute();
+			if (matched) {
 				$labelInput.addClass('uonix-vts-admin__item-label--tagged');
 				$labelInput.attr('title', 'Atributo vinculado do produto: ' + matched.label + ' (apagar limpa a tag)');
 			} else {
@@ -233,19 +233,48 @@
 			}
 		}
 
-		function clearTagAndValue() {
+		function updateValueTagState() {
+			const matched = getMatchedAttribute();
+			const currentVal = String($valueInput.val() || '').trim();
+			const currentValLower = currentVal.toLowerCase();
+
+			let isValueTagged = false;
+			if (matched && Array.isArray(matched.options) && currentVal !== '') {
+				isValueTagged = matched.options.some(function (opt) {
+					return String(opt).trim().toLowerCase() === currentValLower;
+				});
+			}
+
+			if (isValueTagged) {
+				$valueInput.addClass('uonix-vts-admin__item-value--tagged');
+				$valueInput.attr('title', 'Valor vinculado do atributo (apagar limpa a tag)');
+			} else {
+				$valueInput.removeClass('uonix-vts-admin__item-value--tagged');
+				$valueInput.removeAttr('title');
+			}
+		}
+
+		function clearLabelTag() {
 			$labelInput.val('');
 			$labelInput.removeClass('uonix-vts-admin__item-label--tagged');
 			$labelInput.removeAttr('title');
 			updateValueSuggestions();
+			updateValueTagState();
 			$labelInput.trigger('input').trigger('change');
+		}
+
+		function clearValueTag() {
+			$valueInput.val('');
+			$valueInput.removeClass('uonix-vts-admin__item-value--tagged');
+			$valueInput.removeAttr('title');
+			$valueInput.trigger('input').trigger('change');
 		}
 
 		$labelInput.on('keydown', function (e) {
 			if ($labelInput.hasClass('uonix-vts-admin__item-label--tagged')) {
 				if (e.key === 'Backspace' || e.key === 'Delete' || e.keyCode === 8 || e.keyCode === 46) {
 					e.preventDefault();
-					clearTagAndValue();
+					clearLabelTag();
 				}
 			}
 		});
@@ -255,18 +284,43 @@
 				const inputType = e.originalEvent && e.originalEvent.inputType;
 				if (inputType === 'deleteContentBackward' || inputType === 'deleteContentForward' || inputType === 'deleteByCut') {
 					e.preventDefault();
-					clearTagAndValue();
+					clearLabelTag();
 				}
 			}
 		});
 
 		$labelInput.on('input change', function () {
-			updateTagState();
+			updateLabelTagState();
 			updateValueSuggestions();
+			updateValueTagState();
 		});
 
-		updateTagState();
+		$valueInput.on('keydown', function (e) {
+			if ($valueInput.hasClass('uonix-vts-admin__item-value--tagged')) {
+				if (e.key === 'Backspace' || e.key === 'Delete' || e.keyCode === 8 || e.keyCode === 46) {
+					e.preventDefault();
+					clearValueTag();
+				}
+			}
+		});
+
+		$valueInput.on('beforeinput', function (e) {
+			if ($valueInput.hasClass('uonix-vts-admin__item-value--tagged')) {
+				const inputType = e.originalEvent && e.originalEvent.inputType;
+				if (inputType === 'deleteContentBackward' || inputType === 'deleteContentForward' || inputType === 'deleteByCut') {
+					e.preventDefault();
+					clearValueTag();
+				}
+			}
+		});
+
+		$valueInput.on('input change', function () {
+			updateValueTagState();
+		});
+
+		updateLabelTagState();
 		updateValueSuggestions();
+		updateValueTagState();
 	}
 
 	function appendItem($root, $items, item) {

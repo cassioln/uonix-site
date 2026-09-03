@@ -86,7 +86,8 @@
 	margin: 0;
 }
 
-.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--tagged {
+.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--tagged,
+.uonix-vts-admin .uonix-vts-admin__item-value.uonix-vts-admin__item-value--tagged {
 	background-color: #f0f6fc !important;
 	border-color: #2271b1 !important;
 	color: #0c4a6e !important;
@@ -101,7 +102,8 @@
 	transition: all 0.15s ease-in-out;
 }
 
-.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--tagged:focus {
+.uonix-vts-admin .uonix-vts-admin__item-label.uonix-vts-admin__item-label--tagged:focus,
+.uonix-vts-admin .uonix-vts-admin__item-value.uonix-vts-admin__item-value--tagged:focus {
 	border-color: #004377 !important;
 	box-shadow: 0 0 0 2px #2271b1 !important;
 	background-color: #e7f1fb !important;
