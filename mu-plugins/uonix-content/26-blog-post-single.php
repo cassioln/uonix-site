@@ -189,6 +189,13 @@ function uonix_estilos_premium_master()
             }
         }
 
+        /* Remove parágrafos vazios residuais na coluna da barra lateral Kadence */
+        .kt-inside-inner-col > p:empty {
+            display: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
         /* =========================================================
            TÍTULOS E CAIXAS PREMIUM
            ========================================================= */
@@ -929,6 +936,20 @@ function uonix_estilos_premium_master()
 // 2. SHORTCODES DA SIDEBAR (Recentes, Tags, PDF, Autoridade, Newsletter)
 // ==============================================================================
 
+/**
+ * UÔNIX: Remove parágrafos automáticos indesejados gerados pelo bloco nativo wp:shortcode
+ */
+add_filter('render_block_core/shortcode', function ($block_content) {
+    return shortcode_unautop(trim($block_content));
+}, 10);
+
+/**
+ * UÔNIX: Higieniza tags <p> vazias ou contendo apenas espaços deixadas pelo Gutenberg nos widgets de bloco
+ */
+add_filter('widget_block_content', function ($content) {
+    return preg_replace('#<p[^>]*>(\s|&nbsp;)*</p>#i', '', $content);
+}, 20);
+
 /* 2.1 Mais Recentes */
 add_shortcode('uonix_sidebar_posts', 'uonix_gerar_sidebar_posts');
 function uonix_gerar_sidebar_posts()
@@ -949,7 +970,7 @@ function uonix_gerar_sidebar_posts()
             </a>
         <?php endforeach; ?>
     </div>
-    <?php return ob_get_clean();
+    <?php return trim(ob_get_clean());
 }
 
 /* 2.2 Nuvem de Assuntos (Visual Tipográfico WordCloud2) */
@@ -995,7 +1016,7 @@ function uonix_gerar_nuvem_tags_global_v3()
 
     ob_start(); ?>
     <div class="uonix-premium-box uonix-tags-widget">
-        <h3 class="uonix-section-title">Assuntos</h3>
+        <h3 class="uonix-section-title">Principais assuntos</h3>
 
         <div id="uonix-wordcloud-wrap" class="uonix-wordcloud-wrap"></div>
 
@@ -1118,7 +1139,7 @@ function uonix_gerar_nuvem_tags_global_v3()
             });
         })();
     </script>
-    <?php return ob_get_clean();
+    <?php return trim(ob_get_clean());
 }
 
 /* 2.3 PDF Lead Magnet (Integrado com o Pop-up Modular) */
@@ -1173,7 +1194,7 @@ function uonix_gerar_lead_magnet()
 
     </div>
 
-    <?php return ob_get_clean();
+    <?php return trim(ob_get_clean());
 }
 /* 2.4 Caixa de Autoridade (Empresa) */
 add_shortcode('uonix_autoridade', 'uonix_gerar_autoridade');
@@ -1192,7 +1213,7 @@ function uonix_gerar_autoridade()
             segurança da sua equipa com soluções que cumprem rigorosamente as normas NR-35 e ABNT.</p>
         <a href="/empresa" class="uonix-bio-btn">Conheça a Empresa</a>
     </div>
-    <?php return ob_get_clean();
+    <?php return trim(ob_get_clean());
 }
 
 /* 2.5 Sidebar Newsletter (Formulário Embutido Direto) */
@@ -1220,7 +1241,7 @@ function uonix_gerar_newsletter()
             <?php echo do_shortcode('[uonix_form_newsletter]'); ?>
         </div>
     </div>
-    <?php return ob_get_clean();
+    <?php return trim(ob_get_clean());
 }
 
 // ==============================================================================
