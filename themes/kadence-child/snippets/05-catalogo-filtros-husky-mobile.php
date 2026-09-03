@@ -234,7 +234,50 @@ add_action('wp_footer', function() {
             z-index: 5 !important;
         }
 
-        /* 3. DROPDOWN AUTOCOMPLETE (VISUAL PROFISSIONAL) */
+        /* 3. DROPDOWN AUTOCOMPLETE (VISUAL PROFISSIONAL) & CONTROLE DE CAMADAS (STACKING CONTEXT) */
+        .woof_text_search_container {
+            position: relative !important;
+            z-index: 99999 !important;
+        }
+
+        /* Eleva as colunas e linha que envelopam a busca */
+        .wp-block-kadence-column:has(.woof_text_search_container),
+        .kadence-column7150_2a56fa-f9,
+        .kadence-column7150_c66229-c0 {
+            position: relative !important;
+            z-index: 99999 !important;
+        }
+
+        .wp-block-kadence-rowlayout:has(.woof_text_search_container),
+        .kb-row-layout-id7150_219091-69 {
+            position: relative !important;
+            z-index: 100 !important;
+        }
+
+        /* Garante que o painel de tags ativas e o grid fiquem abaixo do dropdown */
+        .woof_products_top_panel,
+        .woof_products_top_panel_ul,
+        .woof_products_top_panel_content,
+        .kadence-column7150_6a9c4f-25 {
+            position: relative !important;
+            z-index: 10 !important;
+        }
+
+        .kadence-column7150_82068b-b2,
+        ul.products.product-archive {
+            position: relative !important;
+            z-index: 5 !important;
+        }
+
+        /* Garante que o bloco de FAQ fique abaixo dos resultados de busca */
+        #faq,
+        [id="faq"],
+        .kb-row-layout-wrap#faq,
+        .kb-row-layout-id2859_1404ed-e8 {
+            position: relative !important;
+            z-index: 1 !important;
+        }
+
         .woof_husky_txt-container {
             background-color: #ffffff !important;
             border: 1px solid #e2e8f0 !important;
@@ -242,7 +285,8 @@ add_action('wp_footer', function() {
             box-shadow: 0 10px 25px rgba(0,0,0,0.1) !important;
             margin-top: 5px !important;
             padding: 10px 0 !important;
-            z-index: 9999 !important;
+            position: absolute !important;
+            z-index: 999999 !important;
         }
 
         /* Itens da Lista */
@@ -311,6 +355,42 @@ add_action('wp_footer', function() {
 
         /* 5. AUXILIARES */
         .woof_husky_txt.uonix-hidden { display: none !important; }
+
+        /* 6. AVISO DE NENHUM PRODUTO ENCONTRADO (IDENTIDADE VISUAL UÔNIX) */
+        .woocommerce-no-products-found {
+            margin: 20px 0 35px 0 !important;
+            width: 100% !important;
+        }
+
+        .woocommerce-no-products-found .woocommerce-info {
+            background: #ffffff !important;
+            border: 1px solid #e2e8f0 !important;
+            border-left: 4px solid #0e3780 !important; /* Azul Uônix */
+            border-radius: 8px !important;
+            box-shadow: 0 4px 18px -2px rgba(14, 55, 128, 0.07), 0 2px 6px -1px rgba(0, 0, 0, 0.04) !important;
+            padding: 18px 22px !important;
+            margin: 0 !important;
+            color: #123063 !important; /* Azul nobre escuro */
+            font-size: 15px !important;
+            font-weight: 600 !important;
+            line-height: 1.5 !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 12px !important;
+            position: relative !important;
+        }
+
+        .woocommerce-no-products-found .woocommerce-info::before {
+            content: "" !important;
+            display: inline-flex !important;
+            width: 22px !important;
+            height: 22px !important;
+            min-width: 22px !important;
+            background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230e3780' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'%3E%3C/line%3E%3Cpath d='M11 8v4'%3E%3C/path%3E%3Cpath d='M11 15h.01'%3E%3C/path%3E%3C/svg%3E") no-repeat center center / contain !important;
+            margin: 0 !important;
+            position: static !important;
+            flex-shrink: 0 !important;
+        }
     </style>
 
     <script id="uonix-husky-integrated-js">
