@@ -179,6 +179,17 @@ final class Uonix_VTST_Table {
 	}
 
 	/**
+	 * Identifica se um rótulo pertence a uma cota de dimensão (ex: A, B, C, D, E, F).
+	 *
+	 * @param string $label Rótulo do campo.
+	 * @return bool
+	 */
+	public static function is_cota_column( $label ) {
+		$trimmed_label = trim( (string) $label );
+		return (bool) preg_match( '/^(?:[A-Z]|Ø|ø|R|H|W|L)(?:\s*\(mm\))?$/u', $trimmed_label );
+	}
+
+	/**
 	 * Troca a aba nativa de atributos somente quando existir uma matriz válida.
 	 *
 	 * @param mixed $tabs Abas WooCommerce.
@@ -248,18 +259,41 @@ final class Uonix_VTST_Table {
 
 		echo '<tr>';
 		foreach ( $matrix['attribute_columns'] as $column ) {
-			echo '<th scope="col">' . esc_html( $column['label'] ) . '</th>';
+			$label = isset( $column['label'] ) ? $column['label'] : '';
+			$classes = array();
+			if ( self::is_cota_column( $label ) ) {
+				$classes[] = 'uonix-vtst-col-cota';
+			} elseif ( in_array( mb_strtolower( $label, 'UTF-8' ), array( 'bitola', 'rosca', 'corpo', 'peso', 'peso aprox.' ), true ) ) {
+				$classes[] = 'uonix-vtst-col-short';
+			}
+			$class_attr = ! empty( $classes ) ? ' class="' . implode( ' ', $classes ) . '"' : '';
+			echo '<th scope="col"' . $class_attr . '>' . esc_html( $label ) . '</th>';
 		}
 		foreach ( $matrix['technical_columns'] as $label ) {
-			echo '<th scope="col">' . esc_html( $label ) . '</th>';
+			$classes = array();
+			if ( self::is_cota_column( $label ) ) {
+				$classes[] = 'uonix-vtst-col-cota';
+			} elseif ( in_array( mb_strtolower( $label, 'UTF-8' ), array( 'carga de trabalho', 'fator de segurança', 'fator de seguranca', 'peso', 'peso aprox.' ), true ) ) {
+				$classes[] = 'uonix-vtst-col-short';
+			}
+			$class_attr = ! empty( $classes ) ? ' class="' . implode( ' ', $classes ) . '"' : '';
+			echo '<th scope="col"' . $class_attr . '>' . esc_html( $label ) . '</th>';
 		}
 		echo '</tr></thead><tbody>';
 
 		foreach ( $matrix['rows'] as $row ) {
 			echo '<tr>';
 			foreach ( $row['attribute_cells'] as $index => $cell ) {
+				$label = isset( $matrix['attribute_columns'][ $index ]['label'] ) ? $matrix['attribute_columns'][ $index ]['label'] : '';
 				$tag = 0 === $index ? 'th scope="row"' : 'td';
-				echo '<' . $tag . '>';
+				$classes = array();
+				if ( self::is_cota_column( $label ) ) {
+					$classes[] = 'uonix-vtst-col-cota';
+				} elseif ( in_array( mb_strtolower( $label, 'UTF-8' ), array( 'bitola', 'rosca', 'corpo', 'peso', 'peso aprox.' ), true ) ) {
+					$classes[] = 'uonix-vtst-col-short';
+				}
+				$class_attr = ! empty( $classes ) ? ' class="' . implode( ' ', $classes ) . '"' : '';
+				echo '<' . $tag . $class_attr . '>';
 				if ( '' !== $cell['url'] ) {
 					echo '<a href="' . esc_url( $cell['url'] ) . '" rel="tag">' . esc_html( $cell['text'] ) . '</a>';
 				} else {
@@ -272,7 +306,14 @@ final class Uonix_VTST_Table {
 					'text' => ( isset( $row['technical_values'][ $label ] ) ? $row['technical_values'][ $label ] : '' ),
 					'url'  => '',
 				);
-				echo '<td>';
+				$classes = array();
+				if ( self::is_cota_column( $label ) ) {
+					$classes[] = 'uonix-vtst-col-cota';
+				} elseif ( in_array( mb_strtolower( $label, 'UTF-8' ), array( 'carga de trabalho', 'fator de segurança', 'fator de seguranca', 'peso', 'peso aprox.' ), true ) ) {
+					$classes[] = 'uonix-vtst-col-short';
+				}
+				$class_attr = ! empty( $classes ) ? ' class="' . implode( ' ', $classes ) . '"' : '';
+				echo '<td' . $class_attr . '>';
 				if ( '' !== $cell['url'] ) {
 					echo '<a href="' . esc_url( $cell['url'] ) . '" rel="tag">' . esc_html( $cell['text'] ) . '</a>';
 				} else {
