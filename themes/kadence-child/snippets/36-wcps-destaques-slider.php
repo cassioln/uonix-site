@@ -61,30 +61,6 @@ function uonix_wcps_banner_hero_styles() {
     ?>
     <style id="uonix-wcps-banner-hero-styles">
     /* ==========================================================================
-       UONIX: TITULO DA SECAO DO CARROSSEL
-       ========================================================================== */
-    .uonix-carousel-title {
-        text-align: center !important;
-        font-size: 32px !important;
-        font-weight: 900 !important;
-        color: #0e3780 !important;
-        margin-top: 40px !important;
-        margin-bottom: 30px !important;
-        text-transform: uppercase !important;
-        letter-spacing: 1px !important;
-        position: relative;
-    }
-    .uonix-carousel-title::after {
-        content: "";
-        display: block;
-        width: 80px;
-        height: 4px;
-        background-color: #f76a0c !important;
-        margin: 15px auto 0 auto;
-        border-radius: 2px;
-    }
-
-    /* ==========================================================================
        UONIX: BANNER HERO SLIDER [wcps id=1546]
        Design Moderno, Comercial e Embutido na Pagina
        ========================================================================== */
@@ -388,12 +364,6 @@ function uonix_wcps_banner_hero_styles() {
 
     /* 7. RESPONSIVIDADE (TABLET E MOBILE) */
     @media (max-width: 991px) {
-        .uonix-carousel-title {
-            font-size: 24px !important;
-            margin-top: 25px !important;
-            margin-bottom: 20px !important;
-        }
-
         .wcps-container-1546 .splide__arrows {
             top: 25% !important;
         }
@@ -456,12 +426,6 @@ function uonix_wcps_banner_hero_styles() {
     }
 
     @media (max-width: 600px) {
-        .uonix-carousel-title {
-            font-size: 20px !important;
-            margin-top: 20px !important;
-            margin-bottom: 15px !important;
-        }
-
         .wcps-container-1546 .elements-wrapper {
             padding: 15px 10px !important;
         }
@@ -490,20 +454,17 @@ function uonix_wcps_banner_hero_styles() {
     <?php
 }
 
-// 3. Auxiliar leve para recalcular dimensões no carregamento do Splide e injetar título
+// 3. Auxiliar leve para recalcular dimensões no carregamento do Splide e remover títulos residuais
 add_action( 'wp_footer', 'uonix_wcps_slider_init_fix', 99 );
 
 function uonix_wcps_slider_init_fix() {
     ?>
     <script id="uonix-wcps-init-fix">
     document.addEventListener('DOMContentLoaded', function() {
-        // Injeta o título canônico antes do carrossel da home caso não esteja presente
-        var carousel1546 = document.querySelector('.wcps-container-1546');
-        if (carousel1546 && !document.querySelector('.uonix-carousel-title')) {
-            var titleEl = document.createElement('h2');
-            titleEl.className = 'uonix-carousel-title';
-            titleEl.textContent = 'Produtos para Ancoragem e Fixação';
-            carousel1546.parentNode.insertBefore(titleEl, carousel1546);
+        // Remove título legado ou duplicado se existir no DOM
+        var legacyTitle = document.querySelector('.uonix-carousel-title');
+        if (legacyTitle) {
+            legacyTitle.remove();
         }
 
         setTimeout(function() {
@@ -523,4 +484,20 @@ function uonix_wcps_slider_init_fix() {
     });
     </script>
     <?php
+}
+
+// 4. Garante o cabeçalho canônico Kadence da seção na Home (substitui texto antigo pelo novo se presente)
+add_filter( 'the_content', 'uonix_wcps_slider_header_canonical_filter', 20 );
+
+function uonix_wcps_slider_header_canonical_filter( $content ) {
+    if ( ( is_front_page() || is_home() ) && false !== strpos( $content, 'uonix-slider-header' ) ) {
+        if ( false !== strpos( $content, 'Os melhores produtos para construir com segurança.' ) ) {
+            $content = str_replace(
+                'Os melhores produtos para construir com segurança.',
+                'Produtos para Ancoragem e Fixação',
+                $content
+            );
+        }
+    }
+    return $content;
 }
