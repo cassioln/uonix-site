@@ -427,7 +427,48 @@ if ( $post_1546 ) {
 }
 
 /* 5. SETAS MAIS PARA DENTRO DO BANNER */
-.wcps-container-1546 .splide__arrows {
+/* CABECALHO KADENCE CANONICO DO SLIDER */
+.uonix-slider-header {
+    margin-bottom: 24px !important;
+    display: block !important;
+}
+
+.uonix-slider-header span.wp-block-kadence-advancedheading {
+    display: inline-flex !important;
+    align-items: center !important;
+    margin-bottom: 8px !important;
+    font-family: inherit !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1.5px !important;
+}
+
+.uonix-slider-header h2.wp-block-kadence-advancedheading {
+    font-family: Barlow Semi Condensed, sans-serif !important;
+    font-size: 36px !important;
+    font-weight: 800 !important;
+    line-height: 1.15 !important;
+    margin: 0 !important;
+}
+
+@media (max-width: 768px) {
+    .uonix-slider-header h2.wp-block-kadence-advancedheading {
+        font-size: 26px !important;
+        text-align: center !important;
+    }
+
+    .uonix-slider-header span.wp-block-kadence-advancedheading {
+        justify-content: center !important;
+        width: 100% !important;
+        text-align: center !important;
+    }
+}
+
+/* 5. SETAS CIRCULARES MODERNAS CANONICAS */
+.wcps-container-1546 .splide__arrows,
+.wcps-container-1546 .splide__arrows.middle,
+.wcps-container-1546 .splide__arrows.middle-fixed {
     position: absolute !important;
     top: 50% !important;
     left: 0 !important;
@@ -439,9 +480,12 @@ if ( $post_1546 ) {
     z-index: 30 !important;
 }
 
+.wcps-container-1546 .splide__arrows div,
+.wcps-container-1546 .splide__arrows div.splide__arrow,
 .wcps-container-1546 .splide__arrow {
     width: 44px !important;
     height: 44px !important;
+    background: rgba(255, 255, 255, 0.95) !important;
     background-color: rgba(255, 255, 255, 0.95) !important;
     backdrop-filter: blur(8px) !important;
     border: 1px solid rgba(226, 232, 240, 0.9) !important;
@@ -460,26 +504,74 @@ if ( $post_1546 ) {
     font-size: 18px !important;
     font-weight: bold !important;
     color: #0e3780 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    outline: none !important;
 }
 
-.wcps-container-1546 .splide__arrow--prev {
+.wcps-container-1546 .splide__arrow i,
+.wcps-container-1546 .splide__arrows div i,
+.wcps-container-1546 .splide__arrow .icon,
+.wcps-container-1546 .splide__arrows div .icon {
+    display: none !important;
+}
+
+.wcps-container-1546 .splide__arrow--prev::before,
+.wcps-container-1546 .splide__arrow.prev::before,
+.wcps-container-1546 .splide__arrows div.prev::before {
+    content: \"\\2039\" !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 28px !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    color: inherit !important;
+    margin-top: -2px !important;
+}
+
+.wcps-container-1546 .splide__arrow--next::before,
+.wcps-container-1546 .splide__arrow.next::before,
+.wcps-container-1546 .splide__arrows div.next::before {
+    content: \"\\203A\" !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 28px !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    color: inherit !important;
+    margin-top: -2px !important;
+}
+
+.wcps-container-1546 .splide__arrows.middle .prev,
+.wcps-container-1546:hover .splide__arrows.middle .prev,
+.wcps-container-1546 .splide__arrow--prev,
+.wcps-container-1546 .splide__arrow.prev,
+.wcps-container-1546 .splide__arrows div.prev {
     left: 15px !important;
+    right: auto !important;
+    float: none !important;
 }
 
-.wcps-container-1546 .splide__arrow--next {
+.wcps-container-1546 .splide__arrows.middle .next,
+.wcps-container-1546:hover .splide__arrows.middle .next,
+.wcps-container-1546 .splide__arrow--next,
+.wcps-container-1546 .splide__arrow.next,
+.wcps-container-1546 .splide__arrows div.next {
     right: 15px !important;
+    left: auto !important;
+    float: none !important;
 }
 
+.wcps-container-1546 .splide__arrows div:hover:not(:disabled),
 .wcps-container-1546 .splide__arrow:hover:not(:disabled) {
     background: #0e3780 !important;
+    background-color: #0e3780 !important;
     border-color: #0e3780 !important;
     color: #ffffff !important;
     transform: translateY(-50%) scale(1.1) !important;
     box-shadow: 0 8px 24px rgba(14, 55, 128, 0.28) !important;
-}
-
-.wcps-container-1546 .splide__arrow .icon::before {
-    display: none !important;
 }
 
 /* 6. PAGINACAO MODERNA */
