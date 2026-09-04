@@ -243,6 +243,139 @@ add_action('wp_footer', function() {
         ul.products.product-archive li.product .woocommerce-loop-product__title a {
             text-wrap: balance !important;
         }
+
+        /* 5. ESTILO PREMIUM DA VITRINE DE PRODUTOS (PARIDADE COM MARCAS E CATEGORIAS) */
+        .woocommerce ul.products li.product {
+            background: #ffffff !important;
+            border: 1px solid #eef2f7 !important;
+            border-radius: 10px !important;
+            overflow: hidden !important;
+            transition: all 0.3s ease !important;
+            display: flex !important;
+            flex-direction: column !important;
+            padding: 0 !important;
+            box-shadow: 0 4px 15px rgba(14, 55, 128, 0.02) !important;
+        }
+
+        .woocommerce ul.products li.product:hover {
+            border-color: #f76a0c !important;
+            box-shadow: 0 12px 30px rgba(14, 55, 128, 0.08) !important;
+            transform: translateY(-4px) !important;
+        }
+
+        /* Imagem do Produto (Aspect Ratio 4:3) */
+        .woocommerce ul.products li.product .woocommerce-loop-image-link {
+            position: relative !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 100% !important;
+            transition: none !important;
+            aspect-ratio: 4 / 3 !important;
+            background: #f8fafc !important;
+            border-bottom: 1px solid #eef2f7 !important;
+            overflow: hidden !important;
+        }
+
+        .woocommerce ul.products li.product img {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: contain !important;
+            padding: 15px !important;
+            transition: transform 0.4s ease !important;
+            background: transparent !important;
+        }
+
+        .woocommerce ul.products li.product:hover img {
+            transform: scale(1.08) !important;
+        }
+
+        /* Badge do Fabricante / Marca */
+        .woocommerce ul.products li.product .uonix-loop-brand-badge {
+            position: absolute !important;
+            top: 12px !important;
+            left: 12px !important;
+            background: #ffffff !important;
+            color: #0e3780 !important;
+            font-size: 10px !important;
+            font-weight: 800 !important;
+            text-transform: uppercase !important;
+            padding: 5px 10px !important;
+            border-radius: 4px !important;
+            z-index: 2 !important;
+            letter-spacing: 0.5px !important;
+            border: 1px solid #e2e8f0 !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
+        }
+
+        /* Detalhes do Produto */
+        .woocommerce ul.products li.product .product-details {
+            padding: 20px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            flex: 1 !important;
+            background: #ffffff !important;
+        }
+
+        /* Título do Produto */
+        .woocommerce ul.products li.product .woocommerce-loop-product__title {
+            font-size: 18px !important;
+            font-weight: 800 !important;
+            line-height: 1.2 !important;
+            margin: 0 0 12px 0 !important;
+            text-align: left !important;
+        }
+
+        .woocommerce ul.products li.product .woocommerce-loop-product__title a {
+            color: #0e3780 !important;
+            text-decoration: none !important;
+            transition: color 0.3s ease !important;
+            display: -webkit-box !important;
+            -webkit-line-clamp: 2 !important;
+            -webkit-box-orient: vertical !important;
+            overflow: hidden !important;
+        }
+
+        .woocommerce ul.products li.product:hover .woocommerce-loop-product__title a {
+            color: #f76a0c !important;
+        }
+
+        /* Oculta Preço e Resumo no Catálogo */
+        .woocommerce ul.products li.product .price,
+        .woocommerce ul.products li.product .product-excerpt {
+            display: none !important;
+        }
+
+        /* Botão "Ver Detalhes" */
+        .woocommerce ul.products li.product .product-action-wrap {
+            margin-top: auto !important;
+            width: 100% !important;
+        }
+
+        .woocommerce ul.products li.product .uonix-details-btn {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 100% !important;
+            background: #0e3780 !important;
+            color: #ffffff !important;
+            padding: 12px 15px !important;
+            font-size: 13px !important;
+            font-weight: 800 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            border: none !important;
+            border-radius: 6px !important;
+            transition: all 0.3s ease !important;
+        }
+
+        .woocommerce ul.products li.product:hover .uonix-details-btn,
+        .woocommerce ul.products li.product .uonix-details-btn:hover {
+            background: #f76a0c !important;
+            color: #ffffff !important;
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 15px rgba(247, 106, 12, 0.25) !important;
+        }
     </style>
 
     <script id="uonix-husky-logic-js">
