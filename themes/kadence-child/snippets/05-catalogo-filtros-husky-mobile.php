@@ -126,6 +126,15 @@ add_action('wp_footer', function() {
             .kadence-column2932_0a9c6d-62 { display: none !important; }
             .kadence-column2932_fec114-b0 { flex: 0 0 100% !important; max-width: 100% !important; }
             
+            /* Garante que a coluna sticky e o botão de filtro mobile fiquem sempre acima do grid de produtos */
+            .kadence-column7150_2b9bfb-d5,
+            .kadence-column7150_2b9bfb-d5 .kt-inside-inner-col,
+            .wp-block-kadence-column:has(.woof_show_mobile_filter),
+            .woof_show_mobile_filter_container,
+            .woof_show_mobile_filter {
+                z-index: 99 !important;
+            }
+            
             .woof_show_filter_for_mobile.woof {
                 position: fixed !important;
                 z-index: 9999 !important;
