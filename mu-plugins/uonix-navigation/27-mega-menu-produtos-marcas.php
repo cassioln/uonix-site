@@ -46,6 +46,17 @@ function uonix_estilos_mega_menu_v14()
         }
 
         /* ==========================================================
+           BLINDAGEM DO MENU MOBILE (OFF-CANVAS)
+           Garante que o menu gaveta mobile fique sempre acima do header sticky
+           ========================================================== */
+        .wp-block-kadence-off-canvas,
+        .wp-block-kadence-off-canvas .kb-off-canvas-inner-wrap,
+        .wp-block-kadence-off-canvas .kb-off-canvas-overlay,
+        .wp-block-kadence-off-canvas .kb-off-canvas-close {
+            z-index: 2000000 !important;
+        }
+
+        /* ==========================================================
            MEGA MENU: ESTRUTURA E PAINÉIS PRINCIPAIS
            ========================================================== */
         .uonix-dynamic-cats-wrapper,
