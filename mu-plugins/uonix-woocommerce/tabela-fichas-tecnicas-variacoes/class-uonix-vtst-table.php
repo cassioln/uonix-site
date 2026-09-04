@@ -171,7 +171,7 @@ final class Uonix_VTST_Table {
 		}
 
 		$trimmed_label = trim( (string) $label );
-		if ( preg_match( '/^(?:[A-Z]|Ø|ø|R|H|W|L)(?:\s*\(mm\))?$/u', $trimmed_label ) ) {
+		if ( preg_match( '/^(?:[A-Z]\d*|Ø|ø)(?:\s*\(mm\))?$/u', $trimmed_label ) ) {
 			return '' !== $clean_sec ? $clean_sec : 'Dimensões (mm)';
 		}
 
