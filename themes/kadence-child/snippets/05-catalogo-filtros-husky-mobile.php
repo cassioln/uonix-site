@@ -96,8 +96,9 @@ add_action('wp_footer', function() {
                 display: none !important; 
             }
 
-            /* Força a Sidebar a existir e ser visível */
-            .kadence-column2932_0a9c6d-62 {
+            /* Força a Sidebar a existir e ser visível por padrão */
+            .kadence-column2932_0a9c6d-62,
+            .kadence-column7150_89634e-21 {
                 display: block !important;
                 flex: 0 0 30% !important;
                 max-width: 30% !important;
@@ -115,25 +116,220 @@ add_action('wp_footer', function() {
             }
 
             /* Coluna de produtos ao lado da sidebar */
-            .kadence-column2932_fec114-b0 {
+            .kadence-column2932_fec114-b0,
+            .kadence-column7150_2a56fa-f9 {
                 flex: 0 0 70% !important;
                 max-width: 70% !important;
+            }
+
+            /* CABEÇALHO DO FILTRO COM BOTÃO DE RECOLHER */
+            .uonix-sidebar-toggle-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 10px 14px;
+                margin-bottom: 18px;
+                background: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+            }
+            .uonix-sidebar-toggle-title {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 13px;
+                font-weight: 700;
+                color: #0e3780;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .uonix-sidebar-toggle-title svg {
+                stroke: #0e3780;
+                flex-shrink: 0;
+            }
+
+            /* BOTÕES DE TOGGLE (RECOLHER E EXPANDIR) */
+            .uonix-btn-toggle-filters {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 6px 12px;
+                background: #ffffff;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                color: #1e293b;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                line-height: 1.2;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            }
+            .uonix-btn-toggle-filters:hover {
+                background: #0e3780;
+                border-color: #0e3780;
+                color: #ffffff;
+            }
+            .uonix-btn-toggle-filters:hover svg {
+                stroke: #ffffff;
+            }
+            .uonix-btn-toggle-filters svg {
+                stroke: #475569;
+                transition: stroke 0.2s ease;
+                flex-shrink: 0;
+            }
+
+            /* BARRA EXPANDIR ACIMA DOS PRODUTOS (QUANDO RECOLHIDO) */
+            .uonix-sidebar-expand-wrap {
+                display: none;
+                align-items: center;
+                margin-bottom: 18px;
+                padding-bottom: 8px;
+            }
+
+            .uonix-sidebar-expand-wrap .uonix-btn-expand {
+                padding: 8px 16px;
+                background: #ffffff;
+                border: 1.5px solid #0e3780;
+                color: #0e3780;
+                font-size: 13px;
+                font-weight: 700;
+                border-radius: 6px;
+                box-shadow: 0 2px 8px rgba(14, 55, 128, 0.08);
+            }
+            .uonix-sidebar-expand-wrap .uonix-btn-expand svg {
+                stroke: #0e3780;
+            }
+            .uonix-sidebar-expand-wrap .uonix-btn-expand:hover {
+                background: #0e3780;
+                color: #ffffff;
+            }
+            .uonix-sidebar-expand-wrap .uonix-btn-expand:hover svg {
+                stroke: #ffffff;
+            }
+
+            /* ESTADO RECOLHIDO (COLLAPSED) */
+            #catalogo-produtos.uonix-filters-collapsed .kadence-column2932_0a9c6d-62,
+            #catalogo-produtos.uonix-filters-collapsed .kadence-column7150_89634e-21,
+            .uonix-filters-collapsed .kadence-column2932_0a9c6d-62,
+            .uonix-filters-collapsed .kadence-column7150_89634e-21 {
+                display: none !important;
+            }
+
+            #catalogo-produtos.uonix-filters-collapsed > .kt-row-column-wrap,
+            .uonix-filters-collapsed #catalogo-produtos > .kt-row-column-wrap {
+                grid-template-columns: 1fr !important;
+                column-gap: 0 !important;
+            }
+
+            #catalogo-produtos.uonix-filters-collapsed .kadence-column2932_fec114-b0,
+            #catalogo-produtos.uonix-filters-collapsed .kadence-column7150_2a56fa-f9,
+            .uonix-filters-collapsed .kadence-column2932_fec114-b0,
+            .uonix-filters-collapsed .kadence-column7150_2a56fa-f9 {
+                flex: 0 0 100% !important;
+                max-width: 100% !important;
+            }
+
+            #catalogo-produtos.uonix-filters-collapsed .uonix-sidebar-expand-wrap,
+            .uonix-filters-collapsed .uonix-sidebar-expand-wrap {
+                display: flex !important;
+            }
+
+            /* GRID EM 4 COLUNAS NO DESKTOP QUANDO RECOLHIDO */
+            @media (min-width: 1025px) {
+                #catalogo-produtos.uonix-filters-collapsed ul.products.product-archive,
+                #catalogo-produtos.uonix-filters-collapsed .woof_shortcode_output ul.products,
+                .uonix-filters-collapsed #catalogo-produtos ul.products.product-archive,
+                .uonix-filters-collapsed #catalogo-produtos .woof_shortcode_output ul.products {
+                    grid-template-columns: repeat(4, minmax(0px, 1fr)) !important;
+                }
+            }
+
+            /* GRID EM 3 COLUNAS NO TABLET QUANDO RECOLHIDO */
+            @media (min-width: 768px) and (max-width: 1024px) {
+                #catalogo-produtos.uonix-filters-collapsed ul.products.product-archive,
+                #catalogo-produtos.uonix-filters-collapsed .woof_shortcode_output ul.products,
+                .uonix-filters-collapsed #catalogo-produtos ul.products.product-archive,
+                .uonix-filters-collapsed #catalogo-produtos .woof_shortcode_output ul.products {
+                    grid-template-columns: repeat(3, minmax(0px, 1fr)) !important;
+                }
             }
         }
 
         /* 2. REGRAS PARA CELULAR (< 768px) */
         @media (max-width: 767px) {
-            .kadence-column2932_0a9c6d-62 { display: none !important; }
-            .kadence-column2932_fec114-b0 { flex: 0 0 100% !important; max-width: 100% !important; }
+            /* Esconde botões de toggle desktop/tablet no mobile */
+            .uonix-sidebar-toggle-header,
+            .uonix-sidebar-expand-wrap {
+                display: none !important;
+            }
+
+            .kadence-column2932_0a9c6d-62,
+            .kadence-column7150_89634e-21 { display: none !important; }
+            .kadence-column2932_fec114-b0,
+            .kadence-column7150_2a56fa-f9 { flex: 0 0 100% !important; max-width: 100% !important; }
             
+            /* Garante que a coluna sticky e o botão de filtro mobile fiquem sempre acima do grid de produtos */
+            .kadence-column7150_2b9bfb-d5,
+            .kadence-column7150_2b9bfb-d5 .kt-inside-inner-col,
+            .wp-block-kadence-column:has(.woof_show_mobile_filter),
+            .woof_show_mobile_filter_container,
+            .woof_show_mobile_filter {
+                z-index: 99 !important;
+            }
+            
+            @keyframes uonix_move_top_filter {
+                0% {
+                    top: 100%;
+                }
+                100% {
+                    top: 60px;
+                }
+            }
+
+            @keyframes move_top {
+                0% {
+                    top: 100%;
+                }
+                100% {
+                    top: 60px;
+                }
+            }
+
             .woof_show_filter_for_mobile.woof {
                 position: fixed !important;
-                z-index: 9999 !important;
-                height: 100% !important;
+                z-index: 99999 !important;
+                top: 100%;
+                margin-top: 0 !important;
+                height: calc(100% - 60px) !important;
+                height: calc(100dvh - 60px) !important;
                 width: 100% !important;
                 left: 0 !important;
+                right: 0 !important;
+                padding: 15px 20px 100px 20px !important;
+                box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.12) !important;
+                border-top: 1px solid #e2e8f0 !important;
                 display: block !important;
-                animation: move_top .5s ease forwards;
+                animation: move_top .4s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+            }
+
+            @keyframes uonix_move_down_filter {
+                0% {
+                    top: 60px;
+                }
+                100% {
+                    top: 100%;
+                }
+            }
+
+            .woof_show_filter_for_mobile.woof.uonix_closing {
+                top: 60px;
+                animation: uonix_move_down_filter .35s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+            }
+
+            .woof_hide_mobile_filter {
+                margin: 8px 0 16px auto !important;
             }
 
             /* Oculta o primeiro botão "Redefinir" no topo no mobile */
@@ -170,6 +366,14 @@ add_action('wp_footer', function() {
         .woof_reset_button_2_redundant { 
             display: none !important; 
         }
+
+        /* 4. TÍTULOS BALANCEADOS NA GRADE DE PRODUTOS (Sem palavras órfãs) */
+        .woocommerce ul.products li.product .woocommerce-loop-product__title,
+        .woocommerce ul.products li.product .woocommerce-loop-product__title a,
+        ul.products.product-archive li.product .woocommerce-loop-product__title,
+        ul.products.product-archive li.product .woocommerce-loop-product__title a {
+            text-wrap: balance !important;
+        }
     </style>
 
     <script id="uonix-husky-logic-js">
@@ -190,8 +394,100 @@ add_action('wp_footer', function() {
             }
         }
 
-        $(document).ready(function() { setTimeout(updateHuskyLayout, 600); });
-        $(window).on('resize', updateHuskyLayout);
+        // Toggle de recolhimento dos filtros em Desktop e Tablet (>= 768px)
+        function setupDesktopFilterToggle() {
+            var $catalog = $('#catalogo-produtos');
+            if (!$catalog.length) return;
+
+            var $filterCol = $catalog.find('.kadence-column7150_89634e-21, .kadence-column2932_0a9c6d-62');
+            var $productsCol = $catalog.find('.kadence-column7150_82068b-b2, .kadence-column2932_fec114-b0');
+
+            // 1. Injeta cabeçalho com botão "Recolher" na sidebar se ainda não existir
+            if ($filterCol.length && !$filterCol.find('.uonix-sidebar-toggle-header').length) {
+                var headerHtml = '<div class="uonix-sidebar-toggle-header">' +
+                    '<span class="uonix-sidebar-toggle-title">' +
+                        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>' +
+                        'Filtros' +
+                    '</span>' +
+                    '<button type="button" class="uonix-btn-toggle-filters uonix-btn-collapse" title="Ocultar barra de filtros">' +
+                        '<span>Recolher</span>' +
+                        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline></svg>' +
+                    '</button>' +
+                '</div>';
+                $filterCol.find('.kt-inside-inner-col').prepend(headerHtml);
+            }
+
+            // 2. Injeta botão "Mostrar Filtros" na coluna dos produtos se ainda não existir
+            if ($productsCol.length && !$productsCol.find('.uonix-sidebar-expand-wrap').length) {
+                var expandHtml = '<div class="uonix-sidebar-expand-wrap">' +
+                    '<button type="button" class="uonix-btn-toggle-filters uonix-btn-expand" title="Exibir filtros laterais">' +
+                        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>' +
+                        '<span>Mostrar Filtros</span>' +
+                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></svg>' +
+                    '</button>' +
+                '</div>';
+                var $ajaxWrap = $productsCol.find('.woof_results_by_ajax_shortcode');
+                if ($ajaxWrap.length) {
+                    $ajaxWrap.before(expandHtml);
+                } else {
+                    $productsCol.find('.kt-inside-inner-col').prepend(expandHtml);
+                }
+            }
+
+            // 3. Aplica preferência salva
+            try {
+                var savedState = localStorage.getItem('uonix_catalog_filters_collapsed');
+                if (savedState === '1' && window.innerWidth >= 768) {
+                    $catalog.addClass('uonix-filters-collapsed');
+                }
+            } catch (e) {}
+        }
+
+        // Handlers de clique para recolher / expandir
+        $(document).on('click', '.uonix-btn-collapse', function(e) {
+            e.preventDefault();
+            $('#catalogo-produtos').addClass('uonix-filters-collapsed');
+            try { localStorage.setItem('uonix_catalog_filters_collapsed', '1'); } catch (e) {}
+        });
+
+        $(document).on('click', '.uonix-btn-expand', function(e) {
+            e.preventDefault();
+            $('#catalogo-produtos').removeClass('uonix-filters-collapsed');
+            try { localStorage.setItem('uonix_catalog_filters_collapsed', '0'); } catch (e) {}
+        });
+
+        // Animação suave invertida (slide down) ao fechar o filtro mobile
+        document.addEventListener('click', function(e) {
+            var hideBtn = e.target.closest('.woof_hide_mobile_filter');
+            if (!hideBtn) return;
+
+            var woof = hideBtn.closest('.woof');
+            if (!woof || !woof.classList.contains('woof_show_filter_for_mobile') || woof.classList.contains('uonix_closing')) return;
+
+            // Intercepta fechamento instantâneo do plugin WOOF
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
+            woof.classList.add('uonix_closing');
+
+            setTimeout(function() {
+                woof.classList.remove('uonix_closing');
+                woof.classList.remove('woof_show_filter_for_mobile');
+            }, 340);
+        }, true);
+
+        $(document).ready(function() {
+            setTimeout(updateHuskyLayout, 600);
+            setupDesktopFilterToggle();
+        });
+
+        $(window).on('resize', function() {
+            updateHuskyLayout();
+            if (window.innerWidth < 768) {
+                $('#catalogo-produtos').removeClass('uonix-filters-collapsed');
+            }
+        });
     })(jQuery);
     </script>
     <?php
