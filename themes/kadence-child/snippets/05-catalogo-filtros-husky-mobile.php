@@ -137,6 +137,14 @@ add_action('wp_footer', function() {
                 z-index: 99 !important;
             }
 
+            /* Garante que o menu gaveta mobile fique sempre acima de tudo */
+            .wp-block-kadence-off-canvas,
+            .wp-block-kadence-off-canvas .kb-off-canvas-inner-wrap,
+            .wp-block-kadence-off-canvas .kb-off-canvas-overlay,
+            .wp-block-kadence-off-canvas .kb-off-canvas-close {
+                z-index: 2000000 !important;
+            }
+
             @keyframes uonix_move_top_filter {
                 0% {
                     top: 100%;
