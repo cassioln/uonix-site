@@ -238,9 +238,9 @@ final class Uonix_VTST_Table {
 			foreach ( $matrix['header_groups'] as $group ) {
 				$title = trim( (string) $group['title'] );
 				if ( '' !== $title ) {
-					echo '<th colspan="' . absint( $group['colspan'] ) . '" class="uonix-vtst-group-header">' . esc_html( mb_strtoupper( $title, 'UTF-8' ) ) . '</th>';
+					echo '<th scope="colgroup" colspan="' . absint( $group['colspan'] ) . '" class="uonix-vtst-group-header">' . esc_html( mb_strtoupper( $title, 'UTF-8' ) ) . '</th>';
 				} else {
-					echo '<th colspan="' . absint( $group['colspan'] ) . '" class="uonix-vtst-group-empty"></th>';
+					echo '<td colspan="' . absint( $group['colspan'] ) . '" class="uonix-vtst-group-empty"></td>';
 				}
 			}
 			echo '</tr>';

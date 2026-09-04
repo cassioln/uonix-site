@@ -126,66 +126,14 @@ add_action('wp_footer', function() {
             .kadence-column2932_0a9c6d-62 { display: none !important; }
             .kadence-column2932_fec114-b0 { flex: 0 0 100% !important; max-width: 100% !important; }
             
-            /* Garante que a coluna sticky e o botão de filtro mobile fiquem sempre acima do grid de produtos */
-            .kadence-column7150_2b9bfb-d5,
-            .kadence-column7150_2b9bfb-d5 .kt-inside-inner-col,
-            .wp-block-kadence-column:has(.woof_show_mobile_filter),
-            .woof_show_mobile_filter_container,
-            .woof_show_mobile_filter {
-                z-index: 99 !important;
-            }
-            
-            @keyframes uonix_move_top_filter {
-                0% {
-                    top: 100%;
-                }
-                100% {
-                    top: 60px;
-                }
-            }
-
-            @keyframes move_top {
-                0% {
-                    top: 100%;
-                }
-                100% {
-                    top: 60px;
-                }
-            }
-
             .woof_show_filter_for_mobile.woof {
                 position: fixed !important;
-                z-index: 99999 !important;
-                top: 100%;
-                margin-top: 0 !important;
-                height: calc(100% - 60px) !important;
-                height: calc(100dvh - 60px) !important;
+                z-index: 9999 !important;
+                height: 100% !important;
                 width: 100% !important;
                 left: 0 !important;
-                right: 0 !important;
-                padding: 15px 20px 100px 20px !important;
-                box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.12) !important;
-                border-top: 1px solid #e2e8f0 !important;
                 display: block !important;
-                animation: move_top .4s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
-            }
-
-            @keyframes uonix_move_down_filter {
-                0% {
-                    top: 60px;
-                }
-                100% {
-                    top: 100%;
-                }
-            }
-
-            .woof_show_filter_for_mobile.woof.uonix_closing {
-                top: 60px;
-                animation: uonix_move_down_filter .35s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
-            }
-
-            .woof_hide_mobile_filter {
-                margin: 8px 0 16px auto !important;
+                animation: move_top .5s ease forwards;
             }
 
             /* Oculta o primeiro botão "Redefinir" no topo no mobile */
@@ -222,14 +170,6 @@ add_action('wp_footer', function() {
         .woof_reset_button_2_redundant { 
             display: none !important; 
         }
-
-        /* 4. TÍTULOS BALANCEADOS NA GRADE DE PRODUTOS (Sem palavras órfãs) */
-        .woocommerce ul.products li.product .woocommerce-loop-product__title,
-        .woocommerce ul.products li.product .woocommerce-loop-product__title a,
-        ul.products.product-archive li.product .woocommerce-loop-product__title,
-        ul.products.product-archive li.product .woocommerce-loop-product__title a {
-            text-wrap: balance !important;
-        }
     </style>
 
     <script id="uonix-husky-logic-js">
@@ -252,27 +192,6 @@ add_action('wp_footer', function() {
 
         $(document).ready(function() { setTimeout(updateHuskyLayout, 600); });
         $(window).on('resize', updateHuskyLayout);
-
-        // Animação suave invertida (slide down) ao fechar o filtro mobile
-        document.addEventListener('click', function(e) {
-            var hideBtn = e.target.closest('.woof_hide_mobile_filter');
-            if (!hideBtn) return;
-
-            var woof = hideBtn.closest('.woof');
-            if (!woof || !woof.classList.contains('woof_show_filter_for_mobile') || woof.classList.contains('uonix_closing')) return;
-
-            // Intercepta fechamento instantâneo do plugin WOOF
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-
-            woof.classList.add('uonix_closing');
-
-            setTimeout(function() {
-                woof.classList.remove('uonix_closing');
-                woof.classList.remove('woof_show_filter_for_mobile');
-            }, 340);
-        }, true);
     })(jQuery);
     </script>
     <?php
@@ -332,7 +251,7 @@ add_action('wp_footer', function() {
         .wp-block-kadence-rowlayout:has(.woof_text_search_container),
         .kb-row-layout-id7150_219091-69 {
             position: relative !important;
-            z-index: 20 !important;
+            z-index: 100 !important;
         }
 
         /* Garante que o painel de tags ativas e o grid fiquem abaixo do dropdown */

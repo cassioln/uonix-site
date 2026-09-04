@@ -3327,6 +3327,7 @@ Uonix_VTST_Table::render_tab( Uonix_VTST_Table::TAB_KEY, array() );
 $dims_html = ob_get_clean();
 vts_assert_contains( 'uonix-vtst-group-row', $dims_html, 'linha de super-cabeçalho de grupos é renderizada quando há cotas' );
 vts_assert_contains( 'DIMENSÕES (MM)', $dims_html, 'super-cabeçalho de dimensões é renderizado' );
+vts_assert_contains( 'scope="colgroup"', $dims_html, 'super-cabeçalho possui scope="colgroup" para acessibilidade' );
 vts_assert_contains( 'uonix-vtst-group-empty', $dims_html, 'colunas sem seção recebem célula vazia de alinhamento' );
 $GLOBALS['product'] = $table_product;
 

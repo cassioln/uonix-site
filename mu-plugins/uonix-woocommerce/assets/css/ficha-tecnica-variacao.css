@@ -26,7 +26,8 @@
 .uonix-vtst-responsive-container::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 .uonix-vtst-table { width: 100% !important; min-width: max-content !important; margin: 0 !important; color: #0f172a; background: #fff; border: 0 !important; border-collapse: separate !important; border-spacing: 0; font-size: 14px; }
-.uonix-vtst-table thead tr.uonix-vtst-group-row th.uonix-vtst-group-empty { background: transparent !important; border: 0 !important; padding: 0 !important; }
+.uonix-vtst-table thead tr.uonix-vtst-group-row th.uonix-vtst-group-empty,
+.uonix-vtst-table thead tr.uonix-vtst-group-row td.uonix-vtst-group-empty { background: transparent !important; border: 0 !important; padding: 0 !important; }
 .uonix-vtst-table thead tr.uonix-vtst-group-row th.uonix-vtst-group-header { padding: 6px 10px !important; color: #1e293b !important; background: #e2e8f0 !important; border: 0 !important; border-bottom: 2px solid #cbd5e1 !important; border-right: 1px solid #cbd5e1 !important; font-size: 11px !important; font-weight: 800 !important; letter-spacing: 0.05em !important; text-transform: uppercase !important; text-align: center !important; }
 .uonix-vtst-table thead tr.uonix-vtst-group-row th.uonix-vtst-group-header:last-child { border-right: 0 !important; }
 .uonix-vtst-table thead th { padding: 10px 12px !important; color: #1e293b; background: #f1f5f9 !important; border: 0 !important; border-bottom: 1px solid #dbe3ef !important; font-size: 12px; font-weight: 800; line-height: 1.15; text-align: left; text-transform: uppercase; vertical-align: middle; white-space: nowrap; }
