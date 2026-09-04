@@ -64,6 +64,44 @@ function uonix_wcps_banner_hero_styles() {
        UONIX: BANNER HERO SLIDER [wcps id=1546]
        Design Moderno, Comercial e Embutido na Pagina
        ========================================================================== */
+    /* CABECALHO KADENCE CANONICO DO SLIDER */
+    .uonix-slider-header {
+        margin-bottom: 24px !important;
+        display: block !important;
+    }
+
+    .uonix-slider-header span.wp-block-kadence-advancedheading {
+        display: inline-flex !important;
+        align-items: center !important;
+        margin-bottom: 8px !important;
+        font-family: inherit !important;
+        font-size: 14px !important;
+        font-weight: 700 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 1.5px !important;
+    }
+
+    .uonix-slider-header h2.wp-block-kadence-advancedheading {
+        font-family: Barlow Semi Condensed, sans-serif !important;
+        font-size: 36px !important;
+        font-weight: 800 !important;
+        line-height: 1.15 !important;
+        margin: 0 !important;
+    }
+
+    @media (max-width: 768px) {
+        .uonix-slider-header h2.wp-block-kadence-advancedheading {
+            font-size: 26px !important;
+            text-align: center !important;
+        }
+
+        .uonix-slider-header span.wp-block-kadence-advancedheading {
+            justify-content: center !important;
+            width: 100% !important;
+            text-align: center !important;
+        }
+    }
+
     .wcps-container-1546,
     .wcps-container-1546 #wcps-1546,
     .wcps-container-1546 .splide,
@@ -277,8 +315,10 @@ function uonix_wcps_banner_hero_styles() {
         width: 100% !important;
     }
 
-    /* 5. SETAS CIRCULARES MODERNAS */
-    .wcps-container-1546 .splide__arrows {
+    /* 5. SETAS CIRCULARES MODERNAS CANONICAS */
+    .wcps-container-1546 .splide__arrows,
+    .wcps-container-1546 .splide__arrows.middle,
+    .wcps-container-1546 .splide__arrows.middle-fixed {
         position: absolute !important;
         top: 50% !important;
         left: 0 !important;
@@ -290,13 +330,17 @@ function uonix_wcps_banner_hero_styles() {
         z-index: 30 !important;
     }
 
+    .wcps-container-1546 .splide__arrows div,
+    .wcps-container-1546 .splide__arrows div.splide__arrow,
     .wcps-container-1546 .splide__arrow {
         width: 44px !important;
         height: 44px !important;
-        background-color: #0e3780 !important;
-        border: none !important;
+        background: rgba(255, 255, 255, 0.95) !important;
+        background-color: rgba(255, 255, 255, 0.95) !important;
+        backdrop-filter: blur(8px) !important;
+        border: 1px solid rgba(226, 232, 240, 0.9) !important;
         border-radius: 50% !important;
-        box-shadow: 0 4px 16px rgba(14, 55, 128, 0.2) !important;
+        box-shadow: 0 4px 16px rgba(14, 55, 128, 0.12) !important;
         position: absolute !important;
         top: 50% !important;
         transform: translateY(-50%) !important;
@@ -309,24 +353,76 @@ function uonix_wcps_banner_hero_styles() {
         transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
         font-size: 18px !important;
         font-weight: bold !important;
-        color: #ffffff !important;
+        color: #0e3780 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        outline: none !important;
     }
 
+    /* Oculta ícones FontAwesome ou nós filhos legados para garantir glifo canônico limpo */
+    .wcps-container-1546 .splide__arrow i,
+    .wcps-container-1546 .splide__arrows div i,
+    .wcps-container-1546 .splide__arrow .icon,
+    .wcps-container-1546 .splide__arrows div .icon {
+        display: none !important;
+    }
+
+    .wcps-container-1546 .splide__arrow--prev::before,
+    .wcps-container-1546 .splide__arrow.prev::before,
+    .wcps-container-1546 .splide__arrows div.prev::before {
+        content: "\2039" !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-size: 28px !important;
+        font-weight: 700 !important;
+        line-height: 1 !important;
+        color: inherit !important;
+        margin-top: -2px !important;
+    }
+
+    .wcps-container-1546 .splide__arrow--next::before,
+    .wcps-container-1546 .splide__arrow.next::before,
+    .wcps-container-1546 .splide__arrows div.next::before {
+        content: "\203A" !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-size: 28px !important;
+        font-weight: 700 !important;
+        line-height: 1 !important;
+        color: inherit !important;
+        margin-top: -2px !important;
+    }
+
+    .wcps-container-1546 .splide__arrows.middle .prev,
+    .wcps-container-1546:hover .splide__arrows.middle .prev,
     .wcps-container-1546 .splide__arrow--prev,
-    .wcps-container-1546 .splide__arrow.prev {
+    .wcps-container-1546 .splide__arrow.prev,
+    .wcps-container-1546 .splide__arrows div.prev {
         left: 15px !important;
+        right: auto !important;
+        float: none !important;
     }
 
+    .wcps-container-1546 .splide__arrows.middle .next,
+    .wcps-container-1546:hover .splide__arrows.middle .next,
     .wcps-container-1546 .splide__arrow--next,
-    .wcps-container-1546 .splide__arrow.next {
+    .wcps-container-1546 .splide__arrow.next,
+    .wcps-container-1546 .splide__arrows div.next {
         right: 15px !important;
+        left: auto !important;
+        float: none !important;
     }
 
+    .wcps-container-1546 .splide__arrows div:hover:not(:disabled),
     .wcps-container-1546 .splide__arrow:hover:not(:disabled) {
-        background-color: #f76a0c !important;
+        background: #0e3780 !important;
+        background-color: #0e3780 !important;
+        border-color: #0e3780 !important;
         color: #ffffff !important;
         transform: translateY(-50%) scale(1.1) !important;
-        box-shadow: 0 8px 24px rgba(247, 106, 12, 0.35) !important;
+        box-shadow: 0 8px 24px rgba(14, 55, 128, 0.28) !important;
     }
 
     /* 6. PAGINACAO MODERNA */
@@ -461,17 +557,27 @@ function uonix_wcps_slider_init_fix() {
     ?>
     <script id="uonix-wcps-init-fix">
     document.addEventListener('DOMContentLoaded', function() {
-        // Remove título legado ou duplicado se existir no DOM
+        // 1. Remove qualquer título legado se existir no DOM
         var legacyTitle = document.querySelector('.uonix-carousel-title');
         if (legacyTitle) {
             legacyTitle.remove();
+        }
+
+        // 2. Garante o cabeçalho canônico Kadence antes do slider caso a página não tenha sido salva no editor
+        var carousel1546 = document.querySelector('.wcps-container-1546');
+        if (carousel1546 && !document.querySelector('.uonix-slider-header')) {
+            var headerDiv = document.createElement('div');
+            headerDiv.className = 'uonix-slider-header';
+            headerDiv.style.marginBottom = '24px';
+            headerDiv.innerHTML = '<span class="kt-adv-heading2150_d3dd23-bf wp-block-kadence-advancedheading kt-adv-heading-has-icon has-theme-palette14-color has-text-color" data-kb-block="kb-adv-heading2150_d3dd23-bf"><span class="kb-svg-icon-wrap kb-adv-heading-icon kb-svg-icon-fe_minus kb-adv-heading-icon-side-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line></svg></span><span class="kb-adv-text-inner">Produtos em destaque</span></span><h2 class="kt-adv-heading2150_d38c94-30 wp-block-kadence-advancedheading has-kb-palette-3-color has-text-color" data-kb-block="kb-adv-heading2150_d38c94-30">Produtos para Ancoragem e Fixação</h2>';
+            carousel1546.parentNode.insertBefore(headerDiv, carousel1546);
         }
 
         setTimeout(function() {
             window.dispatchEvent(new Event('resize'));
         }, 200);
 
-        // Torna o card do slider da sidebar 100% clicável para a página do produto
+        // 3. Torna o card do slider da sidebar 100% clicável para a página do produto
         document.body.addEventListener('click', function(e) {
             var card = e.target.closest('.wcps-container-8643 .elements-wrapper');
             if (card && !e.target.closest('a')) {
@@ -486,17 +592,44 @@ function uonix_wcps_slider_init_fix() {
     <?php
 }
 
-// 4. Garante o cabeçalho canônico Kadence da seção na Home (substitui texto antigo pelo novo se presente)
+// 4. Garante o cabeçalho canônico Kadence da seção na Home (no SSR)
 add_filter( 'the_content', 'uonix_wcps_slider_header_canonical_filter', 20 );
 
 function uonix_wcps_slider_header_canonical_filter( $content ) {
-    if ( ( is_front_page() || is_home() ) && false !== strpos( $content, 'uonix-slider-header' ) ) {
-        if ( false !== strpos( $content, 'Os melhores produtos para construir com segurança.' ) ) {
-            $content = str_replace(
-                'Os melhores produtos para construir com segurança.',
-                'Produtos para Ancoragem e Fixação',
-                $content
+    if ( is_front_page() || is_home() ) {
+        $canonical_header = '<div class="uonix-slider-header" style="margin-bottom: 24px;">' .
+            '<span class="kt-adv-heading2150_d3dd23-bf wp-block-kadence-advancedheading kt-adv-heading-has-icon has-theme-palette14-color has-text-color" data-kb-block="kb-adv-heading2150_d3dd23-bf"><span class="kb-svg-icon-wrap kb-adv-heading-icon kb-svg-icon-fe_minus kb-adv-heading-icon-side-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line></svg></span><span class="kb-adv-text-inner">Produtos em destaque</span></span>' .
+            '<h2 class="kt-adv-heading2150_d38c94-30 wp-block-kadence-advancedheading has-kb-palette-3-color has-text-color" data-kb-block="kb-adv-heading2150_d38c94-30">Produtos para Ancoragem e Fixação</h2>' .
+            '</div>';
+
+        if ( false !== strpos( $content, 'uonix-slider-header' ) ) {
+            // Caso 1: O bloco já existe no banco (substitui texto antigo se presente)
+            if ( false !== strpos( $content, 'Os melhores produtos para construir com segurança.' ) ) {
+                $content = str_replace(
+                    'Os melhores produtos para construir com segurança.',
+                    'Produtos para Ancoragem e Fixação',
+                    $content
+                );
+            }
+        } else {
+            // Caso 2: Em produção, onde o bloco não foi inserido no banco de dados.
+            // Insere o cabeçalho canônico exatamente antes da chamada do slider 1546.
+            $slider_patterns = array(
+                "[wcps id='1546']",
+                '[wcps id="1546"]',
+                '[wcps id=1546]',
             );
+            foreach ( $slider_patterns as $p ) {
+                if ( false !== strpos( $content, $p ) ) {
+                    $content = str_replace( $p, $canonical_header . "\n" . $p, $content );
+                    break;
+                }
+            }
+        }
+
+        // Padroniza texto do link para o catálogo de produtos no rodapé da seção
+        if ( false !== strpos( $content, 'Catálago de Produtos' ) ) {
+            $content = str_replace( 'Catálago de Produtos', 'Conheça todos nossos produtos', $content );
         }
     }
     return $content;
