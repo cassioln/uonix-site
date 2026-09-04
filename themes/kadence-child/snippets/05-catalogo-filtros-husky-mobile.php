@@ -210,6 +210,8 @@ add_action('wp_footer', function() {
             }
 
             /* ESTADO RECOLHIDO (COLLAPSED) */
+            #catalogo-produtos.uonix-filters-collapsed #uonix-sidebar-filtros,
+            .uonix-filters-collapsed #uonix-sidebar-filtros,
             #catalogo-produtos.uonix-filters-collapsed .kadence-column2932_0a9c6d-62,
             #catalogo-produtos.uonix-filters-collapsed .kadence-column7150_89634e-21,
             .uonix-filters-collapsed .kadence-column2932_0a9c6d-62,
@@ -314,18 +316,21 @@ add_action('wp_footer', function() {
                 animation: move_top .4s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
             }
 
-            @keyframes uonix_move_down_filter {
+            /* Animação suave invertida (slide down) ao fechar o filtro mobile */
+            @keyframes uonix_slide_down_filter {
                 0% {
                     top: 60px;
+                    opacity: 1;
                 }
                 100% {
                     top: 100%;
+                    opacity: 0.85;
                 }
             }
 
             .woof_show_filter_for_mobile.woof.uonix_closing {
-                top: 60px;
-                animation: uonix_move_down_filter .35s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+                animation: uonix_slide_down_filter .32s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+                pointer-events: none !important;
             }
 
             .woof_hide_mobile_filter {
@@ -378,6 +383,9 @@ add_action('wp_footer', function() {
 
     <script id="uonix-husky-logic-js">
     (function($) {
+        // ID estável atribuído à coluna lateral de filtros para acessibilidade (aria-controls)
+        var UONIX_FILTER_SIDEBAR_ID = 'uonix-sidebar-filtros';
+
         function updateHuskyLayout() {
             var width = window.innerWidth;
 
@@ -394,6 +402,30 @@ add_action('wp_footer', function() {
             }
         }
 
+        // Sincroniza estado visual e semântica acessível (aria-expanded e aria-controls)
+        function syncFilterToggleState(isCollapsed) {
+            var $catalog = $('#catalogo-produtos');
+            if (!$catalog.length) return;
+
+            var $filterCol = $catalog.find('.kadence-column7150_89634e-21, .kadence-column2932_0a9c6d-62');
+            var filterColId = $filterCol.attr('id') || UONIX_FILTER_SIDEBAR_ID;
+            if ($filterCol.length && !$filterCol.attr('id')) {
+                $filterCol.attr('id', filterColId);
+            }
+
+            var $buttons = $catalog.find('.uonix-btn-toggle-filters');
+            if ($buttons.length) {
+                $buttons.attr('aria-controls', filterColId);
+                $buttons.attr('aria-expanded', isCollapsed ? 'false' : 'true');
+            }
+
+            if (isCollapsed) {
+                $catalog.addClass('uonix-filters-collapsed');
+            } else {
+                $catalog.removeClass('uonix-filters-collapsed');
+            }
+        }
+
         // Toggle de recolhimento dos filtros em Desktop e Tablet (>= 768px)
         function setupDesktopFilterToggle() {
             var $catalog = $('#catalogo-produtos');
@@ -402,16 +434,22 @@ add_action('wp_footer', function() {
             var $filterCol = $catalog.find('.kadence-column7150_89634e-21, .kadence-column2932_0a9c6d-62');
             var $productsCol = $catalog.find('.kadence-column7150_82068b-b2, .kadence-column2932_fec114-b0');
 
+            // Garante o ID estável na coluna de filtros
+            var filterColId = $filterCol.attr('id') || UONIX_FILTER_SIDEBAR_ID;
+            if ($filterCol.length && !$filterCol.attr('id')) {
+                $filterCol.attr('id', filterColId);
+            }
+
             // 1. Injeta cabeçalho com botão "Recolher" na sidebar se ainda não existir
             if ($filterCol.length && !$filterCol.find('.uonix-sidebar-toggle-header').length) {
                 var headerHtml = '<div class="uonix-sidebar-toggle-header">' +
                     '<span class="uonix-sidebar-toggle-title">' +
-                        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>' +
+                        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>' +
                         'Filtros' +
                     '</span>' +
-                    '<button type="button" class="uonix-btn-toggle-filters uonix-btn-collapse" title="Ocultar barra de filtros">' +
+                    '<button type="button" class="uonix-btn-toggle-filters uonix-btn-collapse" title="Ocultar barra de filtros" aria-label="Ocultar barra de filtros" aria-controls="' + filterColId + '" aria-expanded="true">' +
                         '<span>Recolher</span>' +
-                        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline></svg>' +
+                        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline></svg>' +
                     '</button>' +
                 '</div>';
                 $filterCol.find('.kt-inside-inner-col').prepend(headerHtml);
@@ -420,10 +458,10 @@ add_action('wp_footer', function() {
             // 2. Injeta botão "Mostrar Filtros" na coluna dos produtos se ainda não existir
             if ($productsCol.length && !$productsCol.find('.uonix-sidebar-expand-wrap').length) {
                 var expandHtml = '<div class="uonix-sidebar-expand-wrap">' +
-                    '<button type="button" class="uonix-btn-toggle-filters uonix-btn-expand" title="Exibir filtros laterais">' +
-                        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>' +
+                    '<button type="button" class="uonix-btn-toggle-filters uonix-btn-expand" title="Exibir filtros laterais" aria-label="Exibir filtros laterais" aria-controls="' + filterColId + '" aria-expanded="true">' +
+                        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>' +
                         '<span>Mostrar Filtros</span>' +
-                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></svg>' +
+                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></svg>' +
                     '</button>' +
                 '</div>';
                 var $ajaxWrap = $productsCol.find('.woof_results_by_ajax_shortcode');
@@ -434,26 +472,33 @@ add_action('wp_footer', function() {
                 }
             }
 
-            // 3. Aplica preferência salva
+            // 3. Aplica preferência salva sincronizando estado e acessibilidade
+            var shouldCollapse = false;
             try {
-                var savedState = localStorage.getItem('uonix_catalog_filters_collapsed');
-                if (savedState === '1' && window.innerWidth >= 768) {
-                    $catalog.addClass('uonix-filters-collapsed');
-                }
+                shouldCollapse = (localStorage.getItem('uonix_catalog_filters_collapsed') === '1' && window.innerWidth >= 768);
             } catch (e) {}
+            syncFilterToggleState(shouldCollapse);
         }
 
         // Handlers de clique para recolher / expandir
         $(document).on('click', '.uonix-btn-collapse', function(e) {
             e.preventDefault();
-            $('#catalogo-produtos').addClass('uonix-filters-collapsed');
+            syncFilterToggleState(true);
             try { localStorage.setItem('uonix_catalog_filters_collapsed', '1'); } catch (e) {}
+            var $expandBtn = $('#catalogo-produtos').find('.uonix-btn-expand');
+            if ($expandBtn.length) {
+                $expandBtn.trigger('focus');
+            }
         });
 
         $(document).on('click', '.uonix-btn-expand', function(e) {
             e.preventDefault();
-            $('#catalogo-produtos').removeClass('uonix-filters-collapsed');
+            syncFilterToggleState(false);
             try { localStorage.setItem('uonix_catalog_filters_collapsed', '0'); } catch (e) {}
+            var $collapseBtn = $('#catalogo-produtos').find('.uonix-btn-collapse');
+            if ($collapseBtn.length) {
+                $collapseBtn.trigger('focus');
+            }
         });
 
         // Animação suave invertida (slide down) ao fechar o filtro mobile
@@ -485,7 +530,13 @@ add_action('wp_footer', function() {
         $(window).on('resize', function() {
             updateHuskyLayout();
             if (window.innerWidth < 768) {
-                $('#catalogo-produtos').removeClass('uonix-filters-collapsed');
+                syncFilterToggleState(false);
+            } else {
+                var shouldCollapse = false;
+                try {
+                    shouldCollapse = (localStorage.getItem('uonix_catalog_filters_collapsed') === '1');
+                } catch (e) {}
+                syncFilterToggleState(shouldCollapse);
             }
         });
     })(jQuery);
