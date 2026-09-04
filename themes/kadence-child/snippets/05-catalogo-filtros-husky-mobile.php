@@ -136,19 +136,19 @@ add_action('wp_footer', function() {
             }
             
             @keyframes uonix_move_top_filter {
-                from {
+                0% {
                     top: 100%;
                 }
-                to {
+                100% {
                     top: 60px;
                 }
             }
 
             @keyframes move_top {
-                from {
+                0% {
                     top: 100%;
                 }
-                to {
+                100% {
                     top: 60px;
                 }
             }
@@ -156,7 +156,7 @@ add_action('wp_footer', function() {
             .woof_show_filter_for_mobile.woof {
                 position: fixed !important;
                 z-index: 99999 !important;
-                top: 60px !important;
+                top: 100%;
                 margin-top: 0 !important;
                 height: calc(100% - 60px) !important;
                 height: calc(100dvh - 60px) !important;
@@ -167,7 +167,7 @@ add_action('wp_footer', function() {
                 box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.12) !important;
                 border-top: 1px solid #e2e8f0 !important;
                 display: block !important;
-                animation: uonix_move_top_filter .35s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+                animation: move_top .4s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
             }
 
             .woof_hide_mobile_filter {
