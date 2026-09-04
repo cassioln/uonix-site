@@ -46,6 +46,22 @@ function uonix_estilos_mega_menu_v14()
         }
 
         /* ==========================================================
+           ELEVAÇÃO DA LINHA SUPERIOR DO HEADER (ATENDIMENTO, ORÇAMENTO E SELO)
+           Garante que os elementos projetados da row-top fiquem visíveis sobre o header
+           ========================================================== */
+        .wp-block-kadence-header-row-top,
+        .wp-block-kadence-header-row-top .wp-block-kadence-header-section,
+        .wp-block-kadence-header-row-top .menu_buttons,
+        .wp-block-kadence-header-row-top .contato_button_menu,
+        .wp-block-kadence-header-row-top .carrinho_button_menu,
+        .wp-block-kadence-header-row-top .wp-block-kadence-image,
+        #mega-menu-wrap-menu-extra-2,
+        #mega-menu-wrap-menu-extra-3 {
+            position: relative !important;
+            z-index: 1000000 !important;
+        }
+
+        /* ==========================================================
            BLINDAGEM DO MENU MOBILE (OFF-CANVAS)
            Garante que o menu gaveta mobile fique sempre acima do header sticky
            ========================================================== */
