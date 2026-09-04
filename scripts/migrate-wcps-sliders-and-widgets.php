@@ -208,13 +208,410 @@ if ( $post_1546 ) {
 		$opts_changed = true;
 	}
 
+	$banner_custom_css = "/* ==========================================================================
+   UONIX: BANNER HERO SLIDER [wcps id=1546]
+   Design Moderno, Comercial e Embutido na Pagina
+   ========================================================================== */
+
+.wcps-container-1546,
+.wcps-container-1546 #wcps-1546,
+.wcps-container-1546 .splide,
+.wcps-container-1546 .splide__track {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.wcps-container-1546 {
+    position: relative !important;
+    padding: 10px 0 20px 0 !important;
+    margin: 0 auto !important;
+}
+
+.wcps-container-1546 #wcps-1546 {
+    position: relative !important;
+}
+
+.wcps-container-1546 .wcps-ribbon,
+.wcps-container-1546 .wcps-items-price,
+.wcps-container-1546 .price,
+.wcps-container-1546 .amount,
+.wcps-container-1546 .woocommerce-Price-amount {
+    display: none !important;
+}
+
+.wcps-container-1546 .splide__track {
+    padding: 10px 0 !important;
+    overflow: hidden !important;
+}
+
+.wcps-container-1546 .item,
+.wcps-container-1546 .splide__slide {
+    box-sizing: border-box !important;
+    height: auto !important;
+    min-height: auto !important;
+    display: flex !important;
+}
+
+/* 1. ESTRUTURA TOTALMENTE EMBUTIDA (SEM BORDAS) */
+.wcps-container-1546 .elements-wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 380px !important;
+    padding: 20px 60px !important;
+    gap: 50px !important;
+    position: relative !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+}
+
+.wcps-container-1546 .elements-wrapper:hover {
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* Imagem sem moldura/borda, fluida e com blending perfeito */
+.wcps-container-1546 .layer-media {
+    flex: 0 0 46% !important;
+    max-width: 46% !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 10px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 320px !important;
+    box-sizing: border-box !important;
+}
+
+.wcps-container-1546 .wcps-items-thumb {
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.wcps-container-1546 .wcps-items-thumb a {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.wcps-container-1546 .wcps-items-thumb img {
+    max-height: 300px !important;
+    max-width: 100% !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain !important;
+    mix-blend-mode: multiply !important;
+    filter: none !important;
+    transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    margin: 0 auto !important;
+    display: block !important;
+}
+
+.wcps-container-1546 .elements-wrapper:hover .wcps-items-thumb img {
+    transform: scale(1.06) translateY(-4px) !important;
+}
+
+/* 2. CONTEUDO E TIPOGRAFIA COMERCIAL */
+.wcps-container-1546 .layer-content {
+    flex: 0 0 50% !important;
+    max-width: 50% !important;
+    padding: 10px 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    text-align: left !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+}
+
+.wcps-container-1546 .wcps-items-title {
+    font-family: Barlow Semi Condensed, sans-serif !important;
+    font-size: 34px !important;
+    font-weight: 800 !important;
+    line-height: 1.18 !important;
+    letter-spacing: -0.3px !important;
+    margin: 0 0 16px 0 !important;
+    text-align: left !important;
+    width: 100% !important;
+}
+
+.wcps-container-1546 .wcps-items-title a {
+    color: #0e3780 !important;
+    text-decoration: none !important;
+    transition: color 0.25s ease !important;
+}
+
+.wcps-container-1546 .wcps-items-title a:hover {
+    color: #f76a0c !important;
+}
+
+/* 3. DESCRICAO MAIOR E MAIS LEGIVEL */
+.wcps-container-1546 .uonix-wcps-banner-desc {
+    font-family: Barlow, sans-serif !important;
+    font-size: 17px !important;
+    line-height: 1.65 !important;
+    color: #334155 !important;
+    font-weight: 500 !important;
+    margin: 0 0 28px 0 !important;
+    max-width: 550px !important;
+}
+
+.wcps-container-1546 .uonix-wcps-banner-action {
+    width: 100% !important;
+}
+
+/* 4. BOTAO COMERCIAL DE ALTO IMPACTO */
+.wcps-container-1546 .uonix-wcps-btn {
+    background: linear-gradient(135deg, #f76a0c 0%, #e05c04 100%) !important;
+    color: #ffffff !important;
+    border-radius: 10px !important;
+    height: 52px !important;
+    width: auto !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 12px !important;
+    padding: 0 38px !important;
+    font-family: Barlow, sans-serif !important;
+    font-size: 15px !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.8px !important;
+    text-decoration: none !important;
+    border: none !important;
+    outline: none !important;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    box-shadow: 0 6px 20px rgba(247, 106, 12, 0.38) !important;
+    box-sizing: border-box !important;
+    cursor: pointer !important;
+}
+
+.wcps-container-1546 .uonix-wcps-btn:hover {
+    background: linear-gradient(135deg, #0e3780 0%, #09255a 100%) !important;
+    color: #ffffff !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 24px rgba(14, 55, 128, 0.32) !important;
+}
+
+.wcps-container-1546 .uonix-wcps-btn-icon {
+    transition: transform 0.25s ease !important;
+}
+
+.wcps-container-1546 .uonix-wcps-btn:hover .uonix-wcps-btn-icon {
+    transform: translateX(5px) !important;
+}
+
+.wcps-container-1546 .wcps-items-cart,
+.wcps-container-1546 .add_to_cart_inline {
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    width: 100% !important;
+}
+
+/* 5. SETAS MAIS PARA DENTRO DO BANNER */
+.wcps-container-1546 .splide__arrows {
+    position: absolute !important;
+    top: 50% !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    height: 0 !important;
+    transform: translateY(-50%) !important;
+    pointer-events: none !important;
+    z-index: 30 !important;
+}
+
+.wcps-container-1546 .splide__arrow {
+    width: 44px !important;
+    height: 44px !important;
+    background-color: rgba(255, 255, 255, 0.95) !important;
+    backdrop-filter: blur(8px) !important;
+    border: 1px solid rgba(226, 232, 240, 0.9) !important;
+    border-radius: 50% !important;
+    box-shadow: 0 4px 16px rgba(14, 55, 128, 0.12) !important;
+    position: absolute !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    opacity: 0.95 !important;
+    pointer-events: auto !important;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    font-size: 18px !important;
+    font-weight: bold !important;
+    color: #0e3780 !important;
+}
+
+.wcps-container-1546 .splide__arrow--prev {
+    left: 15px !important;
+}
+
+.wcps-container-1546 .splide__arrow--next {
+    right: 15px !important;
+}
+
+.wcps-container-1546 .splide__arrow:hover:not(:disabled) {
+    background: #0e3780 !important;
+    border-color: #0e3780 !important;
+    color: #ffffff !important;
+    transform: translateY(-50%) scale(1.1) !important;
+    box-shadow: 0 8px 24px rgba(14, 55, 128, 0.28) !important;
+}
+
+.wcps-container-1546 .splide__arrow .icon::before {
+    display: none !important;
+}
+
+/* 6. PAGINACAO MODERNA */
+.wcps-container-1546 .splide__pagination {
+    margin-top: 15px !important;
+    padding: 0 !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    gap: 8px !important;
+    position: static !important;
+}
+
+.wcps-container-1546 .splide__pagination__page {
+    width: 8px !important;
+    height: 8px !important;
+    background-color: #cbd5e1 !important;
+    border-radius: 4px !important;
+    border: none !important;
+    opacity: 0.8 !important;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    cursor: pointer !important;
+}
+
+.wcps-container-1546 .splide__pagination__page.is-active {
+    width: 28px !important;
+    height: 8px !important;
+    background-color: #f76a0c !important;
+    border-radius: 4px !important;
+    opacity: 1 !important;
+    box-shadow: 0 2px 8px rgba(247, 106, 12, 0.3) !important;
+}
+
+@media (max-width: 991px) {
+    .wcps-container-1546 .splide__arrows {
+        top: 25% !important;
+    }
+
+    .wcps-container-1546 .elements-wrapper {
+        flex-direction: column !important;
+        padding: 20px 20px !important;
+        gap: 20px !important;
+        text-align: center !important;
+        align-items: center !important;
+        min-height: auto !important;
+    }
+
+    .wcps-container-1546 .layer-media {
+        flex: 0 0 auto !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        min-height: auto !important;
+        padding: 10px !important;
+    }
+
+    .wcps-container-1546 .wcps-items-thumb img {
+        max-height: 200px !important;
+    }
+
+    .wcps-container-1546 .layer-content {
+        flex: 0 0 auto !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        align-items: center !important;
+        text-align: center !important;
+        padding: 0 !important;
+    }
+
+    .wcps-container-1546 .wcps-items-title {
+        text-align: center !important;
+        font-size: 26px !important;
+    }
+
+    .wcps-container-1546 .uonix-wcps-banner-desc {
+        text-align: center !important;
+        font-size: 15px !important;
+        margin-bottom: 20px !important;
+    }
+
+    .wcps-container-1546 .uonix-wcps-btn {
+        width: 100% !important;
+        max-width: 320px !important;
+    }
+
+    .wcps-container-1546 .splide__arrow--prev {
+        left: 8px !important;
+    }
+
+    .wcps-container-1546 .splide__arrow--next {
+        right: 8px !important;
+    }
+}
+
+@media (max-width: 600px) {
+    .wcps-container-1546 .elements-wrapper {
+        padding: 15px 10px !important;
+    }
+
+    .wcps-container-1546 .wcps-items-title {
+        font-size: 22px !important;
+    }
+
+    .wcps-container-1546 .splide__arrow {
+        width: 38px !important;
+        height: 38px !important;
+        font-size: 16px !important;
+    }
+
+    .wcps-container-1546 .splide__arrow--prev {
+        left: 4px !important;
+    }
+
+    .wcps-container-1546 .splide__arrow--next {
+        right: 4px !important;
+    }
+}";
+
+	$current_1546_css = isset( $opts_1546['custom_css'] ) ? $opts_1546['custom_css'] : '';
+	if ( trim( $current_1546_css ) !== trim( $banner_custom_css ) ) {
+		$opts_1546['custom_css'] = $banner_custom_css;
+		$opts_changed = true;
+	}
+
 	if ( $opts_changed ) {
 		$GLOBALS['uonix_changes']++;
-		echo "   [MUDARIA] Slider Home (ID {$p1546_id}): layout associado difere de {$canonical_layout_id}.\n";
+		echo "   [MUDARIA] Slider Home (ID {$p1546_id}): layout ou custom_css difere do canônico.\n";
 		if ( $GLOBALS['uonix_apply'] ) {
 			uonix_wcps_backup( 'postmeta_1546', $p1546_id, get_post_meta( $p1546_id, 'wcps_options', true ), $backup_dir );
 			update_post_meta( $p1546_id, 'wcps_options', $opts_1546 );
-			echo "   ✅ [ATUALIZADO] Slider Home (ID {$p1546_id}) atualizado com layout ID {$canonical_layout_id}.\n";
+			echo "   ✅ [ATUALIZADO] Slider Home (ID {$p1546_id}) atualizado com layout ID {$canonical_layout_id} e custom_css.\n";
 		}
 	} else {
 		$GLOBALS['uonix_noop']++;
