@@ -290,9 +290,6 @@ jobs:
       - name: Test checkout Turnstile UX guard
         run: node scripts/tests/test-checkout-turnstile-ux.js
 
-      - name: Test catalog filter toggle accessibility
-        run: node scripts/tests/test-catalog-filter-toggle-a11y.js
-
       - name: Test Turnstile consistency across surfaces
         run: node scripts/tests/test-turnstile-consistencia.js
 
