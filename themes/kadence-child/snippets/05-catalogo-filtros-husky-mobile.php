@@ -259,7 +259,7 @@ add_action('wp_footer', function() {
         .wp-block-kadence-rowlayout:has(.woof_text_search_container),
         .kb-row-layout-id7150_219091-69 {
             position: relative !important;
-            z-index: 100 !important;
+            z-index: 20 !important;
         }
 
         /* Garante que o painel de tags ativas e o grid fiquem abaixo do dropdown */
