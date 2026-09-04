@@ -33,8 +33,21 @@ function uonix_estilos_mega_menu_v14()
     ?>
     <style id="uonix-megamenu-hybrid-css">
         /* ==========================================================
-                                               MEGA MENU: ESTRUTURA E PAINÉIS PRINCIPAIS
-                                               ========================================================== */
+           BLINDAGEM DO STACKING CONTEXT DO HEADER E MEGA MENU
+           ========================================================== */
+        header.wp-block-kadence-header,
+        .wp-block-kadence-header-desktop,
+        .kb-header-placeholder-wrapper,
+        .kb-header-sticky-wrapper,
+        #mega-menu-wrap-primary,
+        #mega-menu-wrap-primary .mega-menu,
+        #mega-menu-wrap-primary .mega-sub-menu {
+            z-index: 999999 !important;
+        }
+
+        /* ==========================================================
+           MEGA MENU: ESTRUTURA E PAINÉIS PRINCIPAIS
+           ========================================================== */
         .uonix-dynamic-cats-wrapper,
         .uonix-dc-panel {
             pointer-events: none !important;
