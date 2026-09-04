@@ -349,6 +349,7 @@ if ( $post_1546 ) {
     margin: 0 0 16px 0 !important;
     text-align: left !important;
     width: 100% !important;
+    text-wrap: balance !important;
 }
 
 .wcps-container-1546 .wcps-items-title a {
@@ -824,6 +825,7 @@ $sidebar_custom_css = "/* ======================================================
     margin: 0 !important;
     width: 100% !important;
     text-align: center !important;
+    text-wrap: balance !important;
 }
 
 .wcps-container-8643 .wcps-items-title a {
@@ -836,6 +838,7 @@ $sidebar_custom_css = "/* ======================================================
     display: block !important;
     text-align: center !important;
     margin: 0 auto !important;
+    text-wrap: balance !important;
     transition: color 0.25s ease !important;
 }
 
