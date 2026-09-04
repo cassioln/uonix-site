@@ -511,38 +511,44 @@ if ( $post_1546 ) {
 }
 
 .wcps-container-1546 .splide__arrow i,
-.wcps-container-1546 .splide__arrows div i,
-.wcps-container-1546 .splide__arrow .icon,
-.wcps-container-1546 .splide__arrows div .icon {
+.wcps-container-1546 .splide__arrows div i {
     display: none !important;
 }
 
-.wcps-container-1546 .splide__arrow--prev::before,
-.wcps-container-1546 .splide__arrow.prev::before,
-.wcps-container-1546 .splide__arrows div.prev::before {
-    content: \"\\2039\" !important;
+.wcps-container-1546 .splide__arrow .icon,
+.wcps-container-1546 .splide__arrows div .icon {
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
+    width: 100% !important;
+    height: 100% !important;
+    pointer-events: none !important;
+}
+
+.wcps-container-1546 .splide__arrow .icon::before,
+.wcps-container-1546 .splide__arrows div .icon::before {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 1em !important;
+    height: 1em !important;
+    color: currentColor !important;
     font-size: 28px !important;
-    font-weight: 700 !important;
+    font-weight: 800 !important;
     line-height: 1 !important;
-    color: inherit !important;
     margin-top: -2px !important;
 }
 
-.wcps-container-1546 .splide__arrow--next::before,
-.wcps-container-1546 .splide__arrow.next::before,
-.wcps-container-1546 .splide__arrows div.next::before {
+.wcps-container-1546 .splide__arrow--prev .icon::before,
+.wcps-container-1546 .splide__arrow.prev .icon::before,
+.wcps-container-1546 .splide__arrows div.prev .icon::before {
+    content: \"\\2039\" !important;
+}
+
+.wcps-container-1546 .splide__arrow--next .icon::before,
+.wcps-container-1546 .splide__arrow.next .icon::before,
+.wcps-container-1546 .splide__arrows div.next .icon::before {
     content: \"\\203A\" !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 28px !important;
-    font-weight: 700 !important;
-    line-height: 1 !important;
-    color: inherit !important;
-    margin-top: -2px !important;
 }
 
 .wcps-container-1546 .splide__arrows.middle .prev,

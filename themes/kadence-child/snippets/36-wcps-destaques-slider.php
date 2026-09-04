@@ -54,7 +54,54 @@ function uonix_wcps_custom_banner_action( $args ) {
     <?php
 }
 
-// 2. Auxiliar leve para recalcular dimensões no carregamento do Splide e remover títulos residuais
+// 2. Garante o CSS das setas modernas e glifos canônicos dos sliders WCPS (1546 e 8643)
+add_action( 'wp_head', 'uonix_wcps_arrows_fallback_css', 30 );
+
+function uonix_wcps_arrows_fallback_css() {
+    ?>
+    <style id="uonix-wcps-arrows-css">
+    .wcps-container-1546 .splide__arrow i,
+    .wcps-container-8643 .splide__arrow i {
+        display: none !important;
+    }
+    .wcps-container-1546 .splide__arrow .icon,
+    .wcps-container-8643 .splide__arrow .icon {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 100% !important;
+        height: 100% !important;
+        pointer-events: none !important;
+    }
+    .wcps-container-1546 .splide__arrow .icon::before,
+    .wcps-container-8643 .splide__arrow .icon::before {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 1em !important;
+        height: 1em !important;
+        color: currentColor !important;
+        font-size: 28px !important;
+        font-weight: 800 !important;
+        line-height: 1 !important;
+    }
+    .wcps-container-1546 .splide__arrow.prev .icon::before,
+    .wcps-container-1546 .splide__arrow--prev .icon::before,
+    .wcps-container-8643 .splide__arrow.prev .icon::before,
+    .wcps-container-8643 .splide__arrow--prev .icon::before {
+        content: "\2039" !important;
+    }
+    .wcps-container-1546 .splide__arrow.next .icon::before,
+    .wcps-container-1546 .splide__arrow--next .icon::before,
+    .wcps-container-8643 .splide__arrow.next .icon::before,
+    .wcps-container-8643 .splide__arrow--next .icon::before {
+        content: "\203A" !important;
+    }
+    </style>
+    <?php
+}
+
+// 3. Auxiliar leve para recalcular dimensões no carregamento do Splide e remover títulos residuais
 add_action( 'wp_footer', 'uonix_wcps_slider_init_fix', 99 );
 
 function uonix_wcps_slider_init_fix() {
@@ -69,7 +116,8 @@ function uonix_wcps_slider_init_fix() {
 
         // 2. Garante o cabeçalho canônico Kadence antes do slider caso a página não tenha sido salva no editor
         var carousel1546 = document.querySelector('.wcps-container-1546');
-        if (carousel1546 && !document.querySelector('.uonix-slider-header')) {
+        var hasKadenceHeading = document.querySelector('.kt-adv-heading2150_d3dd23-bf') || document.querySelector('.kt-adv-heading2150_d38c94-30') || document.querySelector('.uonix-slider-header');
+        if (carousel1546 && !hasKadenceHeading) {
             var headerDiv = document.createElement('div');
             headerDiv.className = 'uonix-slider-header';
             headerDiv.style.marginBottom = '24px';
@@ -106,7 +154,13 @@ function uonix_wcps_slider_header_canonical_filter( $content ) {
             '<h2 class="kt-adv-heading2150_d38c94-30 wp-block-kadence-advancedheading has-kb-palette-3-color has-text-color" data-kb-block="kb-adv-heading2150_d38c94-30">Produtos para Ancoragem e Fixação</h2>' .
             '</div>';
 
-        if ( false !== strpos( $content, 'uonix-slider-header' ) ) {
+        $has_existing_heading = (
+            false !== strpos( $content, 'kt-adv-heading2150_d3dd23-bf' ) ||
+            false !== strpos( $content, 'kt-adv-heading2150_d38c94-30' ) ||
+            false !== strpos( $content, 'uonix-slider-header' )
+        );
+
+        if ( $has_existing_heading ) {
             // Caso 1: O bloco já existe no banco (substitui texto antigo se presente)
             if ( false !== strpos( $content, 'Os melhores produtos para construir com segurança.' ) ) {
                 $content = str_replace(
@@ -116,7 +170,7 @@ function uonix_wcps_slider_header_canonical_filter( $content ) {
                 );
             }
         } else {
-            // Caso 2: Em produção, onde o bloco não foi inserido no banco de dados.
+            // Caso 2: Onde o bloco não foi inserido no banco de dados.
             // Insere o cabeçalho canônico exatamente antes da chamada do slider 1546.
             $slider_patterns = array(
                 "[wcps id='1546']",
