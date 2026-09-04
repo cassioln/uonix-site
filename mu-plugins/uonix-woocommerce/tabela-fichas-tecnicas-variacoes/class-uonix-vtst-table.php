@@ -42,10 +42,17 @@ final class Uonix_VTST_Table {
 			return null;
 		}
 
-		$attribute_columns = self::attribute_columns( $product, $children );
-		$technical_columns = array();
-		$rows              = array();
-		$has_valid_sheet   = false;
+		$attribute_columns       = self::attribute_columns( $product, $children );
+		$technical_columns       = array();
+		$canonical_columns       = array();
+		$raw_rows                = array();
+		$has_valid_sheet         = false;
+		$inherited_single_values = self::parent_single_value_attributes( $product );
+
+		$canonical_inherited = array();
+		foreach ( $inherited_single_values as $inh_label => $inh_val ) {
+			$canonical_inherited[ self::canonical_key( $inh_label ) ] = $inh_val;
+		}
 
 		foreach ( $children as $child_id ) {
 			$variation = function_exists( 'wc_get_product' ) ? wc_get_product( $child_id ) : false;
@@ -61,25 +68,55 @@ final class Uonix_VTST_Table {
 				$has_valid_sheet = true;
 			}
 
-			$rows[] = array(
-				'attribute_cells' => self::attribute_cells( $variation, $attribute_columns ),
-				'technical_values' => self::sheet_values( $sheet, $technical_columns ),
+			$raw_rows[] = array(
+				'variation'       => $variation,
+				'raw_values'      => self::sheet_canonical_values( $sheet, $canonical_columns, $technical_columns ),
 				'has_valid_sheet' => null !== $sheet,
 			);
 		}
 
-		if ( ! $has_valid_sheet || empty( $rows ) ) {
+		if ( ! $has_valid_sheet || empty( $raw_rows ) ) {
 			return null;
 		}
 
-		foreach ( $rows as &$row ) {
-			foreach ( $technical_columns as $label ) {
-				if ( ! array_key_exists( $label, $row['technical_values'] ) ) {
-					$row['technical_values'][ $label ] = self::EMPTY_VALUE;
-				}
+		foreach ( $inherited_single_values as $inherited_label => $inherited_val ) {
+			$canon = self::canonical_key( $inherited_label );
+			if ( ! isset( $canonical_columns[ $canon ] ) ) {
+				$canonical_columns[ $canon ] = $inherited_label;
+				$technical_columns[]         = $inherited_label;
 			}
 		}
-		unset( $row );
+
+		$global_tax_map = self::product_global_attribute_taxonomies( $product );
+		$rows           = array();
+
+		foreach ( $raw_rows as $raw_row ) {
+			$technical_values = array();
+			$technical_cells  = array();
+
+			foreach ( $technical_columns as $label ) {
+				$canon = self::canonical_key( $label );
+				if ( isset( $raw_row['raw_values'][ $canon ] ) && '' !== $raw_row['raw_values'][ $canon ] ) {
+					$val = $raw_row['raw_values'][ $canon ];
+				} elseif ( isset( $canonical_inherited[ $canon ] ) ) {
+					$val = $canonical_inherited[ $canon ];
+				} else {
+					$val = self::EMPTY_VALUE;
+				}
+
+				$taxonomy                   = self::match_global_taxonomy( $label, $global_tax_map );
+				$cell                       = self::attribute_cell( $taxonomy, $val );
+				$technical_values[ $label ] = $val;
+				$technical_cells[ $label ]  = $cell;
+			}
+
+			$rows[] = array(
+				'attribute_cells'  => self::attribute_cells( $raw_row['variation'], $attribute_columns ),
+				'technical_values' => $technical_values,
+				'technical_cells'  => $technical_cells,
+				'has_valid_sheet'  => $raw_row['has_valid_sheet'],
+			);
+		}
 
 		return array(
 			'attribute_columns' => $attribute_columns,
@@ -150,7 +187,17 @@ final class Uonix_VTST_Table {
 				echo 0 === $index ? '</th>' : '</td>';
 			}
 			foreach ( $matrix['technical_columns'] as $label ) {
-				echo '<td>' . esc_html( $row['technical_values'][ $label ] ) . '</td>';
+				$cell = isset( $row['technical_cells'][ $label ] ) ? $row['technical_cells'][ $label ] : array(
+					'text' => ( isset( $row['technical_values'][ $label ] ) ? $row['technical_values'][ $label ] : '' ),
+					'url'  => '',
+				);
+				echo '<td>';
+				if ( '' !== $cell['url'] ) {
+					echo '<a href="' . esc_url( $cell['url'] ) . '" rel="tag">' . esc_html( $cell['text'] ) . '</a>';
+				} else {
+					echo esc_html( $cell['text'] );
+				}
+				echo '</td>';
 			}
 			echo '</tr>';
 		}
@@ -159,16 +206,96 @@ final class Uonix_VTST_Table {
 	}
 
 	/**
+	 * Retorna atributos informativos do produto pai que possuem exatamente um valor (para herança).
+	 *
+	 * @param mixed $product Produto pai.
+	 * @return array<string, string>
+	 */
+	public static function parent_single_value_attributes( $product ) {
+		if ( ! is_object( $product ) || ! method_exists( $product, 'get_attributes' ) ) {
+			return array();
+		}
+
+		$parent_attributes = $product->get_attributes();
+		if ( ! is_array( $parent_attributes ) ) {
+			return array();
+		}
+
+		$single_values = array();
+
+		foreach ( $parent_attributes as $name => $attribute ) {
+			if ( is_object( $attribute ) && method_exists( $attribute, 'get_variation' ) && $attribute->get_variation() ) {
+				continue;
+			}
+
+			$label = '';
+			if ( is_object( $attribute ) && method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy() ) {
+				$tax = method_exists( $attribute, 'get_taxonomy_object' ) ? $attribute->get_taxonomy_object() : null;
+				if ( $tax && isset( $tax->attribute_label ) && '' !== trim( (string) $tax->attribute_label ) ) {
+					$label = (string) $tax->attribute_label;
+				} elseif ( function_exists( 'wc_attribute_label' ) && method_exists( $attribute, 'get_name' ) ) {
+					$label = (string) wc_attribute_label( $attribute->get_name() );
+				}
+			} elseif ( is_object( $attribute ) && method_exists( $attribute, 'get_name' ) ) {
+				$label = (string) $attribute->get_name();
+			} else {
+				$label = (string) $name;
+			}
+
+			$label = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( $label, true ) : strip_tags( $label );
+			$label = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $label ) : trim( $label );
+			if ( '' === $label ) {
+				continue;
+			}
+
+			$options = array();
+			if ( is_object( $attribute ) && method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy() && function_exists( 'wc_get_product_terms' ) && method_exists( $attribute, 'get_name' ) && method_exists( $product, 'get_id' ) ) {
+				$terms = wc_get_product_terms( $product->get_id(), $attribute->get_name(), array( 'fields' => 'names' ) );
+				if ( is_array( $terms ) ) {
+					foreach ( $terms as $term ) {
+						$val = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( (string) $term, true ) : strip_tags( (string) $term );
+						$val = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $val ) : trim( $val );
+						if ( '' !== $val ) {
+							$options[] = $val;
+						}
+					}
+				}
+			} elseif ( is_object( $attribute ) && method_exists( $attribute, 'get_options' ) ) {
+				$raw_options = $attribute->get_options();
+				if ( is_array( $raw_options ) ) {
+					foreach ( $raw_options as $raw ) {
+						$val = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( (string) $raw, true ) : strip_tags( (string) $raw );
+						$val = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $val ) : trim( $val );
+						if ( '' !== $val ) {
+							$options[] = $val;
+						}
+					}
+				}
+			}
+
+			$unique_options = array_values( array_unique( $options ) );
+			if ( 1 === count( $unique_options ) ) {
+				$single_values[ $label ] = $unique_options[0];
+			}
+		}
+
+		return $single_values;
+	}
+
+	/**
 	 * @param mixed $product Produto pai.
 	 * @param array<int, mixed> $children IDs das variações.
 	 * @return array<int, array<string, string>>
 	 */
-	private static function attribute_columns( $product, array $children ) {
+	public static function attribute_columns( $product, array $children ) {
 		$parent_attributes = method_exists( $product, 'get_attributes' ) ? $product->get_attributes() : array();
 		$columns           = array();
 
 		if ( is_array( $parent_attributes ) ) {
 			foreach ( $parent_attributes as $name => $attribute ) {
+				if ( is_object( $attribute ) && method_exists( $attribute, 'get_variation' ) && ! $attribute->get_variation() ) {
+					continue;
+				}
 				$name = self::attribute_name( $name, $attribute );
 				if ( '' !== $name ) {
 					$columns[ $name ] = self::attribute_column( $name );
@@ -238,11 +365,24 @@ final class Uonix_VTST_Table {
 	}
 
 	/**
-	 * @param array<string, mixed>|null $sheet Ficha normalizada.
-	 * @param array<int, string> $technical_columns Colunas encontradas por referência.
-	 * @return array<string, string>
+	 * Retorna chave canônica insensível a maiúsculas/minúsculas para agrupamento de rótulos.
+	 *
+	 * @param mixed $label Rótulo do campo.
+	 * @return string
 	 */
-	private static function sheet_values( $sheet, array &$technical_columns ) {
+	public static function canonical_key( $label ) {
+		return mb_strtolower( trim( (string) $label ), 'UTF-8' );
+	}
+
+	/**
+	 * Coleta valores da ficha técnica indexados por chave canônica e registra as colunas preservando o primeiro rótulo exibível.
+	 *
+	 * @param array<string, mixed>|null $sheet Ficha normalizada.
+	 * @param array<string, string> $canonical_columns Mapa de chave canônica para primeiro display label encontrado.
+	 * @param array<int, string> $technical_columns Colunas ordenadas por referência.
+	 * @return array<string, string> Mapa canonical_key => value
+	 */
+	private static function sheet_canonical_values( $sheet, array &$canonical_columns, array &$technical_columns ) {
 		$values = array();
 		if ( ! is_array( $sheet ) || empty( $sheet['sections'] ) || ! is_array( $sheet['sections'] ) ) {
 			return $values;
@@ -252,17 +392,32 @@ final class Uonix_VTST_Table {
 			foreach ( $section['items'] ?? array() as $item ) {
 				$label = isset( $item['label'] ) ? (string) $item['label'] : '';
 				$value = isset( $item['value'] ) ? (string) $item['value'] : '';
-				if ( '' === $label || '' === $value ) {
+				$canon = self::canonical_key( $label );
+				if ( '' === $canon || '' === $value ) {
 					continue;
 				}
-				if ( ! in_array( $label, $technical_columns, true ) ) {
-					$technical_columns[] = $label;
+				if ( ! isset( $canonical_columns[ $canon ] ) ) {
+					$canonical_columns[ $canon ] = $label;
+					$technical_columns[]         = $label;
 				}
-				$values[ $label ] = $value;
+				$values[ $canon ] = $value;
 			}
 		}
 
 		return $values;
+	}
+
+	/**
+	 * @param array<string, mixed>|null $sheet Ficha normalizada.
+	 * @param array<int, string> $technical_columns Colunas encontradas por referência.
+	 * @return array<string, string>
+	 */
+	private static function sheet_values( $sheet, array &$technical_columns ) {
+		$canonical_columns = array();
+		foreach ( $technical_columns as $col ) {
+			$canonical_columns[ self::canonical_key( $col ) ] = $col;
+		}
+		return self::sheet_canonical_values( $sheet, $canonical_columns, $technical_columns );
 	}
 
 	/**
@@ -274,8 +429,11 @@ final class Uonix_VTST_Table {
 	private static function has_duplicate_item_labels( array $sheet ) {
 		$labels = array();
 		foreach ( $sheet['sections'] as $section ) {
-			foreach ( $section['items'] as $item ) {
-				$label = (string) $item['label'];
+			foreach ( $section['items'] ?? array() as $item ) {
+				$label = self::canonical_key( isset( $item['label'] ) ? $item['label'] : '' );
+				if ( '' === $label ) {
+					continue;
+				}
 				if ( isset( $labels[ $label ] ) ) {
 					return true;
 				}
@@ -306,11 +464,14 @@ final class Uonix_VTST_Table {
 	 * @return array<string, string>
 	 */
 	private static function attribute_cell( $taxonomy, $value ) {
-		if ( '' === $value ) {
+		if ( '' === $value || self::EMPTY_VALUE === $value ) {
 			return array( 'text' => self::EMPTY_VALUE, 'url' => '' );
 		}
-		if ( function_exists( 'taxonomy_exists' ) && taxonomy_exists( $taxonomy ) && function_exists( 'get_term_by' ) ) {
+		if ( '' !== $taxonomy && function_exists( 'taxonomy_exists' ) && taxonomy_exists( $taxonomy ) && function_exists( 'get_term_by' ) ) {
 			$term = get_term_by( 'slug', $value, $taxonomy );
+			if ( ! $term || ( function_exists( 'is_wp_error' ) && is_wp_error( $term ) ) ) {
+				$term = get_term_by( 'name', $value, $taxonomy );
+			}
 			if ( $term && ( ! function_exists( 'is_wp_error' ) || ! is_wp_error( $term ) ) && isset( $term->name ) ) {
 				$url = function_exists( 'get_term_link' ) ? get_term_link( $term ) : '';
 				return array(
@@ -320,6 +481,88 @@ final class Uonix_VTST_Table {
 			}
 		}
 		return array( 'text' => $value, 'url' => '' );
+	}
+
+	/**
+	 * Mapeia atributos globais (taxonomias) do produto para seus respectivos nomes de taxonomia.
+	 * Atributos locais/personalizados do produto (não globais) são explicitamente excluídos.
+	 *
+	 * @param mixed $product Produto.
+	 * @return array<string, string> Mapa [rótulo_normalizado => taxonomia]
+	 */
+	public static function product_global_attribute_taxonomies( $product ) {
+		if ( ! is_object( $product ) || ! method_exists( $product, 'get_attributes' ) ) {
+			return array();
+		}
+		$attributes = $product->get_attributes();
+		if ( ! is_array( $attributes ) ) {
+			return array();
+		}
+
+		$global_map = array();
+		$custom_set = array();
+
+		foreach ( $attributes as $name => $attribute ) {
+			if ( ! is_object( $attribute ) ) {
+				continue;
+			}
+
+			$attr_name = method_exists( $attribute, 'get_name' ) ? (string) $attribute->get_name() : (string) $name;
+			$label     = '';
+			if ( method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy() ) {
+				$tax_obj = method_exists( $attribute, 'get_taxonomy_object' ) ? $attribute->get_taxonomy_object() : null;
+				if ( $tax_obj && isset( $tax_obj->attribute_label ) && '' !== trim( (string) $tax_obj->attribute_label ) ) {
+					$label = (string) $tax_obj->attribute_label;
+				} elseif ( function_exists( 'wc_attribute_label' ) ) {
+					$label = (string) wc_attribute_label( $attr_name );
+				}
+			} else {
+				$label = $attr_name;
+			}
+
+			$label = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( $label, true ) : strip_tags( $label );
+			$label = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $label ) : trim( $label );
+
+			$is_global = method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy();
+
+			if ( ! $is_global ) {
+				if ( '' !== $label ) {
+					$custom_set[ mb_strtolower( $label, 'UTF-8' ) ] = true;
+				}
+				$custom_set[ mb_strtolower( $attr_name, 'UTF-8' ) ] = true;
+				continue;
+			}
+
+			$taxonomy = $attr_name;
+			if ( '' !== $label ) {
+				$global_map[ mb_strtolower( $label, 'UTF-8' ) ] = $taxonomy;
+			}
+			$global_map[ mb_strtolower( $taxonomy, 'UTF-8' ) ] = $taxonomy;
+			if ( 0 === strpos( $taxonomy, 'pa_' ) ) {
+				$global_map[ mb_strtolower( substr( $taxonomy, 3 ), 'UTF-8' ) ] = $taxonomy;
+			}
+		}
+
+		foreach ( $custom_set as $custom_key => $_ ) {
+			unset( $global_map[ $custom_key ] );
+		}
+
+		return $global_map;
+	}
+
+	/**
+	 * Localiza a taxonomia global associada a um rótulo, se for atributo global do produto.
+	 *
+	 * @param string $label Rótulo do campo técnico.
+	 * @param array<string, string> $global_tax_map Mapa de taxonomias globais.
+	 * @return string Nome da taxonomia ou vazio.
+	 */
+	public static function match_global_taxonomy( $label, array $global_tax_map ) {
+		$normalized = mb_strtolower( trim( (string) $label ), 'UTF-8' );
+		if ( '' !== $normalized && isset( $global_tax_map[ $normalized ] ) ) {
+			return $global_tax_map[ $normalized ];
+		}
+		return '';
 	}
 
 	/**

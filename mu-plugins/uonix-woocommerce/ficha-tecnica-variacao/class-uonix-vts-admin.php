@@ -16,6 +16,7 @@ final class Uonix_VTS_Admin {
 		add_action( 'woocommerce_admin_process_variation_object', array( __CLASS__, 'save_variation' ), 10, 2 );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ), 10, 1 );
 		add_action( 'wp_ajax_uonix_get_variation_technical_sheet', array( __CLASS__, 'ajax_get_copy_sheet' ), 10, 0 );
+		add_action( 'wp_ajax_uonix_get_parent_attributes', array( __CLASS__, 'ajax_get_parent_attributes' ), 10, 0 );
 	}
 
 	/**
@@ -53,20 +54,109 @@ final class Uonix_VTS_Admin {
 			'uonix-vts-admin',
 			'uonixVtsAdmin',
 			array(
-				'parentId'   => $parent_id,
-				'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
-				'nonce'      => wp_create_nonce( 'uonix_variation_technical_sheet_copy' ),
-				'copyAction' => 'uonix_get_variation_technical_sheet',
-				'copyOptions' => self::copy_options( $parent_id ),
-				'strings'    => array(
+				'parentId'         => $parent_id,
+				'ajaxUrl'          => admin_url( 'admin-ajax.php' ),
+				'nonce'                  => wp_create_nonce( 'uonix_variation_technical_sheet_copy' ),
+				'copyAction'             => 'uonix_get_variation_technical_sheet',
+				'parentAttributesAction' => 'uonix_get_parent_attributes',
+				'copyOptions'            => self::copy_options( $parent_id ),
+				'parentAttributes' => self::parent_non_variation_attributes( $parent_id ),
+				'strings'          => array(
 					'removeConfirm'   => 'Remover a ficha técnica desta variação ao salvar?',
 					'payloadError'    => 'Não foi possível carregar a ficha técnica salva.',
 					'copyConfirm'     => 'Substituir a ficha atual pela ficha selecionada?',
 					'copyError'       => 'Não foi possível copiar a ficha selecionada.',
 					'copyPlaceholder' => 'Selecione uma variação',
+					'duplicateLabel'  => 'O rótulo "%s" já está sendo utilizado nesta variação.',
 				),
 			)
 		);
+	}
+
+	/**
+	 * Retorna os atributos informativos do produto pai que não são usados para variação.
+	 *
+	 * @param mixed $parent_id Produto variável pai.
+	 * @return array<int, array{label:string,options:array<int, string>}>
+	 */
+	public static function parent_non_variation_attributes( $parent_id ) {
+		$parent_id = absint( $parent_id );
+		if ( ! $parent_id || ! function_exists( 'wc_get_product' ) ) {
+			return array();
+		}
+
+		$product = wc_get_product( $parent_id );
+		if ( ! is_object( $product ) || ! method_exists( $product, 'get_attributes' ) ) {
+			return array();
+		}
+
+		$attributes = $product->get_attributes();
+		if ( ! is_array( $attributes ) ) {
+			return array();
+		}
+
+		$results     = array();
+		$seen_labels = array();
+
+		foreach ( $attributes as $name => $attribute ) {
+			if ( is_object( $attribute ) && method_exists( $attribute, 'get_variation' ) && $attribute->get_variation() ) {
+				continue;
+			}
+
+			$label = '';
+			if ( is_object( $attribute ) && method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy() ) {
+				$tax = method_exists( $attribute, 'get_taxonomy_object' ) ? $attribute->get_taxonomy_object() : null;
+				if ( $tax && isset( $tax->attribute_label ) && '' !== trim( (string) $tax->attribute_label ) ) {
+					$label = (string) $tax->attribute_label;
+				} elseif ( function_exists( 'wc_attribute_label' ) && method_exists( $attribute, 'get_name' ) ) {
+					$label = (string) wc_attribute_label( $attribute->get_name() );
+				}
+			} elseif ( is_object( $attribute ) && method_exists( $attribute, 'get_name' ) ) {
+				$label = (string) $attribute->get_name();
+			} else {
+				$label = (string) $name;
+			}
+
+			$label = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( $label, true ) : strip_tags( $label );
+			$label = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $label ) : trim( $label );
+			$lower = function_exists( 'mb_strtolower' ) ? mb_strtolower( $label, 'UTF-8' ) : strtolower( $label );
+			if ( '' === $label || isset( $seen_labels[ $lower ] ) ) {
+				continue;
+			}
+
+			$options = array();
+			if ( is_object( $attribute ) && method_exists( $attribute, 'is_taxonomy' ) && $attribute->is_taxonomy() && function_exists( 'wc_get_product_terms' ) && method_exists( $attribute, 'get_name' ) && method_exists( $product, 'get_id' ) ) {
+				$terms = wc_get_product_terms( $product->get_id(), $attribute->get_name(), array( 'fields' => 'names' ) );
+				if ( is_array( $terms ) ) {
+					foreach ( $terms as $term ) {
+						$val = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( (string) $term, true ) : strip_tags( (string) $term );
+						$val = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $val ) : trim( $val );
+						if ( '' !== $val ) {
+							$options[] = $val;
+						}
+					}
+				}
+			} elseif ( is_object( $attribute ) && method_exists( $attribute, 'get_options' ) ) {
+				$raw_options = $attribute->get_options();
+				if ( is_array( $raw_options ) ) {
+					foreach ( $raw_options as $raw ) {
+						$val = function_exists( 'wp_strip_all_tags' ) ? wp_strip_all_tags( (string) $raw, true ) : strip_tags( (string) $raw );
+						$val = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $val ) : trim( $val );
+						if ( '' !== $val ) {
+							$options[] = $val;
+						}
+					}
+				}
+			}
+
+			$results[] = array(
+				'label'   => $label,
+				'options' => array_values( array_unique( $options ) ),
+			);
+			$seen_labels[ $lower ] = true;
+		}
+
+		return $results;
 	}
 
 	/**
@@ -189,6 +279,37 @@ final class Uonix_VTS_Admin {
 			return;
 		}
 		wp_send_json_success( array( 'sheet' => $result['sheet'] ) );
+	}
+
+	/**
+	 * Endpoint autenticado para recarregar atributos informativos atualizados do produto pai via AJAX.
+	 */
+	public static function ajax_get_parent_attributes() {
+		if ( false === check_ajax_referer( 'uonix_variation_technical_sheet_copy', 'nonce', false ) ) {
+			wp_send_json_error( array( 'code' => 'invalid_nonce' ), 403 );
+			return;
+		}
+
+		$parent_raw = isset( $_POST['parent_id'] ) ? wp_unslash( $_POST['parent_id'] ) : 0;
+		$parent_id  = is_scalar( $parent_raw ) ? absint( $parent_raw ) : 0;
+		if ( ! $parent_id ) {
+			wp_send_json_error( array( 'code' => 'invalid_request' ), 400 );
+			return;
+		}
+		if ( ! current_user_can( 'edit_post', $parent_id ) ) {
+			wp_send_json_error( array( 'code' => 'forbidden' ), 403 );
+			return;
+		}
+
+		if ( function_exists( 'clean_post_cache' ) ) {
+			clean_post_cache( $parent_id );
+		}
+		if ( function_exists( 'wc_delete_product_transients' ) ) {
+			wc_delete_product_transients( $parent_id );
+		}
+
+		$attributes = self::parent_non_variation_attributes( $parent_id );
+		wp_send_json_success( array( 'attributes' => $attributes ) );
 	}
 
 	/**
