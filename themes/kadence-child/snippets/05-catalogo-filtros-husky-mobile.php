@@ -54,7 +54,7 @@ add_action( 'wp_footer', function() {
 add_filter('woof_husky_txt_template_path', function($factory_path) {
     // Aponta para a pasta que você criou no seu tema child
     $child_theme_path = get_stylesheet_directory() . '/woof/ext/by_text/views/templates/default.php';
-    
+
     // Se você renomeou para 'husky', use esta linha abaixo:
     // $child_theme_path = get_stylesheet_directory() . '/husky/ext/by_text/views/templates/default.php';
 
@@ -85,15 +85,15 @@ add_action('wp_footer', function() {
     // Executa apenas em páginas de produtos ou na página específica do catálogo
     if ( ! is_post_type_archive( 'product' ) && ! is_tax( get_object_taxonomies( 'product' ) ) && ! is_page(7150) ) return;
     ?>
-    
+
     <style id="uonix-husky-structural-plus">
         /* 1. REGRAS PARA TABLET E DESKTOP (>= 768px) */
         @media (min-width: 768px) {
             /* Esconde elementos de acionamento mobile */
-            .woof_show_mobile_filter, 
-            .woof_show_mobile_filter_container, 
-            .woof_hide_mobile_filter { 
-                display: none !important; 
+            .woof_show_mobile_filter,
+            .woof_show_mobile_filter_container,
+            .woof_hide_mobile_filter {
+                display: none !important;
             }
 
             /* Força a Sidebar a existir e ser visível por padrão */
@@ -269,7 +269,7 @@ add_action('wp_footer', function() {
             .kadence-column7150_89634e-21 { display: none !important; }
             .kadence-column2932_fec114-b0,
             .kadence-column7150_2a56fa-f9 { flex: 0 0 100% !important; max-width: 100% !important; }
-            
+
             /* Garante que a coluna sticky e o botão de filtro mobile fiquem sempre acima do grid de produtos */
             .kadence-column7150_2b9bfb-d5,
             .kadence-column7150_2b9bfb-d5 .kt-inside-inner-col,
@@ -278,7 +278,7 @@ add_action('wp_footer', function() {
             .woof_show_mobile_filter {
                 z-index: 99 !important;
             }
-            
+
             @keyframes uonix_move_top_filter {
                 0% {
                     top: 100%;
@@ -345,26 +345,26 @@ add_action('wp_footer', function() {
         /* 3. LIMPEZA DE TEXTOS E LABELS (FUNCIONAL) */
 
         /* Remove labels como "Fabricante:", "Categorias de produto:" das tags superiores */
-        .woof_products_top_panel_ul ul li:first-child { 
-            display: none !important; 
+        .woof_products_top_panel_ul ul li:first-child {
+            display: none !important;
         }
 
         /* Remove "Início >" da busca de texto no autocomplete */
-        .woof_husky_txt-option-breadcrumb { 
-            font-size: 0 !important; 
+        .woof_husky_txt-option-breadcrumb {
+            font-size: 0 !important;
         }
-        .woof_husky_txt-option-breadcrumb a { 
-            font-size: 11px !important; 
+        .woof_husky_txt-option-breadcrumb a {
+            font-size: 11px !important;
         }
-        .woof_husky_txt-option-breadcrumb a:first-child { 
-            display: none !important; 
+        .woof_husky_txt-option-breadcrumb a:first-child {
+            display: none !important;
         }
 
         /* Limpeza de ícones e botões redundantes nativos */
-        .woof_products_top_panel_ul a img, 
-        .woof_products_top_panel_ul a svg, 
-        .woof_reset_button_2_redundant { 
-            display: none !important; 
+        .woof_products_top_panel_ul a img,
+        .woof_products_top_panel_ul a svg,
+        .woof_reset_button_2_redundant {
+            display: none !important;
         }
 
         /* 4. TÍTULOS BALANCEADOS NA GRADE DE PRODUTOS (Sem palavras órfãs) */
@@ -380,7 +380,7 @@ add_action('wp_footer', function() {
     (function($) {
         function updateHuskyLayout() {
             var width = window.innerWidth;
-            
+
             if (typeof woof_is_mobile !== 'undefined') {
                 woof_is_mobile = (width < 768) ? 1 : 0;
             }
@@ -508,12 +508,12 @@ add_action('wp_footer', function() {
     // Correção do slug 'product' para garantir o funcionamento
     if ( ! is_post_type_archive( 'product' ) && ! is_tax( get_object_taxonomies( 'product' ) ) && ! is_page(7150) ) return;
     ?>
-    
+
     <style id="uonix-husky-integrated-search">
         /* 1. REMOÇÃO DE ELEMENTOS NATIVOS DO PLUGIN */
-        .woof_husky_txt-cross, 
-        .woof_text_search_go { 
-            display: none !important; 
+        .woof_husky_txt-cross,
+        .woof_text_search_go {
+            display: none !important;
         }
 
         /* 2. LOADER (CONFIGURAÇÃO PERSONALIZADA CÁSSIO) */
@@ -521,7 +521,7 @@ add_action('wp_footer', function() {
             display: block !important;
             width: 30px !important;
             height: 30px !important;
-            right: 6px !important; 
+            right: 6px !important;
             top: 50% !important;
             margin-top: -35px !important; /* Ajuste preciso conforme seu teste */
             border: 2px solid rgba(14, 55, 128, 0.2) !important;
@@ -692,7 +692,7 @@ add_action('wp_footer', function() {
     <script id="uonix-husky-integrated-js">
     (function($) {
         $(document).ready(function() {
-            
+
             // A) CLIQUE FORA: Esconde resultados ao perder o foco da área de busca
             $(document).on('mousedown touchstart', function(e) {
                 var container = $(".woof_text_search_container");
@@ -709,7 +709,7 @@ add_action('wp_footer', function() {
 
                     setTimeout(function() {
                         $results.hide();
-                        $input.blur(); 
+                        $input.blur();
                     }, 100);
                 }
             });
