@@ -217,6 +217,9 @@ final class Uonix_VTST_Table {
 		}
 
 		self::render_diagram( self::current_product() );
+		echo '<div class="uonix-vtst-wrapper">';
+		echo '<div class="uonix-vtst-scroll-hint" aria-hidden="true"><span>&larr; Deslize para visualizar todas as especificações &rarr;</span></div>';
+		echo '<div class="uonix-vtst-responsive-container">';
 		echo '<table class="woocommerce-product-attributes shop_attributes uonix-vtst-table">';
 		echo '<thead>';
 
@@ -280,7 +283,7 @@ final class Uonix_VTST_Table {
 			echo '</tr>';
 		}
 
-		echo '</tbody></table>';
+		echo '</tbody></table></div></div>';
 	}
 
 	/**
