@@ -135,14 +135,43 @@ add_action('wp_footer', function() {
                 z-index: 99 !important;
             }
             
+            @keyframes uonix_move_top_filter {
+                from {
+                    top: 100%;
+                }
+                to {
+                    top: 60px;
+                }
+            }
+
+            @keyframes move_top {
+                from {
+                    top: 100%;
+                }
+                to {
+                    top: 60px;
+                }
+            }
+
             .woof_show_filter_for_mobile.woof {
                 position: fixed !important;
-                z-index: 9999 !important;
-                height: 100% !important;
+                z-index: 99999 !important;
+                top: 60px !important;
+                margin-top: 0 !important;
+                height: calc(100% - 60px) !important;
+                height: calc(100dvh - 60px) !important;
                 width: 100% !important;
                 left: 0 !important;
+                right: 0 !important;
+                padding: 15px 20px 100px 20px !important;
+                box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.12) !important;
+                border-top: 1px solid #e2e8f0 !important;
                 display: block !important;
-                animation: move_top .5s ease forwards;
+                animation: uonix_move_top_filter .35s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+            }
+
+            .woof_hide_mobile_filter {
+                margin: 8px 0 16px auto !important;
             }
 
             /* Oculta o primeiro botão "Redefinir" no topo no mobile */
