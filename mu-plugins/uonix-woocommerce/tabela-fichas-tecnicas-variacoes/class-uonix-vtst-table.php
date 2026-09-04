@@ -179,15 +179,15 @@ final class Uonix_VTST_Table {
 	}
 
 	/**
-	 * Identifica se um rótulo pertence a uma cota de dimensão (ex: A, B, C, D, L1, L2, Ø).
-	 * Exclui deliberadamente 'M' (rosca métrica como M10, M12) e outros códigos técnicos não dimensionais.
+	 * Identifica se um rótulo pertence a uma cota de dimensão (ex: A..L, R, H, W, Ø e compostos como L1, L2).
+	 * Usa allowlist estrita para não promover códigos técnicos não dimensionais (ex: M10, N10, Z1).
 	 *
 	 * @param string $label Rótulo do campo.
 	 * @return bool
 	 */
 	public static function is_cota_column( $label ) {
 		$trimmed_label = trim( (string) $label );
-		return (bool) preg_match( '/^(?:[A-LN-Z]\d*|Ø|ø)(?:\s*\(mm\))?$/u', $trimmed_label );
+		return (bool) preg_match( '/^(?:[A-LRHW]\d*|Ø|ø)(?:\s*\(mm\))?$/u', $trimmed_label );
 	}
 
 	/**
