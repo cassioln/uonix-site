@@ -3307,6 +3307,8 @@ vts_assert_same( 'Dimensões (mm)', Uonix_VTST_Table::column_section_title( 'F' 
 vts_assert_same( 'Dimensões (mm)', Uonix_VTST_Table::column_section_title( 'L1' ), 'cota composta L1 é identificada como dimensão' );
 vts_assert_same( 'Dimensões (mm)', Uonix_VTST_Table::column_section_title( 'L2' ), 'cota composta L2 é identificada como dimensão' );
 vts_assert_same( 'Dimensões (mm)', Uonix_VTST_Table::column_section_title( 'A1' ), 'cota composta A1 é identificada como dimensão' );
+vts_assert_same( '', Uonix_VTST_Table::column_section_title( 'M10' ), 'rosca métrica M10 não é classificada incorretamente como dimensão' );
+vts_assert_same( '', Uonix_VTST_Table::column_section_title( 'M12' ), 'rosca métrica M12 não é classificada incorretamente como dimensão' );
 vts_assert_same( '', Uonix_VTST_Table::column_section_title( 'Material' ), 'atributo geral não é identificado como dimensão' );
 
 $dims_sheet = array(

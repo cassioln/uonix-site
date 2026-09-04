@@ -171,7 +171,7 @@ final class Uonix_VTST_Table {
 		}
 
 		$trimmed_label = trim( (string) $label );
-		if ( preg_match( '/^(?:[A-Z]\d*|Ø|ø)(?:\s*\(mm\))?$/u', $trimmed_label ) ) {
+		if ( self::is_cota_column( $trimmed_label ) ) {
 			return '' !== $clean_sec ? $clean_sec : 'Dimensões (mm)';
 		}
 
@@ -179,14 +179,15 @@ final class Uonix_VTST_Table {
 	}
 
 	/**
-	 * Identifica se um rótulo pertence a uma cota de dimensão (ex: A, B, C, D, E, F).
+	 * Identifica se um rótulo pertence a uma cota de dimensão (ex: A, B, C, D, L1, L2, Ø).
+	 * Exclui deliberadamente 'M' (rosca métrica como M10, M12) e outros códigos técnicos não dimensionais.
 	 *
 	 * @param string $label Rótulo do campo.
 	 * @return bool
 	 */
 	public static function is_cota_column( $label ) {
 		$trimmed_label = trim( (string) $label );
-		return (bool) preg_match( '/^(?:[A-Z]|Ø|ø|R|H|W|L)(?:\s*\(mm\))?$/u', $trimmed_label );
+		return (bool) preg_match( '/^(?:[A-LN-Z]\d*|Ø|ø)(?:\s*\(mm\))?$/u', $trimmed_label );
 	}
 
 	/**
