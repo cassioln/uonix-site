@@ -97,8 +97,7 @@ add_action('wp_footer', function() {
             }
 
             /* Força a Sidebar a existir e ser visível por padrão */
-            .kadence-column2932_0a9c6d-62,
-            .kadence-column7150_89634e-21 {
+            .kadence-column2932_0a9c6d-62 {
                 display: block !important;
                 flex: 0 0 30% !important;
                 max-width: 30% !important;
@@ -116,8 +115,7 @@ add_action('wp_footer', function() {
             }
 
             /* Coluna de produtos ao lado da sidebar */
-            .kadence-column2932_fec114-b0,
-            .kadence-column7150_2a56fa-f9 {
+            .kadence-column2932_fec114-b0 {
                 flex: 0 0 70% !important;
                 max-width: 70% !important;
             }
