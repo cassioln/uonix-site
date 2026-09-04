@@ -170,6 +170,20 @@ add_action('wp_footer', function() {
                 animation: move_top .4s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
             }
 
+            @keyframes uonix_move_down_filter {
+                0% {
+                    top: 60px;
+                }
+                100% {
+                    top: 100%;
+                }
+            }
+
+            .woof_show_filter_for_mobile.woof.uonix_closing {
+                top: 60px;
+                animation: uonix_move_down_filter .35s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+            }
+
             .woof_hide_mobile_filter {
                 margin: 8px 0 16px auto !important;
             }
@@ -238,6 +252,27 @@ add_action('wp_footer', function() {
 
         $(document).ready(function() { setTimeout(updateHuskyLayout, 600); });
         $(window).on('resize', updateHuskyLayout);
+
+        // Animação suave invertida (slide down) ao fechar o filtro mobile
+        document.addEventListener('click', function(e) {
+            var hideBtn = e.target.closest('.woof_hide_mobile_filter');
+            if (!hideBtn) return;
+
+            var woof = hideBtn.closest('.woof');
+            if (!woof || !woof.classList.contains('woof_show_filter_for_mobile') || woof.classList.contains('uonix_closing')) return;
+
+            // Intercepta fechamento instantâneo do plugin WOOF
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
+            woof.classList.add('uonix_closing');
+
+            setTimeout(function() {
+                woof.classList.remove('uonix_closing');
+                woof.classList.remove('woof_show_filter_for_mobile');
+            }, 340);
+        }, true);
     })(jQuery);
     </script>
     <?php
