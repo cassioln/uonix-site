@@ -54,6 +54,7 @@ final class Uonix_VTST_Table {
 			$canonical_inherited[ self::canonical_key( $inh_label ) ] = $inh_val;
 		}
 
+		$column_sections = array();
 		foreach ( $children as $child_id ) {
 			$variation = function_exists( 'wc_get_product' ) ? wc_get_product( $child_id ) : false;
 			if ( ! is_object( $variation ) || ! method_exists( $variation, 'get_attributes' ) ) {
@@ -70,7 +71,7 @@ final class Uonix_VTST_Table {
 
 			$raw_rows[] = array(
 				'variation'       => $variation,
-				'raw_values'      => self::sheet_canonical_values( $sheet, $canonical_columns, $technical_columns ),
+				'raw_values'      => self::sheet_canonical_values( $sheet, $canonical_columns, $technical_columns, $column_sections ),
 				'has_valid_sheet' => null !== $sheet,
 			);
 		}
@@ -118,11 +119,63 @@ final class Uonix_VTST_Table {
 			);
 		}
 
+		$column_groups = array();
+		foreach ( $attribute_columns as $col ) {
+			$column_groups[] = self::column_section_title( isset( $col['label'] ) ? $col['label'] : '' );
+		}
+		foreach ( $technical_columns as $label ) {
+			$canon    = self::canonical_key( $label );
+			$explicit = isset( $column_sections[ $canon ] ) ? $column_sections[ $canon ] : '';
+			$column_groups[] = self::column_section_title( $label, $explicit );
+		}
+
+		$header_groups = array();
+		foreach ( $column_groups as $sec_title ) {
+			if ( empty( $header_groups ) ) {
+				$header_groups[] = array(
+					'title'   => $sec_title,
+					'colspan' => 1,
+				);
+			} else {
+				$last_idx = count( $header_groups ) - 1;
+				if ( self::canonical_key( $header_groups[ $last_idx ]['title'] ) === self::canonical_key( $sec_title ) ) {
+					$header_groups[ $last_idx ]['colspan']++;
+				} else {
+					$header_groups[] = array(
+						'title'   => $sec_title,
+						'colspan' => 1,
+					);
+				}
+			}
+		}
+
 		return array(
 			'attribute_columns' => $attribute_columns,
 			'technical_columns' => $technical_columns,
+			'header_groups'     => $header_groups,
 			'rows'              => $rows,
 		);
+	}
+
+	/**
+	 * Retorna o título da seção se for uma coluna de seção/dimensão, ou vazio para atributos gerais.
+	 *
+	 * @param string $label Rótulo do campo.
+	 * @param string $explicit_section Seção explícita da ficha técnica.
+	 * @return string
+	 */
+	public static function column_section_title( $label, $explicit_section = '' ) {
+		$clean_sec = trim( (string) $explicit_section );
+		if ( '' !== $clean_sec && false !== mb_strpos( mb_strtolower( $clean_sec, 'UTF-8' ), 'dimen', 0, 'UTF-8' ) ) {
+			return $clean_sec;
+		}
+
+		$trimmed_label = trim( (string) $label );
+		if ( preg_match( '/^(?:[A-Z]|Ø|ø|R|H|W|L)(?:\s*\(mm\))?$/u', $trimmed_label ) ) {
+			return '' !== $clean_sec ? $clean_sec : 'Dimensões (mm)';
+		}
+
+		return '';
 	}
 
 	/**
@@ -165,7 +218,32 @@ final class Uonix_VTST_Table {
 
 		self::render_diagram( self::current_product() );
 		echo '<table class="woocommerce-product-attributes shop_attributes uonix-vtst-table">';
-		echo '<thead><tr>';
+		echo '<thead>';
+
+		$has_named_group = false;
+		if ( ! empty( $matrix['header_groups'] ) ) {
+			foreach ( $matrix['header_groups'] as $group ) {
+				if ( '' !== trim( (string) $group['title'] ) ) {
+					$has_named_group = true;
+					break;
+				}
+			}
+		}
+
+		if ( $has_named_group ) {
+			echo '<tr class="uonix-vtst-group-row">';
+			foreach ( $matrix['header_groups'] as $group ) {
+				$title = trim( (string) $group['title'] );
+				if ( '' !== $title ) {
+					echo '<th colspan="' . absint( $group['colspan'] ) . '" class="uonix-vtst-group-header">' . esc_html( mb_strtoupper( $title, 'UTF-8' ) ) . '</th>';
+				} else {
+					echo '<th colspan="' . absint( $group['colspan'] ) . '" class="uonix-vtst-group-empty"></th>';
+				}
+			}
+			echo '</tr>';
+		}
+
+		echo '<tr>';
 		foreach ( $matrix['attribute_columns'] as $column ) {
 			echo '<th scope="col">' . esc_html( $column['label'] ) . '</th>';
 		}
@@ -382,13 +460,14 @@ final class Uonix_VTST_Table {
 	 * @param array<int, string> $technical_columns Colunas ordenadas por referência.
 	 * @return array<string, string> Mapa canonical_key => value
 	 */
-	private static function sheet_canonical_values( $sheet, array &$canonical_columns, array &$technical_columns ) {
+	private static function sheet_canonical_values( $sheet, array &$canonical_columns, array &$technical_columns, array &$column_sections = array() ) {
 		$values = array();
 		if ( ! is_array( $sheet ) || empty( $sheet['sections'] ) || ! is_array( $sheet['sections'] ) ) {
 			return $values;
 		}
 
 		foreach ( $sheet['sections'] as $section ) {
+			$sec_title = isset( $section['title'] ) ? trim( (string) $section['title'] ) : '';
 			foreach ( $section['items'] ?? array() as $item ) {
 				$label = isset( $item['label'] ) ? (string) $item['label'] : '';
 				$value = isset( $item['value'] ) ? (string) $item['value'] : '';
@@ -399,6 +478,9 @@ final class Uonix_VTST_Table {
 				if ( ! isset( $canonical_columns[ $canon ] ) ) {
 					$canonical_columns[ $canon ] = $label;
 					$technical_columns[]         = $label;
+					if ( '' !== $sec_title ) {
+						$column_sections[ $canon ] = $sec_title;
+					}
 				}
 				$values[ $canon ] = $value;
 			}

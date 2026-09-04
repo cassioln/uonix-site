@@ -170,6 +170,14 @@ add_action('wp_footer', function() {
         .woof_reset_button_2_redundant { 
             display: none !important; 
         }
+
+        /* 4. TÍTULOS BALANCEADOS NA GRADE DE PRODUTOS (Sem palavras órfãs) */
+        .woocommerce ul.products li.product .woocommerce-loop-product__title,
+        .woocommerce ul.products li.product .woocommerce-loop-product__title a,
+        ul.products.product-archive li.product .woocommerce-loop-product__title,
+        ul.products.product-archive li.product .woocommerce-loop-product__title a {
+            text-wrap: balance !important;
+        }
     </style>
 
     <script id="uonix-husky-logic-js">

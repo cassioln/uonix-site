@@ -3300,6 +3300,35 @@ $table_html = ob_get_clean();
 vts_assert_contains( 'woocommerce-product-attributes shop_attributes', $table_html, 'tabela usa classes WooCommerce' );
 vts_assert_contains( 'https://example.test/material/galvanizado', $table_html, 'link taxonômico é renderizado' );
 vts_assert_contains( '—', $table_html, 'célula sem ficha é renderizada com travessão' );
+vts_assert_not_contains( 'uonix-vtst-group-row', $table_html, 'tabela sem dimensões não renderiza super-cabeçalho desnecessário' );
+
+vts_assert_same( 'Dimensões (mm)', Uonix_VTST_Table::column_section_title( 'A' ), 'cota A é identificada como dimensão' );
+vts_assert_same( 'Dimensões (mm)', Uonix_VTST_Table::column_section_title( 'F' ), 'cota F é identificada como dimensão' );
+vts_assert_same( '', Uonix_VTST_Table::column_section_title( 'Material' ), 'atributo geral não é identificado como dimensão' );
+
+$dims_sheet = array(
+	'version' => 1,
+	'title'   => 'Ficha com Cotas',
+	'sections' => array(
+		array(
+			'title'  => 'Dimensões (mm)',
+			'layout' => 'compact',
+			'items'  => array(
+				array( 'label' => 'A', 'value' => '125' ),
+				array( 'label' => 'B', 'value' => '105' ),
+			),
+		),
+	),
+);
+$GLOBALS['vts_products'][20110] = new VTS_Fake_Table_Variation( 20110, array( 'pa_material' => 'inox-316' ), $dims_sheet );
+$GLOBALS['product'] = new VTS_Fake_Table_Product( 20111, 'variable', array( 'pa_material' => array() ), array( 20110 ) );
+ob_start();
+Uonix_VTST_Table::render_tab( Uonix_VTST_Table::TAB_KEY, array() );
+$dims_html = ob_get_clean();
+vts_assert_contains( 'uonix-vtst-group-row', $dims_html, 'linha de super-cabeçalho de grupos é renderizada quando há cotas' );
+vts_assert_contains( 'DIMENSÕES (MM)', $dims_html, 'super-cabeçalho de dimensões é renderizado' );
+vts_assert_contains( 'uonix-vtst-group-empty', $dims_html, 'colunas sem seção recebem célula vazia de alinhamento' );
+$GLOBALS['product'] = $table_product;
 
 $GLOBALS['vts_attachment_images'][30001] = 'https://example.test/uploads/esquema-grampo.png';
 $GLOBALS['vts_post_meta'][20100][ Uonix_VTST_Table::DIAGRAM_IMAGE_META_KEY ] = 30001;
