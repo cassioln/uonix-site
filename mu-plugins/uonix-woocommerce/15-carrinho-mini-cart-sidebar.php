@@ -97,6 +97,14 @@ add_action( 'wp_footer', function() {
         }
 
         /* Estrutura do drawer e dos itens. */
+        .wc-block-components-drawer__screen-overlay,
+        .wc-block-components-drawer__screen-overlay .wc-block-components-drawer,
+        .wc-block-components-drawer__screen-overlay .wc-block-mini-cart__drawer,
+        .wc-block-mini-cart__drawer,
+        .wc-block-components-drawer {
+            z-index: 3000000 !important;
+        }
+
         tr.wc-block-cart-items__row {
             grid-template-columns: 30% 70% !important;
             align-items: stretch !important;
