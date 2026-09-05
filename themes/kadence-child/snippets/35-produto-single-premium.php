@@ -94,13 +94,7 @@ function uonix_product_premium_footer_assets() {
             position: relative !important;
         }
 
-        .woocommerce-product-gallery .woocommerce-product-gallery__trigger {
-            position: absolute !important;
-            top: 15px !important;
-            right: 15px !important;
-            z-index: 99 !important;
-            display: flex !important;
-        }
+
 
         /* Categoria */
         .single-product-category a {
@@ -636,6 +630,684 @@ function uonix_product_premium_footer_assets() {
                 height: 28px;
             }
         }
+
+        /* ---------------------------------------------------------
+         * UÔNIX: Modal de Zoom da Galeria (PhotoSwipe Premium)
+         * --------------------------------------------------------- */
+        /* Backdrop com desfoque e tom azul escuro da marca */
+        #uonix-modal-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(10, 25, 47, 0.72);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 9999998;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+        body.uonix-modal-active #uonix-modal-backdrop {
+            display: block;
+            opacity: 1;
+        }
+
+        /* Modal Card Flutuante PhotoSwipe */
+        .pswp {
+            position: fixed !important;
+            z-index: 9999999 !important;
+            font-family: inherit !important;
+        }
+
+        @media (min-width: 769px) {
+            .pswp {
+                top: 50% !important;
+                left: 50% !important;
+                transform: translate(-50%, -50%) !important;
+                width: min(92vw, 1100px) !important;
+                height: min(88vh, 800px) !important;
+                border-radius: 16px !important;
+                box-shadow: 0 25px 60px -15px rgba(14, 55, 128, 0.35), 0 0 0 1px rgba(14, 55, 128, 0.08) !important;
+                overflow: hidden !important;
+            }
+            .pswp__bg {
+                border-radius: 16px !important;
+            }
+            .pswp__scroll-wrap {
+                border-radius: 16px !important;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .pswp {
+                top: 0 !important;
+                left: 0 !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                border-radius: 0 !important;
+            }
+            .pswp__top-bar {
+                height: 50px !important;
+                padding: 0 10px !important;
+                gap: 6px !important;
+            }
+            .uonix-pswp-brand-title {
+                gap: 6px !important;
+                max-width: 55% !important;
+            }
+            .uonix-pswp-badge {
+                font-size: 10px !important;
+                padding: 3px 6px !important;
+            }
+            .uonix-pswp-prod-name {
+                font-size: 12px !important;
+                max-width: 140px !important;
+            }
+            .pswp__counter {
+                height: 28px !important;
+                line-height: 28px !important;
+                padding: 0 8px !important;
+                font-size: 11px !important;
+            }
+            .pswp__button {
+                width: 32px !important;
+                height: 32px !important;
+            }
+            .pswp__button--arrow--left,
+            .pswp__button--arrow--right {
+                width: 38px !important;
+                height: 38px !important;
+            }
+            .pswp__button--arrow--left {
+                left: 10px !important;
+            }
+            .pswp__button--arrow--right {
+                right: 10px !important;
+            }
+            .pswp button.pswp__button--arrow--left::before,
+            .pswp button.pswp__button--arrow--right::before,
+            button.pswp__button--arrow--left::before,
+            button.pswp__button--arrow--right::before {
+                width: 18px !important;
+                height: 18px !important;
+            }
+            .pswp__caption__center::after {
+                display: none !important;
+            }
+            .pswp__caption {
+                min-height: 38px !important;
+                padding: 6px 12px !important;
+            }
+            .pswp__caption__center {
+                font-size: 12px !important;
+            }
+        }
+
+        /* Fundo branco puro para valorizar imagens com ou sem fundo */
+        .pswp__bg {
+            background: #ffffff !important;
+            opacity: 1 !important;
+        }
+
+        /* Sombra natural e sutil na imagem */
+        .pswp__img {
+            filter: drop-shadow(0 15px 35px rgba(14, 55, 128, 0.08)) !important;
+        }
+
+        /* Top Bar / Cabeçalho do Modal */
+        .pswp__top-bar {
+            height: 60px !important;
+            background: rgba(255, 255, 255, 0.98) !important;
+            backdrop-filter: blur(10px) !important;
+            -webkit-backdrop-filter: blur(10px) !important;
+            border-bottom: 1px solid #e2e8f0 !important;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03) !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-end !important;
+            padding: 0 20px !important;
+            gap: 10px !important;
+            opacity: 1 !important;
+        }
+
+        /* Branding no Top Bar */
+        .uonix-pswp-brand-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-right: auto;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .uonix-pswp-badge {
+            background: #0e3780;
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.8px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .uonix-pswp-prod-name {
+            color: #0e3780;
+            font-size: 14px;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 480px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        /* Contador de imagens estilo Pill Badge */
+        .pswp__counter {
+            position: relative !important;
+            top: auto !important;
+            left: auto !important;
+            height: 30px !important;
+            line-height: 30px !important;
+            padding: 0 12px !important;
+            background: #f1f5f9 !important;
+            color: #475569 !important;
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            border-radius: 20px !important;
+            border: 1px solid #e2e8f0 !important;
+            margin: 0 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            white-space: nowrap !important;
+            flex-shrink: 0 !important;
+        }
+
+        /* Oculta botão share nativo e modais desnecessários */
+        .pswp__element--disabled,
+        .pswp__button.pswp__button--share,
+        button.pswp__button--share,
+        .pswp__button.pswp__element--disabled,
+        .pswp__share-modal {
+            display: none !important;
+        }
+
+        /* Oculta setas e contador quando só há 1 imagem */
+        .pswp__ui--one-slide .pswp__button--arrow--left,
+        .pswp__ui--one-slide .pswp__button--arrow--right,
+        .pswp__ui--one-slide .pswp__counter {
+            display: none !important;
+        }
+
+        /* ==========================================================================
+           PhotoSwipe - Botões de Ação e Setas (Foco, Hover e Contraste Blindados)
+           ========================================================================== */
+
+        /* Reset forçado de backgrounds e sombras para anular o WooCommerce */
+        .pswp button.pswp__button,
+        button.pswp__button,
+        .pswp .pswp__button {
+            background-image: none !important;
+            outline: none !important;
+            opacity: 1 !important;
+        }
+
+        /* Botões do Header: Zoom & Tela Cheia */
+        .pswp button.pswp__button--zoom,
+        .pswp button.pswp__button--fs,
+        button.pswp__button--zoom,
+        button.pswp__button--fs {
+            width: 38px !important;
+            height: 38px !important;
+            background-color: #f1f5f9 !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 50% !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            cursor: pointer !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            position: relative !important;
+            margin: 0 !important;
+        }
+
+        /* Ícones Zoom e Fullscreen - Normal */
+        .pswp button.pswp__button--zoom::before,
+        button.pswp__button--zoom::before {
+            content: '' !important;
+            display: block !important;
+            width: 17px !important;
+            height: 17px !important;
+            background-color: #0e3780 !important;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7.5'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.5' y2='16.5'%3E%3C/line%3E%3Cline x1='11' y1='8' x2='11' y2='14'%3E%3C/line%3E%3Cline x1='8' y1='11' x2='14' y2='11'%3E%3C/line%3E%3C/svg%3E") no-repeat center / contain !important;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7.5'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.5' y2='16.5'%3E%3C/line%3E%3Cline x1='11' y1='8' x2='11' y2='14'%3E%3C/line%3E%3Cline x1='8' y1='11' x2='14' y2='11'%3E%3C/line%3E%3C/svg%3E") no-repeat center / contain !important;
+            transition: background-color 0.2s ease !important;
+        }
+
+        /* Ícone Zoom com Menos (-) quando o zoom estiver aplicado no modal */
+        .pswp.pswp--zoomed-in button.pswp__button--zoom::before,
+        .pswp--zoomed-in .pswp button.pswp__button--zoom::before,
+        .pswp--zoomed-in button.pswp__button--zoom::before {
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7.5'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.5' y2='16.5'%3E%3C/line%3E%3Cline x1='8' y1='11' x2='14' y2='11'%3E%3C/line%3E%3C/svg%3E") no-repeat center / contain !important;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7.5'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.5' y2='16.5'%3E%3C/line%3E%3Cline x1='8' y1='11' x2='14' y2='11'%3E%3C/line%3E%3C/svg%3E") no-repeat center / contain !important;
+        }
+
+        .pswp button.pswp__button--fs::before,
+        button.pswp__button--fs::before {
+            content: '' !important;
+            display: block !important;
+            width: 16px !important;
+            height: 16px !important;
+            background-color: #0e3780 !important;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3'%3E%3C/path%3E%3C/svg%3E") no-repeat center / contain !important;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3'%3E%3C/path%3E%3C/svg%3E") no-repeat center / contain !important;
+            transition: background-color 0.2s ease !important;
+        }
+
+        /* Hover e Focus no Zoom & Fullscreen: Fundo azul institucional Uônix, Ícone BRANCO nítido */
+        .pswp button.pswp__button--zoom:hover,
+        .pswp button.pswp__button--zoom:focus,
+        .pswp button.pswp__button--zoom:active,
+        button.pswp__button--zoom:hover,
+        button.pswp__button--zoom:focus,
+        button.pswp__button--zoom:active,
+        .pswp button.pswp__button--fs:hover,
+        .pswp button.pswp__button--fs:focus,
+        .pswp button.pswp__button--fs:active,
+        button.pswp__button--fs:hover,
+        button.pswp__button--fs:focus,
+        button.pswp__button--fs:active {
+            background-color: #0e3780 !important;
+            background: #0e3780 !important;
+            border-color: #0e3780 !important;
+            transform: translateY(-1px) scale(1.05) !important;
+            box-shadow: 0 4px 12px rgba(14, 55, 128, 0.28) !important;
+        }
+
+        .pswp button.pswp__button--zoom:hover::before,
+        .pswp button.pswp__button--zoom:focus::before,
+        .pswp button.pswp__button--zoom:active::before,
+        button.pswp__button--zoom:hover::before,
+        button.pswp__button--zoom:focus::before,
+        button.pswp__button--zoom:active::before,
+        .pswp button.pswp__button--fs:hover::before,
+        .pswp button.pswp__button--fs:focus::before,
+        .pswp button.pswp__button--fs:active::before,
+        button.pswp__button--fs:hover::before,
+        button.pswp__button--fs:focus::before,
+        button.pswp__button--fs:active::before {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+        }
+
+        /* Foco persistente no botão de Zoom/Fullscreen pós-clique sem mouse por cima */
+        .pswp button.pswp__button--zoom:focus:not(:hover),
+        .pswp button.pswp__button--fs:focus:not(:hover),
+        button.pswp__button--zoom:focus:not(:hover),
+        button.pswp__button--fs:focus:not(:hover) {
+            background-color: #f1f5f9 !important;
+            background: #f1f5f9 !important;
+            border-color: #0e3780 !important;
+            transform: none !important;
+            box-shadow: 0 0 0 3px rgba(14, 55, 128, 0.2) !important;
+        }
+        .pswp button.pswp__button--zoom:focus:not(:hover)::before,
+        .pswp button.pswp__button--fs:focus:not(:hover)::before,
+        button.pswp__button--zoom:focus:not(:hover)::before,
+        button.pswp__button--fs:focus:not(:hover)::before {
+            background-color: #0e3780 !important;
+            background: #0e3780 !important;
+        }
+
+        /* Botão Fechar */
+        .pswp button.pswp__button--close,
+        button.pswp__button--close {
+            width: 38px !important;
+            height: 38px !important;
+            background-color: #fef2f2 !important;
+            background: #fef2f2 !important;
+            border: 1px solid #fee2e2 !important;
+            border-radius: 50% !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            cursor: pointer !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            position: relative !important;
+            margin: 0 !important;
+        }
+
+        .pswp button.pswp__button--close::before,
+        button.pswp__button--close::before {
+            content: '' !important;
+            display: block !important;
+            width: 15px !important;
+            height: 15px !important;
+            background-color: #dc2626 !important;
+            background: #dc2626 !important;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'%3E%3C/line%3E%3Cline x1='6' y1='6' x2='18' y2='18'%3E%3C/line%3E%3C/svg%3E") no-repeat center / contain !important;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'%3E%3C/line%3E%3Cline x1='6' y1='6' x2='18' y2='18'%3E%3C/line%3E%3C/svg%3E") no-repeat center / contain !important;
+            transition: background-color 0.2s ease !important;
+        }
+
+        .pswp button.pswp__button--close:hover,
+        .pswp button.pswp__button--close:focus,
+        .pswp button.pswp__button--close:active,
+        button.pswp__button--close:hover,
+        button.pswp__button--close:focus,
+        button.pswp__button--close:active {
+            background-color: #dc2626 !important;
+            background: #dc2626 !important;
+            border-color: #dc2626 !important;
+            transform: translateY(-1px) scale(1.05) !important;
+            box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3) !important;
+        }
+
+        .pswp button.pswp__button--close:hover::before,
+        .pswp button.pswp__button--close:focus::before,
+        .pswp button.pswp__button--close:active::before,
+        button.pswp__button--close:hover::before,
+        button.pswp__button--close:focus::before,
+        button.pswp__button--close:active::before {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+        }
+
+        /* Foco persistente no botão de Fechar pós-clique sem mouse por cima */
+        .pswp button.pswp__button--close:focus:not(:hover),
+        button.pswp__button--close:focus:not(:hover) {
+            background-color: #fef2f2 !important;
+            background: #fef2f2 !important;
+            border-color: #dc2626 !important;
+            transform: none !important;
+            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.2) !important;
+        }
+        .pswp button.pswp__button--close:focus:not(:hover)::before,
+        button.pswp__button--close:focus:not(:hover)::before {
+            background-color: #dc2626 !important;
+            background: #dc2626 !important;
+        }
+
+        /* Setas de Navegação Lateral */
+        .pswp button.pswp__button--arrow--left,
+        .pswp button.pswp__button--arrow--right,
+        button.pswp__button--arrow--left,
+        button.pswp__button--arrow--right,
+        .pswp__button--arrow--left,
+        .pswp__button--arrow--right {
+            position: absolute !important;
+            top: 50% !important;
+            transform: translateY(-50%) !important;
+            width: 48px !important;
+            height: 48px !important;
+            border-radius: 50% !important;
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            border: 1px solid #cbd5e1 !important;
+            box-shadow: 0 4px 14px rgba(14, 55, 128, 0.12) !important;
+            z-index: 10000010 !important;
+            opacity: 1 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            cursor: pointer !important;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        }
+
+        .pswp button.pswp__button--arrow--left,
+        button.pswp__button--arrow--left {
+            left: 20px !important;
+        }
+
+        .pswp button.pswp__button--arrow--right,
+        button.pswp__button--arrow--right {
+            right: 20px !important;
+        }
+
+        /* Ícones das Setas - Normal */
+        .pswp button.pswp__button--arrow--left::before,
+        button.pswp__button--arrow--left::before {
+            content: '' !important;
+            display: block !important;
+            position: static !important;
+            top: auto !important;
+            left: auto !important;
+            width: 22px !important;
+            height: 22px !important;
+            background-color: #0e3780 !important;
+            background: #0e3780 !important;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='15 18 9 12 15 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center / contain !important;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='15 18 9 12 15 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center / contain !important;
+            transition: background-color 0.2s ease !important;
+        }
+
+        .pswp button.pswp__button--arrow--right::before,
+        button.pswp__button--arrow--right::before {
+            content: '' !important;
+            display: block !important;
+            position: static !important;
+            top: auto !important;
+            left: auto !important;
+            width: 22px !important;
+            height: 22px !important;
+            background-color: #0e3780 !important;
+            background: #0e3780 !important;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 18 15 12 9 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center / contain !important;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 18 15 12 9 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center / contain !important;
+            transition: background-color 0.2s ease !important;
+        }
+
+        /* Hover, Focus e Active das Setas: Fundo azul institucional Uônix, Ícone BRANCO puro */
+        .pswp button.pswp__button--arrow--left:hover,
+        .pswp button.pswp__button--arrow--left:focus,
+        .pswp button.pswp__button--arrow--left:active,
+        button.pswp__button--arrow--left:hover,
+        button.pswp__button--arrow--left:focus,
+        button.pswp__button--arrow--left:active,
+        .pswp button.pswp__button--arrow--right:hover,
+        .pswp button.pswp__button--arrow--right:focus,
+        .pswp button.pswp__button--arrow--right:active,
+        button.pswp__button--arrow--right:hover,
+        button.pswp__button--arrow--right:focus,
+        button.pswp__button--arrow--right:active {
+            background-color: #0e3780 !important;
+            background: #0e3780 !important;
+            border-color: #0e3780 !important;
+            transform: translateY(-50%) scale(1.08) !important;
+            box-shadow: 0 6px 18px rgba(14, 55, 128, 0.3) !important;
+        }
+
+        .pswp button.pswp__button--arrow--left:hover::before,
+        .pswp button.pswp__button--arrow--left:focus::before,
+        .pswp button.pswp__button--arrow--left:active::before,
+        button.pswp__button--arrow--left:hover::before,
+        button.pswp__button--arrow--left:focus::before,
+        button.pswp__button--arrow--left:active::before,
+        .pswp button.pswp__button--arrow--right:hover::before,
+        .pswp button.pswp__button--arrow--right:focus::before,
+        .pswp button.pswp__button--arrow--right:active::before,
+        button.pswp__button--arrow--right:hover::before,
+        button.pswp__button--arrow--right:focus::before,
+        button.pswp__button--arrow--right:active::before {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+        }
+
+        /* Estado de foco persistente pós-clique sem mouse por cima */
+        .pswp button.pswp__button--arrow--left:focus:not(:hover),
+        .pswp button.pswp__button--arrow--right:focus:not(:hover),
+        button.pswp__button--arrow--left:focus:not(:hover),
+        button.pswp__button--arrow--right:focus:not(:hover) {
+            background-color: #f1f5f9 !important;
+            background: #f1f5f9 !important;
+            border-color: #0e3780 !important;
+            transform: translateY(-50%) !important;
+            box-shadow: 0 0 0 3px rgba(14, 55, 128, 0.2) !important;
+        }
+        .pswp button.pswp__button--arrow--left:focus:not(:hover)::before,
+        .pswp button.pswp__button--arrow--right:focus:not(:hover)::before,
+        button.pswp__button--arrow--left:focus:not(:hover)::before,
+        button.pswp__button--arrow--right:focus:not(:hover)::before {
+            background-color: #0e3780 !important;
+            background: #0e3780 !important;
+        }
+
+        /* Rodapé / Legenda */
+        .pswp__caption {
+            position: absolute !important;
+            bottom: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            min-height: 46px !important;
+            background: rgba(255, 255, 255, 0.98) !important;
+            backdrop-filter: blur(8px) !important;
+            -webkit-backdrop-filter: blur(8px) !important;
+            border-top: 1px solid #f1f5f9 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            padding: 8px 20px !important;
+        }
+
+        .pswp__caption__center {
+            text-align: center !important;
+            color: #0e3780 !important;
+            font-size: 13px !important;
+            font-weight: 700 !important;
+            line-height: 1.4 !important;
+            max-width: 780px !important;
+            margin: 0 auto !important;
+        }
+
+        .pswp__caption__center::after {
+            content: "  •  Dica: clique para aproximar ou use a rolagem do mouse";
+            color: #64748b;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        /* Botão Trigger de Zoom na Galeria do Produto (Lupa Normal, Centralizada) */
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger,
+        a.woocommerce-product-gallery__trigger {
+            position: absolute !important;
+            top: 16px !important;
+            right: 16px !important;
+            left: auto !important;
+            bottom: auto !important;
+            z-index: 99 !important;
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 50% !important;
+            width: 42px !important;
+            height: 42px !important;
+            box-shadow: 0 4px 12px rgba(14, 55, 128, 0.1) !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            cursor: pointer !important;
+            text-decoration: none !important;
+            overflow: hidden !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            outline: none !important;
+            text-indent: 0 !important;
+            box-sizing: border-box !important;
+            font-size: 0 !important;
+            line-height: 0 !important;
+        }
+
+        /* Anula totalmente qualquer elemento nativo ou interferência do WooCommerce */
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger::before,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger::before,
+        a.woocommerce-product-gallery__trigger::before {
+            display: none !important;
+            content: none !important;
+            width: 0 !important;
+            height: 0 !important;
+            border: none !important;
+            position: static !important;
+        }
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger img,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger .emoji,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger span {
+            display: none !important;
+        }
+
+        /* Ícone de Lupa Normal (Sem o +, Perfeitamente Centralizado) */
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger::after,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger::after,
+        a.woocommerce-product-gallery__trigger::after {
+            content: '' !important;
+            display: block !important;
+            position: static !important;
+            top: auto !important;
+            left: auto !important;
+            right: auto !important;
+            bottom: auto !important;
+            transform: none !important;
+            margin: 0 auto !important;
+            width: 20px !important;
+            height: 20px !important;
+            min-width: 20px !important;
+            min-height: 20px !important;
+            background-color: #0e3780 !important;
+            -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7.5'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.5' y2='16.5'%3E%3C/line%3E%3C/svg%3E") no-repeat center / contain !important;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7.5'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.5' y2='16.5'%3E%3C/line%3E%3C/svg%3E") no-repeat center / contain !important;
+            transition: background-color 0.2s ease !important;
+            box-sizing: border-box !important;
+            border-radius: 0 !important;
+            background-image: none !important;
+        }
+
+        /* Hover e Focus no Botão de Lupa */
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger:hover,
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger:focus,
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger:active,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger:hover,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger:focus,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger:active,
+        a.woocommerce-product-gallery__trigger:hover,
+        a.woocommerce-product-gallery__trigger:focus,
+        a.woocommerce-product-gallery__trigger:active {
+            background: #0e3780 !important;
+            background-color: #0e3780 !important;
+            border-color: #0e3780 !important;
+            transform: scale(1.08) !important;
+            box-shadow: 0 6px 16px rgba(14, 55, 128, 0.25) !important;
+            outline: none !important;
+        }
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger:hover::after,
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger:focus::after,
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger:active::after,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger:hover::after,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger:focus::after,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger:active::after,
+        a.woocommerce-product-gallery__trigger:hover::after,
+        a.woocommerce-product-gallery__trigger:focus::after,
+        a.woocommerce-product-gallery__trigger:active::after {
+            background-color: #ffffff !important;
+            transform: none !important;
+        }
+
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger:focus:not(:hover),
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger:focus:not(:hover),
+        a.woocommerce-product-gallery__trigger:focus:not(:hover) {
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+            border-color: #0e3780 !important;
+            box-shadow: 0 0 0 3px rgba(14, 55, 128, 0.2) !important;
+            transform: none !important;
+        }
+        .woocommerce div.product div.images .woocommerce-product-gallery__trigger:focus:not(:hover)::after,
+        .woocommerce-product-gallery .woocommerce-product-gallery__trigger:focus:not(:hover)::after,
+        a.woocommerce-product-gallery__trigger:focus:not(:hover)::after {
+            background-color: #0e3780 !important;
+            transform: none !important;
+        }
     </style>
 
     <script id="uonix-product-premium-js">
@@ -789,6 +1461,77 @@ function uonix_product_premium_footer_assets() {
                 observer.observe(waBoxEl);
             }
         }
+
+        /* ---------------------------------------------------------
+         * UÔNIX: Modal PhotoSwipe - Backdrop e Título da Marca
+         * --------------------------------------------------------- */
+        var $modalBackdrop = $('#uonix-modal-backdrop');
+        if (!$modalBackdrop.length) {
+            $modalBackdrop = $('<div id="uonix-modal-backdrop"></div>');
+            $('body').append($modalBackdrop);
+        }
+
+        $modalBackdrop.on('click', function(e) {
+            e.preventDefault();
+            var $closeBtn = $('.pswp__button--close');
+            if ($closeBtn.length) {
+                $closeBtn.trigger('click');
+            }
+        });
+
+        function uonixSyncPswpModal() {
+            var $pswp = $('.pswp');
+            if ($pswp.length && $pswp.hasClass('pswp--open')) {
+                $('body').addClass('uonix-modal-active');
+
+                var $topBar = $pswp.find('.pswp__top-bar');
+                if ($topBar.length && !$topBar.find('.uonix-pswp-brand-title').length) {
+                    var prodTitle = $('h1.product_title').text().trim() || 'Produto Uônix';
+                    var brandTitleHtml = '<div class="uonix-pswp-brand-title">' +
+                        '<span class="uonix-pswp-badge">UÔNIX</span>' +
+                        '<span class="uonix-pswp-prod-name">' + prodTitle + '</span>' +
+                        '</div>';
+                    $topBar.prepend(brandTitleHtml);
+                }
+            } else {
+                $('body').removeClass('uonix-modal-active');
+            }
+        }
+
+        var pswpElem = document.querySelector('.pswp');
+        if (pswpElem && 'MutationObserver' in window) {
+            var pswpObserver = new MutationObserver(function(mutations) {
+                for (var i = 0; i < mutations.length; i++) {
+                    if (mutations[i].attributeName === 'class') {
+                        uonixSyncPswpModal();
+                        break;
+                    }
+                }
+            });
+            pswpObserver.observe(pswpElem, { attributes: true });
+        }
+
+        function uonixCleanZoomTrigger() {
+            var $trigger = $('.woocommerce-product-gallery__trigger');
+            if ($trigger.length) {
+                $trigger.find('img, .emoji, span').remove();
+            }
+        }
+        uonixCleanZoomTrigger();
+        setTimeout(uonixCleanZoomTrigger, 100);
+        setTimeout(uonixCleanZoomTrigger, 400);
+        setTimeout(uonixCleanZoomTrigger, 1000);
+
+        $(document).on('click', '.woocommerce-product-gallery__trigger, .woocommerce-product-gallery__image a', function() {
+            setTimeout(uonixSyncPswpModal, 50);
+            setTimeout(uonixSyncPswpModal, 250);
+        });
+
+        $(window).on('keydown', function(e) {
+            if (e.key === 'Escape') {
+                setTimeout(uonixSyncPswpModal, 100);
+            }
+        });
     });
     </script>
 
