@@ -892,6 +892,22 @@ function uonix_product_premium_footer_assets() {
             mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7.5'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.5' y2='16.5'%3E%3C/line%3E%3Cline x1='8' y1='11' x2='14' y2='11'%3E%3C/line%3E%3C/svg%3E") no-repeat center / contain !important;
         }
 
+        /* UÔNIX: Suporte a Zoom Digital para Produtos com Imagens Menores */
+        .pswp.pswp--digital-zoom-active button.pswp__button--zoom,
+        .pswp--digital-zoom-active button.pswp__button--zoom,
+        .pswp.pswp--digital-zoom-active .pswp__button--zoom,
+        .pswp--digital-zoom-active .pswp__button--zoom {
+            display: inline-flex !important;
+        }
+        .pswp--digital-zoom-active:not(.pswp--zoomed-in) .pswp__img {
+            cursor: -webkit-zoom-in !important;
+            cursor: zoom-in !important;
+        }
+        .pswp--digital-zoom-active.pswp--zoomed-in .pswp__img {
+            cursor: -webkit-zoom-out !important;
+            cursor: zoom-out !important;
+        }
+
         .pswp button.pswp__button--fs::before,
         button.pswp__button--fs::before {
             content: '' !important;
@@ -1530,6 +1546,78 @@ function uonix_product_premium_footer_assets() {
         $(window).on('keydown', function(e) {
             if (e.key === 'Escape') {
                 setTimeout(uonixSyncPswpModal, 100);
+            }
+        });
+
+        /* ---------------------------------------------------------
+         * UÔNIX: Suporte a Zoom Digital para Imagens Menores
+         * Força zoom digital (2.0x) apenas quando a imagem for menor
+         * ou igual à área de visualização e não possuir margem nativa.
+         * --------------------------------------------------------- */
+        if (typeof window.wc_single_product_params !== 'undefined') {
+            window.wc_single_product_params.photoswipe_options = window.wc_single_product_params.photoswipe_options || {};
+            window.wc_single_product_params.photoswipe_options.clickToCloseNonZoomable = false;
+            window.wc_single_product_params.photoswipe_options.maxSpreadZoom = 3;
+        }
+
+        if (typeof window.PhotoSwipe !== 'undefined' && !window.PhotoSwipe._uonixHooked) {
+            var OriginalPhotoSwipe = window.PhotoSwipe;
+            window.PhotoSwipe = function(template, ui, items, options) {
+                options = options || {};
+                options.clickToCloseNonZoomable = false;
+                options.maxSpreadZoom = 3;
+
+                var prevGetDoubleTapZoom = options.getDoubleTapZoom;
+                options.getDoubleTapZoom = function(isMouseClick, item) {
+                    // Imagens pequenas que cabem na tela: força zoom digital de 2.0x
+                    if (item && (item.initialZoomLevel >= 0.92 || item.fitRatio >= 0.92)) {
+                        return 2.0;
+                    }
+                    if (typeof prevGetDoubleTapZoom === 'function') {
+                        return prevGetDoubleTapZoom(isMouseClick, item);
+                    }
+                    return isMouseClick ? 1 : ((item && item.initialZoomLevel < 0.7) ? 1 : 1.33);
+                };
+
+                var instance = new OriginalPhotoSwipe(template, ui, items, options);
+                window._uonixActivePhotoSwipe = instance;
+
+                function syncDigitalZoomState() {
+                    var item = instance.currItem;
+                    if (!item) return;
+                    var isDigital = (item.initialZoomLevel >= 0.92 || item.fitRatio >= 0.92);
+                    if (isDigital) {
+                        $(template).addClass('pswp--digital-zoom-active pswp--zoom-allowed');
+                    } else {
+                        $(template).removeClass('pswp--digital-zoom-active');
+                    }
+                }
+
+                instance.listen('afterInit', function() {
+                    setTimeout(syncDigitalZoomState, 10);
+                });
+                instance.listen('beforeChange', function() {
+                    setTimeout(syncDigitalZoomState, 10);
+                });
+                instance.listen('resize', function() {
+                    setTimeout(syncDigitalZoomState, 10);
+                });
+                instance.listen('close', function() {
+                    window._uonixActivePhotoSwipe = null;
+                });
+
+                return instance;
+            };
+            window.PhotoSwipe.prototype = OriginalPhotoSwipe.prototype;
+            window.PhotoSwipe._uonixHooked = true;
+        }
+
+        // Clique direto na imagem pequena com zoom digital: ativa/desativa ampliação
+        $(document).off('click.uonixDigitalZoom').on('click.uonixDigitalZoom', '.pswp--digital-zoom-active .pswp__img', function(e) {
+            if (window._uonixActivePhotoSwipe && typeof window._uonixActivePhotoSwipe.toggleDesktopZoom === 'function') {
+                e.preventDefault();
+                e.stopPropagation();
+                window._uonixActivePhotoSwipe.toggleDesktopZoom();
             }
         });
     });
