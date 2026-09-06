@@ -72,6 +72,9 @@ jobs:
       - name: Test WooCommerce-optional callbacks
         run: php scripts/tests/test-woocommerce-optional-plugin.php
 
+      - name: Test Mini-Cart drawer layer hierarchy
+        run: php scripts/tests/test-mini-cart-drawer-layer-hierarchy.php
+
       - name: Test RFQ product default
         run: php scripts/tests/test-rfq-product-default.php
 
