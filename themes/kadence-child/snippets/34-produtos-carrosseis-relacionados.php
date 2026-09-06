@@ -566,29 +566,7 @@ function uonix_carrossel_produtos_relacionados_script() {
                     setTimeout(updateArrowVisibility, 100);
                     window.addEventListener('resize', updateArrowVisibility);
 
-                    let isPaused = false;
-                    let resumeTimeout = null;
-
-                    const pauseCarousel = () => {
-                        isPaused = true;
-                        if (resumeTimeout) clearTimeout(resumeTimeout);
-                    };
-                    const playCarousel = () => {
-                        if (resumeTimeout) clearTimeout(resumeTimeout);
-                        resumeTimeout = setTimeout(() => { isPaused = false; }, 1500);
-                    };
-
-                    carousel.addEventListener('mouseenter', pauseCarousel);
-                    carousel.addEventListener('mouseleave', playCarousel);
-                    carousel.addEventListener('touchstart', pauseCarousel);
-                    carousel.addEventListener('touchend', playCarousel);
-
-                    btnPrev.addEventListener('mouseenter', pauseCarousel);
-                    btnNext.addEventListener('mouseenter', pauseCarousel);
-                    btnPrev.addEventListener('mouseleave', playCarousel);
-                    btnNext.addEventListener('mouseleave', playCarousel);
-
-                    // 4. LÓGICA DE ROLAGEM
+                    // 4. LÓGICA DE ROLAGEM MANUAL
                     const scrollCarousel = (direction) => {
                         const card = carousel.querySelector('li');
                         if (!card) return;
@@ -610,27 +588,16 @@ function uonix_carrossel_produtos_relacionados_script() {
                         }
                     };
 
-                    // Eventos de clique nas setas com pausa prolongada de 6s
+                    // Eventos de clique nas setas de navegação
                     btnNext.addEventListener('click', (e) => {
                         e.preventDefault();
-                        pauseCarousel();
                         scrollCarousel('next');
-                        resumeTimeout = setTimeout(() => { isPaused = false; }, 6000);
                     });
 
                     btnPrev.addEventListener('click', (e) => {
                         e.preventDefault();
-                        pauseCarousel();
                         scrollCarousel('prev');
-                        resumeTimeout = setTimeout(() => { isPaused = false; }, 6000);
                     });
-
-                    // 5. MOTOR AUTOPLAY (4.5 Segundos)
-                    setInterval(function() {
-                        if (!isPaused && carousel.scrollWidth > carousel.clientWidth + 10) {
-                            scrollCarousel('next');
-                        }
-                    }, 4500);
                 }
             }
         });
@@ -1058,21 +1025,7 @@ function uonix_produtos_relacionados_carrossel_mobile() {
                         container.appendChild(btnPrev);
                         container.appendChild(btnNext);
 
-                        let isPaused = false;
-
-                        // Pausa o autoplay ao interagir
-                        const pauseCarousel = () => isPaused = true;
-                        const playCarousel = () => isPaused = false;
-
-                        carousel.addEventListener('mouseenter', pauseCarousel);
-                        carousel.addEventListener('mouseleave', playCarousel);
-                        carousel.addEventListener('touchstart', pauseCarousel);
-                        carousel.addEventListener('touchend', playCarousel);
-
-                        btnPrev.addEventListener('mouseenter', pauseCarousel);
-                        btnNext.addEventListener('mouseenter', pauseCarousel);
-
-                        // Ação de deslizar
+                        // Ação de deslizar manual
                         const scrollCarousel = (direction) => {
                             const card = carousel.querySelector('li.product');
                             if (!card) return;
@@ -1096,13 +1049,6 @@ function uonix_produtos_relacionados_carrossel_mobile() {
 
                         btnNext.addEventListener('click', (e) => { e.preventDefault(); scrollCarousel('next'); });
                         btnPrev.addEventListener('click', (e) => { e.preventDefault(); scrollCarousel('prev'); });
-
-                        // Autoplay de 4 segundos
-                        setInterval(function() {
-                            if (!isPaused) {
-                                scrollCarousel('next');
-                            }
-                        }, 4000);
                     }
                 });
             }

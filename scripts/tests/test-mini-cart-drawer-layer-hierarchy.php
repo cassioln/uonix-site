@@ -98,10 +98,20 @@ test_assert(
 
 echo "ok   15-carrinho-mini-cart-sidebar.php: Promoção da Marca no topo coberta por contrato (PHP, CSS e JS idempotente)\n";
 
-// 4. Prova matemática de ordem: drawer > overlay
+// 4. Validação de acessibilidade (WCAG 2.2.2): Carrossel de produtos sem autoplay invasivo não controlado
+$rel_file = $repo_root . '/themes/kadence-child/snippets/34-produtos-carrosseis-relacionados.php';
+test_assert(file_exists($rel_file), "Arquivo de carrossel não encontrado: {$rel_file}");
+$rel_content = file_get_contents($rel_file);
+test_assert(
+    !str_contains($rel_content, 'setInterval'),
+    '34-produtos-carrosseis-relacionados.php: Autoplay (setInterval) deve ser removido para atender WCAG 2.2.2'
+);
+echo "ok   34-produtos-carrosseis-relacionados.php: Acessibilidade WCAG 2.2.2 garantida (sem autoplay não controlado)\n";
+
+// 5. Prova matemática de ordem: drawer > overlay
 $overlay_val = 3000000;
 $drawer_val  = 3000001;
 test_assert($drawer_val > $overlay_val, "A camada do drawer ({$drawer_val}) deve ser estritamente maior que a do overlay ({$overlay_val})");
 echo "ok   Hierarquia estrita comprovada: drawer (3000001) > overlay (3000000) > header (1000000)\n";
 
-echo "\nPASS: Todos os contratos de stacking context e promoção da Marca foram aprovados com sucesso!\n";
+echo "\nPASS: Todos os contratos de stacking context, promoção da Marca e acessibilidade foram aprovados com sucesso!\n";
