@@ -54,3 +54,7 @@ docs/superpowers/
 # uma cópia da árvore dentro dela mesma. Remover com `git worktree remove`,
 # não com `rm -rf` — o registro em .git/worktrees/ precisa sair junto.
 .worktrees/
+
+# Scripts/manifestos operacionais locais; não são artefatos do site nem do deploy.
+scripts/maintenance/local/
+scripts/local/
