@@ -55,19 +55,11 @@ add_action( 'wp_head', function() {
     }
     ?>
     <style id="uonix-sticky-cart-css">
-        /* Icone do carrinho no menu e prevencao de FOUC. */
+        /* Normalizacao global segura sem imposicao de dimensoes no desktop. */
         .uonix-menu-cart,
         a.uonix-menu-cart {
-            position: relative !important;
-            display: inline-flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            width: 50px !important;
-            height: 50px !important;
-            color: #003399 !important;
             text-decoration: none !important;
-            background: transparent !important;
-            line-height: 1 !important;
+            background: transparent;
         }
 
         .uonix-menu-cart:hover,
@@ -77,39 +69,62 @@ add_action( 'wp_head', function() {
         a.uonix-menu-cart:focus,
         a.uonix-menu-cart:visited {
             text-decoration: none !important;
-            color: #003399 !important;
         }
 
-        .uonix-menu-cart svg {
-            display: block !important;
-            width: 45px !important;
-            height: 45px !important;
-            fill: currentColor !important;
-        }
+        /* Escopo exclusivo do cabecalho Mobile e Tablet (<= 1024px). */
+        @media (max-width: 1024px) {
+            .uonix-menu-cart,
+            a.uonix-menu-cart {
+                position: relative !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                width: 50px !important;
+                height: 50px !important;
+                color: #003399 !important;
+                line-height: 1 !important;
+            }
 
-        .uonix-menu-cart-badge {
-            position: absolute !important;
-            top: -3px !important;
-            left: 25px !important;
-            z-index: 101 !important;
-            display: none !important;
-            align-items: center !important;
-            justify-content: center !important;
-            width: 22px !important;
-            height: 22px !important;
-            border-radius: 50% !important;
-            background-color: #f76a0c !important;
-            color: #ffffff !important;
-            font-size: 13px !important;
-            font-weight: 800 !important;
-            line-height: 1 !important;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3) !important;
-            pointer-events: none !important;
-            text-decoration: none !important;
-        }
+            .uonix-menu-cart:hover,
+            .uonix-menu-cart:focus,
+            .uonix-menu-cart:visited,
+            a.uonix-menu-cart:hover,
+            a.uonix-menu-cart:focus,
+            a.uonix-menu-cart:visited {
+                color: #003399 !important;
+            }
 
-        .uonix-menu-cart-badge.is-active {
-            display: flex !important;
+            .uonix-menu-cart svg {
+                display: block !important;
+                width: 45px !important;
+                height: 45px !important;
+                fill: currentColor !important;
+            }
+
+            .uonix-menu-cart-badge {
+                position: absolute !important;
+                top: -3px !important;
+                left: 25px !important;
+                z-index: 101 !important;
+                display: none !important;
+                align-items: center !important;
+                justify-content: center !important;
+                width: 22px !important;
+                height: 22px !important;
+                border-radius: 50% !important;
+                background-color: #f76a0c !important;
+                color: #ffffff !important;
+                font-size: 13px !important;
+                font-weight: 800 !important;
+                line-height: 1 !important;
+                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3) !important;
+                pointer-events: none !important;
+                text-decoration: none !important;
+            }
+
+            .uonix-menu-cart-badge.is-active {
+                display: flex !important;
+            }
         }
 
         /* Estrutura do drawer e eliminação de scroll horizontal. */

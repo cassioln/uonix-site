@@ -177,9 +177,19 @@ add_action('wp_footer', function () {
 			// --- Lógica para o Badge Oficial (Woo Blocks) ---
 			if ($officialBadge.length) {
 				if (currentCount <= 0) {
-					$officialBadge.addClass('uonix-force-hide').attr('hidden', 'true');
+					if (!$officialBadge.hasClass('uonix-force-hide')) {
+						$officialBadge.addClass('uonix-force-hide');
+					}
+					if ($officialBadge.attr('hidden') !== 'true') {
+						$officialBadge.attr('hidden', 'true');
+					}
 				} else {
-					$officialBadge.removeClass('uonix-force-hide').removeAttr('hidden');
+					if ($officialBadge.hasClass('uonix-force-hide')) {
+						$officialBadge.removeClass('uonix-force-hide');
+					}
+					if ($officialBadge.attr('hidden')) {
+						$officialBadge.removeAttr('hidden');
+					}
 				}
 			}
 		}
@@ -198,17 +208,26 @@ add_action('wp_footer', function () {
 		$(document).ready(function () {
 			syncUonixCart();
 
-			// Observa mutações no badge oficial para sincronia imediata
+			// Observa apenas nós e conteúdo textual do badge oficial para sincronia imediata (sem attributes para evitar ciclo recursivo)
 			var targetOfficial = document.querySelector('.wc-block-mini-cart__badge');
 			if (targetOfficial && window.MutationObserver) {
-				var observer = new MutationObserver(function () {
-					syncUonixCart();
+				var observer = new MutationObserver(function (mutations) {
+					var hasContentMutation = false;
+					for (var i = 0; i < mutations.length; i++) {
+						var mType = mutations[i].type;
+						if (mType === 'childList' || mType === 'characterData') {
+							hasContentMutation = true;
+							break;
+						}
+					}
+					if (hasContentMutation) {
+						syncUonixCart();
+					}
 				});
 				observer.observe(targetOfficial, {
 					childList: true,
 					characterData: true,
-					subtree: true,
-					attributes: true
+					subtree: true
 				});
 			}
 
