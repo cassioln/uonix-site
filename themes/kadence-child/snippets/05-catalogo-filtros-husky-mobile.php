@@ -227,6 +227,14 @@ add_action('wp_footer', function () {
             .select2-dropdown {
                 z-index: 9999999 !important;
             }
+
+            /* Remove limite rígido de altura da imagem no mobile para restaurar proporção e visual fluido */
+            ul.products.product-archive li.product .woocommerce-loop-image-link img,
+            .woocommerce ul.products li.product .woocommerce-loop-image-link img {
+                max-height: none !important;
+                width: 100% !important;
+                height: 100% !important;
+            }
         }
 
         /* 3. LIMPEZA DE TEXTOS E LABELS (FUNCIONAL) */
