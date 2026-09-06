@@ -106,6 +106,28 @@ test_assert(
     '15-carrinho-mini-cart-sidebar.php: .uonix-menu-cart-badge.is-active deve ter display: flex !important'
 );
 
-echo "ok   15-carrinho-mini-cart-sidebar.php: Estilos do badge mobile (geometria, cores, sombra e estados) validados\n";
+// 3. Validação anti-FOUC (Prevenção de piscada com formatação quebrada)
+test_assert(
+    (bool) preg_match('/add_action\(\s*[\'"]wp_head[\'"].*?uonix-badge-double-sync-css/s', $autoopen_content),
+    '13-carrinho-badge-autoopen.php: Estilos do badge devem ser carregados no wp_head para evitar FOUC'
+);
+test_assert(
+    (bool) preg_match('/add_action\(\s*[\'"]wp_head[\'"].*?uonix-sticky-cart-css/s', $sidebar_content),
+    '15-carrinho-mini-cart-sidebar.php: Estilos do mini-cart devem ser carregados no wp_head para evitar FOUC'
+);
+test_assert(
+    (bool) preg_match('/add_action\(\s*[\'"]wp_footer[\'"].*?uonix-sticky-cart-js/s', $sidebar_content),
+    '15-carrinho-mini-cart-sidebar.php: Scripts do mini-cart devem permanecer no wp_footer'
+);
+test_assert(
+    (bool) preg_match('/add_filter\(\s*[\'"]render_block[\'"]/', $sidebar_content),
+    '15-carrinho-mini-cart-sidebar.php: Deve conter filtro render_block para pré-renderização defensiva server-side'
+);
+test_assert(
+    (bool) preg_match('/\.uonix-menu-cart[^{]*\{[^}]*text-decoration:\s*none\s*!important/s', $sidebar_content),
+    '15-carrinho-mini-cart-sidebar.php: .uonix-menu-cart deve forçar text-decoration: none !important contra sublinhado'
+);
+
+echo "ok   Validações anti-FOUC: estilos em wp_head, pré-renderização em render_block e isolamento de links validados\n";
 
 echo "\nPASS: Todos os contratos de sincronização e exibição dos badges do carrinho foram aprovados com sucesso!\n";

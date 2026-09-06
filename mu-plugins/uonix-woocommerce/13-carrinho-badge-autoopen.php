@@ -64,7 +64,7 @@ add_action('wp_footer', function() {
  * - Faz o badge sumir quando o carrinho está vazio.
  */
 
-add_action('wp_footer', function () {
+add_action('wp_head', function () {
 	if ( ! function_exists('WC') ) return;
 	?>
 
@@ -104,6 +104,12 @@ add_action('wp_footer', function () {
 			display: none !important;
 		}
 	</style>
+	<?php
+}, 10);
+
+add_action('wp_footer', function () {
+	if ( ! function_exists('WC') ) return;
+	?>
 
 	<script id="uonix-badge-double-sync-js">
 	(function ($) {
