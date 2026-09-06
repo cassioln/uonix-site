@@ -48,52 +48,83 @@ add_filter( 'woocommerce_get_item_data', function( $item_data, $cart_item ) {
     return $item_data;
 }, 10, 2 );
 
-// Injeta os ajustes visuais e os pequenos comportamentos do mini carrinho.
-add_action( 'wp_footer', function() {
+// Injeta os estilos do mini carrinho e o CSS crítico dos badges e ícone no <head> para eliminar FOUC.
+add_action( 'wp_head', function() {
     if ( ! function_exists( 'WC' ) ) {
         return;
     }
     ?>
     <style id="uonix-sticky-cart-css">
-        /* Icone do carrinho no menu. */
-        .uonix-menu-cart {
-            position: relative;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: #003399;
-            text-decoration: none;
+        /* Normalizacao global segura sem imposicao de dimensoes no desktop. */
+        .uonix-menu-cart,
+        a.uonix-menu-cart {
+            text-decoration: none !important;
             background: transparent;
-            line-height: 1;
         }
 
-        .uonix-menu-cart svg {
-            display: block;
-            width: 45px;
-            height: 45px;
-            fill: currentColor;
+        .uonix-menu-cart:hover,
+        .uonix-menu-cart:focus,
+        .uonix-menu-cart:visited,
+        a.uonix-menu-cart:hover,
+        a.uonix-menu-cart:focus,
+        a.uonix-menu-cart:visited {
+            text-decoration: none !important;
         }
 
-        .uonix-menu-cart-badge {
-            position: absolute !important;
-            top: -3px !important;
-            left: 25px !important;
-            z-index: 101 !important;
-            display: none !important;
-            align-items: center !important;
-            justify-content: center !important;
-            width: 22px !important;
-            height: 22px !important;
-            border-radius: 50% !important;
-            background-color: #f76a0c !important;
-            color: #ffffff !important;
-            font-size: 13px !important;
-            font-weight: 800 !important;
-            line-height: 1 !important;
-        }
+        /* Escopo exclusivo do cabecalho Mobile e Tablet (<= 1024px). */
+        @media (max-width: 1024px) {
+            .uonix-menu-cart,
+            a.uonix-menu-cart {
+                position: relative !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                width: 50px !important;
+                height: 50px !important;
+                color: #003399 !important;
+                line-height: 1 !important;
+            }
 
-        .uonix-menu-cart-badge.is-active {
-            display: flex !important;
+            .uonix-menu-cart:hover,
+            .uonix-menu-cart:focus,
+            .uonix-menu-cart:visited,
+            a.uonix-menu-cart:hover,
+            a.uonix-menu-cart:focus,
+            a.uonix-menu-cart:visited {
+                color: #003399 !important;
+            }
+
+            .uonix-menu-cart svg {
+                display: block !important;
+                width: 45px !important;
+                height: 45px !important;
+                fill: currentColor !important;
+            }
+
+            .uonix-menu-cart-badge {
+                position: absolute !important;
+                top: -3px !important;
+                left: 25px !important;
+                z-index: 101 !important;
+                display: none !important;
+                align-items: center !important;
+                justify-content: center !important;
+                width: 22px !important;
+                height: 22px !important;
+                border-radius: 50% !important;
+                background-color: #f76a0c !important;
+                color: #ffffff !important;
+                font-size: 13px !important;
+                font-weight: 800 !important;
+                line-height: 1 !important;
+                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3) !important;
+                pointer-events: none !important;
+                text-decoration: none !important;
+            }
+
+            .uonix-menu-cart-badge.is-active {
+                display: flex !important;
+            }
         }
 
         /* Estrutura do drawer e eliminação de scroll horizontal. */
@@ -520,7 +551,15 @@ add_action( 'wp_footer', function() {
             font-size: 16px;
         }
     </style>
+    <?php
+}, 10 );
 
+// Injeta os comportamentos e scripts do mini carrinho no footer.
+add_action( 'wp_footer', function() {
+    if ( ! function_exists( 'WC' ) ) {
+        return;
+    }
+    ?>
     <script id="uonix-sticky-cart-js">
     (function ($) {
         'use strict';
@@ -609,5 +648,37 @@ add_action( 'wp_footer', function() {
     </script>
     <?php
 }, 100 );
+
+/**
+ * Pré-renderização defensiva do ícone e badge do carrinho no cabeçalho.
+ * Evita qualquer Flash of Unstyled Content (FOUC) antes do carregamento de scripts.
+ */
+add_filter( 'render_block', function( $block_content, $block ) {
+    if ( empty( $block_content ) || ! is_string( $block_content ) ) {
+        return $block_content;
+    }
+
+    if ( strpos( $block_content, 'uonix-menu-cart' ) === false ) {
+        return $block_content;
+    }
+
+    $count = ( function_exists( 'WC' ) && is_object( WC()->cart ) ) ? WC()->cart->get_cart_contents_count() : 0;
+    $badge_class = $count > 0 ? 'uonix-menu-cart-badge is-active' : 'uonix-menu-cart-badge';
+    $badge_style = $count > 0 ? 'display: flex !important;' : 'display: none !important;';
+
+    // Garante dimensoes no SVG para renderizacao estavel antes do CSS
+    if ( strpos( $block_content, '<svg' ) !== false && strpos( $block_content, 'width=' ) === false ) {
+        $block_content = preg_replace( '/<svg\b/', '<svg width="45" height="45"', $block_content, 1 );
+    }
+
+    // Pre-renderiza quantidade e visibilidade do badge diretamente no HTML do servidor
+    $block_content = preg_replace(
+        '/<span class="uonix-menu-cart-badge"[^>]*>.*?<\/span>/s',
+        '<span class="' . esc_attr( $badge_class ) . '" style="' . esc_attr( $badge_style ) . '">' . intval( $count ) . '</span>',
+        $block_content
+    );
+
+    return $block_content;
+}, 10, 2 );
 
 

@@ -64,7 +64,7 @@ add_action('wp_footer', function() {
  * - Faz o badge sumir quando o carrinho está vazio.
  */
 
-add_action('wp_footer', function () {
+add_action('wp_head', function () {
 	if ( ! function_exists('WC') ) return;
 	?>
 
@@ -104,24 +104,28 @@ add_action('wp_footer', function () {
 			display: none !important;
 		}
 	</style>
+	<?php
+}, 10);
+
+add_action('wp_footer', function () {
+	if ( ! function_exists('WC') ) return;
+	?>
 
 	<script id="uonix-badge-double-sync-js">
 	(function ($) {
 		function syncUonixCart() {
-			// -- Seletores atualizados para o Mega Menu
+			// -- Seletores atualizados para o Mega Menu Desktop
 			var $menuLink = $('#mega-menu-item-4819 a.mega-menu-link');
 			var $officialBadge = $('.wc-block-mini-cart__badge');
 
 			// Pega a quantidade atual do WooCommerce
 			var countText = $officialBadge.first().text().trim();
-			var currentCount = parseInt(countText, 10) || 0;
-
-			// Fallback para carregamento inicial
-			if (countText === "" && typeof uonixInitialCount !== 'undefined') {
-				currentCount = uonixInitialCount;
+			var currentCount = parseInt(countText, 10);
+			if (isNaN(currentCount)) {
+				currentCount = (typeof uonixInitialCount !== 'undefined') ? uonixInitialCount : 0;
 			}
 
-			// --- Lógica para o Badge Custom do Menu ---
+			// --- Lógica para o Badge Custom do Menu Desktop ---
 			if ($menuLink.length) {
 				// Se o badge não existir no HTML, cria ele
 				if ($menuLink.find('.uonix-cart-badge').length === 0) {
@@ -139,12 +143,53 @@ add_action('wp_footer', function () {
 				}
 			}
 
+			// --- Lógica para o Badge Custom do Menu Mobile ---
+			var $mobileCart = $('.uonix-menu-cart');
+			if ($mobileCart.length) {
+				$mobileCart.each(function () {
+					var $cart = $(this);
+					var $badgeMobile = $cart.find('.uonix-menu-cart-badge');
+					if ($badgeMobile.length === 0) {
+						$cart.append('<span class="uonix-menu-cart-badge">0</span>');
+						$badgeMobile = $cart.find('.uonix-menu-cart-badge');
+					}
+
+					$badgeMobile.text(currentCount);
+
+					if (currentCount > 0) {
+						$badgeMobile.addClass('is-active').css('display', 'flex');
+					} else {
+						$badgeMobile.removeClass('is-active').css('display', 'none');
+					}
+				});
+			} else {
+				var $orphanMobile = $('.uonix-menu-cart-badge');
+				if ($orphanMobile.length) {
+					$orphanMobile.text(currentCount);
+					if (currentCount > 0) {
+						$orphanMobile.addClass('is-active').css('display', 'flex');
+					} else {
+						$orphanMobile.removeClass('is-active').css('display', 'none');
+					}
+				}
+			}
+
 			// --- Lógica para o Badge Oficial (Woo Blocks) ---
 			if ($officialBadge.length) {
 				if (currentCount <= 0) {
-					$officialBadge.addClass('uonix-force-hide').attr('hidden', 'true');
+					if (!$officialBadge.hasClass('uonix-force-hide')) {
+						$officialBadge.addClass('uonix-force-hide');
+					}
+					if ($officialBadge.attr('hidden') !== 'true') {
+						$officialBadge.attr('hidden', 'true');
+					}
 				} else {
-					$officialBadge.removeClass('uonix-force-hide').removeAttr('hidden');
+					if ($officialBadge.hasClass('uonix-force-hide')) {
+						$officialBadge.removeClass('uonix-force-hide');
+					}
+					if ($officialBadge.attr('hidden')) {
+						$officialBadge.removeAttr('hidden');
+					}
 				}
 			}
 		}
@@ -162,6 +207,29 @@ add_action('wp_footer', function () {
 
 		$(document).ready(function () {
 			syncUonixCart();
+
+			// Observa apenas nós e conteúdo textual do badge oficial para sincronia imediata (sem attributes para evitar ciclo recursivo)
+			var targetOfficial = document.querySelector('.wc-block-mini-cart__badge');
+			if (targetOfficial && window.MutationObserver) {
+				var observer = new MutationObserver(function (mutations) {
+					var hasContentMutation = false;
+					for (var i = 0; i < mutations.length; i++) {
+						var mType = mutations[i].type;
+						if (mType === 'childList' || mType === 'characterData') {
+							hasContentMutation = true;
+							break;
+						}
+					}
+					if (hasContentMutation) {
+						syncUonixCart();
+					}
+				});
+				observer.observe(targetOfficial, {
+					childList: true,
+					characterData: true,
+					subtree: true
+				});
+			}
 
 			// Reforço constante para sincronia em tempo real
 			setInterval(syncUonixCart, 2000);
