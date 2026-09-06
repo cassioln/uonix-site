@@ -39,10 +39,10 @@ add_filter( 'woocommerce_get_item_data', function( $item_data, $cart_item ) {
     }
 
     if ( ! empty( $marca ) ) {
-        $item_data[] = array(
+        array_unshift( $item_data, array(
             'key'   => 'Marca',
             'value' => $marca,
-        );
+        ) );
     }
 
     return $item_data;
@@ -304,6 +304,12 @@ add_action( 'wp_footer', function() {
             display: none !important;
         }
 
+        /* Garante que o bloco de detalhes da Marca fique no topo na ordem flex */
+        .wc-block-mini-cart__drawer .wc-block-components-product-details:has(.wc-block-components-product-details__marca),
+        .wc-block-mini-cart__drawer .wc-block-components-product-details.uonix-brand-first {
+            order: -1 !important;
+        }
+
         /* Substitui / por | entre os atributos de variação no mini-cart */
         .wc-block-mini-cart__drawer .wc-block-components-product-details span[aria-hidden="true"] {
             font-size: 0 !important;
@@ -539,29 +545,22 @@ add_action( 'wp_footer', function() {
         function moveBrandMetadata() {
             $('.wc-block-cart-items__row').each(function () {
                 var $row = $(this);
-                var $wrap = $row.find('.wc-block-cart-item__wrap');
-                var brandFound = false;
+                var $metadata = $row.find('.wc-block-components-product-metadata');
+                if (!$metadata.length) {
+                    return;
+                }
 
-                $row.find('.wc-block-components-product-details div, .wc-block-components-product-details li').each(function () {
-                    var $detail = $(this);
+                var $brandDetail = $metadata.children('.wc-block-components-product-details').filter(function () {
+                    return $(this).find('.wc-block-components-product-details__marca').length > 0 ||
+                           $(this).text().toLowerCase().indexOf('marca:') !== -1;
+                }).first();
 
-                    if ($detail.text().toLowerCase().indexOf('marca:') === -1) {
-                        return;
+                if ($brandDetail.length) {
+                    $brandDetail.addClass('uonix-brand-first');
+                    if ($brandDetail.index() !== 0) {
+                        $brandDetail.prependTo($metadata);
                     }
-
-                    if (brandFound) {
-                        $detail.remove();
-                        return;
-                    }
-
-                    $detail
-                        .addClass('uonix-marca-final')
-                        .removeAttr('hidden')
-                        .css('display', 'block')
-                        .prependTo($wrap);
-
-                    brandFound = true;
-                });
+                }
             });
         }
 
@@ -590,6 +589,7 @@ add_action( 'wp_footer', function() {
 
         function formatUonixSidebar() {
             normalizeProductNames();
+            moveBrandMetadata();
             addMoreProductsLink();
             updateCartLinks();
         }

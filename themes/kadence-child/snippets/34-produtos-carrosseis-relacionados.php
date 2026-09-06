@@ -511,7 +511,7 @@ function uonix_carrossel_produtos_relacionados_script() {
         document.addEventListener('DOMContentLoaded', function() {
             const container = document.querySelector('.pordutos-relacionados-carrinho .wp-block-woocommerce-product-collection') || document.querySelector('.wp-block-woocommerce-product-collection');
             const carousel = container ? container.querySelector('ul.wc-block-product-template') : null;
-            
+
             if (container && carousel) {
                 // 1. INJEÇÃO DOS BADGES DE MARCA
                 const cards = container.querySelectorAll('li.wc-block-product');
@@ -582,7 +582,7 @@ function uonix_carrossel_produtos_relacionados_script() {
                     carousel.addEventListener('mouseleave', playCarousel);
                     carousel.addEventListener('touchstart', pauseCarousel);
                     carousel.addEventListener('touchend', playCarousel);
-                    
+
                     btnPrev.addEventListener('mouseenter', pauseCarousel);
                     btnNext.addEventListener('mouseenter', pauseCarousel);
                     btnPrev.addEventListener('mouseleave', playCarousel);
@@ -592,9 +592,9 @@ function uonix_carrossel_produtos_relacionados_script() {
                     const scrollCarousel = (direction) => {
                         const card = carousel.querySelector('li');
                         if (!card) return;
-                        
+
                         const step = card.offsetWidth + 20; // Largura do card + gap
-                        
+
                         if (direction === 'next') {
                             if (carousel.scrollLeft + carousel.clientWidth >= carousel.scrollWidth - 25) {
                                 carousel.scrollTo({ left: 0, behavior: 'smooth' });
@@ -704,7 +704,7 @@ function uonix_produtos_relacionados_carrossel_mobile() {
                 -webkit-overflow-scrolling: touch; /* Rolar suave no iOS/Android */
                 align-items: stretch !important; /* Mantém a altura igual */
             }
-            
+
             /* Esconder barra de rolagem nativa */
             section.related.products ul.products::-webkit-scrollbar,
             section.up-sells.products ul.products::-webkit-scrollbar,
@@ -725,20 +725,20 @@ function uonix_produtos_relacionados_carrossel_mobile() {
             section.up-sells.products ul.products li.product,
             section.upsells.products ul.products li.product,
             .cross-sells ul.products li.product {
-                flex: 0 0 calc(33.333% - 10px) !important; 
+                flex: 0 0 calc(33.333% - 10px) !important;
                 scroll-snap-align: start;
                 margin: 0 !important;
                 max-width: none !important;
             }
         }
-        
+
         @media (max-width: 768px) {
             /* Mobile: 1 na tela (mostrando o canto do próximo) */
             section.related.products ul.products li.product,
             section.up-sells.products ul.products li.product,
             section.upsells.products ul.products li.product,
             .cross-sells ul.products li.product {
-                flex: 0 0 calc(85%) !important; 
+                flex: 0 0 calc(85%) !important;
             }
         }
 
@@ -998,8 +998,8 @@ function uonix_produtos_relacionados_carrossel_mobile() {
         .related.products,
         .up-sells.products,
         .upsells.products,
-        .cross-sells { 
-            position: relative; 
+        .cross-sells {
+            position: relative;
         }
 
         .uonix-rel-nav {
@@ -1038,11 +1038,11 @@ function uonix_produtos_relacionados_carrossel_mobile() {
             // Só executa o script se for uma tela menor ou igual a 1024px (onde o carrossel atua)
             if (window.innerWidth <= 1024) {
                 const containers = document.querySelectorAll('.related.products, .up-sells.products, .upsells.products, .cross-sells');
-                
+
                 containers.forEach(function(container) {
                     const carousel = container.querySelector('ul.products');
                     if (!carousel) return;
-                    
+
                     // Injeta as setas de navegação se ainda não existirem
                     if (!container.querySelector('.uonix-rel-prev')) {
                         const btnPrev = document.createElement('button');
@@ -1068,7 +1068,7 @@ function uonix_produtos_relacionados_carrossel_mobile() {
                         carousel.addEventListener('mouseleave', playCarousel);
                         carousel.addEventListener('touchstart', pauseCarousel);
                         carousel.addEventListener('touchend', playCarousel);
-                        
+
                         btnPrev.addEventListener('mouseenter', pauseCarousel);
                         btnNext.addEventListener('mouseenter', pauseCarousel);
 
@@ -1076,9 +1076,9 @@ function uonix_produtos_relacionados_carrossel_mobile() {
                         const scrollCarousel = (direction) => {
                             const card = carousel.querySelector('li.product');
                             if (!card) return;
-                            
+
                             const step = card.offsetWidth + 15; // Largura do card + gap do css
-                            
+
                             if (direction === 'next') {
                                 if (carousel.scrollLeft + carousel.clientWidth >= carousel.scrollWidth - 50) {
                                     carousel.scrollTo({ left: 0, behavior: 'smooth' });
@@ -1111,6 +1111,3 @@ function uonix_produtos_relacionados_carrossel_mobile() {
         <?php
     }
 }
-
-
-
