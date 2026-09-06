@@ -108,20 +108,18 @@ add_action('wp_footer', function () {
 	<script id="uonix-badge-double-sync-js">
 	(function ($) {
 		function syncUonixCart() {
-			// -- Seletores atualizados para o Mega Menu
+			// -- Seletores atualizados para o Mega Menu Desktop
 			var $menuLink = $('#mega-menu-item-4819 a.mega-menu-link');
 			var $officialBadge = $('.wc-block-mini-cart__badge');
 
 			// Pega a quantidade atual do WooCommerce
 			var countText = $officialBadge.first().text().trim();
-			var currentCount = parseInt(countText, 10) || 0;
-
-			// Fallback para carregamento inicial
-			if (countText === "" && typeof uonixInitialCount !== 'undefined') {
-				currentCount = uonixInitialCount;
+			var currentCount = parseInt(countText, 10);
+			if (isNaN(currentCount)) {
+				currentCount = (typeof uonixInitialCount !== 'undefined') ? uonixInitialCount : 0;
 			}
 
-			// --- Lógica para o Badge Custom do Menu ---
+			// --- Lógica para o Badge Custom do Menu Desktop ---
 			if ($menuLink.length) {
 				// Se o badge não existir no HTML, cria ele
 				if ($menuLink.find('.uonix-cart-badge').length === 0) {
@@ -136,6 +134,37 @@ add_action('wp_footer', function () {
 					$badgeCustom.css('display', 'flex');
 				} else {
 					$badgeCustom.css('display', 'none');
+				}
+			}
+
+			// --- Lógica para o Badge Custom do Menu Mobile ---
+			var $mobileCart = $('.uonix-menu-cart');
+			if ($mobileCart.length) {
+				$mobileCart.each(function () {
+					var $cart = $(this);
+					var $badgeMobile = $cart.find('.uonix-menu-cart-badge');
+					if ($badgeMobile.length === 0) {
+						$cart.append('<span class="uonix-menu-cart-badge">0</span>');
+						$badgeMobile = $cart.find('.uonix-menu-cart-badge');
+					}
+
+					$badgeMobile.text(currentCount);
+
+					if (currentCount > 0) {
+						$badgeMobile.addClass('is-active').css('display', 'flex');
+					} else {
+						$badgeMobile.removeClass('is-active').css('display', 'none');
+					}
+				});
+			} else {
+				var $orphanMobile = $('.uonix-menu-cart-badge');
+				if ($orphanMobile.length) {
+					$orphanMobile.text(currentCount);
+					if (currentCount > 0) {
+						$orphanMobile.addClass('is-active').css('display', 'flex');
+					} else {
+						$orphanMobile.removeClass('is-active').css('display', 'none');
+					}
 				}
 			}
 
@@ -162,6 +191,20 @@ add_action('wp_footer', function () {
 
 		$(document).ready(function () {
 			syncUonixCart();
+
+			// Observa mutações no badge oficial para sincronia imediata
+			var targetOfficial = document.querySelector('.wc-block-mini-cart__badge');
+			if (targetOfficial && window.MutationObserver) {
+				var observer = new MutationObserver(function () {
+					syncUonixCart();
+				});
+				observer.observe(targetOfficial, {
+					childList: true,
+					characterData: true,
+					subtree: true,
+					attributes: true
+				});
+			}
 
 			// Reforço constante para sincronia em tempo real
 			setInterval(syncUonixCart, 2000);

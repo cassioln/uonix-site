@@ -90,6 +90,8 @@ add_action( 'wp_footer', function() {
             font-size: 13px !important;
             font-weight: 800 !important;
             line-height: 1 !important;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3) !important;
+            pointer-events: none !important;
         }
 
         .uonix-menu-cart-badge.is-active {

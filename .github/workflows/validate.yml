@@ -75,6 +75,9 @@ jobs:
       - name: Test Mini-Cart drawer layer hierarchy
         run: php scripts/tests/test-mini-cart-drawer-layer-hierarchy.php
 
+      - name: Test Cart badge sync
+        run: php scripts/tests/test-cart-badge-sync.php
+
       - name: Test RFQ product default
         run: php scripts/tests/test-rfq-product-default.php
 
