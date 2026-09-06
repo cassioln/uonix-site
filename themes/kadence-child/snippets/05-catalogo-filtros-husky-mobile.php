@@ -1,5 +1,5 @@
 <?php
-if ( ! defined( 'ABSPATH' ) ) {
+if (!defined('ABSPATH')) {
     exit;
 }
 
@@ -19,12 +19,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * UÔNIX: Mover filtro para o Body APENAS em Celulares (< 768px)
  */
-add_action( 'wp_footer', function() {
+add_action('wp_footer', function () {
     ?>
     <script type="text/javascript">
-        (function($) {
-            $(document).ready(function() {
-                setTimeout(function() {
+        (function ($) {
+            $(document).ready(function () {
+                setTimeout(function () {
                     // Agora o limite é 767px para não bugar tablets com sidebar
                     if (window.innerWidth <= 767) {
                         var $filter = $('.woof-front-builder-container');
@@ -40,7 +40,7 @@ add_action( 'wp_footer', function() {
         })(jQuery);
     </script>
     <?php
-}, 100 );
+}, 100);
 
 
 // -----------------------------------------------------------------------------
@@ -51,7 +51,7 @@ add_action( 'wp_footer', function() {
  * ---------------------------------------------------------
  * Garante que o plugin use o arquivo do tema Child
  */
-add_filter('woof_husky_txt_template_path', function($factory_path) {
+add_filter('woof_husky_txt_template_path', function ($factory_path) {
     // Aponta para a pasta que você criou no seu tema child
     $child_theme_path = get_stylesheet_directory() . '/woof/ext/by_text/views/templates/default.php';
 
@@ -81,14 +81,16 @@ add_filter('woof_husky_txt_template_path', function($factory_path) {
  * - CORREÇÕES: Select2 Mobile, Labels Ativos e Breadcrumb Busca.
  */
 
-add_action('wp_footer', function() {
+add_action('wp_footer', function () {
     // Executa apenas em páginas de produtos ou na página específica do catálogo
-    if ( ! is_post_type_archive( 'product' ) && ! is_tax( get_object_taxonomies( 'product' ) ) && ! is_page(7150) ) return;
+    if (!is_post_type_archive('product') && !is_tax(get_object_taxonomies('product')) && !is_page(7150))
+        return;
     ?>
 
     <style id="uonix-husky-structural-plus">
         /* 1. REGRAS PARA TABLET E DESKTOP (>= 768px) */
         @media (min-width: 768px) {
+
             /* Esconde elementos de acionamento mobile */
             .woof_show_mobile_filter,
             .woof_show_mobile_filter_container,
@@ -106,7 +108,8 @@ add_action('wp_footer', function() {
             }
 
             /* Mantém o container do filtro em modo bloco estático */
-            .woof-front-builder-container, .woof {
+            .woof-front-builder-container,
+            .woof {
                 display: block !important;
                 position: relative !important;
                 top: 0 !important;
@@ -123,10 +126,17 @@ add_action('wp_footer', function() {
 
         /* 2. REGRAS PARA CELULAR (< 768px) */
         @media (max-width: 767px) {
+
             .kadence-column2932_0a9c6d-62,
-            .kadence-column7150_89634e-21 { display: none !important; }
+            .kadence-column7150_89634e-21 {
+                display: none !important;
+            }
+
             .kadence-column2932_fec114-b0,
-            .kadence-column7150_2a56fa-f9 { flex: 0 0 100% !important; max-width: 100% !important; }
+            .kadence-column7150_2a56fa-f9 {
+                flex: 0 0 100% !important;
+                max-width: 100% !important;
+            }
 
             /* Garante que a coluna sticky e o botão de filtro mobile fiquem sempre acima do grid de produtos */
             .kadence-column7150_2b9bfb-d5,
@@ -149,6 +159,7 @@ add_action('wp_footer', function() {
                 0% {
                     top: 100%;
                 }
+
                 100% {
                     top: 60px;
                 }
@@ -158,6 +169,7 @@ add_action('wp_footer', function() {
                 0% {
                     top: 100%;
                 }
+
                 100% {
                     top: 60px;
                 }
@@ -186,6 +198,7 @@ add_action('wp_footer', function() {
                     top: 60px;
                     opacity: 1;
                 }
+
                 100% {
                     top: 100%;
                     opacity: 0.85;
@@ -202,38 +215,45 @@ add_action('wp_footer', function() {
             }
 
             /* Oculta o primeiro botão "Redefinir" no topo no mobile */
-            .woof_redraw_zone > .woof_submit_search_form_container:first-of-type {
+            .woof_redraw_zone>.woof_submit_search_form_container:first-of-type {
                 display: none !important;
             }
 
             /* CORREÇÃO SELECT2 NO MOBILE: Garante que as opções fiquem na frente do overlay */
-            .select2-container--open { z-index: 9999999 !important; }
-            .select2-dropdown { z-index: 9999999 !important; }
+            .select2-container--open {
+                z-index: 9999999 !important;
+            }
+
+            .select2-dropdown {
+                z-index: 9999999 !important;
+            }
         }
 
         /* 3. LIMPEZA DE TEXTOS E LABELS (FUNCIONAL) */
 
         /* Remove labels como "Fabricante:", "Categorias de produto:" das tags superiores */
-        .woof_products_top_panel_ul ul li:first-child { 
-            display: none !important; 
+        .woof_products_top_panel_ul ul li:first-child {
+            display: none !important;
         }
 
         /* Remove "Início >" da busca de texto no autocomplete */
-        .woof_husky_txt-option-breadcrumb { 
-            font-size: 0 !important; 
+        .woof_husky_txt-option-breadcrumb {
+            font-size: 0 !important;
         }
-        .woof_husky_txt-option-breadcrumb a { 
-            font-size: 11px !important; 
+
+        .woof_husky_txt-option-breadcrumb a {
+            font-size: 11px !important;
         }
-        .woof_husky_txt-option-breadcrumb a:first-child { 
-            display: none !important; 
+
+        .woof_husky_txt-option-breadcrumb a:first-child {
+            display: none !important;
         }
 
         /* Limpeza de ícones e botões redundantes nativos */
-        .woof_products_top_panel_ul a img, 
-        .woof_products_top_panel_ul a svg, 
-        .woof_reset_button_2_redundant { 
-            display: none !important; 
+        .woof_products_top_panel_ul a img,
+        .woof_products_top_panel_ul a svg,
+        .woof_reset_button_2_redundant {
+            display: none !important;
         }
 
         /* 4. TÍTULOS BALANCEADOS NA GRADE DE PRODUTOS (Sem palavras órfãs) */
@@ -305,7 +325,7 @@ add_action('wp_footer', function() {
             z-index: 2 !important;
             letter-spacing: 0.5px !important;
             border: 1px solid #e2e8f0 !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05) !important;
         }
 
         /* Detalhes do Produto */
@@ -379,47 +399,47 @@ add_action('wp_footer', function() {
     </style>
 
     <script id="uonix-husky-logic-js">
-    (function($) {
-        function updateHuskyLayout() {
-            var width = window.innerWidth;
+        (function ($) {
+            function updateHuskyLayout() {
+                var width = window.innerWidth;
 
-            if (typeof woof_is_mobile !== 'undefined') {
-                woof_is_mobile = (width < 768) ? 1 : 0;
-            }
+                if (typeof woof_is_mobile !== 'undefined') {
+                    woof_is_mobile = (width < 768) ? 1 : 0;
+                }
 
-            if (width < 768) {
-                var $filter = $('.woof-front-builder-container');
-                if ($filter.length && !$filter.parent().is('body')) {
-                    $filter.find('.woof').removeClass('woof_show_filter_for_mobile');
-                    $filter.appendTo('body');
+                if (width < 768) {
+                    var $filter = $('.woof-front-builder-container');
+                    if ($filter.length && !$filter.parent().is('body')) {
+                        $filter.find('.woof').removeClass('woof_show_filter_for_mobile');
+                        $filter.appendTo('body');
+                    }
                 }
             }
-        }
 
-        // Animação suave invertida (slide down) ao fechar o filtro mobile
-        document.addEventListener('click', function(e) {
-            var hideBtn = e.target.closest('.woof_hide_mobile_filter');
-            if (!hideBtn) return;
+            // Animação suave invertida (slide down) ao fechar o filtro mobile
+            document.addEventListener('click', function (e) {
+                var hideBtn = e.target.closest('.woof_hide_mobile_filter');
+                if (!hideBtn) return;
 
-            var woof = hideBtn.closest('.woof');
-            if (!woof || !woof.classList.contains('woof_show_filter_for_mobile') || woof.classList.contains('uonix_closing')) return;
+                var woof = hideBtn.closest('.woof');
+                if (!woof || !woof.classList.contains('woof_show_filter_for_mobile') || woof.classList.contains('uonix_closing')) return;
 
-            // Intercepta fechamento instantâneo do plugin WOOF
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
+                // Intercepta fechamento instantâneo do plugin WOOF
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
 
-            woof.classList.add('uonix_closing');
+                woof.classList.add('uonix_closing');
 
-            setTimeout(function() {
-                woof.classList.remove('uonix_closing');
-                woof.classList.remove('woof_show_filter_for_mobile');
-            }, 340);
-        }, true);
+                setTimeout(function () {
+                    woof.classList.remove('uonix_closing');
+                    woof.classList.remove('woof_show_filter_for_mobile');
+                }, 340);
+            }, true);
 
-        $(document).ready(function() { setTimeout(updateHuskyLayout, 600); });
-        $(window).on('resize', updateHuskyLayout);
-    })(jQuery);
+            $(document).ready(function () { setTimeout(updateHuskyLayout, 600); });
+            $(window).on('resize', updateHuskyLayout);
+        })(jQuery);
     </script>
     <?php
 }, 999);
@@ -435,9 +455,10 @@ add_action('wp_footer', function() {
  * - Autocomplete com imagens 70x70 e remoção de "Início".
  */
 
-add_action('wp_footer', function() {
+add_action('wp_footer', function () {
     // Correção do slug 'product' para garantir o funcionamento
-    if ( ! is_post_type_archive( 'product' ) && ! is_tax( get_object_taxonomies( 'product' ) ) && ! is_page(7150) ) return;
+    if (!is_post_type_archive('product') && !is_tax(get_object_taxonomies('product')) && !is_page(7150))
+        return;
     ?>
 
     <style id="uonix-husky-integrated-search">
@@ -454,7 +475,8 @@ add_action('wp_footer', function() {
             height: 30px !important;
             right: 6px !important;
             top: 50% !important;
-            margin-top: -35px !important; /* Ajuste preciso conforme seu teste */
+            margin-top: -35px !important;
+            /* Ajuste preciso conforme seu teste */
             border: 2px solid rgba(14, 55, 128, 0.2) !important;
             border-right-color: #0e3780 !important;
             border-radius: 50% !important;
@@ -509,7 +531,7 @@ add_action('wp_footer', function() {
             background-color: #ffffff !important;
             border: 1px solid #e2e8f0 !important;
             border-radius: 4px !important;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1) !important;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1) !important;
             margin-top: 5px !important;
             padding: 10px 0 !important;
             position: absolute !important;
@@ -525,8 +547,13 @@ add_action('wp_footer', function() {
             align-items: center !important;
         }
 
-        .woof_husky_txt-option:last-child { border-bottom: none !important; }
-        .woof_husky_txt-option:hover { background-color: #e8e8e8 !important; }
+        .woof_husky_txt-option:last-child {
+            border-bottom: none !important;
+        }
+
+        .woof_husky_txt-option:hover {
+            background-color: #e8e8e8 !important;
+        }
 
         /* Miniaturas (70x70) */
         .woof_husky_txt-option-thumbnail {
@@ -550,7 +577,8 @@ add_action('wp_footer', function() {
         }
 
         .woof_husky_txt-option:hover .woof_husky_txt-option-title a {
-            color: #0e3780 !important; /* Azul Uônix */
+            color: #0e3780 !important;
+            /* Azul Uônix */
         }
 
         .woof_husky_txt-option-text {
@@ -563,8 +591,8 @@ add_action('wp_footer', function() {
         .woof_husky_txt-option-breadcrumb {
             font-size: 0 !important;
             margin-bottom: 0px !important;
-			padding-bottom: 0px !important;
-			line-height: normal !important;
+            padding-bottom: 0px !important;
+            line-height: normal !important;
         }
 
         .woof_husky_txt-option-breadcrumb a {
@@ -572,7 +600,8 @@ add_action('wp_footer', function() {
             text-transform: uppercase !important;
             letter-spacing: 0.5px !important;
             font-weight: 600 !important;
-            color: #f76a0c !important; /* Laranja Uônix */
+            color: #f76a0c !important;
+            /* Laranja Uônix */
             text-decoration: none !important;
         }
 
@@ -581,7 +610,9 @@ add_action('wp_footer', function() {
         }
 
         /* 5. AUXILIARES */
-        .woof_husky_txt.uonix-hidden { display: none !important; }
+        .woof_husky_txt.uonix-hidden {
+            display: none !important;
+        }
 
         /* 6. AVISO DE NENHUM PRODUTO ENCONTRADO (IDENTIDADE VISUAL UÔNIX) */
         .woocommerce-no-products-found {
@@ -592,12 +623,14 @@ add_action('wp_footer', function() {
         .woocommerce-no-products-found .woocommerce-info {
             background: #ffffff !important;
             border: 1px solid #e2e8f0 !important;
-            border-left: 4px solid #0e3780 !important; /* Azul Uônix */
+            border-left: 4px solid #0e3780 !important;
+            /* Azul Uônix */
             border-radius: 8px !important;
             box-shadow: 0 4px 18px -2px rgba(14, 55, 128, 0.07), 0 2px 6px -1px rgba(0, 0, 0, 0.04) !important;
             padding: 18px 22px !important;
             margin: 0 !important;
-            color: #123063 !important; /* Azul nobre escuro */
+            color: #123063 !important;
+            /* Azul nobre escuro */
             font-size: 15px !important;
             font-weight: 600 !important;
             line-height: 1.5 !important;
@@ -621,37 +654,37 @@ add_action('wp_footer', function() {
     </style>
 
     <script id="uonix-husky-integrated-js">
-    (function($) {
-        $(document).ready(function() {
+        (function ($) {
+            $(document).ready(function () {
 
-            // A) CLIQUE FORA: Esconde resultados ao perder o foco da área de busca
-            $(document).on('mousedown touchstart', function(e) {
-                var container = $(".woof_text_search_container");
-                if (!container.is(e.target) && container.has(e.target).length === 0) {
-                    $(".woof_husky_txt").hide();
-                }
+                // A) CLIQUE FORA: Esconde resultados ao perder o foco da área de busca
+                $(document).on('mousedown touchstart', function (e) {
+                    var container = $(".woof_text_search_container");
+                    if (!container.is(e.target) && container.has(e.target).length === 0) {
+                        $(".woof_husky_txt").hide();
+                    }
+                });
+
+                // B) TECLA ENTER: Esconde resultados e tira o foco
+                $(document).on('keydown', '.woof_husky_txt-input', function (e) {
+                    if (e.which == 13) {
+                        var $input = $(this);
+                        var $results = $input.closest('.woof_container_inner').find('.woof_husky_txt');
+
+                        setTimeout(function () {
+                            $results.hide();
+                            $input.blur();
+                        }, 100);
+                    }
+                });
+
+                // C) VOLTAR A DIGITAR: Reabre a lista se houver foco ou interação
+                $(document).on('input focus', '.woof_husky_txt-input', function () {
+                    $(this).closest('.woof_container_inner').find('.woof_husky_txt').show();
+                });
+
             });
-
-            // B) TECLA ENTER: Esconde resultados e tira o foco
-            $(document).on('keydown', '.woof_husky_txt-input', function(e) {
-                if (e.which == 13) {
-                    var $input = $(this);
-                    var $results = $input.closest('.woof_container_inner').find('.woof_husky_txt');
-
-                    setTimeout(function() {
-                        $results.hide();
-                        $input.blur();
-                    }, 100);
-                }
-            });
-
-            // C) VOLTAR A DIGITAR: Reabre a lista se houver foco ou interação
-            $(document).on('input focus', '.woof_husky_txt-input', function() {
-                $(this).closest('.woof_container_inner').find('.woof_husky_txt').show();
-            });
-
-        });
-    })(jQuery);
+        })(jQuery);
     </script>
     <?php
 }, 999);
