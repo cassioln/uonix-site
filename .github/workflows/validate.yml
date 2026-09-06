@@ -299,6 +299,9 @@ jobs:
       - name: Test watchdog cleared by real execution
         run: node scripts/tests/test-watchdog-execucao-real.js
 
+      - name: Test PhotoSwipe gallery modal and digital zoom
+        run: node scripts/tests/test-photoswipe-gallery-modal.js
+
       - name: Test email migration passfile tooling
         run: python3 -m unittest discover --start-directory scripts/email-migration --pattern 'test_*.py' --verbose
 

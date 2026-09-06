@@ -1503,11 +1503,10 @@ function uonix_product_premium_footer_assets() {
                 var $topBar = $pswp.find('.pswp__top-bar');
                 if ($topBar.length && !$topBar.find('.uonix-pswp-brand-title').length) {
                     var prodTitle = $('h1.product_title').text().trim() || 'Produto Uônix';
-                    var brandTitleHtml = '<div class="uonix-pswp-brand-title">' +
-                        '<span class="uonix-pswp-badge">UÔNIX</span>' +
-                        '<span class="uonix-pswp-prod-name">' + prodTitle + '</span>' +
-                        '</div>';
-                    $topBar.prepend(brandTitleHtml);
+                    var $brandTitle = $('<div>', { class: 'uonix-pswp-brand-title' })
+                        .append($('<span>', { class: 'uonix-pswp-badge', text: 'UÔNIX' }))
+                        .append($('<span>', { class: 'uonix-pswp-prod-name', text: prodTitle }));
+                    $topBar.prepend($brandTitle);
                 }
             } else {
                 $('body').removeClass('uonix-modal-active');
