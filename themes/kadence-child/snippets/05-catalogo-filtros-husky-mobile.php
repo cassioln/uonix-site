@@ -179,7 +179,7 @@ add_action('wp_footer', function () {
                 position: fixed !important;
                 z-index: 99999 !important;
                 top: 100%;
-                margin-top: 60px !important;
+                margin-top: 0 !important;
                 height: calc(100% - 60px) !important;
                 height: calc(100dvh - 60px) !important;
                 width: 100% !important;
