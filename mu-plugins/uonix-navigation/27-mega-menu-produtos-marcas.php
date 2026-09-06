@@ -75,15 +75,20 @@ function uonix_estilos_mega_menu_v14()
         /* ==========================================================
            BLINDAGEM DE MODAIS E DRAWERS (CARRINHO E GALERIA WOOCOMMERCE)
            Garante que o painel lateral do carrinho, seu overlay e o
-           PhotoSwipe fiquem sempre acima do cabeçalho fixo e menu mobile
+           PhotoSwipe fiquem sempre acima do cabeçalho fixo e menu mobile.
+           O overlay fica em 3000000 e o painel filho em 3000001, assegurando
+           que o drawer e seus controles fiquem hierarquicamente acima do backdrop.
            ========================================================== */
         .wc-block-components-drawer__screen-overlay,
+        .pswp {
+            z-index: 3000000 !important;
+        }
+
         .wc-block-components-drawer__screen-overlay .wc-block-components-drawer,
         .wc-block-components-drawer__screen-overlay .wc-block-mini-cart__drawer,
         .wc-block-mini-cart__drawer,
-        .wc-block-components-drawer,
-        .pswp {
-            z-index: 3000000 !important;
+        .wc-block-components-drawer {
+            z-index: 3000001 !important;
         }
 
         /* ==========================================================
