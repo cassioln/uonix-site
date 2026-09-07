@@ -5,7 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /**
  * UONIX Snippets - Formulários - Persistência global e autopreenchimento de dados (First-Party)
- * com conformidade LGPD via AdOpt.
+ * com conformidade LGPD via AdOpt (Fail-Closed).
  *
  * Sincroniza dados de contato (Nome, Empresa, E-mail, Telefone, Cidade e Estado) entre:
  * - Formulário de Contato (/#contato - Fluent Forms ID 3)
@@ -15,8 +15,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  * - Finalizar Orçamento (/finalizar-orcamento/ - WooCommerce Checkout)
  * - Newsletter ([uonix_form_newsletter])
  *
- * Em conformidade com a LGPD (Princípio da Minimização e Segurança), documentos fiscais
- * (CPF/CNPJ) e endereço residencial completo NÃO são persistidos no navegador.
+ * Em conformidade com a LGPD (Princípio da Minimização e Segurança):
+ * 1. Documentos fiscais (CPF/CNPJ) e endereço residencial completo NÃO são persistidos no navegador.
+ * 2. Política Fail-Closed: sem evidência positiva e explícita de consentimento no AdOpt,
+ *    nenhum dado é salvo no navegador e nenhum cookie de comentário é autorizado.
  */
 
 add_action('wp_footer', function() {
@@ -28,32 +30,77 @@ add_action('wp_footer', function() {
     (function() {
         const STORAGE_KEY = 'uonix_user_lead';
         const COOKIE_KEY = 'uonix_lead_profile';
+        const CONSENT_COOKIE = 'uonix_consent_granted';
 
-        // 1. Verificação de Consentimento AdOpt
-        function isAdoptRejected() {
+        // 1. Verificação Positiva de Consentimento AdOpt (Fail-Closed)
+        function isAdoptConsentGranted() {
             try {
+                // Bloqueio absoluto se houver sinal de recusa em cookie ou localStorage
                 if (document.cookie.indexOf('_adoptReject=') !== -1) {
-                    return true;
+                    return false;
                 }
                 if (window.localStorage && localStorage.getItem('_adoptReject')) {
+                    return false;
+                }
+
+                // Evidência positiva de consentimento emitida pelo fluxo AdOpt / banner
+                const hasCookieConsent = document.cookie.indexOf('AdoptConsent=') !== -1 || document.cookie.indexOf(CONSENT_COOKIE + '=1') !== -1;
+                const hasStorageConsent = !!(window.localStorage && (localStorage.getItem('AdoptConsent') || localStorage.getItem(CONSENT_COOKIE) === '1'));
+
+                if (hasCookieConsent || hasStorageConsent) {
                     return true;
                 }
             } catch (e) {}
+
+            // Padrão seguro fail-closed: silêncio ou ausência de ação NÃO é consentimento
             return false;
+        }
+
+        function markConsentGranted() {
+            try {
+                if (window.localStorage) {
+                    localStorage.setItem(CONSENT_COOKIE, '1');
+                    localStorage.removeItem('_adoptReject');
+                }
+                const maxAge = 365 * 24 * 60 * 60;
+                const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+                document.cookie = CONSENT_COOKIE + '=1; path=/; max-age=' + maxAge + '; SameSite=Lax' + secure;
+                document.cookie = '_adoptReject=; path=/; max-age=0; SameSite=Lax';
+            } catch (e) {}
+        }
+
+        function markConsentRejected() {
+            try {
+                if (window.localStorage) {
+                    localStorage.setItem('_adoptReject', '1');
+                    localStorage.removeItem(CONSENT_COOKIE);
+                }
+                const maxAge = 365 * 24 * 60 * 60;
+                const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+                document.cookie = '_adoptReject=1; path=/; max-age=' + maxAge + '; SameSite=Lax' + secure;
+                document.cookie = CONSENT_COOKIE + '=; path=/; max-age=0; SameSite=Lax';
+            } catch (e) {}
+            clearSavedData();
         }
 
         function clearSavedData() {
             try {
                 if (window.localStorage) {
                     localStorage.removeItem(STORAGE_KEY);
+                    localStorage.removeItem(CONSENT_COOKIE);
                 }
                 document.cookie = COOKIE_KEY + '=; path=/; max-age=0; SameSite=Lax';
+                document.cookie = CONSENT_COOKIE + '=; path=/; max-age=0; SameSite=Lax';
+
+                // Garante que inputs de consentimento sejam removidos do DOM
+                const consentInputs = document.querySelectorAll('input[name="wp-comment-cookies-consent"]');
+                consentInputs.forEach(el => el.remove());
             } catch (e) {}
         }
 
         // 2. Leitura dos Dados Salvos
         function getSavedLeadData() {
-            if (isAdoptRejected()) {
+            if (!isAdoptConsentGranted()) {
                 clearSavedData();
                 return null;
             }
@@ -69,7 +116,6 @@ add_action('wp_footer', function() {
             } catch (e) {}
 
             if (!data) {
-                // Tenta ler do cookie fallback
                 const match = document.cookie.match(new RegExp('(?:^|; )' + COOKIE_KEY + '=([^;]*)'));
                 if (match && match[1]) {
                     try {
@@ -83,9 +129,12 @@ add_action('wp_footer', function() {
 
         // 3. Gravação dos Dados (Estritamente dados de contato permitidos pela LGPD)
         function saveLeadData(fields) {
-            if (isAdoptRejected() || !fields || typeof fields !== 'object') {
+            if (!isAdoptConsentGranted() || !fields || typeof fields !== 'object') {
                 return;
             }
+
+            // Sincroniza cookie de consentimento para o servidor
+            markConsentGranted();
 
             const current = getSavedLeadData() || {};
             const merged = {
@@ -132,6 +181,8 @@ add_action('wp_footer', function() {
         }
 
         function autofillForms() {
+            if (!isAdoptConsentGranted()) return;
+
             const data = getSavedLeadData();
             if (!data) return;
 
@@ -185,13 +236,17 @@ add_action('wp_footer', function() {
             const form = e.target;
             if (!form || !(form instanceof HTMLFormElement)) return;
 
-            // Se rejeitou AdOpt, garante que comentários não setem consentimento
-            if (isAdoptRejected()) {
+            // Fail-closed: se NÃO há consentimento positivo do AdOpt, garante que comentários
+            // não setem consentimento e não salva os dados do lead
+            if (!isAdoptConsentGranted()) {
                 clearSavedData();
                 const consentInput = form.querySelector('input[name="wp-comment-cookies-consent"]');
                 if (consentInput) consentInput.remove();
                 return;
             }
+
+            // Garante que o cookie de consentimento positivo esteja ativo no envio
+            markConsentGranted();
 
             // Extrai dados do formulário submetido (estritamente permitidos pela LGPD)
             const nomeEl = form.querySelector('input[name="form_nome"], input[name="nome"], input[name="author"], input[name="billing_complete_name"], input[name="billing_first_name"]');
@@ -209,7 +264,7 @@ add_action('wp_footer', function() {
             if (cityEl && cityEl.value) payload.cidade = cityEl.value;
             if (stateEl && stateEl.value) payload.estado = stateEl.value;
 
-            // Se for comentário do blog, injeta o consentimento nativo se AdOpt não rejeitou
+            // Se for comentário do blog E temos consentimento positivo garantido, injeta consentimento
             if (form.id === 'commentform' || form.classList.contains('comment-form')) {
                 let consentInput = form.querySelector('input[name="wp-comment-cookies-consent"]');
                 if (!consentInput) {
@@ -224,11 +279,31 @@ add_action('wp_footer', function() {
             saveLeadData(payload);
         }, true);
 
-        // 6. Monitora cliques de rejeição do AdOpt
+        // 6. Monitora cliques de aceite ou rejeição no banner da AdOpt
         document.addEventListener('click', function(e) {
             const btn = e.target.closest('button, a');
-            if (btn && btn.textContent && /rejeitar|recusar/i.test(btn.textContent)) {
-                clearSavedData();
+            if (!btn) return;
+            const txt = (btn.textContent || '').trim();
+
+            // Aceite no AdOpt
+            if (btn.id === 'adopt-accept-all-button' || /^aceitar/i.test(txt)) {
+                markConsentGranted();
+                autofillForms();
+            }
+
+            // Recusa no AdOpt
+            if (btn.id === 'adopt-reject-all-button' || /rejeitar|recusar|^n[ãa]o\s+vend/i.test(txt)) {
+                markConsentRejected();
+            }
+        });
+
+        // Escuta evento customizado emitido pelo script AdOpt
+        window.addEventListener('adopt-visitor-consent-ready', function() {
+            if (isAdoptConsentGranted()) {
+                markConsentGranted();
+                autofillForms();
+            } else {
+                markConsentRejected();
             }
         });
 
@@ -257,6 +332,9 @@ add_action('wp_footer', function() {
         window.uonixSaveLeadData = saveLeadData;
         window.uonixGetSavedLeadData = getSavedLeadData;
         window.uonixAutofillForms = autofillForms;
+        window.uonixIsAdoptConsentGranted = isAdoptConsentGranted;
+        window.uonixMarkConsentGranted = markConsentGranted;
+        window.uonixMarkConsentRejected = markConsentRejected;
     })();
     </script>
     <?php

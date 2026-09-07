@@ -206,13 +206,33 @@ add_filter('comment_form_field_comment', function($field) {
 // 2. BACK-END: PROCESSAMENTO E INTEGRAÇÃO FLUENT FORMS
 // ==============================================================================
 
+/**
+ * Verifica se há consentimento positivo e verificável pelo servidor para persistência de cookies.
+ *
+ * Em estrita conformidade com a LGPD e política fail-closed:
+ * 1. Qualquer sinal de recusa/rejeição (_adoptReject) bloqueia imediatamente.
+ * 2. O consentimento NÃO é presumido por silêncio ou ausência de rejeição.
+ * 3. O servidor exige evidência positiva de consentimento (cookie AdoptConsent ou uonix_consent_granted).
+ */
+function uonix_comment_has_positive_consent() {
+    if (isset($_COOKIE['_adoptReject'])) {
+        return false;
+    }
+
+    if (!empty($_COOKIE['AdoptConsent']) || !empty($_COOKIE['uonix_consent_granted'])) {
+        return true;
+    }
+
+    return false;
+}
+
 add_filter('preprocess_comment', function($commentdata) {
-    // Sincroniza consentimento de cookies se AdOpt não estiver rejeitado
+    // Fail-Closed: se o formulário enviou wp-comment-cookies-consent, mas o servidor NÃO constatar
+    // evidência positiva de consentimento ou detectar rejeição explícita, invalida o consentimento.
+    // NUNCA insere ou presume wp-comment-cookies-consent se ele estiver ausente no POST.
     if (!is_user_logged_in()) {
-        if (isset($_COOKIE['_adoptReject'])) {
+        if (isset($_POST['wp-comment-cookies-consent']) && !uonix_comment_has_positive_consent()) {
             unset($_POST['wp-comment-cookies-consent']);
-        } elseif (!isset($_POST['wp-comment-cookies-consent'])) {
-            $_POST['wp-comment-cookies-consent'] = 'yes';
         }
     }
 
@@ -329,19 +349,23 @@ add_action('set_comment_cookies', function($comment, $user, $cookies_consent = t
         return;
     }
 
-    $cookie_hash = COOKIEHASH;
-    $secure = is_ssl();
+    $cookie_hash = defined('COOKIEHASH') ? COOKIEHASH : '';
+    $secure = function_exists('is_ssl') ? is_ssl() : false;
+    $has_consent = (bool) ( $cookies_consent && uonix_comment_has_positive_consent() );
 
-    if ($cookies_consent && isset($_POST['company'])) {
+    do_action( 'uonix_comment_set_cookies_evaluated', $has_consent, $cookies_consent );
+
+    // Fail-Closed: grava cookie apenas se cookies_consent for verdadeiro E houver evidência positiva no servidor
+    if ($has_consent && isset($_POST['company'])) {
         $company = uonix_comment_sync_upper_text(sanitize_text_field(wp_unslash($_POST['company'])));
         $comment_cookie_lifetime = apply_filters('comment_cookie_lifetime', 30000000);
         setcookie('comment_author_company_' . $cookie_hash, $company, time() + $comment_cookie_lifetime, COOKIEPATH, COOKIE_DOMAIN, $secure, true);
-        if (COOKIEPATH !== SITECOOKIEPATH) {
+        if (defined('SITECOOKIEPATH') && COOKIEPATH !== SITECOOKIEPATH) {
             setcookie('comment_author_company_' . $cookie_hash, $company, time() + $comment_cookie_lifetime, SITECOOKIEPATH, COOKIE_DOMAIN, $secure, true);
         }
     } else {
         setcookie('comment_author_company_' . $cookie_hash, '', time() - 3600, COOKIEPATH, COOKIE_DOMAIN, $secure, true);
-        if (COOKIEPATH !== SITECOOKIEPATH) {
+        if (defined('SITECOOKIEPATH') && COOKIEPATH !== SITECOOKIEPATH) {
             setcookie('comment_author_company_' . $cookie_hash, '', time() - 3600, SITECOOKIEPATH, COOKIE_DOMAIN, $secure, true);
         }
     }
