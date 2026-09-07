@@ -145,4 +145,31 @@ test_assert(
     '28-catalogo-ajax-carrinho.php: .product-action-wrap deve ter opacity: 1 !important no hover e focus-within'
 );
 
-echo "✅ Todos os contratos do botão interativo, controle de quantidade e visibilidade on-hover/focus foram validados com sucesso!\n";
+// 5. Sincronização reativa de quantidades com carrinho lateral / mini-cart drawer
+test_assert(
+    strpos($content_28, 'wp_ajax_uonix_get_cart_quantities') !== false &&
+    strpos($content_28, 'wp_ajax_nopriv_uonix_get_cart_quantities') !== false,
+    '28-catalogo-ajax-carrinho.php: Deve registrar endpoint uonix_get_cart_quantities para sincronização rápida'
+);
+
+test_assert(
+    strpos($content_28, 'applyCartQuantities') !== false,
+    '28-catalogo-ajax-carrinho.php: Deve conter função applyCartQuantities para sincronizar os cards'
+);
+
+test_assert(
+    strpos($content_28, 'fetchCartQuantitiesDebounced') !== false,
+    '28-catalogo-ajax-carrinho.php: Deve conter função fetchCartQuantitiesDebounced'
+);
+
+test_assert(
+    strpos($content_28, 'window.fetch') !== false && strpos($content_28, '/wc/store/') !== false,
+    '28-catalogo-ajax-carrinho.php: Deve interceptar requisições Store API do WooCommerce Blocks para resposta imediata'
+);
+
+test_assert(
+    strpos($content_28, 'wc_fragments_refreshed') !== false && strpos($content_28, 'removed_from_cart') !== false,
+    '28-catalogo-ajax-carrinho.php: Deve ouvir eventos de carrinho e mini-cart do WooCommerce'
+);
+
+echo "✅ Todos os contratos do botão interativo, controle de quantidade e sincronização reativa foram validados com sucesso!\n";

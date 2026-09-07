@@ -146,6 +146,38 @@ function uonix_ajax_update_loop_cart_qty() {
 }
 
 /**
+ * Endpoint AJAX para consulta rápida das quantidades reais de produtos no carrinho
+ */
+add_action( 'wp_ajax_uonix_get_cart_quantities', 'uonix_ajax_get_cart_quantities' );
+add_action( 'wp_ajax_nopriv_uonix_get_cart_quantities', 'uonix_ajax_get_cart_quantities' );
+
+function uonix_ajax_get_cart_quantities() {
+	$quantities = array();
+	$total_count = 0;
+
+	if ( function_exists( 'WC' ) && WC()->cart ) {
+		foreach ( WC()->cart->get_cart() as $cart_item ) {
+			$product_id = isset( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
+			$qty        = isset( $cart_item['quantity'] ) ? (int) $cart_item['quantity'] : 0;
+			if ( $product_id > 0 && $qty > 0 ) {
+				if ( ! isset( $quantities[ $product_id ] ) ) {
+					$quantities[ $product_id ] = 0;
+				}
+				$quantities[ $product_id ] += $qty;
+			}
+		}
+		$total_count = WC()->cart->get_cart_contents_count();
+	}
+
+	wp_send_json_success(
+		array(
+			'items'       => $quantities,
+			'total_count' => $total_count,
+		)
+	);
+}
+
+/**
  * Injeção de Scripts no wp_footer para controle de carrinho no catálogo
  */
 add_action( 'wp_footer', 'uonix_loop_cart_scripts', 99 );
@@ -193,6 +225,134 @@ function uonix_loop_cart_scripts() {
 					.html(trashSvg);
 			}
 		}
+
+		// Atualiza todos os botões da vitrine com base no mapa de quantidades { product_id: qty }
+		function applyCartQuantities(itemsMap) {
+			itemsMap = itemsMap || {};
+			$('.uonix-product-action-wrap').each(function () {
+				var $wrap = $(this);
+				var pid = $wrap.attr('data-product-id');
+				if (pid) {
+					var qty = itemsMap[pid] ? parseInt(itemsMap[pid], 10) : 0;
+					var currentQty = parseInt($wrap.attr('data-qty') || '0', 10);
+					if (qty !== currentQty) {
+						updateControlState($wrap, qty);
+					}
+				}
+			});
+		}
+
+		// Consulta debounced das quantidades reais do carrinho via endpoint AJAX leve
+		var fetchDebounceTimer = null;
+		function fetchCartQuantitiesDebounced() {
+			clearTimeout(fetchDebounceTimer);
+			fetchDebounceTimer = setTimeout(function () {
+				$.ajax({
+					url: (window.uonixLoopCartParams && window.uonixLoopCartParams.ajax_url) || '/wp-admin/admin-ajax.php',
+					type: 'GET',
+					dataType: 'json',
+					data: {
+						action: 'uonix_get_cart_quantities'
+					},
+					success: function (res) {
+						if (res && res.success && res.data) {
+							applyCartQuantities(res.data.items);
+							if (typeof window.syncUonixCart === 'function') {
+								window.syncUonixCart();
+							}
+						}
+					}
+				});
+			}, 100);
+		}
+
+		// 1. Intercepta requisições de Store API do WooCommerce Blocks (mini-cart drawer)
+		if (window.fetch) {
+			var origFetch = window.fetch;
+			window.fetch = function () {
+				var args = arguments;
+				var url = (args && args[0]) ? (typeof args[0] === 'string' ? args[0] : args[0].url) : '';
+				var promise = origFetch.apply(this, args);
+
+				if (url && (url.indexOf('/wc/store/') !== -1 || url.indexOf('wc/store/v1/cart') !== -1)) {
+					promise.then(function (response) {
+						if (response && response.ok) {
+							try {
+								response.clone().json().then(function (data) {
+									if (data && data.items && Array.isArray(data.items)) {
+										var itemsMap = {};
+										data.items.forEach(function (item) {
+											var pid = item.id;
+											var qty = parseInt(item.quantity, 10) || 0;
+											if (pid) {
+												itemsMap[pid] = (itemsMap[pid] || 0) + qty;
+											}
+										});
+										applyCartQuantities(itemsMap);
+									} else {
+										fetchCartQuantitiesDebounced();
+									}
+								}).catch(function () {
+									fetchCartQuantitiesDebounced();
+								});
+							} catch (e) {
+								fetchCartQuantitiesDebounced();
+							}
+						}
+					});
+				}
+				return promise;
+			};
+		}
+
+		// 2. Integração com o dispatcher de State do WooCommerce Blocks (@wordpress/data)
+		if (window.wp && window.wp.data && typeof window.wp.data.subscribe === 'function') {
+			try {
+				var previousCartHash = null;
+				window.wp.data.subscribe(function () {
+					var cartSelect = window.wp.data.select('wc/store/cart');
+					if (cartSelect && typeof cartSelect.getCartData === 'function') {
+						var cartData = cartSelect.getCartData();
+						if (cartData && cartData.items) {
+							var currentHash = JSON.stringify(cartData.items.map(function (i) { return i.id + ':' + i.quantity; }));
+							if (currentHash !== previousCartHash) {
+								previousCartHash = currentHash;
+								var itemsMap = {};
+								cartData.items.forEach(function (item) {
+									var pid = item.id;
+									var qty = parseInt(item.quantity, 10) || 0;
+									if (pid) {
+										itemsMap[pid] = (itemsMap[pid] || 0) + qty;
+									}
+								});
+								applyCartQuantities(itemsMap);
+							}
+						}
+					}
+				});
+			} catch (e) {}
+		}
+
+		// 3. Monitora eventos clássicos do WooCommerce
+		$(document.body).on(
+			'added_to_cart removed_from_cart updated_cart_totals updated_checkout wc_fragments_refreshed wc_fragments_loaded',
+			function () {
+				fetchCartQuantitiesDebounced();
+			}
+		);
+
+		// 4. Delegação em botões de exclusão e alteração do mini-cart drawer
+		$(document).on('click', '.wc-block-mini-cart__drawer button, .wc-block-cart-item__remove-link, .woocommerce-mini-cart .remove', function () {
+			setTimeout(fetchCartQuantitiesDebounced, 250);
+		});
+
+		// 5. Atualiza ao recuperar foco da janela/aba
+		window.addEventListener('focus', function () {
+			fetchCartQuantitiesDebounced();
+		});
+		window.addEventListener('pageshow', function () {
+			fetchCartQuantitiesDebounced();
+		});
 
 		function sendCartRequest($wrap, actionType) {
 			if ($wrap.hasClass('is-loading')) {
@@ -280,6 +440,11 @@ function uonix_loop_cart_scripts() {
 			e.preventDefault();
 			var $wrap = $(this).closest('.uonix-product-action-wrap');
 			sendCartRequest($wrap, 'increment');
+		});
+
+		// Consulta inicial para garantir consistência
+		$(document).ready(function () {
+			fetchCartQuantitiesDebounced();
 		});
 
 	})(jQuery);
