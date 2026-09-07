@@ -198,20 +198,20 @@ if ($GLOBALS['_last_cookies_evaluated']['has_consent'] !== false) {
     exit(1);
 }
 
-// CENÁRIO B2: Tentativa de envio com consentimento falso (sem evidência positiva no servidor)
-$_POST = array('comment' => 'Dúvida', 'company' => 'Empresa Fake', 'wp-comment-cookies-consent' => 'yes');
-$_COOKIE = array();
+// CENÁRIO B2: Cookie AdoptConsent isolado NÃO prova consentimento (pode conter opt-outs)
+$_POST = array('comment' => 'Dúvida', 'company' => 'Empresa Sem Prova', 'wp-comment-cookies-consent' => 'yes');
+$_COOKIE = array('AdoptConsent' => 'visitor_choices_recorded_with_opt_outs');
 $GLOBALS['_last_cookies_evaluated'] = null;
 
 $preprocessFilter(array('comment_content' => 'Dúvida'));
 if (isset($_POST['wp-comment-cookies-consent'])) {
-    echo "ERRO FAIL-CLOSED: preprocess_comment não anulou wp-comment-cookies-consent quando o servidor não possui evidência positiva de consentimento!\n";
+    echo "ERRO FAIL-CLOSED: preprocess_comment aceitou AdoptConsent isolado sem prova positiva uonix_consent_granted!\n";
     exit(1);
 }
 
 $setCookiesAction(null, null, false);
 if ($GLOBALS['_last_cookies_evaluated']['has_consent'] !== false) {
-    echo "ERRO FAIL-CLOSED: set_comment_cookies autorizou gravação sem evidência positiva!\n";
+    echo "ERRO FAIL-CLOSED: set_comment_cookies autorizou gravação com AdoptConsent isolado!\n";
     exit(1);
 }
 
@@ -232,7 +232,7 @@ if ($GLOBALS['_last_cookies_evaluated']['has_consent'] !== false) {
     exit(1);
 }
 
-// CENÁRIO B4: Consentimento positivo legítimo (uonix_consent_granted)
+// CENÁRIO B4: Consentimento positivo legítimo First-Party (uonix_consent_granted)
 $_POST = array('comment' => 'Dúvida', 'company' => 'Empresa Aprovada', 'wp-comment-cookies-consent' => 'yes');
 $_COOKIE = array('uonix_consent_granted' => '1');
 $GLOBALS['_last_cookies_evaluated'] = null;
@@ -261,6 +261,7 @@ if (empty($jsMatch[1])) {
 }
 
 $jsCode = $jsMatch[1];
+$jsCode = preg_replace('/<\?php.*?\?>/s', json_encode(array('funcional', 'preferences', 'functional', 'uonix_cookies')), $jsCode);
 $encodedJs = json_encode($jsCode);
 
 $nodeTestScript = <<<NODE_JS
@@ -273,6 +274,20 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}) {
     const storage = Object.assign({}, initialStorage);
     const eventListeners = {};
 
+    function HTMLFormElement() {}
+    const commentFormChildren = [];
+    const commentForm = Object.create(HTMLFormElement.prototype);
+    commentForm.id = 'commentform';
+    commentForm.classList = { contains: (c) => c === 'comment-form' };
+    commentForm.children = commentFormChildren;
+    commentForm.appendChild = function(el) { commentFormChildren.push(el); };
+    commentForm.querySelector = function(sel) {
+        if (sel.includes('wp-comment-cookies-consent')) {
+            return commentFormChildren.find(c => c.name === 'wp-comment-cookies-consent') || null;
+        }
+        return null;
+    };
+
     const doc = {
         get cookie() { return cookieStr; },
         set cookie(val) {
@@ -283,12 +298,22 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}) {
             if (val.includes('max-age=0')) {
                 cookieStr = cookieStr.split(';').filter(c => !c.trim().startsWith(k + '=')).join('; ');
             } else {
-                doc.cookie = k + '=' + v; // remove old
+                cookieStr = cookieStr.split(';').filter(c => !c.trim().startsWith(k + '=')).join('; ');
                 cookieStr = (cookieStr ? cookieStr + '; ' : '') + k + '=' + v;
             }
         },
         querySelectorAll: function(sel) {
+            if (sel.includes('wp-comment-cookies-consent')) {
+                return commentFormChildren.filter(c => c.name === 'wp-comment-cookies-consent');
+            }
             return [];
+        },
+        querySelector: function(sel) {
+            if (sel === '#commentform') return commentForm;
+            return null;
+        },
+        createElement: function(tag) {
+            return { tagName: tag.toUpperCase(), type: '', name: '', value: '' };
         },
         addEventListener: function(evt, handler) {
             eventListeners[evt] = eventListeners[evt] || [];
@@ -316,42 +341,72 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}) {
         Event: function(name) { this.name = name; }
     };
     win.window = win;
+    win.HTMLFormElement = HTMLFormElement;
 
     const context = vm.createContext(win);
     vm.runInContext(CODE_PAYLOAD, context);
 
-    return { win, doc, storage, eventListeners };
+    function triggerSubmit(form) {
+        const handlers = eventListeners['submit'] || [];
+        handlers.forEach(h => h({ target: form, preventDefault: () => {} }));
+    }
+
+    return { win, doc, storage, eventListeners, commentForm, triggerSubmit };
 }
 
-// F1: Com _adoptReject em localStorage -> isAdoptConsentGranted DEVE ser false
+// F1: Callback oficial da AdOpt com Opt-Out na categoria funcional -> Negação fail-closed
 {
-    const { win } = runTestEnvironment('', { '_adoptReject': '1' });
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F1: isAdoptConsentGranted deveria ser false com recusa em localStorage');
+    const { win, doc, commentForm, triggerSubmit } = runTestEnvironment('', {});
+    assert.strictEqual(typeof win.adoptCB, 'function', 'F1: window.adoptCB deve ser uma função registrada');
+
+    win.adoptCB({ optInTags: ['marketing'], optOutTags: ['funcional'] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F1a: isAdoptConsentGranted deve ser false quando funcional está em optOutTags');
+    assert.strictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1, 'F1b: uonix_consent_granted NÃO deve ser emitido');
+
+    triggerSubmit(commentForm);
+    assert.strictEqual(commentForm.querySelector('input[name="wp-comment-cookies-consent"]'), null, 'F1c: wp-comment-cookies-consent NÃO deve ser injetado');
 }
 
-// F2: Visita inicial (sem cookie e sem storage) -> isAdoptConsentGranted DEVE ser false (fail-closed)
+// F2: Callback oficial da AdOpt com Opt-In na categoria funcional -> Autorização legítima
 {
-    const { win } = runTestEnvironment('', {});
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F2: isAdoptConsentGranted deveria ser false em visita limpa');
+    const { win, doc, commentForm, triggerSubmit } = runTestEnvironment('', {});
+    win.adoptCB({ optInTags: ['funcional'], optOutTags: [] });
+
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F2a: isAdoptConsentGranted deve ser true quando funcional está em optInTags');
+    assert.notStrictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1, 'F2b: uonix_consent_granted DEVE ser gravado no cookie');
+
+    triggerSubmit(commentForm);
+    const consentInput = commentForm.querySelector('input[name="wp-comment-cookies-consent"]');
+    assert.notStrictEqual(consentInput, null, 'F2c: wp-comment-cookies-consent DEVE ser injetado no commentform');
+    assert.strictEqual(consentInput.value, 'yes', 'F2d: valor do consentimento deve ser yes');
 }
 
-// F3: Consentimento positivo em cookie ou storage -> isAdoptConsentGranted DEVE ser true
+// F3: Reversão subsequente para Opt-Out expurga dados salvos e cookies
 {
-    const { win } = runTestEnvironment('AdoptConsent=abc', {});
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F3a: isAdoptConsentGranted deveria ser true com AdoptConsent');
-}
-{
-    const { win } = runTestEnvironment('', { 'uonix_consent_granted': '1' });
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F3b: isAdoptConsentGranted deveria ser true com uonix_consent_granted no storage');
+    const { win, doc, storage } = runTestEnvironment('uonix_consent_granted=1', { 'uonix_user_lead': '{"nome":"Teste"}' });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F3a: Inicialmente autorizado');
+
+    win.adoptCB({ optInTags: [], optOutTags: ['funcional'] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F3b: Após opt-out, isAdoptConsentGranted deve ser false');
+    assert.strictEqual(storage['uonix_user_lead'], undefined, 'F3c: Dados de lead devem ser apagados');
+    assert.strictEqual(doc.cookie.indexOf('uonix_consent_granted='), -1, 'F3d: Cookie uonix_consent_granted deve ser excluído');
+    assert.notStrictEqual(doc.cookie.indexOf('_adoptReject=1'), -1, 'F3e: _adoptReject deve ser gravado');
 }
 
-// F4: markConsentRejected limpa os dados
+// F4: Callback com payload vazio ou categorias não reconhecidas -> Fail-closed
 {
-    const { win, storage } = runTestEnvironment('uonix_consent_granted=1', { 'uonix_user_lead': '{"nome":"Teste"}' });
-    win.uonixMarkConsentRejected();
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F4a: Após markConsentRejected, consentimento deve ser false');
-    assert.strictEqual(storage['uonix_user_lead'], undefined, 'F4b: Dados salvos devem ser excluídos');
-    assert.strictEqual(storage['_adoptReject'], '1', 'F4c: _adoptReject deve ser gravado');
+    const { win, doc } = runTestEnvironment('', {});
+    win.adoptCB({});
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F4a: Payload vazio deve resultar em recusa');
+
+    win.adoptCB({ optInTags: ['categoria_desconhecida'] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F4b: Categoria não reconhecida deve resultar em recusa');
+}
+
+// F5: Mera presença de AdoptConsent em cookie ou storage NÃO autoriza
+{
+    const { win } = runTestEnvironment('AdoptConsent={"choices":"all"}', { 'AdoptConsent': 'true' });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F5: AdoptConsent isolado NÃO deve autorizar persistência');
 }
 
 console.log('NODE_JS_PASS');
