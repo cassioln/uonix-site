@@ -123,6 +123,9 @@ jobs:
       - name: Test SEO Product schema enhancement
         run: php scripts/tests/test-seo-product-schema-enhancement.php
 
+      - name: Test forms global autofill and blog comments AdOpt
+        run: php scripts/tests/test-forms-global-autofill.php
+
       - name: Lint SEO metadata sync script
         run: php -l scripts/apply-seo-metadata-production.php
 

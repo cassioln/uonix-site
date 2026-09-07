@@ -113,7 +113,11 @@ add_filter('comment_form_default_fields', function($fields) {
 
     // Campo Empresa aparece somente para visitantes.
     if (!is_user_logged_in()) {
-        $fields['company'] = '<p class="comment-form-company comment-form-float-label"><input id="company" name="company" type="text" placeholder="Nome da sua empresa" value="" size="30" /><label class="float-label" for="company">Empresa</label></p>';
+        $comment_author_company = '';
+        if (isset($_COOKIE['comment_author_company_' . COOKIEHASH])) {
+            $comment_author_company = sanitize_text_field(wp_unslash($_COOKIE['comment_author_company_' . COOKIEHASH]));
+        }
+        $fields['company'] = '<p class="comment-form-company comment-form-float-label"><input id="company" name="company" type="text" placeholder="Nome da sua empresa" value="' . esc_attr($comment_author_company) . '" size="30" /><label class="float-label" for="company">Empresa</label></p>';
     }
 
     return $fields;
@@ -180,7 +184,8 @@ function uonix_bottom_checkboxes_html($include_cookies = true, $include_newslett
 }
 
 function uonix_bottom_checkboxes_injection() {
-    echo uonix_bottom_checkboxes_html(true, true);
+    // Checkbox nativo de cookies omitido em prol da gestão unificada AdOpt
+    echo uonix_bottom_checkboxes_html(false, true);
 }
 
 // Para usuário logado, injeta Empresa oculta e LGPD depois do campo comentário.
@@ -202,6 +207,15 @@ add_filter('comment_form_field_comment', function($field) {
 // ==============================================================================
 
 add_filter('preprocess_comment', function($commentdata) {
+    // Sincroniza consentimento de cookies se AdOpt não estiver rejeitado
+    if (!is_user_logged_in()) {
+        if (isset($_COOKIE['_adoptReject'])) {
+            unset($_POST['wp-comment-cookies-consent']);
+        } elseif (!isset($_POST['wp-comment-cookies-consent'])) {
+            $_POST['wp-comment-cookies-consent'] = 'yes';
+        }
+    }
+
     if ( ! apply_filters( 'uonix_turnstile_protect_comment_form', true ) ) {
         return $commentdata;
     }
@@ -309,6 +323,29 @@ add_action('comment_post', function($comment_id) {
         }
     }
 });
+
+add_action('set_comment_cookies', function($comment, $user, $cookies_consent = true) {
+    if (is_user_logged_in()) {
+        return;
+    }
+
+    $cookie_hash = COOKIEHASH;
+    $secure = is_ssl();
+
+    if ($cookies_consent && isset($_POST['company'])) {
+        $company = uonix_comment_sync_upper_text(sanitize_text_field(wp_unslash($_POST['company'])));
+        $comment_cookie_lifetime = apply_filters('comment_cookie_lifetime', 30000000);
+        setcookie('comment_author_company_' . $cookie_hash, $company, time() + $comment_cookie_lifetime, COOKIEPATH, COOKIE_DOMAIN, $secure, true);
+        if (COOKIEPATH !== SITECOOKIEPATH) {
+            setcookie('comment_author_company_' . $cookie_hash, $company, time() + $comment_cookie_lifetime, SITECOOKIEPATH, COOKIE_DOMAIN, $secure, true);
+        }
+    } else {
+        setcookie('comment_author_company_' . $cookie_hash, '', time() - 3600, COOKIEPATH, COOKIE_DOMAIN, $secure, true);
+        if (COOKIEPATH !== SITECOOKIEPATH) {
+            setcookie('comment_author_company_' . $cookie_hash, '', time() - 3600, SITECOOKIEPATH, COOKIE_DOMAIN, $secure, true);
+        }
+    }
+}, 10, 3);
 
 // Coluna Empresa na listagem de comentários.
 add_filter('manage_edit-comments_columns', function($cols) {

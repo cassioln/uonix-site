@@ -17,6 +17,7 @@ uonix_mu_require_files(
 		'32-form-newsletter.php',
 		'33-form-trabalhe-conosco.php',
 		'48-form-trabalhe-redirect-autofill.php',
+		'49-forms-global-autofill.php',
 	),
 	'uonix-forms'
 );
