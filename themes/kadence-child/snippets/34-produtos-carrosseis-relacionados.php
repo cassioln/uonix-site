@@ -815,6 +815,20 @@ function uonix_produtos_relacionados_carrossel_mobile() {
             background: #ffffff !important;
             position: relative !important;
             transition: transform 0.3s cubic-bezier(0.17, 0.67, 0.35, 0.95) !important;
+            justify-content: center !important;
+            min-height: 6rem !important;
+        }
+
+        .related.products ul.products li.product .product-details.content-bg.entry-content-wrap,
+        .related.products ul.products li.product .entry-content-wrap,
+        .up-sells.products ul.products li.product .product-details.content-bg.entry-content-wrap,
+        .up-sells.products ul.products li.product .entry-content-wrap,
+        .upsells.products ul.products li.product .product-details.content-bg.entry-content-wrap,
+        .upsells.products ul.products li.product .entry-content-wrap,
+        .cross-sells ul.products li.product .product-details.content-bg.entry-content-wrap,
+        .cross-sells ul.products li.product .entry-content-wrap {
+            justify-content: center !important;
+            min-height: 6rem !important;
         }
 
         .related.products ul.products li.product:hover .product-details,
@@ -919,7 +933,7 @@ function uonix_produtos_relacionados_carrossel_mobile() {
             align-items: center !important;
             justify-content: center !important;
             width: 100% !important;
-            background: #f76a0c !important;
+            background: #0e3780 !important;
             color: #ffffff !important;
             padding: 12px 15px !important;
             font-size: 13px !important;
@@ -933,10 +947,11 @@ function uonix_produtos_relacionados_carrossel_mobile() {
             text-align: center !important;
             line-height: 1.2 !important;
             white-space: normal !important;
-            box-shadow: 0 6px 15px rgba(247, 106, 12, 0.25) !important;
+            box-shadow: none !important;
             text-decoration: none !important;
         }
 
+        /* Mantém o botão com a cor institucional azul quando o hover/foco for no card do produto */
         .related.products ul.products li.product:hover .uonix-details-btn,
         .related.products ul.products li.product:hover .button,
         .up-sells.products ul.products li.product:hover .uonix-details-btn,
@@ -945,6 +960,21 @@ function uonix_produtos_relacionados_carrossel_mobile() {
         .upsells.products ul.products li.product:hover .button,
         .cross-sells ul.products li.product:hover .uonix-details-btn,
         .cross-sells ul.products li.product:hover .button,
+        .related.products ul.products li.product:focus-within .uonix-details-btn,
+        .related.products ul.products li.product:focus-within .button,
+        .up-sells.products ul.products li.product:focus-within .uonix-details-btn,
+        .up-sells.products ul.products li.product:focus-within .button,
+        .upsells.products ul.products li.product:focus-within .uonix-details-btn,
+        .upsells.products ul.products li.product:focus-within .button,
+        .cross-sells ul.products li.product:focus-within .uonix-details-btn,
+        .cross-sells ul.products li.product:focus-within .button {
+            background: #0e3780 !important;
+            color: #ffffff !important;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* O botão fica laranja SOMENTE quando o hover ou foco estiver diretamente sobre ele */
         .related.products ul.products li.product .uonix-details-btn:hover,
         .related.products ul.products li.product .button:hover,
         .up-sells.products ul.products li.product .uonix-details-btn:hover,
@@ -952,11 +982,27 @@ function uonix_produtos_relacionados_carrossel_mobile() {
         .upsells.products ul.products li.product .uonix-details-btn:hover,
         .upsells.products ul.products li.product .button:hover,
         .cross-sells ul.products li.product .uonix-details-btn:hover,
-        .cross-sells ul.products li.product .button:hover {
-            background: #e05e07 !important;
+        .cross-sells ul.products li.product .button:hover,
+        .related.products ul.products li.product .uonix-details-btn:focus,
+        .related.products ul.products li.product .uonix-details-btn:focus-visible,
+        .related.products ul.products li.product .button:focus,
+        .related.products ul.products li.product .button:focus-visible,
+        .up-sells.products ul.products li.product .uonix-details-btn:focus,
+        .up-sells.products ul.products li.product .uonix-details-btn:focus-visible,
+        .up-sells.products ul.products li.product .button:focus,
+        .up-sells.products ul.products li.product .button:focus-visible,
+        .upsells.products ul.products li.product .uonix-details-btn:focus,
+        .upsells.products ul.products li.product .uonix-details-btn:focus-visible,
+        .upsells.products ul.products li.product .button:focus,
+        .upsells.products ul.products li.product .button:focus-visible,
+        .cross-sells ul.products li.product .uonix-details-btn:focus,
+        .cross-sells ul.products li.product .uonix-details-btn:focus-visible,
+        .cross-sells ul.products li.product .button:focus,
+        .cross-sells ul.products li.product .button:focus-visible {
+            background: #f76a0c !important;
             color: #ffffff !important;
             transform: translateY(-2px) !important;
-            box-shadow: 0 8px 20px rgba(247, 106, 12, 0.35) !important;
+            box-shadow: 0 6px 15px rgba(247, 106, 12, 0.25) !important;
         }
 
         /* ==========================================================================
