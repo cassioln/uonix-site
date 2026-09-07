@@ -25,12 +25,15 @@ add_action('wp_footer', function() {
     if (is_admin()) {
         return;
     }
+
+    $allowed_consent_tags = apply_filters( 'uonix_adopt_consent_tags', array( 'funcional', 'preferences', 'functional', 'uonix_cookies' ) );
     ?>
     <script id="uonix-global-autofill-js">
     (function() {
         const STORAGE_KEY = 'uonix_user_lead';
         const COOKIE_KEY = 'uonix_lead_profile';
         const CONSENT_COOKIE = 'uonix_consent_granted';
+        const ALLOWED_TAGS = <?php echo json_encode( array_values( (array) $allowed_consent_tags ) ); ?>;
 
         // 1. Verificação Positiva de Consentimento AdOpt (Fail-Closed)
         function isAdoptConsentGranted() {
@@ -43,9 +46,11 @@ add_action('wp_footer', function() {
                     return false;
                 }
 
-                // Evidência positiva de consentimento emitida pelo fluxo AdOpt / banner
-                const hasCookieConsent = document.cookie.indexOf('AdoptConsent=') !== -1 || document.cookie.indexOf(CONSENT_COOKIE + '=1') !== -1;
-                const hasStorageConsent = !!(window.localStorage && (localStorage.getItem('AdoptConsent') || localStorage.getItem(CONSENT_COOKIE) === '1'));
+                // Evidência positiva First-Party gerada exclusivamente após validação das tags
+                // no callback oficial da AdOpt (window.adoptCB).
+                // O cookie AdoptConsent NUNCA é aceito como autorização pois apenas registra preferências.
+                const hasCookieConsent = document.cookie.indexOf(CONSENT_COOKIE + '=1') !== -1;
+                const hasStorageConsent = !!(window.localStorage && localStorage.getItem(CONSENT_COOKIE) === '1');
 
                 if (hasCookieConsent || hasStorageConsent) {
                     return true;
@@ -279,33 +284,44 @@ add_action('wp_footer', function() {
             saveLeadData(payload);
         }, true);
 
-        // 6. Monitora cliques de aceite ou rejeição no banner da AdOpt
-        document.addEventListener('click', function(e) {
-            const btn = e.target.closest('button, a');
-            if (!btn) return;
-            const txt = (btn.textContent || '').trim();
+        // 6. Integração oficial com a API da AdOpt via window.adoptCB (optInTags / optOutTags)
+        function evaluateAdoptConsent(consent) {
+            if (!consent || typeof consent !== 'object') {
+                markConsentRejected();
+                return false;
+            }
 
-            // Aceite no AdOpt
-            if (btn.id === 'adopt-accept-all-button' || /^aceitar/i.test(txt)) {
+            const optIn = Array.isArray(consent.optInTags) ? consent.optInTags : [];
+            const optOut = Array.isArray(consent.optOutTags) ? consent.optOutTags : [];
+
+            // Se qualquer tag permitida foi explicitamente rejeitada no optOutTags -> REJEITA
+            const isExplicitOptOut = optOut.some(tag => ALLOWED_TAGS.includes(tag));
+            if (isExplicitOptOut) {
+                markConsentRejected();
+                return false;
+            }
+
+            // Exige que ao menos uma das tags permitidas esteja presente no optInTags
+            const isExplicitOptIn = optIn.some(tag => ALLOWED_TAGS.includes(tag));
+            if (isExplicitOptIn) {
                 markConsentGranted();
                 autofillForms();
+                return true;
             }
 
-            // Recusa no AdOpt
-            if (btn.id === 'adopt-reject-all-button' || /rejeitar|recusar|^n[ãa]o\s+vend/i.test(txt)) {
-                markConsentRejected();
-            }
-        });
+            // Fail-closed: se a categoria não estiver autorizada, nega
+            markConsentRejected();
+            return false;
+        }
 
-        // Escuta evento customizado emitido pelo script AdOpt
-        window.addEventListener('adopt-visitor-consent-ready', function() {
-            if (isAdoptConsentGranted()) {
-                markConsentGranted();
-                autofillForms();
-            } else {
-                markConsentRejected();
+        // Registra e encadeia o callback oficial da AdOpt
+        const previousAdoptCB = window.adoptCB;
+        window.adoptCB = function(consent) {
+            if (typeof previousAdoptCB === 'function') {
+                try { previousAdoptCB(consent); } catch (e) {}
             }
-        });
+            evaluateAdoptConsent(consent);
+        };
 
         // 7. Dispara preenchimento na inicialização e quando o modal técnico abrir
         if (document.readyState === 'loading') {
@@ -333,6 +349,7 @@ add_action('wp_footer', function() {
         window.uonixGetSavedLeadData = getSavedLeadData;
         window.uonixAutofillForms = autofillForms;
         window.uonixIsAdoptConsentGranted = isAdoptConsentGranted;
+        window.uonixEvaluateAdoptConsent = evaluateAdoptConsent;
         window.uonixMarkConsentGranted = markConsentGranted;
         window.uonixMarkConsentRejected = markConsentRejected;
     })();

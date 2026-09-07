@@ -212,14 +212,17 @@ add_filter('comment_form_field_comment', function($field) {
  * Em estrita conformidade com a LGPD e política fail-closed:
  * 1. Qualquer sinal de recusa/rejeição (_adoptReject) bloqueia imediatamente.
  * 2. O consentimento NÃO é presumido por silêncio ou ausência de rejeição.
- * 3. O servidor exige evidência positiva de consentimento (cookie AdoptConsent ou uonix_consent_granted).
+ * 3. O cookie de preferências do AdOpt (AdoptConsent) registra escolhas do visitante e pode conter opt-outs;
+ *    por isso, NUNCA é tratado como consentimento positivo por si só.
+ * 4. O servidor exige evidência positiva via cookie First-Party (uonix_consent_granted=1), emitido
+ *    exclusivamente após validação das tags permitidas no callback oficial da AdOpt (window.adoptCB).
  */
 function uonix_comment_has_positive_consent() {
     if (isset($_COOKIE['_adoptReject'])) {
         return false;
     }
 
-    if (!empty($_COOKIE['AdoptConsent']) || !empty($_COOKIE['uonix_consent_granted'])) {
+    if (isset($_COOKIE['uonix_consent_granted']) && '1' === (string) $_COOKIE['uonix_consent_granted']) {
         return true;
     }
 
