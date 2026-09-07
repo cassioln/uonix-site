@@ -338,11 +338,16 @@ add_action('wp_footer', function () {
 
         /* Detalhes do Produto */
         .woocommerce ul.products li.product .product-details {
-            padding: 20px !important;
+            padding: 5px 20px 20px 20px !important;
             display: flex !important;
             flex-direction: column !important;
             flex: 1 !important;
             background: #ffffff !important;
+        }
+
+        .product-details.content-bg.entry-content-wrap {
+            justify-content: center !important;
+            min-height: 6rem !important;
         }
 
         /* Título do Produto */
@@ -350,7 +355,7 @@ add_action('wp_footer', function () {
             font-size: 18px !important;
             font-weight: 800 !important;
             line-height: 1.2 !important;
-            margin: 0 0 12px 0 !important;
+            margin: 0 0 0 0 !important;
             text-align: left !important;
         }
 
@@ -374,10 +379,39 @@ add_action('wp_footer', function () {
             display: none !important;
         }
 
-        /* Botão "Ver Detalhes" */
+        /* Botão "Ver Detalhes" / Ação do Produto (Aparece no foco/hover, idêntico aos produtos relacionados) */
+        .woocommerce ul.products li.product .entry-content-wrap,
+        .woocommerce ul.products li.product .product-details {
+            transition: transform 0.3s cubic-bezier(0.17, 0.67, 0.35, 0.95) !important;
+        }
+
+        .woocommerce ul.products li.product:hover .entry-content-wrap,
+        .woocommerce ul.products li.product:hover .product-details,
+        .woocommerce ul.products li.product:focus-within .entry-content-wrap,
+        .woocommerce ul.products li.product:focus-within .product-details {
+            transform: translateY(-2rem) !important;
+        }
+
         .woocommerce ul.products li.product .product-action-wrap {
-            margin-top: auto !important;
-            width: 100% !important;
+            position: absolute !important;
+            bottom: -2rem !important;
+            left: 0 !important;
+            right: 0 !important;
+            width: auto !important;
+            padding: 0 1rem !important;
+            margin-top: 0 !important;
+            opacity: 0 !important;
+            visibility: visible !important;
+            pointer-events: none !important;
+            transition: opacity 0.3s cubic-bezier(0.17, 0.67, 0.35, 0.95), bottom 0.3s cubic-bezier(0.17, 0.67, 0.35, 0.95) !important;
+            z-index: 5 !important;
+        }
+
+        .woocommerce ul.products li.product:hover .product-action-wrap,
+        .woocommerce ul.products li.product:focus-within .product-action-wrap {
+            bottom: -0.8rem !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
         }
 
         .woocommerce ul.products li.product .uonix-details-btn {
@@ -397,8 +431,26 @@ add_action('wp_footer', function () {
             transition: all 0.3s ease !important;
         }
 
+        /* Mantém o botão com a cor institucional azul quando o hover/foco for no card do produto */
         .woocommerce ul.products li.product:hover .uonix-details-btn,
-        .woocommerce ul.products li.product .uonix-details-btn:hover {
+        .woocommerce ul.products li.product:focus-within .uonix-details-btn {
+            background: #0e3780 !important;
+            color: #ffffff !important;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* O botão fica laranja SOMENTE quando o hover ou foco estiver diretamente sobre ele */
+        .woocommerce ul.products li.product .uonix-details-btn:hover,
+        .woocommerce ul.products li.product a.uonix-details-btn:hover,
+        .woocommerce ul.products li.product:hover .uonix-details-btn:hover,
+        .woocommerce ul.products li.product:hover a.uonix-details-btn:hover,
+        .woocommerce ul.products li.product .uonix-details-btn:focus,
+        .woocommerce ul.products li.product a.uonix-details-btn:focus,
+        .woocommerce ul.products li.product:hover .uonix-details-btn:focus,
+        .woocommerce ul.products li.product .uonix-details-btn:focus-visible,
+        .woocommerce ul.products li.product a.uonix-details-btn:focus-visible,
+        .woocommerce ul.products li.product:hover .uonix-details-btn:focus-visible {
             background: #f76a0c !important;
             color: #ffffff !important;
             transform: translateY(-2px) !important;
