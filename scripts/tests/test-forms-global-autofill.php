@@ -114,6 +114,11 @@ if (!function_exists('add_action')) {
 
 if (!function_exists('apply_filters')) {
     function apply_filters($hook, $value, ...$args) {
+        if (!empty($GLOBALS['_mock_filters'][$hook])) {
+            foreach ($GLOBALS['_mock_filters'][$hook] as $cb) {
+                $value = $cb($value, ...$args);
+            }
+        }
         return $value;
     }
 }
@@ -249,6 +254,33 @@ if ($GLOBALS['_last_cookies_evaluated']['has_consent'] !== true) {
     exit(1);
 }
 
+// CENÁRIO B5: Validação de IDs de tags da AdOpt (Nomes de categorias descartados)
+require_once $rootDir . '/mu-plugins/uonix-forms/49-forms-global-autofill.php';
+
+if (!function_exists('uonix_adopt_get_consent_tag_ids')) {
+    echo "ERRO: Função uonix_adopt_get_consent_tag_ids não foi declarada em 49-forms-global-autofill.php\n";
+    exit(1);
+}
+
+// Prova que defaults textuais genéricos NUNCA são tratados como IDs válidos
+$fakeFilter = function() { return array('funcional', 'preferences', 'functional', 'uonix_cookies'); };
+$GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids'] = array($fakeFilter);
+$idsFromText = uonix_adopt_get_consent_tag_ids();
+if (!empty($idsFromText)) {
+    echo "ERRO FAIL-CLOSED: uonix_adopt_get_consent_tag_ids aceitou nomes genéricos de categorias como se fossem IDs!\n";
+    exit(1);
+}
+
+// Prova que fixture com UUID realista da AdOpt é aceita e normalizada
+$uuidFilter = function() { return array('6332f834-41df-4cc5-a3bf-dffe359112c5', 'funcional'); };
+$GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids'] = array($uuidFilter);
+$idsFromUuid = uonix_adopt_get_consent_tag_ids();
+if ($idsFromUuid !== array('6332f834-41df-4cc5-a3bf-dffe359112c5')) {
+    echo "ERRO: uonix_adopt_get_consent_tag_ids deveria validar e retornar exclusivamente o UUID realista configurado!\n";
+    exit(1);
+}
+unset($GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids']);
+
 // ==============================================================================
 // 3. VALIDAÇÃO COMPORTAMENTAL DO FRONTEND VIA NODE.JS (SIMULAÇÃO DOM & ADOPT)
 // ==============================================================================
@@ -261,15 +293,16 @@ if (empty($jsMatch[1])) {
 }
 
 $jsCode = $jsMatch[1];
-$jsCode = preg_replace('/<\?php.*?\?>/s', json_encode(array('funcional', 'preferences', 'functional', 'uonix_cookies')), $jsCode);
+$jsCode = preg_replace('/<\?php.*?\?>/s', '(typeof __TEST_ALLOWED_TAG_IDS__ !== "undefined" ? __TEST_ALLOWED_TAG_IDS__ : ["6332f834-41df-4cc5-a3bf-dffe359112c5"])', $jsCode);
 $encodedJs = json_encode($jsCode);
 
 $nodeTestScript = <<<NODE_JS
 const vm = require('vm');
 const assert = require('assert');
 const CODE_PAYLOAD = $encodedJs;
+const FIXTURE_TAG_ID = '6332f834-41df-4cc5-a3bf-dffe359112c5';
 
-function runTestEnvironment(initialCookie = '', initialStorage = {}) {
+function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagIds = [FIXTURE_TAG_ID]) {
     let cookieStr = initialCookie;
     const storage = Object.assign({}, initialStorage);
     const eventListeners = {};
@@ -342,6 +375,7 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}) {
     };
     win.window = win;
     win.HTMLFormElement = HTMLFormElement;
+    win.__TEST_ALLOWED_TAG_IDS__ = allowedTagIds;
 
     const context = vm.createContext(win);
     vm.runInContext(CODE_PAYLOAD, context);
@@ -354,59 +388,66 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}) {
     return { win, doc, storage, eventListeners, commentForm, triggerSubmit };
 }
 
-// F1: Callback oficial da AdOpt com Opt-Out na categoria funcional -> Negação fail-closed
+// F1: Fixture com UUID realista configurado como ID autorizado concede consentimento
 {
     const { win, doc, commentForm, triggerSubmit } = runTestEnvironment('', {});
     assert.strictEqual(typeof win.adoptCB, 'function', 'F1: window.adoptCB deve ser uma função registrada');
 
-    win.adoptCB({ optInTags: ['marketing'], optOutTags: ['funcional'] });
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F1a: isAdoptConsentGranted deve ser false quando funcional está em optOutTags');
-    assert.strictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1, 'F1b: uonix_consent_granted NÃO deve ser emitido');
-
-    triggerSubmit(commentForm);
-    assert.strictEqual(commentForm.querySelector('input[name="wp-comment-cookies-consent"]'), null, 'F1c: wp-comment-cookies-consent NÃO deve ser injetado');
-}
-
-// F2: Callback oficial da AdOpt com Opt-In na categoria funcional -> Autorização legítima
-{
-    const { win, doc, commentForm, triggerSubmit } = runTestEnvironment('', {});
-    win.adoptCB({ optInTags: ['funcional'], optOutTags: [] });
-
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F2a: isAdoptConsentGranted deve ser true quando funcional está em optInTags');
-    assert.notStrictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1, 'F2b: uonix_consent_granted DEVE ser gravado no cookie');
+    win.adoptCB({ optInTags: [FIXTURE_TAG_ID], optOutTags: [] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F1a: isAdoptConsentGranted deve ser true para UUID autorizado em optInTags');
+    assert.notStrictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1, 'F1b: uonix_consent_granted DEVE ser gravado');
 
     triggerSubmit(commentForm);
     const consentInput = commentForm.querySelector('input[name="wp-comment-cookies-consent"]');
-    assert.notStrictEqual(consentInput, null, 'F2c: wp-comment-cookies-consent DEVE ser injetado no commentform');
-    assert.strictEqual(consentInput.value, 'yes', 'F2d: valor do consentimento deve ser yes');
+    assert.notStrictEqual(consentInput, null, 'F1c: wp-comment-cookies-consent DEVE ser injetado no commentform');
+    assert.strictEqual(consentInput.value, 'yes', 'F1d: valor do consentimento deve ser yes');
 }
 
-// F3: Reversão subsequente para Opt-Out expurga dados salvos e cookies
+// F2: UUID desconhecido em optInTags nega consentimento (fail-closed)
+{
+    const { win, doc, commentForm, triggerSubmit } = runTestEnvironment('', {});
+    win.adoptCB({ optInTags: ['b9a1e041-0000-4000-8000-000000000000'], optOutTags: [] });
+
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F2a: UUID desconhecido NÃO deve autorizar');
+    assert.strictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1, 'F2b: uonix_consent_granted NÃO deve ser emitido');
+
+    triggerSubmit(commentForm);
+    assert.strictEqual(commentForm.querySelector('input[name="wp-comment-cookies-consent"]'), null, 'F2c: wp-comment-cookies-consent NÃO deve ser injetado');
+}
+
+// F3: Defaults textuais genéricos em optInTags (ex: 'funcional') NÃO são tratados como IDs e são negados
+{
+    const { win, doc, commentForm, triggerSubmit } = runTestEnvironment('', {});
+    win.adoptCB({ optInTags: ['funcional', 'preferences'], optOutTags: [] });
+
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F3a: Defaults textuais NÃO são IDs válidos e devem ser negados');
+    triggerSubmit(commentForm);
+    assert.strictEqual(commentForm.querySelector('input[name="wp-comment-cookies-consent"]'), null, 'F3b: Sem injeção de consentimento');
+}
+
+// F4: Ambiente sem IDs autorizados configurados (ALLOWED_TAG_IDS = []) opera estritamente fail-closed
+{
+    const { win, doc } = runTestEnvironment('', {}, []);
+    win.adoptCB({ optInTags: [FIXTURE_TAG_ID], optOutTags: [] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F4: Sem IDs configurados no ambiente deve sempre negar');
+}
+
+// F5: Opt-Out no UUID autorizado expurga dados salvos e cookies
 {
     const { win, doc, storage } = runTestEnvironment('uonix_consent_granted=1', { 'uonix_user_lead': '{"nome":"Teste"}' });
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F3a: Inicialmente autorizado');
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F5a: Inicialmente autorizado');
 
-    win.adoptCB({ optInTags: [], optOutTags: ['funcional'] });
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F3b: Após opt-out, isAdoptConsentGranted deve ser false');
-    assert.strictEqual(storage['uonix_user_lead'], undefined, 'F3c: Dados de lead devem ser apagados');
-    assert.strictEqual(doc.cookie.indexOf('uonix_consent_granted='), -1, 'F3d: Cookie uonix_consent_granted deve ser excluído');
-    assert.notStrictEqual(doc.cookie.indexOf('_adoptReject=1'), -1, 'F3e: _adoptReject deve ser gravado');
+    win.adoptCB({ optInTags: [], optOutTags: [FIXTURE_TAG_ID] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F5b: Após opt-out, isAdoptConsentGranted deve ser false');
+    assert.strictEqual(storage['uonix_user_lead'], undefined, 'F5c: Dados de lead devem ser apagados');
+    assert.strictEqual(doc.cookie.indexOf('uonix_consent_granted='), -1, 'F5d: Cookie uonix_consent_granted deve ser excluído');
+    assert.notStrictEqual(doc.cookie.indexOf('_adoptReject=1'), -1, 'F5e: _adoptReject deve ser gravado');
 }
 
-// F4: Callback com payload vazio ou categorias não reconhecidas -> Fail-closed
-{
-    const { win, doc } = runTestEnvironment('', {});
-    win.adoptCB({});
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F4a: Payload vazio deve resultar em recusa');
-
-    win.adoptCB({ optInTags: ['categoria_desconhecida'] });
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F4b: Categoria não reconhecida deve resultar em recusa');
-}
-
-// F5: Mera presença de AdoptConsent em cookie ou storage NÃO autoriza
+// F6: Mera presença de AdoptConsent em cookie ou storage NÃO autoriza
 {
     const { win } = runTestEnvironment('AdoptConsent={"choices":"all"}', { 'AdoptConsent': 'true' });
-    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F5: AdoptConsent isolado NÃO deve autorizar persistência');
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F6: AdoptConsent isolado NÃO deve autorizar persistência');
 }
 
 console.log('NODE_JS_PASS');
@@ -423,5 +464,5 @@ if (trim($output) !== 'NODE_JS_PASS') {
     exit(1);
 }
 
-echo "SUCESSO: Todos os testes comportamentais de backend (fail-closed) e frontend (DOM/AdOpt) passaram com 100% de precisão!\n";
+echo "SUCESSO: Todos os testes comportamentais de backend (fail-closed) e frontend (DOM/AdOpt com UUIDs reais) passaram com 100% de precisão!\n";
 exit(0);
