@@ -21,23 +21,73 @@ if ( ! defined( 'ABSPATH' ) ) {
  *    nenhum dado é salvo no navegador e nenhum cookie de comentário é autorizado.
  */
 
+if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
+    /**
+     * Obtém e valida a lista de IDs de tags da AdOpt que autorizam a persistência de formulários.
+     *
+     * A API oficial da AdOpt entrega UUIDs/IDs em optInTags e optOutTags.
+     * Nomes textuais de categoria (ex: 'funcional', 'preferences') NÃO são IDs e são descartados.
+     * Se nenhum ID válido for configurado no ambiente, o sistema opera estritamente fail-closed.
+     *
+     * @return array
+     */
+    function uonix_adopt_get_consent_tag_ids() {
+        $raw_ids = defined( 'UONIX_ADOPT_CONSENT_TAG_IDS' ) ? UONIX_ADOPT_CONSENT_TAG_IDS : array();
+        if ( is_string( $raw_ids ) ) {
+            $raw_ids = array_map( 'trim', explode( ',', $raw_ids ) );
+        } elseif ( ! is_array( $raw_ids ) ) {
+            $raw_ids = array();
+        }
+
+        $raw_ids = apply_filters( 'uonix_adopt_consent_tag_ids', $raw_ids );
+        if ( ! is_array( $raw_ids ) ) {
+            return array();
+        }
+
+        $valid_ids = array();
+        foreach ( $raw_ids as $id ) {
+            $id = trim( (string) $id );
+            if ( '' === $id ) {
+                continue;
+            }
+
+            // Descarta explicitamente nomes de categoria genéricos
+            if ( in_array( strtolower( $id ), array( 'funcional', 'preferences', 'functional', 'uonix_cookies', 'marketing', 'analytics', 'necessario', 'essential' ), true ) ) {
+                continue;
+            }
+
+            // Exige formato de ID de tag realista (UUID com 36 caracteres ou identificador alfanumérico com hífen)
+            if ( preg_match( '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $id ) || preg_match( '/^[a-zA-Z0-9_-]{12,}$/', $id ) ) {
+                $valid_ids[] = strtolower( $id );
+            }
+        }
+
+        return array_values( array_unique( $valid_ids ) );
+    }
+}
+
 add_action('wp_footer', function() {
     if (is_admin()) {
         return;
     }
 
-    $allowed_consent_tags = apply_filters( 'uonix_adopt_consent_tags', array( 'funcional', 'preferences', 'functional', 'uonix_cookies' ) );
+    $allowed_tag_ids = uonix_adopt_get_consent_tag_ids();
     ?>
     <script id="uonix-global-autofill-js">
     (function() {
         const STORAGE_KEY = 'uonix_user_lead';
         const COOKIE_KEY = 'uonix_lead_profile';
         const CONSENT_COOKIE = 'uonix_consent_granted';
-        const ALLOWED_TAGS = <?php echo json_encode( array_values( (array) $allowed_consent_tags ) ); ?>;
+        const ALLOWED_TAG_IDS = <?php echo json_encode( $allowed_tag_ids ); ?>;
 
         // 1. Verificação Positiva de Consentimento AdOpt (Fail-Closed)
         function isAdoptConsentGranted() {
             try {
+                // Se não houver IDs válidos configurados no ambiente, nega (fail-closed)
+                if (!Array.isArray(ALLOWED_TAG_IDS) || ALLOWED_TAG_IDS.length === 0) {
+                    return false;
+                }
+
                 // Bloqueio absoluto se houver sinal de recusa em cookie ou localStorage
                 if (document.cookie.indexOf('_adoptReject=') !== -1) {
                     return false;
@@ -46,7 +96,7 @@ add_action('wp_footer', function() {
                     return false;
                 }
 
-                // Evidência positiva First-Party gerada exclusivamente após validação das tags
+                // Evidência positiva First-Party gerada exclusivamente após validação dos IDs autorizados
                 // no callback oficial da AdOpt (window.adoptCB).
                 // O cookie AdoptConsent NUNCA é aceito como autorização pois apenas registra preferências.
                 const hasCookieConsent = document.cookie.indexOf(CONSENT_COOKIE + '=1') !== -1;
@@ -286,30 +336,30 @@ add_action('wp_footer', function() {
 
         // 6. Integração oficial com a API da AdOpt via window.adoptCB (optInTags / optOutTags)
         function evaluateAdoptConsent(consent) {
-            if (!consent || typeof consent !== 'object') {
+            if (!consent || typeof consent !== 'object' || !Array.isArray(ALLOWED_TAG_IDS) || ALLOWED_TAG_IDS.length === 0) {
                 markConsentRejected();
                 return false;
             }
 
-            const optIn = Array.isArray(consent.optInTags) ? consent.optInTags : [];
-            const optOut = Array.isArray(consent.optOutTags) ? consent.optOutTags : [];
+            const optIn = Array.isArray(consent.optInTags) ? consent.optInTags.map(t => String(t).toLowerCase()) : [];
+            const optOut = Array.isArray(consent.optOutTags) ? consent.optOutTags.map(t => String(t).toLowerCase()) : [];
 
-            // Se qualquer tag permitida foi explicitamente rejeitada no optOutTags -> REJEITA
-            const isExplicitOptOut = optOut.some(tag => ALLOWED_TAGS.includes(tag));
+            // Se qualquer ID de tag autorizada foi explicitamente rejeitado no optOutTags -> REJEITA
+            const isExplicitOptOut = optOut.some(id => ALLOWED_TAG_IDS.includes(id));
             if (isExplicitOptOut) {
                 markConsentRejected();
                 return false;
             }
 
-            // Exige que ao menos uma das tags permitidas esteja presente no optInTags
-            const isExplicitOptIn = optIn.some(tag => ALLOWED_TAGS.includes(tag));
+            // Exige que ao menos um ID de tag autorizada esteja presente no optInTags
+            const isExplicitOptIn = optIn.some(id => ALLOWED_TAG_IDS.includes(id));
             if (isExplicitOptIn) {
                 markConsentGranted();
                 autofillForms();
                 return true;
             }
 
-            // Fail-closed: se a categoria não estiver autorizada, nega
+            // Fail-closed: se nenhum ID autorizado foi concedido, nega
             markConsentRejected();
             return false;
         }
