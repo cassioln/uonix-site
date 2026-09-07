@@ -27,12 +27,27 @@ As constantes devem ser definidas na configuração privada de cada ambiente, nu
 
 | Ambiente | Constantes/políticas obrigatórias |
 |---|---|
-| Produção | `WP_ENVIRONMENT_TYPE=production`; `WP_HOME` e `WP_SITEURL` apontam para `https://uonix.com.br`; `UONIX_ALLOW_INDEXING=true`; `UONIX_ANALYTICS_ENABLED=true`. Somente este ambiente pode receber IDs de analytics. **`WP_HOME`/`WP_SITEURL` são constantes**: `wp option update home` NÃO tem efeito enquanto elas existirem — o valor da constante sempre vence sobre o banco. Em troca de domínio, editar `wp-config.php` primeiro e depois corrigir o banco com `UPDATE` SQL direto. |
+| Produção | `WP_ENVIRONMENT_TYPE=production`; `WP_HOME` e `WP_SITEURL` apontam para `https://uonix.com.br`; `UONIX_ALLOW_INDEXING=true`; `UONIX_ANALYTICS_ENABLED=true`. Somente este ambiente pode receber IDs de analytics e AdOpt (`UONIX_ADOPT_WEBSITE_ID` e `UONIX_ADOPT_CONSENT_TAG_IDS`). **`WP_HOME`/`WP_SITEURL` são constantes**: `wp option update home` NÃO tem efeito enquanto elas existirem — o valor da constante sempre vence sobre o banco. Em troca de domínio, editar `wp-config.php` primeiro e depois corrigir o banco com `UPDATE` SQL direto. |
 | QA | `WP_ENVIRONMENT_TYPE=staging`; URL canônica `https://uonix.ksio.dev`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; caixa segura não produtiva e Turnstile de teste definidos fora do repositório. |
 | DEV | `WP_ENVIRONMENT_TYPE=development`; URL canônica `https://test.uonix.ksio.dev`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; caixa segura não produtiva e Turnstile de teste definidos fora do repositório. |
 | Local | `WP_ENVIRONMENT_TYPE=local`; URL canônica `http://localhost:8080`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; Mailpit ativo e Turnstile desligado. |
 
 Não declarar IDs GTM, GA4 ou AdOpt em QA, DEV ou local. Os identificadores de analytics, a configuração SMTP e as chaves Turnstile são dados por ambiente e não pertencem a arquivos versionados.
+
+### Provisionamento e Rotação: Tags AdOpt (`UONIX_ADOPT_CONSENT_TAG_IDS`)
+
+- **Localização:** Declarado exclusivamente no `wp-config.php` fora do Git (em Produção).
+- **Formato:** String separada por vírgula de UUIDs reais das tags da AdOpt responsáveis por persistência/cookies de funcionalidade (ex: `define( 'UONIX_ADOPT_CONSENT_TAG_IDS', '6332f834-41df-4cc5-a3bf-dffe359112c5' );`).
+- **Política Fail-Closed:** Se a constante não estiver declarada ou nenhum UUID for válido, o sistema opera estritamente sem persistência de dados no navegador.
+- **Procedimento de Rotação:**
+  1. No painel AdOpt (`app.goadopt.io`), identificar o novo UUID da tag.
+  2. No `wp-config.php`, incluir o novo UUID concatenado com o anterior: `define( 'UONIX_ADOPT_CONSENT_TAG_IDS', 'novo-uuid,antigo-uuid' );`.
+  3. Executar `wp cache flush` para aplicar.
+  4. Após o período de transição, remover o UUID antigo mantendo apenas o novo.
+- **Verificação Segura no Runtime (sem expor segredos):**
+  ```bash
+  wp eval 'echo defined("UONIX_ADOPT_CONSENT_TAG_IDS") ? "PRESENTE: tags=" . count(uonix_adopt_get_consent_tag_ids()) . " hash=" . substr(hash("sha256", UONIX_ADOPT_CONSENT_TAG_IDS), 0, 8) : "0";'
+  ```
 
 ## Contrato de clone
 
