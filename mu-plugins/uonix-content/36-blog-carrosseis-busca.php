@@ -27,32 +27,84 @@ if ( ! defined( 'ABSPATH' ) ) {
 // -----------------------------------------------------------------------------
 
 /**
- * Scroll Suave e Autopreenchimento do Formulário na mesma página
- */
-/**
- * UÔNIX: Autopreenchimento do Formulário via Link (Mantendo o Scroll Nativo do Tema)
+ * Scroll Suave e Autopreenchimento do Formulário via Link / URL
+ * Suporta navegação entre páginas e mesma página com ?assunto= e âncoras #contato e #lgpd.
  */
 add_action('wp_footer', function() {
     ?>
     <script>
     jQuery(document).ready(function($) {
-        
-        // Fica de olho apenas nos links que têm o ?assunto= e vão para o #contato
-        $('a[href*="?assunto="][href*="#contato"]').on('click', function() {
-            
-            // Se o formulário estiver na tela, faz o preenchimento invisível:
-            if ($('#ff_3_3_form_assunto').length) {
-                var href = $(this).attr('href');
-                var parametro = href.split('?assunto=')[1];
-                var assunto = parametro ? parametro.split('#')[0] : '';
-                
-                if (assunto) {
-                    $('#ff_3_3_form_assunto').val(assunto).trigger('change');
+        var $selectAssunto = $('select[name="form_assunto"], #ff_3_form_assunto, #ff_3_3_form_assunto');
+        var $secaoContato = $('#contato');
+
+        // Garante a existência da âncora #lgpd no DOM logo antes de #contato para compatibilidade nativa
+        if ($secaoContato.length && !$('#lgpd').length) {
+            $secaoContato.before('<div id="lgpd" style="position:relative; top:-80px; visibility:hidden; pointer-events:none;"></div>');
+        }
+
+        function aplicarAssuntoEscroll(assunto, deveRolar) {
+            if (assunto && $selectAssunto.length) {
+                var $opt = $selectAssunto.find('option[value="' + assunto + '"]');
+                if ($opt.length) {
+                    if ($selectAssunto.val() !== assunto) {
+                        $selectAssunto.val(assunto).trigger('change');
+                    }
                 }
             }
-            
-            // Note que NÃO bloqueamos a ação padrão (e.preventDefault) 
-            // e NÃO fazemos a animação de scroll. O Kadence fará isso por nós!
+
+            if (deveRolar && $secaoContato.length) {
+                setTimeout(function() {
+                    var offsetTop = $secaoContato.offset().top - 80;
+                    $('html, body').animate({ scrollTop: Math.max(0, offsetTop) }, 500);
+                }, 200);
+            }
+        }
+
+        // 1. Processamento no carregamento da página (direto ou vindo de outra página)
+        var urlParams = new URLSearchParams(window.location.search);
+        var assuntoParam = urlParams.get('assunto');
+        var hash = (window.location.hash || '').toLowerCase();
+
+        if (hash === '#lgpd') {
+            // Se a URL trouxer a âncora #lgpd, define o assunto para 'lgpd'
+            aplicarAssuntoEscroll('lgpd', true);
+        } else if (assuntoParam) {
+            var deveRolar = (hash === '#contato');
+            aplicarAssuntoEscroll(assuntoParam, deveRolar);
+        }
+
+        // 2. Processamento ao clicar em links dentro da mesma página
+        $('a[href*="#contato"], a[href*="#lgpd"], a[href*="?assunto="]').on('click', function(e) {
+            var href = $(this).attr('href') || '';
+            var isContato = href.indexOf('#contato') !== -1;
+            var isLgpd = href.indexOf('#lgpd') !== -1;
+
+            if ($secaoContato.length && (isContato || isLgpd)) {
+                var assunto = '';
+                if (href.indexOf('?assunto=') !== -1) {
+                    var param = href.split('?assunto=')[1];
+                    assunto = param ? param.split('#')[0] : '';
+                }
+
+                // Se o link apontar especificamente para #lgpd, define assunto como lgpd
+                if (isLgpd && (!assunto || assunto === 'info')) {
+                    assunto = 'lgpd';
+                }
+
+                if (assunto) {
+                    aplicarAssuntoEscroll(assunto, false);
+                }
+
+                // Se for link para #lgpd (âncora customizada), faz scroll suave controlado
+                if (isLgpd) {
+                    e.preventDefault();
+                    var offsetTop = $secaoContato.offset().top - 80;
+                    $('html, body').animate({ scrollTop: Math.max(0, offsetTop) }, 500);
+                    if (window.history && window.history.pushState) {
+                        window.history.pushState(null, null, href);
+                    }
+                }
+            }
         });
     });
     </script>
