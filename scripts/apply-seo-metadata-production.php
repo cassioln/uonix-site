@@ -361,6 +361,20 @@ uonix_sync_post_meta(
 );
 
 uonix_sync_post_meta(
+	array( 'termos-de-uso', 'termos' ), 'page',
+	'Termos de Uso | Uônix Montagens e Consultoria Técnica',
+	'Conheça os termos de uso do website e catálogo de dispositivos de ancoragem predial da Uônix. Regras de cotação comercial e propriedade intelectual.',
+	'termos de uso, termos de uso uonix'
+);
+
+uonix_sync_post_meta(
+	array( 'politica-de-cookies', 'cookies' ), 'page',
+	'Política de Cookies | Uônix Ancoragem Predial',
+	'Conheça a Política de Cookies da Uônix. Saiba quais cookies utilizamos, finalidades de segurança e cotação, e gerencie suas preferências de privacidade.',
+	'política de cookies, cookies uonix, gerenciar cookies'
+);
+
+uonix_sync_post_meta(
 	array( 'trabalhe-conosco', 'trabalhe-na-uonix' ), 'page',
 	'Trabalhe na Uônix | Oportunidades em Engenharia e Segurança',
 	'Faça parte da equipe Uônix. Conheça nossas oportunidades nas áreas de engenharia, vendas técnicas e fabricação de sistemas de ancoragem.',
