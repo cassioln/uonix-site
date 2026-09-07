@@ -36,15 +36,65 @@ function uonix_botao_ver_detalhes() {
         return;
     }
 
-    // Pega o link do produto
-    $link = get_permalink( $product->get_id() );
-    
-    // Define as classes:
-    // 'button' -> Pega o estilo padrão de botões do seu tema
-    // 'uonix-details-btn' -> Classe extra para estilizar via CSS se precisar
-    $classes = 'button product_type_simple add_to_cart_button uonix-details-btn';
+    $product_id = $product->get_id();
+    $link       = get_permalink( $product_id );
 
-    echo '<a href="' . esc_url( $link ) . '" class="' . $classes . '">Ver detalhes</a>';
+    // 1. Produtos com Variações: Botão "Ver Opções" direcionando para a página do produto
+    if ( $product->is_type( 'variable' ) ) {
+        $classes = 'button uonix-details-btn uonix-btn-variable';
+        echo '<a href="' . esc_url( $link ) . '" class="' . esc_attr( $classes ) . '">Ver Opções</a>';
+        return;
+    }
+
+    // 2. Produtos Simples: Botão "Adicionar ao carrinho" com Seletor de Quantidade Interativo
+    $qty_in_cart = 0;
+    if ( function_exists( 'WC' ) && WC()->cart ) {
+        foreach ( WC()->cart->get_cart() as $cart_item ) {
+            if ( isset( $cart_item['product_id'] ) && (int) $cart_item['product_id'] === $product_id ) {
+                $qty_in_cart += (int) $cart_item['quantity'];
+            }
+        }
+    }
+
+    $has_items   = ( $qty_in_cart > 0 );
+    $wrap_class  = $has_items ? 'uonix-product-action-wrap has-items' : 'uonix-product-action-wrap';
+    $is_trash    = ( $qty_in_cart === 1 );
+
+    $trash_svg = function_exists( 'uonix_get_cart_loop_svg' )
+        ? uonix_get_cart_loop_svg( 'trash' )
+        : '<svg class="uonix-qty-icon uonix-icon-trash" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
+
+    $minus_svg = function_exists( 'uonix_get_cart_loop_svg' )
+        ? uonix_get_cart_loop_svg( 'minus' )
+        : '<svg class="uonix-qty-icon uonix-icon-minus" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+
+    $plus_svg = function_exists( 'uonix_get_cart_loop_svg' )
+        ? uonix_get_cart_loop_svg( 'plus' )
+        : '<svg class="uonix-qty-icon uonix-icon-plus" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+
+    $left_icon  = $is_trash ? $trash_svg : $minus_svg;
+    $left_title = $is_trash ? 'Remover do carrinho' : 'Diminuir quantidade';
+    $left_class = $is_trash ? 'uonix-qty-btn uonix-qty-minus is-trash' : 'uonix-qty-btn uonix-qty-minus';
+
+    echo '<div class="' . esc_attr( $wrap_class ) . '" data-product-id="' . esc_attr( $product_id ) . '" data-qty="' . esc_attr( $qty_in_cart ) . '">';
+    
+    // Botão Adicionar ao Carrinho inicial
+    echo '<button type="button" class="button uonix-details-btn uonix-add-to-cart-btn" data-product-id="' . esc_attr( $product_id ) . '">';
+    echo 'Adicionar ao carrinho';
+    echo '</button>';
+
+    // Seletor de Quantidade Retangular (Design System Uônix)
+    echo '<div class="uonix-qty-control">';
+    echo '<button type="button" class="' . esc_attr( $left_class ) . '" title="' . esc_attr( $left_title ) . '" aria-label="' . esc_attr( $left_title ) . '">';
+    echo $left_icon;
+    echo '</button>';
+    echo '<div class="uonix-qty-text"><span class="uonix-qty-num">' . esc_html( $qty_in_cart ) . '</span> no carrinho</div>';
+    echo '<button type="button" class="uonix-qty-btn uonix-qty-plus" title="Aumentar quantidade" aria-label="Aumentar quantidade">';
+    echo $plus_svg;
+    echo '</button>';
+    echo '</div>';
+
+    echo '</div>';
 }
 
 /**

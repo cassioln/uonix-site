@@ -1,0 +1,545 @@
+<?php
+/**
+ * UONIX - Adição Direta e Controle de Quantidade AJAX no Catálogo e Loops
+ *
+ * Transforma o botão de produtos simples em um seletor de quantidade retangular
+ * com botões de diminuir/lixeira e aumentar, com sincronização em tempo real do carrinho.
+ * Para produtos com variações, renderiza o botão "Ver Opções" em laranja.
+ *
+ * @package Uonix
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+/**
+ * Retorna os SVGs padronizados do Design System Uônix
+ */
+function uonix_get_cart_loop_svg( $icon ) {
+	switch ( $icon ) {
+		case 'trash':
+			return '<svg class="uonix-qty-icon uonix-icon-trash" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
+		case 'minus':
+			return '<svg class="uonix-qty-icon uonix-icon-minus" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+		case 'plus':
+			return '<svg class="uonix-qty-icon uonix-icon-plus" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+		default:
+			return '';
+	}
+}
+
+/**
+ * Endpoint AJAX: Atualização de quantidade no carrinho a partir do loop
+ */
+add_action( 'wp_ajax_uonix_update_loop_cart_qty', 'uonix_ajax_update_loop_cart_qty' );
+add_action( 'wp_ajax_nopriv_uonix_update_loop_cart_qty', 'uonix_ajax_update_loop_cart_qty' );
+
+function uonix_ajax_update_loop_cart_qty() {
+	check_ajax_referer( 'uonix_loop_cart_nonce', 'nonce' );
+
+	if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+		wp_send_json_error( array( 'message' => 'WooCommerce Cart não disponível.' ) );
+	}
+
+	$product_id  = isset( $_POST['product_id'] ) ? absint( $_POST['product_id'] ) : 0;
+	$action_type = isset( $_POST['action_type'] ) ? sanitize_key( $_POST['action_type'] ) : 'add';
+
+	if ( ! $product_id ) {
+		wp_send_json_error( array( 'message' => 'Produto inválido.' ) );
+	}
+
+	$product = wc_get_product( $product_id );
+	if ( ! $product || ! $product->is_purchasable() ) {
+		wp_send_json_error( array( 'message' => 'Produto indisponível para compra.' ) );
+	}
+
+	$cart = WC()->cart;
+	$cart_item_key = '';
+	$current_qty   = 0;
+
+	// Localiza o item no carrinho atual
+	foreach ( $cart->get_cart() as $key => $item ) {
+		if ( (int) $item['product_id'] === $product_id ) {
+			$cart_item_key = $key;
+			$current_qty   = (int) $item['quantity'];
+			break;
+		}
+	}
+
+	$new_qty = $current_qty;
+
+	switch ( $action_type ) {
+		case 'add':
+			if ( $cart_item_key ) {
+				$new_qty = $current_qty + 1;
+				$cart->set_quantity( $cart_item_key, $new_qty );
+			} else {
+				$cart_item_key = $cart->add_to_cart( $product_id, 1 );
+				$new_qty = $cart_item_key ? 1 : 0;
+			}
+			break;
+
+		case 'increment':
+			$new_qty = $current_qty + 1;
+			if ( $cart_item_key ) {
+				$cart->set_quantity( $cart_item_key, $new_qty );
+			} else {
+				$cart_item_key = $cart->add_to_cart( $product_id, 1 );
+				$new_qty = $cart_item_key ? 1 : 0;
+			}
+			break;
+
+		case 'decrement':
+			if ( $current_qty > 1 && $cart_item_key ) {
+				$new_qty = $current_qty - 1;
+				$cart->set_quantity( $cart_item_key, $new_qty );
+			} elseif ( $cart_item_key ) {
+				$cart->remove_cart_item( $cart_item_key );
+				$new_qty = 0;
+			}
+			break;
+
+		case 'remove':
+			if ( $cart_item_key ) {
+				$cart->remove_cart_item( $cart_item_key );
+			}
+			$new_qty = 0;
+			break;
+
+		default:
+			wp_send_json_error( array( 'message' => 'Ação não suportada.' ) );
+	}
+
+	// Recalcula totais do carrinho
+	$cart->calculate_totals();
+
+	// Obtém a contagem real atualizada deste produto
+	$final_product_qty = 0;
+	foreach ( $cart->get_cart() as $item ) {
+		if ( (int) $item['product_id'] === $product_id ) {
+			$final_product_qty += (int) $item['quantity'];
+		}
+	}
+
+	$total_cart_count = $cart->get_cart_contents_count();
+
+	// Gera fragmentos do mini cart se a função estiver disponível
+	$fragments = array();
+	if ( function_exists( 'woocommerce_mini_cart' ) ) {
+		ob_start();
+		woocommerce_mini_cart();
+		$mini_cart = ob_get_clean();
+		$fragments['div.widget_shopping_cart_content'] = '<div class="widget_shopping_cart_content">' . $mini_cart . '</div>';
+	}
+
+	wp_send_json_success(
+		array(
+			'product_id' => $product_id,
+			'quantity'   => $final_product_qty,
+			'cart_count' => $total_cart_count,
+			'action'     => $action_type,
+			'fragments'  => apply_filters( 'woocommerce_add_to_cart_fragments', $fragments ),
+			'cart_hash'  => apply_filters( 'woocommerce_add_to_cart_hash', $cart->get_cart_hash(), $cart ),
+		)
+	);
+}
+
+/**
+ * Injeção de Scripts no wp_footer para controle de carrinho no catálogo
+ */
+add_action( 'wp_footer', 'uonix_loop_cart_scripts', 99 );
+
+function uonix_loop_cart_scripts() {
+	$params = array(
+		'ajax_url' => admin_url( 'admin-ajax.php' ),
+		'nonce'    => wp_create_nonce( 'uonix_loop_cart_nonce' ),
+	);
+	?>
+	<script id="uonix-loop-cart-action-js">
+	window.uonixLoopCartParams = <?php echo wp_json_encode( $params ); ?>;
+	(function ($) {
+		'use strict';
+
+		var trashSvg = '<svg class="uonix-qty-icon uonix-icon-trash" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
+		var minusSvg = '<svg class="uonix-qty-icon uonix-icon-minus" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+
+		function updateControlState($wrap, qty) {
+			$wrap.attr('data-qty', qty);
+			var $leftBtn = $wrap.find('.uonix-qty-minus');
+			var $num = $wrap.find('.uonix-qty-num');
+
+			if (qty > 0) {
+				$wrap.addClass('has-items');
+				$num.text(qty);
+
+				if (qty === 1) {
+					$leftBtn.addClass('is-trash')
+						.attr('title', 'Remover do carrinho')
+						.attr('aria-label', 'Remover do carrinho')
+						.html(trashSvg);
+				} else {
+					$leftBtn.removeClass('is-trash')
+						.attr('title', 'Diminuir quantidade')
+						.attr('aria-label', 'Diminuir quantidade')
+						.html(minusSvg);
+				}
+			} else {
+				$wrap.removeClass('has-items');
+				$num.text('0');
+				$leftBtn.addClass('is-trash')
+					.attr('title', 'Remover do carrinho')
+					.attr('aria-label', 'Remover do carrinho')
+					.html(trashSvg);
+			}
+		}
+
+		function sendCartRequest($wrap, actionType) {
+			if ($wrap.hasClass('is-loading')) {
+				return;
+			}
+
+			var productId = $wrap.attr('data-product-id');
+			var currentQty = parseInt($wrap.attr('data-qty') || '0', 10);
+
+			$wrap.addClass('is-loading');
+
+			// Atualização otimista da interface
+			var optimisticQty = currentQty;
+			if (actionType === 'add' || actionType === 'increment') {
+				optimisticQty = currentQty + 1;
+			} else if (actionType === 'decrement') {
+				optimisticQty = Math.max(0, currentQty - 1);
+			} else if (actionType === 'remove') {
+				optimisticQty = 0;
+			}
+			updateControlState($wrap, optimisticQty);
+
+			$.ajax({
+				url: (window.uonixLoopCartParams && window.uonixLoopCartParams.ajax_url) || '/wp-admin/admin-ajax.php',
+				type: 'POST',
+				dataType: 'json',
+				data: {
+					action: 'uonix_update_loop_cart_qty',
+					nonce: (window.uonixLoopCartParams && window.uonixLoopCartParams.nonce) || '',
+					product_id: productId,
+					action_type: actionType
+				},
+				success: function (res) {
+					if (res && res.success) {
+						var confirmedQty = parseInt(res.data.quantity, 10);
+						updateControlState($wrap, confirmedQty);
+
+						// Atualiza fragmentos do WooCommerce se retornados
+						if (res.data.fragments) {
+							$.each(res.data.fragments, function(key, value) {
+								$(key).replaceWith(value);
+							});
+						}
+
+						// Dispara atualização para badges do cabeçalho e mini-cart
+						if (typeof window.syncUonixCart === 'function') {
+							window.syncUonixCart();
+						}
+						$(document.body).trigger('wc_fragments_refreshed');
+						$(document.body).trigger(actionType === 'remove' ? 'removed_from_cart' : 'added_to_cart', [res.data.fragments, res.data.cart_hash]);
+					} else {
+						// Em caso de erro, reverte para o estado anterior
+						updateControlState($wrap, currentQty);
+						if (res && res.data && res.data.message) {
+							alert(res.data.message);
+						}
+					}
+				},
+				error: function () {
+					updateControlState($wrap, currentQty);
+				},
+				complete: function () {
+					$wrap.removeClass('is-loading');
+				}
+			});
+		}
+
+		// Delegação de cliques no botão "Adicionar ao carrinho"
+		$(document).on('click', '.uonix-product-action-wrap .uonix-add-to-cart-btn', function (e) {
+			e.preventDefault();
+			var $wrap = $(this).closest('.uonix-product-action-wrap');
+			sendCartRequest($wrap, 'add');
+		});
+
+		// Delegação de cliques no botão de diminuir / lixeira
+		$(document).on('click', '.uonix-product-action-wrap .uonix-qty-minus', function (e) {
+			e.preventDefault();
+			var $wrap = $(this).closest('.uonix-product-action-wrap');
+			var isTrash = $(this).hasClass('is-trash');
+			sendCartRequest($wrap, isTrash ? 'remove' : 'decrement');
+		});
+
+		// Delegação de cliques no botão de aumentar
+		$(document).on('click', '.uonix-product-action-wrap .uonix-qty-plus', function (e) {
+			e.preventDefault();
+			var $wrap = $(this).closest('.uonix-product-action-wrap');
+			sendCartRequest($wrap, 'increment');
+		});
+
+	})(jQuery);
+	</script>
+	<?php
+}
+
+/**
+ * Estilos CSS padronizados do Design System Uônix para o botão e controle de quantidade
+ */
+add_action( 'wp_head', 'uonix_loop_cart_styles', 99 );
+
+function uonix_loop_cart_styles() {
+	?>
+	<style id="uonix-loop-cart-styles">
+		/* Os botões de ação aparecem SOMENTE quando o card do produto tem foco / hover (igual a Produtos Relacionados) */
+		.woocommerce ul.products li.product .entry-content-wrap,
+		.woocommerce ul.products li.product .product-details {
+			transition: transform 0.3s cubic-bezier(0.17, 0.67, 0.35, 0.95) !important;
+		}
+
+		.woocommerce ul.products li.product:hover .entry-content-wrap,
+		.woocommerce ul.products li.product:hover .product-details,
+		.woocommerce ul.products li.product:focus-within .entry-content-wrap,
+		.woocommerce ul.products li.product:focus-within .product-details {
+			transform: translateY(-2rem) !important;
+		}
+
+		.woocommerce ul.products li.product .product-details.content-bg.entry-content-wrap,
+		.woocommerce ul.products li.product .entry-content-wrap,
+		.woocommerce ul.products li.product .product-details,
+		.product-details.content-bg.entry-content-wrap {
+			justify-content: center !important;
+			min-height: 6rem !important;
+		}
+
+		.woocommerce ul.products li.product .product-action-wrap {
+			position: absolute !important;
+			bottom: -2rem !important;
+			left: 0 !important;
+			right: 0 !important;
+			width: auto !important;
+			padding: 0 1rem !important;
+			margin-top: 0 !important;
+			opacity: 0 !important;
+			visibility: visible !important;
+			pointer-events: none !important;
+			transition: opacity 0.3s cubic-bezier(0.17, 0.67, 0.35, 0.95), bottom 0.3s cubic-bezier(0.17, 0.67, 0.35, 0.95) !important;
+			z-index: 5 !important;
+		}
+
+		.woocommerce ul.products li.product:hover .product-action-wrap,
+		.woocommerce ul.products li.product:focus-within .product-action-wrap {
+			bottom: -0.8rem !important;
+			opacity: 1 !important;
+			pointer-events: auto !important;
+		}
+
+		/* Container da Ação no Card */
+		.uonix-product-action-wrap {
+			margin-top: auto !important;
+			width: 100% !important;
+			position: relative !important;
+			display: block !important;
+			box-sizing: border-box !important;
+		}
+
+		/* Botão com Variações (Ver Opções): Mesma cor e formatação que Produtos Relacionados */
+		.woocommerce ul.products li.product a.uonix-btn-variable,
+		.woocommerce ul.products li.product .uonix-btn-variable,
+		.uonix-btn-variable {
+			display: flex !important;
+			align-items: center !important;
+			justify-content: center !important;
+			width: 100% !important;
+			background: #0e3780 !important;
+			color: #ffffff !important;
+			padding: 12px 15px !important;
+			font-size: 13px !important;
+			font-weight: 800 !important;
+			text-transform: uppercase !important;
+			letter-spacing: 0.5px !important;
+			border: none !important;
+			border-radius: 6px !important;
+			transition: all 0.3s ease !important;
+			text-decoration: none !important;
+			cursor: pointer !important;
+			box-sizing: border-box !important;
+			text-align: center !important;
+			line-height: 1.2 !important;
+			white-space: normal !important;
+			box-shadow: none !important;
+		}
+
+		/* Mantém o botão Azul institucional quando o hover/foco for no card */
+		.woocommerce ul.products li.product:hover .uonix-btn-variable,
+		.woocommerce ul.products li.product:focus-within .uonix-btn-variable,
+		.woocommerce ul.products li.product:hover a.uonix-btn-variable,
+		.woocommerce ul.products li.product:focus-within a.uonix-btn-variable {
+			background: #0e3780 !important;
+			color: #ffffff !important;
+			transform: none !important;
+			box-shadow: none !important;
+		}
+
+		/* Hover direto no botão Ver Opções acende em Laranja Uônix (idêntico a Produtos Relacionados) */
+		.woocommerce ul.products li.product .uonix-btn-variable:hover,
+		.woocommerce ul.products li.product a.uonix-btn-variable:hover,
+		.woocommerce ul.products li.product:hover .uonix-btn-variable:hover,
+		.woocommerce ul.products li.product:hover a.uonix-btn-variable:hover,
+		.woocommerce ul.products li.product .uonix-btn-variable:focus,
+		.woocommerce ul.products li.product a.uonix-btn-variable:focus,
+		.woocommerce ul.products li.product:hover .uonix-btn-variable:focus,
+		.woocommerce ul.products li.product .uonix-btn-variable:focus-visible,
+		.woocommerce ul.products li.product a.uonix-btn-variable:focus-visible,
+		.woocommerce ul.products li.product:hover .uonix-btn-variable:focus-visible {
+			background: #f76a0c !important;
+			color: #ffffff !important;
+			transform: translateY(-2px) !important;
+			box-shadow: 0 6px 15px rgba(247, 106, 12, 0.25) !important;
+		}
+
+		/* Botão Adicionar ao Carrinho Inicial (Azul Uônix) */
+		.woocommerce ul.products li.product .uonix-add-to-cart-btn,
+		.uonix-add-to-cart-btn {
+			display: flex !important;
+			align-items: center !important;
+			justify-content: center !important;
+			width: 100% !important;
+			background: #0e3780 !important;
+			color: #ffffff !important;
+			padding: 12px 15px !important;
+			font-size: 13px !important;
+			font-weight: 800 !important;
+			text-transform: uppercase !important;
+			letter-spacing: 0.5px !important;
+			border: none !important;
+			border-radius: 6px !important;
+			transition: all 0.3s ease !important;
+			text-decoration: none !important;
+			cursor: pointer !important;
+			box-sizing: border-box !important;
+		}
+
+		/* Mantém azul quando o hover for no card */
+		.woocommerce ul.products li.product:hover .uonix-add-to-cart-btn,
+		.woocommerce ul.products li.product:focus-within .uonix-add-to-cart-btn {
+			background: #0e3780 !important;
+			color: #ffffff !important;
+			transform: none !important;
+			box-shadow: none !important;
+		}
+
+		/* Hover direto no botão Adicionar ao Carrinho acende em Laranja */
+		.woocommerce ul.products li.product .uonix-add-to-cart-btn:hover,
+		.woocommerce ul.products li.product:hover .uonix-add-to-cart-btn:hover,
+		.woocommerce ul.products li.product .uonix-add-to-cart-btn:focus,
+		.woocommerce ul.products li.product:hover .uonix-add-to-cart-btn:focus,
+		.woocommerce ul.products li.product .uonix-add-to-cart-btn:focus-visible {
+			background: #f76a0c !important;
+			color: #ffffff !important;
+			transform: translateY(-2px) !important;
+			box-shadow: 0 6px 15px rgba(247, 106, 12, 0.25) !important;
+		}
+
+		/* Quando houver itens no carrinho: oculta o botão Adicionar ao Carrinho */
+		.woocommerce ul.products li.product .uonix-product-action-wrap.has-items .uonix-add-to-cart-btn,
+		.woocommerce ul.products li.product .uonix-product-action-wrap:not([data-qty="0"]) .uonix-add-to-cart-btn,
+		.uonix-product-action-wrap.has-items .uonix-add-to-cart-btn,
+		.uonix-product-action-wrap:not([data-qty="0"]) .uonix-add-to-cart-btn {
+			display: none !important;
+		}
+
+		/* Controle de Quantidade Retangular (Linguagem Visual Uônix) */
+		.woocommerce ul.products li.product .uonix-qty-control,
+		.uonix-qty-control {
+			display: none !important;
+			align-items: center !important;
+			justify-content: space-between !important;
+			width: 100% !important;
+			height: 43px !important;
+			background: #ffffff !important;
+			border: 2px solid #0e3780 !important;
+			border-radius: 6px !important;
+			overflow: hidden !important;
+			box-sizing: border-box !important;
+			transition: border-color 0.3s ease, box-shadow 0.3s ease !important;
+			user-select: none !important;
+		}
+
+		/* Quando houver itens no carrinho: exibe o controle de quantidade */
+		.woocommerce ul.products li.product .uonix-product-action-wrap.has-items .uonix-qty-control,
+		.woocommerce ul.products li.product .uonix-product-action-wrap:not([data-qty="0"]) .uonix-qty-control,
+		.uonix-product-action-wrap.has-items .uonix-qty-control,
+		.uonix-product-action-wrap:not([data-qty="0"]) .uonix-qty-control {
+			display: flex !important;
+		}
+
+		.uonix-qty-control:hover,
+		.woocommerce ul.products li.product:hover .uonix-qty-control {
+			border-color: #0e3780 !important;
+			box-shadow: 0 4px 12px rgba(14, 55, 128, 0.1) !important;
+		}
+
+		/* Botões Internos (-) (+) (Lixeira) */
+		.uonix-qty-btn {
+			display: flex !important;
+			align-items: center !important;
+			justify-content: center !important;
+			width: 44px !important;
+			height: 100% !important;
+			background: transparent !important;
+			border: none !important;
+			color: #0e3780 !important;
+			cursor: pointer !important;
+			padding: 0 !important;
+			margin: 0 !important;
+			transition: all 0.2s ease !important;
+			outline: none !important;
+		}
+
+		.uonix-qty-btn:hover,
+		.uonix-qty-btn:focus-visible {
+			background: #eef3fa !important;
+			color: #f76a0c !important;
+		}
+
+		/* Botão da Lixeira quando qty = 1 */
+		.uonix-qty-btn.is-trash:hover,
+		.uonix-qty-btn.is-trash:focus-visible {
+			background: #fdf0f0 !important;
+			color: #d93838 !important;
+		}
+
+		/* Texto Central "X no carrinho" */
+		.uonix-qty-text {
+			flex: 1 !important;
+			text-align: center !important;
+			font-size: 13px !important;
+			font-weight: 800 !important;
+			text-transform: uppercase !important;
+			color: #0e3780 !important;
+			letter-spacing: 0.3px !important;
+			white-space: nowrap !important;
+			pointer-events: none !important;
+			line-height: 1 !important;
+		}
+
+		.uonix-qty-text .uonix-qty-num {
+			font-size: 14px !important;
+			font-weight: 900 !important;
+			margin-right: 2px !important;
+		}
+
+		/* Estado de Carregamento */
+		.uonix-product-action-wrap.is-loading .uonix-qty-control,
+		.uonix-product-action-wrap.is-loading .uonix-add-to-cart-btn {
+			opacity: 0.65 !important;
+			pointer-events: none !important;
+		}
+	</style>
+	<?php
+}
