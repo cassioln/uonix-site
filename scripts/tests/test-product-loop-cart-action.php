@@ -172,4 +172,176 @@ test_assert(
     '28-catalogo-ajax-carrinho.php: Deve ouvir eventos de carrinho e mini-cart do WooCommerce'
 );
 
-echo "✅ Todos os contratos do botão interativo, controle de quantidade e sincronização reativa foram validados com sucesso!\n";
+// 6. Contrato de Produtos Vendidos Individualmente (is_sold_individually)
+test_assert(
+    strpos($content_01, 'is_sold_individually') !== false && strpos($content_01, 'data-sold-individually') !== false,
+    '01-woocommerce-loop-especificacoes.php: Deve checar is_sold_individually e renderizar atributo data-sold-individually'
+);
+
+test_assert(
+    strpos($content_28, 'uonix_process_cart_item_quantity_transition') !== false,
+    '28-catalogo-ajax-carrinho.php: Deve conter função de transição uonix_process_cart_item_quantity_transition'
+);
+
+test_assert(
+    strpos($content_28, 'is_sold_individually') !== false,
+    '28-catalogo-ajax-carrinho.php: Deve validar is_sold_individually antes de alterar quantidade'
+);
+
+test_assert(
+    strpos($content_28, '.uonix-qty-btn:disabled') !== false || strpos($content_28, '.uonix-qty-btn.is-disabled') !== false,
+    '28-catalogo-ajax-carrinho.php: Deve conter estilo CSS para botão de quantidade desabilitado'
+);
+
+// ========================================================================
+// 7. PROVA DE RUNTIME: Execução Real de uonix_process_cart_item_quantity_transition
+// ========================================================================
+
+// Stubs do WordPress se ainda não definidos
+if ( ! function_exists( 'add_action' ) ) {
+    function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {}
+}
+if ( ! function_exists( 'apply_filters' ) ) {
+    function apply_filters( $hook, $value ) { return $value; }
+}
+if ( ! function_exists( '__' ) ) {
+    function __( $text, $domain = 'default' ) { return $text; }
+}
+if ( ! function_exists( 'absint' ) ) {
+    function absint( $v ) { return abs( (int) $v ); }
+}
+if ( ! function_exists( 'sanitize_key' ) ) {
+    function sanitize_key( $k ) { return preg_replace( '/[^a-z0-9_\-]/i', '', $k ); }
+}
+
+// Mock de Produto WooCommerce
+class Test_Mock_WC_Product {
+    public $id;
+    public $name;
+    public $sold_individually;
+    public $managing_stock;
+    public $backorders_allowed;
+    public $stock_quantity;
+
+    public function __construct( $id, $name, $sold_individually = false, $managing_stock = false, $stock_qty = null ) {
+        $this->id                 = (int) $id;
+        $this->name               = $name;
+        $this->sold_individually  = (bool) $sold_individually;
+        $this->managing_stock     = (bool) $managing_stock;
+        $this->backorders_allowed = false;
+        $this->stock_quantity     = $stock_qty;
+    }
+
+    public function get_id() { return $this->id; }
+    public function get_name() { return $this->name; }
+    public function is_sold_individually() { return $this->sold_individually; }
+    public function managing_stock() { return $this->managing_stock; }
+    public function backorders_allowed() { return $this->backorders_allowed; }
+    public function get_stock_quantity() { return $this->stock_quantity; }
+    public function is_purchasable() { return true; }
+}
+
+// Mock de Carrinho WooCommerce
+class Test_Mock_WC_Cart {
+    public $items = array();
+    public $set_quantity_calls = array();
+    public $remove_cart_item_calls = array();
+    public $add_to_cart_calls = array();
+
+    public function add_to_cart( $product_id, $qty = 1 ) {
+        $key = 'key_prod_' . $product_id;
+        $this->items[ $key ] = array(
+            'product_id' => $product_id,
+            'quantity'   => $qty,
+        );
+        $this->add_to_cart_calls[] = array( 'product_id' => $product_id, 'qty' => $qty );
+        return $key;
+    }
+
+    public function set_quantity( $cart_item_key, $quantity = 1 ) {
+        $this->set_quantity_calls[] = array( 'key' => $cart_item_key, 'qty' => $quantity );
+        if ( isset( $this->items[ $cart_item_key ] ) ) {
+            $this->items[ $cart_item_key ]['quantity'] = $quantity;
+        }
+    }
+
+    public function remove_cart_item( $cart_item_key ) {
+        $this->remove_cart_item_calls[] = $cart_item_key;
+        unset( $this->items[ $cart_item_key ] );
+    }
+
+    public function get_cart() {
+        return $this->items;
+    }
+
+    public function calculate_totals() {}
+    public function get_cart_contents_count() {
+        $c = 0;
+        foreach ( $this->items as $i ) { $c += $i['quantity']; }
+        return $c;
+    }
+}
+
+// Carrega o arquivo funcional
+require_once $mu_plugin_28;
+
+// --- Cenário 1: Produto vendido individualmente (is_sold_individually = true) ---
+$prod_indiv = new Test_Mock_WC_Product( 101, 'Ancoragem Especial Vendida Individualmente', true );
+$cart_indiv = new Test_Mock_WC_Cart();
+
+// Passo 1.1: Primeira adição ao carrinho vazio (deve permitir adicionar 1 unidade)
+$res_indiv_1 = uonix_process_cart_item_quantity_transition( $prod_indiv, $cart_indiv, 'add', 0, '' );
+test_assert( $res_indiv_1['new_qty'] === 1, 'Runtime Indiv: Primeira adição deve definir quantidade = 1' );
+test_assert( $res_indiv_1['limit_reached'] === false, 'Runtime Indiv: Primeira adição não deve disparar limite' );
+test_assert( count( $cart_indiv->set_quantity_calls ) === 0, 'Runtime Indiv: Primeira adição usa add_to_cart, não set_quantity' );
+
+// Passo 1.2: Segunda adição com item já no carrinho (deve BLOQUEAR em 1 e NÃO chamar set_quantity para 2)
+$res_indiv_2 = uonix_process_cart_item_quantity_transition( $prod_indiv, $cart_indiv, 'add', 1, 'key_prod_101' );
+test_assert( $res_indiv_2['new_qty'] === 1, 'Runtime Indiv: Segunda adição DEVE manter quantidade em 1 (bloqueante)' );
+test_assert( $res_indiv_2['limit_reached'] === true, 'Runtime Indiv: Segunda adição deve marcar limit_reached = true' );
+test_assert( count( $cart_indiv->set_quantity_calls ) === 0, 'Runtime Indiv: set_quantity NÃO pode ser chamado para produto vendido individualmente já presente' );
+test_assert( ! empty( $res_indiv_2['notice_message'] ), 'Runtime Indiv: Deve retornar mensagem explicativa de limite atingido' );
+
+// Passo 1.3: Tentativa de incremento via botão (+) com item já no carrinho (deve BLOQUEAR em 1)
+$res_indiv_3 = uonix_process_cart_item_quantity_transition( $prod_indiv, $cart_indiv, 'increment', 1, 'key_prod_101' );
+test_assert( $res_indiv_3['new_qty'] === 1, 'Runtime Indiv: Clique no botão (+) DEVE manter quantidade em 1' );
+test_assert( $res_indiv_3['limit_reached'] === true, 'Runtime Indiv: Incremento deve acusar limite atingido' );
+test_assert( count( $cart_indiv->set_quantity_calls ) === 0, 'Runtime Indiv: set_quantity NÃO pode ter sido chamado em nenhum incremento' );
+
+// Passo 1.4: Decremento / remoção de 1 para 0
+$res_indiv_4 = uonix_process_cart_item_quantity_transition( $prod_indiv, $cart_indiv, 'decrement', 1, 'key_prod_101' );
+test_assert( $res_indiv_4['new_qty'] === 0, 'Runtime Indiv: Decremento de 1 deve zerar quantidade' );
+test_assert( in_array( 'key_prod_101', $cart_indiv->remove_cart_item_calls, true ), 'Runtime Indiv: remove_cart_item deve ser invocado ao zerar' );
+
+// --- Cenário 2: Produto comum (is_sold_individually = false) ---
+$prod_normal = new Test_Mock_WC_Product( 202, 'Limpador de Furos Padrão', false );
+$cart_normal = new Test_Mock_WC_Cart();
+
+// Passo 2.1: Primeira adição
+$res_norm_1 = uonix_process_cart_item_quantity_transition( $prod_normal, $cart_normal, 'add', 0, '' );
+test_assert( $res_norm_1['new_qty'] === 1, 'Runtime Normal: Primeira adição deve resultar em 1' );
+
+// Passo 2.2: Incremento para 2 (deve permitir normalmente)
+$res_norm_2 = uonix_process_cart_item_quantity_transition( $prod_normal, $cart_normal, 'increment', 1, 'key_prod_202' );
+test_assert( $res_norm_2['new_qty'] === 2, 'Runtime Normal: Incremento deve resultar em 2' );
+test_assert( $res_norm_2['limit_reached'] === false, 'Runtime Normal: Não deve acusar limite' );
+$last_call = end( $cart_normal->set_quantity_calls );
+test_assert( $last_call && $last_call['qty'] === 2, 'Runtime Normal: set_quantity deve ter sido chamado com 2' );
+
+// Passo 2.3: Decremento de 2 para 1
+$res_norm_3 = uonix_process_cart_item_quantity_transition( $prod_normal, $cart_normal, 'decrement', 2, 'key_prod_202' );
+test_assert( $res_norm_3['new_qty'] === 1, 'Runtime Normal: Decremento deve retornar para 1' );
+$last_call = end( $cart_normal->set_quantity_calls );
+test_assert( $last_call && $last_call['qty'] === 1, 'Runtime Normal: set_quantity deve ter sido chamado com 1' );
+
+// --- Cenário 3: Produto com limite de estoque gerenciado (ex: estoque = 2) ---
+$prod_stock = new Test_Mock_WC_Product( 303, 'Produto com Estoque Limitado', false, true, 2 );
+$cart_stock = new Test_Mock_WC_Cart();
+
+// Tentativa de incremento além do estoque disponível (já tem 2 no carrinho)
+$res_stock = uonix_process_cart_item_quantity_transition( $prod_stock, $cart_stock, 'increment', 2, 'key_prod_303' );
+test_assert( $res_stock['new_qty'] === 2, 'Runtime Estoque: Não pode incrementar além do limite de estoque' );
+test_assert( $res_stock['limit_reached'] === true, 'Runtime Estoque: Deve acusar limite atingido' );
+test_assert( count( $cart_stock->set_quantity_calls ) === 0, 'Runtime Estoque: set_quantity não deve ser chamado quando excede estoque' );
+
+echo "✅ Todos os contratos do botão interativo, regras de 'is_sold_individually', controle de quantidade e provas de runtime foram validados com 100% de aprovação!\n";

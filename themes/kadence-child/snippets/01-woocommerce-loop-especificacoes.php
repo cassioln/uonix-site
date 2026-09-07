@@ -76,7 +76,14 @@ function uonix_botao_ver_detalhes() {
     $left_title = $is_trash ? 'Remover do carrinho' : 'Diminuir quantidade';
     $left_class = $is_trash ? 'uonix-qty-btn uonix-qty-minus is-trash' : 'uonix-qty-btn uonix-qty-minus';
 
-    echo '<div class="' . esc_attr( $wrap_class ) . '" data-product-id="' . esc_attr( $product_id ) . '" data-qty="' . esc_attr( $qty_in_cart ) . '">';
+    $is_sold_individually = method_exists( $product, 'is_sold_individually' ) && $product->is_sold_individually();
+    $limit_reached        = ( $is_sold_individually && $qty_in_cart >= 1 );
+
+    $plus_title = $limit_reached ? 'Limite de 1 unidade atingido' : 'Aumentar quantidade';
+    $plus_class = $limit_reached ? 'uonix-qty-btn uonix-qty-plus is-disabled' : 'uonix-qty-btn uonix-qty-plus';
+    $plus_attr  = $limit_reached ? ' disabled="disabled"' : '';
+
+    echo '<div class="' . esc_attr( $wrap_class ) . '" data-product-id="' . esc_attr( $product_id ) . '" data-qty="' . esc_attr( $qty_in_cart ) . '" data-sold-individually="' . ( $is_sold_individually ? '1' : '0' ) . '">';
     
     // Botão Adicionar ao Carrinho inicial
     echo '<button type="button" class="button uonix-details-btn uonix-add-to-cart-btn" data-product-id="' . esc_attr( $product_id ) . '">';
@@ -89,7 +96,7 @@ function uonix_botao_ver_detalhes() {
     echo $left_icon;
     echo '</button>';
     echo '<div class="uonix-qty-text"><span class="uonix-qty-num">' . esc_html( $qty_in_cart ) . '</span> no carrinho</div>';
-    echo '<button type="button" class="uonix-qty-btn uonix-qty-plus" title="Aumentar quantidade" aria-label="Aumentar quantidade">';
+    echo '<button type="button" class="' . esc_attr( $plus_class ) . '" title="' . esc_attr( $plus_title ) . '" aria-label="' . esc_attr( $plus_title ) . '"' . $plus_attr . '>';
     echo $plus_svg;
     echo '</button>';
     echo '</div>';

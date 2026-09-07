@@ -30,6 +30,103 @@ function uonix_get_cart_loop_svg( $icon ) {
 }
 
 /**
+ * Processa a transição de quantidade do produto no carrinho respeitando restrições comerciais e estoque.
+ *
+ * @param WC_Product $product
+ * @param WC_Cart    $cart
+ * @param string     $action_type 'add' | 'increment' | 'decrement' | 'remove'
+ * @param int        $current_qty
+ * @param string     $cart_item_key
+ * @return array {
+ *     @type int    $new_qty
+ *     @type string $notice_message
+ *     @type bool   $limit_reached
+ *     @type bool   $sold_individually
+ * }
+ */
+function uonix_process_cart_item_quantity_transition( $product, $cart, $action_type, $current_qty, $cart_item_key ) {
+	$is_sold_individually = method_exists( $product, 'is_sold_individually' ) && $product->is_sold_individually();
+	$notice_message       = '';
+	$limit_reached        = false;
+	$new_qty              = $current_qty;
+	$product_id           = method_exists( $product, 'get_id' ) ? $product->get_id() : 0;
+	$product_name         = method_exists( $product, 'get_name' ) ? $product->get_name() : 'Produto';
+
+	switch ( $action_type ) {
+		case 'add':
+		case 'increment':
+			// 1. Limite comercial: produto vendido individualmente não pode exceder 1 unidade no carrinho
+			if ( $is_sold_individually && $current_qty >= 1 ) {
+				$limit_reached  = true;
+				$new_qty        = 1;
+				$notice_message = sprintf(
+					/* translators: %s: Nome do produto */
+					__( 'Você só pode adicionar 1 unidade de &ldquo;%s&rdquo; ao seu carrinho.', 'woocommerce' ),
+					$product_name
+				);
+				break;
+			}
+
+			// 2. Limite de estoque: respeita o estoque gerenciado quando não permite encomendas
+			if ( method_exists( $product, 'managing_stock' ) && $product->managing_stock() &&
+				method_exists( $product, 'backorders_allowed' ) && ! $product->backorders_allowed() &&
+				method_exists( $product, 'get_stock_quantity' ) && $product->get_stock_quantity() !== null ) {
+				$stock_limit = (int) $product->get_stock_quantity();
+				if ( $current_qty >= $stock_limit ) {
+					$limit_reached  = true;
+					$new_qty        = $current_qty;
+					$notice_message = sprintf(
+						/* translators: 1: Quantidade de estoque, 2: Nome do produto */
+						__( 'Você não pode adicionar mais de %1$d unidade(s) de &ldquo;%2$s&rdquo; (limite de estoque).', 'woocommerce' ),
+						$stock_limit,
+						$product_name
+					);
+					break;
+				}
+			}
+
+			// 3. Aplicação normal da alteração
+			if ( $cart_item_key ) {
+				$new_qty = $current_qty + 1;
+				$cart->set_quantity( $cart_item_key, $new_qty );
+			} else {
+				$new_key = $cart->add_to_cart( $product_id, 1 );
+				$new_qty = $new_key ? 1 : 0;
+			}
+			break;
+
+		case 'decrement':
+			if ( $current_qty > 1 && $cart_item_key ) {
+				$new_qty = $current_qty - 1;
+				$cart->set_quantity( $cart_item_key, $new_qty );
+			} elseif ( $cart_item_key ) {
+				$cart->remove_cart_item( $cart_item_key );
+				$new_qty = 0;
+			} else {
+				$new_qty = 0;
+			}
+			break;
+
+		case 'remove':
+			if ( $cart_item_key ) {
+				$cart->remove_cart_item( $cart_item_key );
+			}
+			$new_qty = 0;
+			break;
+
+		default:
+			break;
+	}
+
+	return array(
+		'new_qty'           => $new_qty,
+		'notice_message'    => $notice_message,
+		'limit_reached'     => $limit_reached,
+		'sold_individually' => $is_sold_individually,
+	);
+}
+
+/**
  * Endpoint AJAX: Atualização de quantidade no carrinho a partir do loop
  */
 add_action( 'wp_ajax_uonix_update_loop_cart_qty', 'uonix_ajax_update_loop_cart_qty' );
@@ -67,49 +164,7 @@ function uonix_ajax_update_loop_cart_qty() {
 		}
 	}
 
-	$new_qty = $current_qty;
-
-	switch ( $action_type ) {
-		case 'add':
-			if ( $cart_item_key ) {
-				$new_qty = $current_qty + 1;
-				$cart->set_quantity( $cart_item_key, $new_qty );
-			} else {
-				$cart_item_key = $cart->add_to_cart( $product_id, 1 );
-				$new_qty = $cart_item_key ? 1 : 0;
-			}
-			break;
-
-		case 'increment':
-			$new_qty = $current_qty + 1;
-			if ( $cart_item_key ) {
-				$cart->set_quantity( $cart_item_key, $new_qty );
-			} else {
-				$cart_item_key = $cart->add_to_cart( $product_id, 1 );
-				$new_qty = $cart_item_key ? 1 : 0;
-			}
-			break;
-
-		case 'decrement':
-			if ( $current_qty > 1 && $cart_item_key ) {
-				$new_qty = $current_qty - 1;
-				$cart->set_quantity( $cart_item_key, $new_qty );
-			} elseif ( $cart_item_key ) {
-				$cart->remove_cart_item( $cart_item_key );
-				$new_qty = 0;
-			}
-			break;
-
-		case 'remove':
-			if ( $cart_item_key ) {
-				$cart->remove_cart_item( $cart_item_key );
-			}
-			$new_qty = 0;
-			break;
-
-		default:
-			wp_send_json_error( array( 'message' => 'Ação não suportada.' ) );
-	}
+	$transition = uonix_process_cart_item_quantity_transition( $product, $cart, $action_type, $current_qty, $cart_item_key );
 
 	// Recalcula totais do carrinho
 	$cart->calculate_totals();
@@ -135,12 +190,15 @@ function uonix_ajax_update_loop_cart_qty() {
 
 	wp_send_json_success(
 		array(
-			'product_id' => $product_id,
-			'quantity'   => $final_product_qty,
-			'cart_count' => $total_cart_count,
-			'action'     => $action_type,
-			'fragments'  => apply_filters( 'woocommerce_add_to_cart_fragments', $fragments ),
-			'cart_hash'  => apply_filters( 'woocommerce_add_to_cart_hash', $cart->get_cart_hash(), $cart ),
+			'product_id'        => $product_id,
+			'quantity'          => $final_product_qty,
+			'cart_count'        => $total_cart_count,
+			'action'            => $action_type,
+			'sold_individually' => $transition['sold_individually'],
+			'limit_reached'     => $transition['limit_reached'],
+			'message'           => $transition['notice_message'],
+			'fragments'         => apply_filters( 'woocommerce_add_to_cart_fragments', $fragments ),
+			'cart_hash'         => apply_filters( 'woocommerce_add_to_cart_hash', $cart->get_cart_hash(), $cart ),
 		)
 	);
 }
@@ -196,10 +254,14 @@ function uonix_loop_cart_scripts() {
 		var trashSvg = '<svg class="uonix-qty-icon uonix-icon-trash" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
 		var minusSvg = '<svg class="uonix-qty-icon uonix-icon-minus" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
 
-		function updateControlState($wrap, qty) {
+		function updateControlState($wrap, qty, isSoldIndividually) {
 			$wrap.attr('data-qty', qty);
 			var $leftBtn = $wrap.find('.uonix-qty-minus');
+			var $plusBtn = $wrap.find('.uonix-qty-plus');
 			var $num = $wrap.find('.uonix-qty-num');
+			var soldIndividually = (typeof isSoldIndividually !== 'undefined')
+				? Boolean(isSoldIndividually)
+				: ($wrap.attr('data-sold-individually') === '1');
 
 			if (qty > 0) {
 				$wrap.addClass('has-items');
@@ -216,6 +278,18 @@ function uonix_loop_cart_scripts() {
 						.attr('aria-label', 'Diminuir quantidade')
 						.html(minusSvg);
 				}
+
+				if (soldIndividually) {
+					$plusBtn.prop('disabled', true)
+						.addClass('is-disabled')
+						.attr('title', 'Limite de 1 unidade atingido')
+						.attr('aria-label', 'Limite de 1 unidade atingido');
+				} else {
+					$plusBtn.prop('disabled', false)
+						.removeClass('is-disabled')
+						.attr('title', 'Aumentar quantidade')
+						.attr('aria-label', 'Aumentar quantidade');
+				}
 			} else {
 				$wrap.removeClass('has-items');
 				$num.text('0');
@@ -223,6 +297,11 @@ function uonix_loop_cart_scripts() {
 					.attr('title', 'Remover do carrinho')
 					.attr('aria-label', 'Remover do carrinho')
 					.html(trashSvg);
+
+				$plusBtn.prop('disabled', false)
+					.removeClass('is-disabled')
+					.attr('title', 'Aumentar quantidade')
+					.attr('aria-label', 'Aumentar quantidade');
 			}
 		}
 
@@ -388,7 +467,11 @@ function uonix_loop_cart_scripts() {
 				success: function (res) {
 					if (res && res.success) {
 						var confirmedQty = parseInt(res.data.quantity, 10);
-						updateControlState($wrap, confirmedQty);
+						var isSoldIndiv = Boolean(res.data.sold_individually);
+						if (isSoldIndiv) {
+							$wrap.attr('data-sold-individually', '1');
+						}
+						updateControlState($wrap, confirmedQty, isSoldIndiv);
 
 						// Atualiza fragmentos do WooCommerce se retornados
 						if (res.data.fragments) {
@@ -438,7 +521,15 @@ function uonix_loop_cart_scripts() {
 		// Delegação de cliques no botão de aumentar
 		$(document).on('click', '.uonix-product-action-wrap .uonix-qty-plus', function (e) {
 			e.preventDefault();
-			var $wrap = $(this).closest('.uonix-product-action-wrap');
+			var $btn = $(this);
+			var $wrap = $btn.closest('.uonix-product-action-wrap');
+			var isSoldIndividually = ($wrap.attr('data-sold-individually') === '1');
+			var currentQty = parseInt($wrap.attr('data-qty') || '0', 10);
+
+			if ($btn.prop('disabled') || $btn.hasClass('is-disabled') || (isSoldIndividually && currentQty >= 1)) {
+				return;
+			}
+
 			sendCartRequest($wrap, 'increment');
 		});
 
@@ -677,6 +768,14 @@ function uonix_loop_cart_styles() {
 		.uonix-qty-btn.is-trash:focus-visible {
 			background: #fdf0f0 !important;
 			color: #d93838 !important;
+		}
+
+		/* Botões desabilitados por restrição comercial (ex: limite de 1 unidade por pedido) */
+		.uonix-qty-btn:disabled,
+		.uonix-qty-btn.is-disabled {
+			opacity: 0.35 !important;
+			cursor: not-allowed !important;
+			pointer-events: none !important;
 		}
 
 		/* Texto Central "X no carrinho" */
