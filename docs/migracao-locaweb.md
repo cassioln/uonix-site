@@ -310,12 +310,13 @@ liberação explícita, aplica `noindex, nofollow, noarchive` e força `blog_pub
 Constantes em produção (verificadas):
 
 ```
-UONIX_ENV               = 'production'
-UONIX_ALLOW_INDEXING    = false
-UONIX_ANALYTICS_ENABLED = true
-UONIX_GTM_CONTAINER_ID  = 'GTM-P8TR5CCH'
-UONIX_ADOPT_WEBSITE_ID  = definido
-UONIX_NONPROD_EMAIL_TO  = não definido
+UONIX_ENV                  = 'production'
+UONIX_ALLOW_INDEXING       = false
+UONIX_ANALYTICS_ENABLED    = true
+UONIX_GTM_CONTAINER_ID     = 'GTM-P8TR5CCH'
+UONIX_ADOPT_WEBSITE_ID     = definido
+UONIX_ADOPT_CONSENT_TAG_IDS = fora do Git (UUIDs da AdOpt)
+UONIX_NONPROD_EMAIL_TO     = não definido
 ```
 
 ## 12. Diagnóstico do smoke de produção
