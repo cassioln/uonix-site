@@ -42,6 +42,9 @@ jobs:
       - name: Test social links use https
         run: php scripts/tests/test-social-links-https.php
 
+      - name: Test Uônix responsible contacts and link shortcodes
+        run: php scripts/tests/test-uonix-admin-contacts-shortcodes.php
+
       - name: Test noindex on flow pages
         run: php scripts/tests/test-noindex-paginas-de-fluxo.php
 

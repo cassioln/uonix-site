@@ -61,7 +61,22 @@ function uox_render_dados_page() {
                 'email_contato'       => ['label' => 'E-mail (Contato)', 'default' => 'contato@uonix.com.br'],
                 'email_atendimento'   => ['label' => 'E-mail (Atendimento)', 'default' => 'atendimento@uonix.com.br'],
                 'email_administrativo'=> ['label' => 'E-mail (Administrativo)', 'default' => 'administrativo@uonix.com.br'],
+                'email_lgpd'          => ['label' => 'E-mail (LGPD)', 'default' => 'administrativo@uonix.com.br'],
                 'email_marketing'     => ['label' => 'E-mail (Marketing)', 'default' => 'marketing@uonix.com.br'],
+            ]
+        ],
+        'contatos-responsaveis' => [
+            'label'  => '👥 Contatos Responsáveis',
+            'inputs' => [
+                'marketing'     => ['label' => 'Marketing', 'default' => ''],
+                'lgpd'          => ['label' => 'LGPD', 'default' => ''],
+                'administrativo_1' => ['label' => 'Administrativo 1', 'default' => ''],
+                'administrativo_2' => ['label' => 'Administrativo 2', 'default' => ''],
+                'vendedor_1'    => ['label' => 'Vendedor 1', 'default' => ''],
+                'vendedor_2'    => ['label' => 'Vendedor 2', 'default' => ''],
+                'vendedor_3'    => ['label' => 'Vendedor 3', 'default' => ''],
+                'engenheiro_1'  => ['label' => 'Engenheiro 1', 'default' => ''],
+                'engenheiro_2'  => ['label' => 'Engenheiro 2', 'default' => ''],
             ]
         ],
         'endereco' => [
@@ -149,7 +164,7 @@ function uox_render_dados_page() {
                                 <?php if ($id !== 'roteamento'): ?>
                                     <p class="description" style="margin-top: 5px; color: #64748b; font-size: 12px;">Tag curta: <code>[uonix <?php echo $chave; ?>]</code></p>
                                     <?php if (strpos($chave, 'telefone') !== false || strpos($chave, 'whatsapp') !== false): ?>
-                                        <p class="description" style="color: #0284c7; font-size: 11px; margin-top: 1px; font-weight: 500;">Uso em links de clique: <code>[uonix <?php echo $chave; ?> link]</code></p>
+                                        <p class="description" style="color: #0284c7; font-size: 11px; margin-top: 1px; font-weight: 500;">Uso em links de clique: <code>[uonix_<?php echo $chave; ?>_link]</code></p>
                                     <?php endif; ?>
                                 <?php endif; ?>
                             </td>
@@ -203,6 +218,35 @@ function uox_render_shortcode_simples($atts) {
         $valor = preg_replace('/[^0-9]/', '', $valor);
     }
     return $valor;
+}
+
+// Aliases sem espaços para números usados em links: [uonix_telefone_1_link].
+function uox_render_shortcode_link($atts, $content = '', $tag = '') {
+    $prefixo = 'uonix_';
+    $sufixo  = '_link';
+
+    if (strpos($tag, $prefixo) !== 0 || substr($tag, -strlen($sufixo)) !== $sufixo) {
+        return '';
+    }
+
+    $campo = substr($tag, strlen($prefixo), -strlen($sufixo));
+    $campos_permitidos = [
+        'telefone_1', 'telefone_2',
+        'whatsapp_1', 'whatsapp_2', 'whatsapp_3',
+    ];
+
+    if (!in_array($campo, $campos_permitidos, true)) {
+        return '';
+    }
+
+    return preg_replace('/[^0-9]/', '', get_option('uox_' . $campo, ''));
+}
+
+foreach ([
+    'telefone_1', 'telefone_2',
+    'whatsapp_1', 'whatsapp_2', 'whatsapp_3',
+] as $campo_link) {
+    add_shortcode('uonix_' . $campo_link . '_link', 'uox_render_shortcode_link');
 }
 add_filter('widget_text', 'do_shortcode');
 
