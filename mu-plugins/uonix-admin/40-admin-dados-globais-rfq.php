@@ -61,6 +61,7 @@ function uox_render_dados_page() {
                 'email_contato'       => ['label' => 'E-mail (Contato)', 'default' => 'contato@uonix.com.br'],
                 'email_atendimento'   => ['label' => 'E-mail (Atendimento)', 'default' => 'atendimento@uonix.com.br'],
                 'email_administrativo'=> ['label' => 'E-mail (Administrativo)', 'default' => 'administrativo@uonix.com.br'],
+                'email_lgpd'          => ['label' => 'E-mail (LGPD)', 'default' => 'administrativo@uonix.com.br'],
                 'email_marketing'     => ['label' => 'E-mail (Marketing)', 'default' => 'marketing@uonix.com.br'],
             ]
         ],
