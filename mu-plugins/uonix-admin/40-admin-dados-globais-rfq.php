@@ -65,6 +65,20 @@ function uox_render_dados_page() {
                 'email_marketing'     => ['label' => 'E-mail (Marketing)', 'default' => 'marketing@uonix.com.br'],
             ]
         ],
+        'contatos-responsaveis' => [
+            'label'  => '👥 Contatos Responsáveis',
+            'inputs' => [
+                'marketing'     => ['label' => 'Marketing', 'default' => ''],
+                'lgpd'          => ['label' => 'LGPD', 'default' => ''],
+                'administrativo_1' => ['label' => 'Administrativo 1', 'default' => ''],
+                'administrativo_2' => ['label' => 'Administrativo 2', 'default' => ''],
+                'vendedor_1'    => ['label' => 'Vendedor 1', 'default' => ''],
+                'vendedor_2'    => ['label' => 'Vendedor 2', 'default' => ''],
+                'vendedor_3'    => ['label' => 'Vendedor 3', 'default' => ''],
+                'engenheiro_1'  => ['label' => 'Engenheiro 1', 'default' => ''],
+                'engenheiro_2'  => ['label' => 'Engenheiro 2', 'default' => ''],
+            ]
+        ],
         'endereco' => [
             'label'  => '📍 Endereço',
             'inputs' => [
