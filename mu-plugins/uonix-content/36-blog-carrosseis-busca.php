@@ -13,199 +13,98 @@ if ( ! defined( 'ABSPATH' ) ) {
 // -----------------------------------------------------------------------------
 // Bloco 1 - linhas 12943-13618 do export original.
 // -----------------------------------------------------------------------------
-/**
- * Carrossel Produtos Destaque
- */
-/**
- * UÔNIX: Carrossel Home (Banner Hero) - Título, Layout, Setas e Botão Ver Detalhes
- */
-add_action('wp_footer', 'uonix_carrossel_banner_hero');
-
-function uonix_carrossel_banner_hero() {
-    ?>
-    <style>
-    /* ==========================================================================
-       1. TÍTULO DO CARROSSEL (Injetado via JS)
-       ========================================================================== */
-    .uonix-carousel-title {
-        text-align: center !important;
-        font-size: 32px !important;
-        font-weight: 900 !important;
-        color: #0e3780 !important; /* Azul Uônix */
-        margin-top: 40px !important;
-        margin-bottom: 30px !important;
-        text-transform: uppercase !important;
-        letter-spacing: 1px !important;
-        position: relative;
-    }
-    .uonix-carousel-title::after {
-        content: "";
-        display: block;
-        width: 80px;
-        height: 4px;
-        background-color: #f76a0c !important; /* Detalhe Laranja Uônix */
-        margin: 15px auto 0 auto;
-        border-radius: 2px;
-    }
-
-    /* ==========================================================================
-       2. LAYOUT BANNER HERO (Imagem esquerda, Texto direita - DESKTOP)
-       ========================================================================== */
-    .wcps-container-1546 .elements-wrapper {
-        display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-        justify-content: space-between !important;
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        padding: 20px 40px !important;
-        transition: none !important;
-    }
-    .wcps-container-1546 .elements-wrapper:hover { transform: none !important; }
-
-    .wcps-container-1546 .layer-media { width: 50% !important; background: transparent !important; padding: 0 !important; }
-    .wcps-container-1546 .layer-media img { max-height: 380px !important; width: auto !important; object-fit: contain !important; margin: 0 auto !important; transform: scale(1.05); transition: transform 0.5s ease; }
-    .wcps-container-1546 .elements-wrapper:hover .layer-media img { transform: scale(1.12); }
-
-    .wcps-container-1546 .layer-content { width: 50% !important; padding: 0 0 0 40px !important; align-items: flex-start !important; text-align: left !important; }
-    .wcps-container-1546 .wcps-items-title { text-align: left !important; margin-bottom: 20px !important; width: 100% !important; }
-    .wcps-container-1546 .wcps-items-title a { font-size: 38px !important; font-weight: 900 !important; line-height: 1.1 !important; color: #0e3780 !important; text-decoration: none !important; }
-    .wcps-container-1546 .wcps-items-title a:hover { color: #f76a0c !important; }
-    .wcps-container-1546 .wcps-items-price { display: none !important; }
-
-    /* ==========================================================================
-       3. SUBSTITUIÇÃO DO BOTÃO
-       ========================================================================== */
-    .wcps-container-1546 .wcps-items-cart a.add_to_cart_button,
-    .wcps-container-1546 .wcps-items-cart a.added_to_cart,
-    .wcps-container-1546 .wcps-items-cart span.screen-reader-text { display: none !important; }
-    .wcps-container-1546 .wcps-items-cart p { border: none !important; padding: 0 !important; margin: 0 !important; }
-
-    .wcps-container-1546 .wcps-items-cart { width: auto !important; margin-top: 10px !important; }
-    .wcps-container-1546 .wcps-items-cart a.uonix-btn-detalhes { background-color: #f76a0c !important; color: #ffffff !important; border-radius: 50px !important; height: 54px !important; width: auto !important; display: inline-flex !important; align-items: center !important; padding: 0 40px !important; font-size: 16px !important; font-weight: 800 !important; text-transform: uppercase !important; letter-spacing: 1px !important; border: none !important; transition: all 0.3s ease !important; box-shadow: 0 4px 15px rgba(247, 106, 12, 0.3) !important; text-decoration: none !important; }
-    .wcps-container-1546 .wcps-items-cart a.uonix-btn-detalhes:hover { background-color: #0e3780 !important; box-shadow: 0 6px 20px rgba(14, 55, 128, 0.3) !important; transform: translateY(-2px) !important; }
-
-    /* ==========================================================================
-       4. SETAS E PAGINAÇÃO MODERNAS (DESKTOP)
-       ========================================================================== */
-    .wcps-container-1546 .splide__arrows div.splide__arrow { background-color: #0e3780 !important; width: 48px !important; height: 48px !important; border-radius: 50% !important; display: flex !important; align-items: center !important; justify-content: center !important; padding: 0 !important; opacity: 0.9 !important; box-shadow: 0 4px 10px rgba(0,0,0,0.15) !important; transition: all 0.3s ease !important; position: absolute !important; top: 50% !important; transform: translateY(-50%) !important; z-index: 10 !important; }
-    .wcps-container-1546 .splide__arrows div.splide__arrow:hover { background-color: #f76a0c !important; opacity: 1 !important; transform: translateY(-50%) scale(1.1) !important; }
-    .wcps-container-1546 .splide__arrows div.splide__arrow .icon, .wcps-container-1546 .splide__arrows div.splide__arrow i { color: #ffffff !important; font-size: 16px !important; display: flex !important; align-items: center !important; justify-content: center !important; margin: 0 !important; padding: 0 !important; }
-    .wcps-container-1546 .splide__arrows div.splide__arrow.prev { left: 10px !important; }
-    .wcps-container-1546 .splide__arrows div.splide__arrow.next { right: 10px !important; left: auto !important; }
-
-    .wcps-container-1546 .splide__pagination { bottom: -15px !important; display: flex !important; justify-content: center !important; align-items: center !important; gap: 6px !important; margin-bottom: 20px !important;}
-    .wcps-container-1546 .splide__pagination li { margin: 0 !important; }
-    .wcps-container-1546 .splide__pagination button.splide__pagination__page { background-color: #cbd5e1 !important; width: 10px !important; height: 10px !important; border-radius: 50% !important; padding: 0 !important; margin: 0 !important; border: none !important; transition: all 0.3s ease !important; opacity: 1 !important; }
-    .wcps-container-1546 .splide__pagination button.splide__pagination__page.is-active { background-color: #f76a0c !important; width: 28px !important; border-radius: 10px !important; }
-
-  /* ==========================================================================
-       5. RESPONSIVIDADE (MOBILE) - BOTÃO NO HOVER/TOQUE
-       ========================================================================== */
-    @media (max-width: 768px) {
-        
-        .uonix-carousel-title { font-size: 20px !important; margin-top: 20px !important; margin-bottom: 15px !important; }
-        .wcps-container-1546 .elements-wrapper { flex-direction: column !important; padding: 10px !important; }
-        .wcps-container-1546 .layer-content { display: contents !important; }
-
-        /* Título no topo e menor */
-        .wcps-container-1546 .wcps-items-title { order: -1 !important; text-align: center !important; width: 100% !important; margin-bottom: 5px !important; }
-        .wcps-container-1546 .wcps-items-title a { font-size: 18px !important; }
-
-        /* Imagem no meio */
-        .wcps-container-1546 .layer-media { order: 0 !important; width: 100% !important; padding: 0 !important; margin-bottom: 15px !important; }
-        .wcps-container-1546 .layer-media img { max-height: 220px !important; }
-
-        /* Botão escondido inicialmente */
-        .wcps-container-1546 .wcps-items-cart { 
-            order: 1 !important; 
-            width: 100% !important;
-            opacity: 0 !important;
-            visibility: hidden !important;
-            max-height: 0 !important; /* Zera a altura para não ocupar espaço */
-            margin-top: 0 !important;
-            transition: all 0.4s ease !important; /* Animação suave */
-        }
-
-        .wcps-container-1546 .wcps-items-cart a.uonix-btn-detalhes { width: 100% !important; justify-content: center !important; }
-
-        /* Botão aparece deslizando ao tocar/passar o dedo no card */
-        .wcps-container-1546 .elements-wrapper:hover .wcps-items-cart,
-        .wcps-container-1546 .elements-wrapper:active .wcps-items-cart {
-            opacity: 1 !important;
-            visibility: visible !important;
-            max-height: 60px !important; /* Altura suficiente para o botão */
-            margin-top: 10px !important;
-        }
-
-        /* Oculta as setas para manter clean */
-        .wcps-container-1546 .splide__arrows div.splide__arrow { opacity: 0 !important; width: 36px !important; height: 36px !important; }
-        .wcps-container-1546:active .splide__arrows div.splide__arrow, .wcps-container-1546:hover .splide__arrows div.splide__arrow { opacity: 0.6 !important; }
-    }
-    </style>
-
-    <script>
-    jQuery(document).ready(function($) {
-        
-        // 1. INJETA O TÍTULO PREMIUM ANTES DO CARROSSEL
-        if ($('.wcps-container-1546').length && $('.uonix-carousel-title').length === 0) {
-            $('.wcps-container-1546').before('<h2 class="uonix-carousel-title">Produtos para Ancoragem e Fixação</h2>');
-        }
-
-        // 2. FUNÇÃO PARA INJETAR O BOTÃO "VER DETALHES" SEGURO
-        function injectUonixDetailsButton() {
-            $('.wcps-container-1546 .item').each(function() {
-                var $containerBotoes = $(this).find('.wcps-items-cart p.add_to_cart_inline');
-                var urlProduto = $(this).find('.wcps-items-title a').attr('href');
-                
-                if (urlProduto && $containerBotoes.find('.uonix-btn-detalhes').length === 0) {
-                    $containerBotoes.append('<a href="' + urlProduto + '" class="button uonix-btn-detalhes">Ver detalhes</a>');
-                }
-            });
-        }
-
-        setTimeout(injectUonixDetailsButton, 800);
-        $(window).on('resize', function() { setTimeout(injectUonixDetailsButton, 500); });
-    });
-    </script>
-    <?php
-}
-
 // -----------------------------------------------------------------------------
-// Carrossel Sidebar Blog [wcps id='8643']:
-// Hook de conversão do botão para "Solicitar Orçamento" gerenciado em:
-// themes/kadence-child/snippets/36-wcps-destaques-slider.php
-// Migração e integridade de banco automatizadas via scripts/migrate-wcps-sliders-and-widgets.php
+// Carrosseis WCPS:
+// - Banner Hero da Home [wcps id='1546']:
+//   Layout comercial, estilizacao completa, conversao para botao "Solicitar Orcamento"
+//   e injecao de titulo gerenciados em:
+//   themes/kadence-child/snippets/36-wcps-destaques-slider.php
+//
+// - Carrossel Sidebar Blog [wcps id='8643']:
+//   Hook de conversao do botao para "Solicitar Orcamento" gerenciado em:
+//   themes/kadence-child/snippets/36-wcps-destaques-slider.php
+//   Migracao e integridade de banco automatizadas via scripts/migrate-wcps-sliders-and-widgets.php
 // -----------------------------------------------------------------------------
 
 /**
- * Scroll Suave e Autopreenchimento do Formulário na mesma página
- */
-/**
- * UÔNIX: Autopreenchimento do Formulário via Link (Mantendo o Scroll Nativo do Tema)
+ * Scroll Suave e Autopreenchimento do Formulário via Link / URL
+ * Suporta navegação entre páginas e mesma página com ?assunto= e âncoras #contato e #lgpd.
  */
 add_action('wp_footer', function() {
     ?>
     <script>
     jQuery(document).ready(function($) {
-        
-        // Fica de olho apenas nos links que têm o ?assunto= e vão para o #contato
-        $('a[href*="?assunto="][href*="#contato"]').on('click', function() {
-            
-            // Se o formulário estiver na tela, faz o preenchimento invisível:
-            if ($('#ff_3_3_form_assunto').length) {
-                var href = $(this).attr('href');
-                var parametro = href.split('?assunto=')[1];
-                var assunto = parametro ? parametro.split('#')[0] : '';
-                
-                if (assunto) {
-                    $('#ff_3_3_form_assunto').val(assunto).trigger('change');
+        var $selectAssunto = $('select[name="form_assunto"], #ff_3_form_assunto, #ff_3_3_form_assunto');
+        var $secaoContato = $('#contato');
+
+        // Garante a existência da âncora #lgpd no DOM logo antes de #contato para compatibilidade nativa
+        if ($secaoContato.length && !$('#lgpd').length) {
+            $secaoContato.before('<div id="lgpd" style="position:relative; top:-80px; visibility:hidden; pointer-events:none;"></div>');
+        }
+
+        function aplicarAssuntoEscroll(assunto, deveRolar) {
+            if (assunto && $selectAssunto.length) {
+                var $opt = $selectAssunto.find('option[value="' + assunto + '"]');
+                if ($opt.length) {
+                    if ($selectAssunto.val() !== assunto) {
+                        $selectAssunto.val(assunto).trigger('change');
+                    }
                 }
             }
-            
-            // Note que NÃO bloqueamos a ação padrão (e.preventDefault) 
-            // e NÃO fazemos a animação de scroll. O Kadence fará isso por nós!
+
+            if (deveRolar && $secaoContato.length) {
+                setTimeout(function() {
+                    var offsetTop = $secaoContato.offset().top - 80;
+                    $('html, body').animate({ scrollTop: Math.max(0, offsetTop) }, 500);
+                }, 200);
+            }
+        }
+
+        // 1. Processamento no carregamento da página (direto ou vindo de outra página)
+        var urlParams = new URLSearchParams(window.location.search);
+        var assuntoParam = urlParams.get('assunto');
+        var hash = (window.location.hash || '').toLowerCase();
+
+        if (hash === '#lgpd') {
+            // Se a URL trouxer a âncora #lgpd, define o assunto para 'lgpd'
+            aplicarAssuntoEscroll('lgpd', true);
+        } else if (assuntoParam) {
+            var deveRolar = (hash === '#contato');
+            aplicarAssuntoEscroll(assuntoParam, deveRolar);
+        }
+
+        // 2. Processamento ao clicar em links dentro da mesma página
+        $('a[href*="#contato"], a[href*="#lgpd"], a[href*="?assunto="]').on('click', function(e) {
+            var href = $(this).attr('href') || '';
+            var isContato = href.indexOf('#contato') !== -1;
+            var isLgpd = href.indexOf('#lgpd') !== -1;
+
+            if ($secaoContato.length && (isContato || isLgpd)) {
+                var assunto = '';
+                if (href.indexOf('?assunto=') !== -1) {
+                    var param = href.split('?assunto=')[1];
+                    assunto = param ? param.split('#')[0] : '';
+                }
+
+                // Se o link apontar especificamente para #lgpd, define assunto como lgpd
+                if (isLgpd && (!assunto || assunto === 'info')) {
+                    assunto = 'lgpd';
+                }
+
+                if (assunto) {
+                    aplicarAssuntoEscroll(assunto, false);
+                }
+
+                // Se for link para #lgpd (âncora customizada), faz scroll suave controlado
+                if (isLgpd) {
+                    e.preventDefault();
+                    var offsetTop = $secaoContato.offset().top - 80;
+                    $('html, body').animate({ scrollTop: Math.max(0, offsetTop) }, 500);
+                    if (window.history && window.history.pushState) {
+                        window.history.pushState(null, null, href);
+                    }
+                }
+            }
         });
     });
     </script>

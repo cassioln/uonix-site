@@ -33,8 +33,67 @@ function uonix_estilos_mega_menu_v14()
     ?>
     <style id="uonix-megamenu-hybrid-css">
         /* ==========================================================
-                                               MEGA MENU: ESTRUTURA E PAINÉIS PRINCIPAIS
-                                               ========================================================== */
+           BLINDAGEM DO STACKING CONTEXT DO HEADER E MEGA MENU
+           ========================================================== */
+        header.wp-block-kadence-header,
+        .wp-block-kadence-header-desktop,
+        .kb-header-placeholder-wrapper,
+        .kb-header-sticky-wrapper,
+        #mega-menu-wrap-primary,
+        #mega-menu-wrap-primary .mega-menu,
+        #mega-menu-wrap-primary .mega-sub-menu {
+            z-index: 999999 !important;
+        }
+
+        /* ==========================================================
+           ELEVAÇÃO DA LINHA SUPERIOR DO HEADER (ATENDIMENTO, ORÇAMENTO E SELO)
+           Garante que os elementos projetados da row-top fiquem visíveis sobre o header
+           ========================================================== */
+        .wp-block-kadence-header-row-top,
+        .wp-block-kadence-header-row-top .wp-block-kadence-header-section,
+        .wp-block-kadence-header-row-top .menu_buttons,
+        .wp-block-kadence-header-row-top .contato_button_menu,
+        .wp-block-kadence-header-row-top .carrinho_button_menu,
+        .wp-block-kadence-header-row-top .wp-block-kadence-image,
+        #mega-menu-wrap-menu-extra-2,
+        #mega-menu-wrap-menu-extra-3 {
+            position: relative !important;
+            z-index: 1000000 !important;
+        }
+
+        /* ==========================================================
+           BLINDAGEM DO MENU MOBILE (OFF-CANVAS)
+           Garante que o menu gaveta mobile fique sempre acima do header sticky
+           ========================================================== */
+        .wp-block-kadence-off-canvas,
+        .wp-block-kadence-off-canvas .kb-off-canvas-inner-wrap,
+        .wp-block-kadence-off-canvas .kb-off-canvas-overlay,
+        .wp-block-kadence-off-canvas .kb-off-canvas-close {
+            z-index: 2000000 !important;
+        }
+
+        /* ==========================================================
+           BLINDAGEM DE MODAIS E DRAWERS (CARRINHO E GALERIA WOOCOMMERCE)
+           Garante que o painel lateral do carrinho, seu overlay e o
+           PhotoSwipe fiquem sempre acima do cabeçalho fixo e menu mobile.
+           O overlay fica em 3000000 e o painel filho em 3000001, assegurando
+           que o drawer e seus controles fiquem hierarquicamente acima do backdrop.
+           ========================================================== */
+        .wc-block-components-drawer__screen-overlay,
+        .pswp {
+            z-index: 3000000 !important;
+        }
+
+        .wc-block-components-drawer__screen-overlay .wc-block-components-drawer,
+        .wc-block-components-drawer__screen-overlay .wc-block-mini-cart__drawer,
+        .wc-block-mini-cart__drawer,
+        .wc-block-components-drawer {
+            z-index: 3000001 !important;
+        }
+
+        /* ==========================================================
+           MEGA MENU: ESTRUTURA E PAINÉIS PRINCIPAIS
+           ========================================================== */
         .uonix-dynamic-cats-wrapper,
         .uonix-dc-panel {
             pointer-events: none !important;

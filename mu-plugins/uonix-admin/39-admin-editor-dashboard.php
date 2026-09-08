@@ -984,7 +984,6 @@ function uox_render_manutencao_cache() {
     if (isset($_GET['uox_flush_action']) && $_GET['uox_flush_action'] == 'run') {
         wp_cache_flush();
         if (function_exists('rocket_clean_domain')) { rocket_clean_domain(); }
-        if (class_exists('LiteSpeed_Cache_API')) { do_action('litespeed_purge_all'); }
         
         echo '<div class="notice notice-success is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>A memória cache do site foi totalmente limpa e atualizada!</p></div>';
     }

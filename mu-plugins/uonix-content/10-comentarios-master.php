@@ -113,7 +113,11 @@ add_filter('comment_form_default_fields', function($fields) {
 
     // Campo Empresa aparece somente para visitantes.
     if (!is_user_logged_in()) {
-        $fields['company'] = '<p class="comment-form-company comment-form-float-label"><input id="company" name="company" type="text" placeholder="Nome da sua empresa" value="" size="30" /><label class="float-label" for="company">Empresa</label></p>';
+        $comment_author_company = '';
+        if (isset($_COOKIE['comment_author_company_' . COOKIEHASH])) {
+            $comment_author_company = sanitize_text_field(wp_unslash($_COOKIE['comment_author_company_' . COOKIEHASH]));
+        }
+        $fields['company'] = '<p class="comment-form-company comment-form-float-label"><input id="company" name="company" type="text" placeholder="Nome da sua empresa" value="' . esc_attr($comment_author_company) . '" size="30" /><label class="float-label" for="company">Empresa</label></p>';
     }
 
     return $fields;
@@ -180,7 +184,8 @@ function uonix_bottom_checkboxes_html($include_cookies = true, $include_newslett
 }
 
 function uonix_bottom_checkboxes_injection() {
-    echo uonix_bottom_checkboxes_html(true, true);
+    // Checkbox nativo de cookies omitido em prol da gestão unificada AdOpt
+    echo uonix_bottom_checkboxes_html(false, true);
 }
 
 // Para usuário logado, injeta Empresa oculta e LGPD depois do campo comentário.
@@ -201,7 +206,39 @@ add_filter('comment_form_field_comment', function($field) {
 // 2. BACK-END: PROCESSAMENTO E INTEGRAÇÃO FLUENT FORMS
 // ==============================================================================
 
+/**
+ * Verifica se há consentimento positivo e verificável pelo servidor para persistência de cookies.
+ *
+ * Em estrita conformidade com a LGPD e política fail-closed:
+ * 1. Qualquer sinal de recusa/rejeição (_adoptReject) bloqueia imediatamente.
+ * 2. O consentimento NÃO é presumido por silêncio ou ausência de rejeição.
+ * 3. O cookie de preferências do AdOpt (AdoptConsent) registra escolhas do visitante e pode conter opt-outs;
+ *    por isso, NUNCA é tratado como consentimento positivo por si só.
+ * 4. O servidor exige evidência positiva via cookie First-Party (uonix_consent_granted=1), emitido
+ *    exclusivamente após validação das tags permitidas no callback oficial da AdOpt (window.adoptCB).
+ */
+function uonix_comment_has_positive_consent() {
+    if (isset($_COOKIE['_adoptReject'])) {
+        return false;
+    }
+
+    if (isset($_COOKIE['uonix_consent_granted']) && '1' === (string) $_COOKIE['uonix_consent_granted']) {
+        return true;
+    }
+
+    return false;
+}
+
 add_filter('preprocess_comment', function($commentdata) {
+    // Fail-Closed: se o formulário enviou wp-comment-cookies-consent, mas o servidor NÃO constatar
+    // evidência positiva de consentimento ou detectar rejeição explícita, invalida o consentimento.
+    // NUNCA insere ou presume wp-comment-cookies-consent se ele estiver ausente no POST.
+    if (!is_user_logged_in()) {
+        if (isset($_POST['wp-comment-cookies-consent']) && !uonix_comment_has_positive_consent()) {
+            unset($_POST['wp-comment-cookies-consent']);
+        }
+    }
+
     if ( ! apply_filters( 'uonix_turnstile_protect_comment_form', true ) ) {
         return $commentdata;
     }
@@ -309,6 +346,33 @@ add_action('comment_post', function($comment_id) {
         }
     }
 });
+
+add_action('set_comment_cookies', function($comment, $user, $cookies_consent = true) {
+    if (is_user_logged_in()) {
+        return;
+    }
+
+    $cookie_hash = defined('COOKIEHASH') ? COOKIEHASH : '';
+    $secure = function_exists('is_ssl') ? is_ssl() : false;
+    $has_consent = (bool) ( $cookies_consent && uonix_comment_has_positive_consent() );
+
+    do_action( 'uonix_comment_set_cookies_evaluated', $has_consent, $cookies_consent );
+
+    // Fail-Closed: grava cookie apenas se cookies_consent for verdadeiro E houver evidência positiva no servidor
+    if ($has_consent && isset($_POST['company'])) {
+        $company = uonix_comment_sync_upper_text(sanitize_text_field(wp_unslash($_POST['company'])));
+        $comment_cookie_lifetime = apply_filters('comment_cookie_lifetime', 30000000);
+        setcookie('comment_author_company_' . $cookie_hash, $company, time() + $comment_cookie_lifetime, COOKIEPATH, COOKIE_DOMAIN, $secure, true);
+        if (defined('SITECOOKIEPATH') && COOKIEPATH !== SITECOOKIEPATH) {
+            setcookie('comment_author_company_' . $cookie_hash, $company, time() + $comment_cookie_lifetime, SITECOOKIEPATH, COOKIE_DOMAIN, $secure, true);
+        }
+    } else {
+        setcookie('comment_author_company_' . $cookie_hash, '', time() - 3600, COOKIEPATH, COOKIE_DOMAIN, $secure, true);
+        if (defined('SITECOOKIEPATH') && COOKIEPATH !== SITECOOKIEPATH) {
+            setcookie('comment_author_company_' . $cookie_hash, '', time() - 3600, SITECOOKIEPATH, COOKIE_DOMAIN, $secure, true);
+        }
+    }
+}, 10, 3);
 
 // Coluna Empresa na listagem de comentários.
 add_filter('manage_edit-comments_columns', function($cols) {

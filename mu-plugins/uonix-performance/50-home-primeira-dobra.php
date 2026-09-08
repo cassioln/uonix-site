@@ -372,25 +372,35 @@ if ( ! function_exists( 'uonix_home_performance_critical_css' ) ) {
 			.wcps-container-8643 .splide__arrow i {
 				display: none !important;
 			}
+			.wcps-container-1546 .splide__arrow .icon,
+			.wcps-container-8643 .splide__arrow .icon {
+				display: flex !important;
+				align-items: center !important;
+				justify-content: center !important;
+			}
 			.wcps-container-1546 .splide__arrow .icon::before,
 			.wcps-container-8643 .splide__arrow .icon::before {
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				width: 1em;
-				height: 1em;
-				color: currentColor;
-				font-size: 28px;
-				font-weight: 800;
-				line-height: 1;
+				display: flex !important;
+				align-items: center !important;
+				justify-content: center !important;
+				width: 1em !important;
+				height: 1em !important;
+				color: currentColor !important;
+				font-size: 28px !important;
+				font-weight: 800 !important;
+				line-height: 1 !important;
 			}
 			.wcps-container-1546 .splide__arrow.prev .icon::before,
-			.wcps-container-8643 .splide__arrow.prev .icon::before {
-				content: "\2039";
+			.wcps-container-1546 .splide__arrow--prev .icon::before,
+			.wcps-container-8643 .splide__arrow.prev .icon::before,
+			.wcps-container-8643 .splide__arrow--prev .icon::before {
+				content: "\2039" !important;
 			}
 			.wcps-container-1546 .splide__arrow.next .icon::before,
-			.wcps-container-8643 .splide__arrow.next .icon::before {
-				content: "\203A";
+			.wcps-container-1546 .splide__arrow--next .icon::before,
+			.wcps-container-8643 .splide__arrow.next .icon::before,
+			.wcps-container-8643 .splide__arrow--next .icon::before {
+				content: "\203A" !important;
 			}
 		</style>
 		<?php
