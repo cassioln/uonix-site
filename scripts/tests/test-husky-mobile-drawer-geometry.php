@@ -97,6 +97,14 @@ test_assert(
     strpos($admin_content, 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags') !== false,
     '39-admin-editor-dashboard.php: Deve conter atalho para o painel AdOpt com link de tags'
 );
-echo "ok   39-admin-editor-dashboard.php: Atalho AdOpt, chamadas órfãs do LiteSpeed eliminadas, WP Rocket e wp_cache_flush preservados\n";
+test_assert(
+    strpos($admin_content, 'min-height: 200px') === false,
+    '39-admin-editor-dashboard.php: Não deve conter altura mínima fixa legada (min-height: 200px)'
+);
+test_assert(
+    strpos($admin_content, 'height: auto !important') !== false,
+    '39-admin-editor-dashboard.php: Cards do dashboard devem ter altura dinâmica (height: auto !important)'
+);
+echo "ok   39-admin-editor-dashboard.php: Atalho AdOpt, cards dinâmicos sem min-height fixo, chamadas órfãs eliminadas\n";
 
-echo "\nPASS: Todos os contratos de geometria mobile e limpeza de cache foram aprovados com sucesso!\n";
+echo "\nPASS: Todos os contratos de geometria mobile, cache e cards dinâmicos foram aprovados com sucesso!\n";
