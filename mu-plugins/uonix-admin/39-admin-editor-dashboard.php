@@ -936,6 +936,9 @@ function uox_render_quick_links() {
 		<a href="/wp-admin/upload.php?page=uonix-curriculos-recebidos" class="uox-btn">
             <span class="dashicons dashicons-media-text"></span> Currículos Recebidos
         </a>
+		<a href="https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags" target="_blank" rel="noopener noreferrer" class="uox-btn">
+            <span class="dashicons dashicons-shield"></span> Adopt
+        </a>
         <a href="/wp-admin/admin.php?page=uox-dados-globais" class="uox-btn uox-btn-primary uox-btn-full">
             <span class="dashicons dashicons-building"></span> Alterar Telefones e Endereço
         </a>

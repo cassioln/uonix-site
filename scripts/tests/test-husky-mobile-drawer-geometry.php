@@ -93,6 +93,10 @@ test_assert(
     strpos($admin_content, 'rocket_clean_domain') !== false,
     '39-admin-editor-dashboard.php: Deve manter rocket_clean_domain para WP Rocket'
 );
-echo "ok   39-admin-editor-dashboard.php: Chamadas órfãs do LiteSpeed eliminadas, WP Rocket e wp_cache_flush preservados\n";
+test_assert(
+    strpos($admin_content, 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags') !== false,
+    '39-admin-editor-dashboard.php: Deve conter atalho para o painel AdOpt com link de tags'
+);
+echo "ok   39-admin-editor-dashboard.php: Atalho AdOpt, chamadas órfãs do LiteSpeed eliminadas, WP Rocket e wp_cache_flush preservados\n";
 
 echo "\nPASS: Todos os contratos de geometria mobile e limpeza de cache foram aprovados com sucesso!\n";
