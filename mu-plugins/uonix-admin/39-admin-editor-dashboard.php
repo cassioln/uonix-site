@@ -1010,6 +1010,9 @@ function uox_render_quick_links() {
 		<a href="/wp-admin/upload.php?page=uonix-curriculos-recebidos" class="uox-btn">
             <span class="dashicons dashicons-media-text"></span> Currículos Recebidos
         </a>
+		<a href="/wp-admin/admin.php?page=fluent_forms_all_entries" class="uox-btn">
+            <span class="dashicons dashicons-email-alt"></span> Leads
+        </a>
 		<a href="https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags" target="_blank" rel="noopener noreferrer" class="uox-btn">
             <span class="dashicons dashicons-shield"></span> Adopt
         </a>

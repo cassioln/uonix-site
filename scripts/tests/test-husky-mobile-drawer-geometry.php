@@ -105,6 +105,10 @@ test_assert(
     strpos($admin_content, 'height: auto !important') !== false,
     '39-admin-editor-dashboard.php: Cards do dashboard devem ter altura dinâmica (height: auto !important)'
 );
-echo "ok   39-admin-editor-dashboard.php: Atalho AdOpt, cards dinâmicos sem min-height fixo, chamadas órfãs eliminadas\n";
+test_assert(
+    strpos($admin_content, 'admin.php?page=fluent_forms_all_entries') !== false,
+    '39-admin-editor-dashboard.php: Deve conter atalho direto para Leads no Acesso Rápido'
+);
+echo "ok   39-admin-editor-dashboard.php: Atalhos AdOpt e Leads, cards dinâmicos sem min-height fixo, chamadas órfãs eliminadas\n";
 
 echo "\nPASS: Todos os contratos de geometria mobile, cache e cards dinâmicos foram aprovados com sucesso!\n";
