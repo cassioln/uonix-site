@@ -75,6 +75,8 @@ function uonix_render_analytics_dashboard_page() {
 	$gsc_domain_url  = 'https://search.google.com/search-console?resource_id=sc-domain:uonix.com.br';
 	$ga4_url         = 'https://analytics.google.com/analytics/web/';
 	$looker_url      = 'https://lookerstudio.google.com/';
+	$meta_events_url = 'https://business.facebook.com/events_manager2';
+	$meta_suite_url  = 'https://business.facebook.com/latest/home';
 	?>
 	<div class="wrap uonix-analytics-wrap">
 		<!-- Header Principal -->
@@ -91,6 +93,9 @@ function uonix_render_analytics_dashboard_page() {
 				<a href="<?php echo esc_url( $gsc_domain_url ); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-secondary">
 					<span class="dashicons dashicons-search"></span> Abrir Search Console
 				</a>
+				<a href="<?php echo esc_url( $meta_events_url ); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-meta">
+					<span class="dashicons dashicons-facebook-alt"></span> Meta Events Manager
+				</a>
 			</div>
 		</div>
 
@@ -105,6 +110,11 @@ function uonix_render_analytics_dashboard_page() {
 				<span class="uonix-status-dot uonix-dot-active"></span>
 				<span class="uonix-status-label">Google Analytics 4:</span>
 				<strong>Coleta via GTM [Ativo]</strong>
+			</div>
+			<div class="uonix-status-item">
+				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-label">Meta Pixel:</span>
+				<strong>GTM + LGPD [Ativo]</strong>
 			</div>
 			<div class="uonix-status-item">
 				<span class="uonix-status-dot uonix-dot-active"></span>
@@ -166,7 +176,7 @@ function uonix_render_analytics_dashboard_page() {
 				<span class="dashicons dashicons-hammer"></span> Serviços de Engenharia (<?php echo esc_html( $total_services ); ?>)
 			</button>
 			<button class="uonix-tab-btn" data-tab="tab-google-hub">
-				<span class="dashicons dashicons-dashboard"></span> Atalhos do Google & Relatórios
+				<span class="dashicons dashicons-dashboard"></span> Ferramentas & Tráfego (Google + Meta)
 			</button>
 		</div>
 
@@ -332,11 +342,11 @@ function uonix_render_analytics_dashboard_page() {
 				</div>
 			</div>
 
-			<!-- ABA 4: ATALHOS GOOGLE & LOOKER -->
+			<!-- ABA 4: ATALHOS GOOGLE & META -->
 			<div id="tab-google-hub" class="uonix-tab-panel">
 				<div class="uonix-panel-header">
-					<h2>Hub de Acesso Direto às Ferramentas do Google</h2>
-					<p>Clique nos cards abaixo para abrir os relatórios específicos diretamente na sua conta Google configurada.</p>
+					<h2>Hub de Acesso Direto às Ferramentas de Tráfego & Monitoramento</h2>
+					<p>Clique nos cards abaixo para abrir os relatórios específicos diretamente nas plataformas Google e Meta.</p>
 				</div>
 				<div class="uonix-shortcuts-grid">
 
@@ -366,6 +376,21 @@ function uonix_render_analytics_dashboard_page() {
 							<li><a href="<?php echo esc_url( 'https://search.google.com/search-console/sitemaps?resource_id=sc-domain:uonix.com.br' ); ?>" target="_blank" rel="noopener">➔ Sitemaps XML Enviados</a></li>
 						</ul>
 						<a href="<?php echo esc_url( $gsc_domain_url ); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Search Console</a>
+					</div>
+
+					<div class="uonix-shortcut-card">
+						<div class="uonix-shortcut-header">
+							<span class="dashicons dashicons-facebook-alt uonix-sc-icon-meta"></span>
+							<h3>Meta Pixel (Facebook & Instagram)</h3>
+						</div>
+						<p>Acompanhe a entrega de eventos de conversão, disparos via GTM (PageView, Contact, Lead) e a saúde do Pixel.</p>
+						<ul class="uonix-shortcut-links">
+							<li><a href="<?php echo esc_url( $meta_events_url ); ?>" target="_blank" rel="noopener">➔ Gerenciador de Eventos (Events Manager)</a></li>
+							<li><a href="<?php echo esc_url( 'https://business.facebook.com/events_manager2/diagnostics' ); ?>" target="_blank" rel="noopener">➔ Diagnóstico & Qualidade dos Eventos</a></li>
+							<li><a href="<?php echo esc_url( 'https://business.facebook.com/events_manager2/test_events' ); ?>" target="_blank" rel="noopener">➔ Testar Eventos do Pixel em Tempo Real</a></li>
+							<li><a href="<?php echo esc_url( $meta_suite_url ); ?>" target="_blank" rel="noopener">➔ Meta Business Suite Principal</a></li>
+						</ul>
+						<a href="<?php echo esc_url( $meta_events_url ); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline uonix-btn-outline-meta">Abrir Meta Events Manager</a>
 					</div>
 
 					<div class="uonix-shortcut-card">
@@ -450,6 +475,8 @@ function uonix_render_analytics_dashboard_page() {
 		.uonix-btn-primary:hover { background: #1d4ed8; color: #ffffff; }
 		.uonix-btn-secondary { background: rgba(255, 255, 255, 0.15); color: #ffffff; border: 1px solid rgba(255, 255, 255, 0.2); }
 		.uonix-btn-secondary:hover { background: rgba(255, 255, 255, 0.25); color: #ffffff; }
+		.uonix-btn-meta { background: #1877f2; color: #ffffff; border: 1px solid #1877f2; }
+		.uonix-btn-meta:hover { background: #166fe5; color: #ffffff; }
 		.uonix-btn-outline {
 			display: block;
 			text-align: center;
@@ -626,6 +653,9 @@ function uonix_render_analytics_dashboard_page() {
 		.uonix-sc-icon-ga { color: #ea580c; font-size: 24px; width: 24px; height: 24px; }
 		.uonix-sc-icon-gsc { color: #2563eb; font-size: 24px; width: 24px; height: 24px; }
 		.uonix-sc-icon-looker { color: #059669; font-size: 24px; width: 24px; height: 24px; }
+		.uonix-sc-icon-meta { color: #1877f2; font-size: 24px; width: 24px; height: 24px; }
+		.uonix-btn-outline-meta { color: #1877f2; }
+		.uonix-btn-outline-meta:hover { background: #1877f2; color: #ffffff; border-color: #1877f2; }
 	</style>
 
 	<!-- Script JS para Troca de Abas -->
