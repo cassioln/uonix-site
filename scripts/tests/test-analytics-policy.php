@@ -97,12 +97,49 @@ function uonix_analytics_assert_not_contains( $needle, $haystack, $message ) {
 function uonix_analytics_assert_css_declaration( $selector, $declaration, $css, $message ) {
 	global $failures;
 
-	$pattern = '/' . preg_quote( $selector, '/' ) . '\\s*\\{(?<body>.*?)\\}/s';
+	$pattern = '/(?:^|[\},])\s*([^\{\}]*?' . preg_quote( $selector, '/' ) . '[^\{\}]*?)\{(?<body>[^\}]*?)\}/s';
 
-	if ( ! preg_match( $pattern, $css, $matches ) || false === strpos( $matches['body'], $declaration ) ) {
+	if ( ! preg_match_all( $pattern, $css, $matches ) ) {
 		++$failures;
-		fwrite( STDERR, sprintf( "FAIL: %s (seletor/declaracao ausente: %s { %s })\n", $message, $selector, $declaration ) );
+		fwrite( STDERR, sprintf( "FAIL: %s (seletor ausente: %s)\n", $message, $selector ) );
+		return;
 	}
+
+	foreach ( $matches['body'] as $body ) {
+		if ( false !== strpos( $body, $declaration ) ) {
+			return;
+		}
+	}
+
+	++$failures;
+	fwrite( STDERR, sprintf( "FAIL: %s (declaracao ausente para %s: { %s })\n", $message, $selector, $declaration ) );
+}
+
+function uonix_analytics_assert_media_query_css( $media_query, $selector, $declaration, $css, $message ) {
+	global $failures;
+
+	$media_pattern = '/' . preg_quote( $media_query, '/' ) . '\s*\{(?<media_body>.*?)\}\s*(?:@|\z|<\/style>)/s';
+
+	if ( ! preg_match_all( $media_pattern, $css, $media_matches ) ) {
+		++$failures;
+		fwrite( STDERR, sprintf( "FAIL: %s (media query ausente: %s)\n", $message, $media_query ) );
+		return;
+	}
+
+	$rule_pattern = '/(?:^|[\},])\s*([^\{\}]*?' . preg_quote( $selector, '/' ) . '[^\{\}]*?)\{(?<body>[^\}]*?)\}/s';
+
+	foreach ( $media_matches['media_body'] as $media_body ) {
+		if ( preg_match_all( $rule_pattern, $media_body, $matches ) ) {
+			foreach ( $matches['body'] as $body ) {
+				if ( false !== strpos( $body, $declaration ) ) {
+					return;
+				}
+			}
+		}
+	}
+
+	++$failures;
+	fwrite( STDERR, sprintf( "FAIL: %s (regra ausente dentro de %s: %s { %s })\n", $message, $media_query, $selector, $declaration ) );
 }
 
 $required_functions = array(
@@ -144,6 +181,39 @@ uonix_analytics_assert_css_declaration(
 	$head_html,
 	'botão Não venda usa o mesmo arredondamento discreto do Aceitar sem alterar Minhas opções'
 );
+
+// Contrato de layout dos 3 links legais do banner AdOpt (lado a lado e responsivo)
+$legal_container_selector = '#uonix-cookie-root #cookie-banner span:has(> #adopt-divisor)';
+uonix_analytics_assert_css_declaration( $legal_container_selector, 'display: flex !important', $head_html, 'container de links legais usa layout flexível' );
+uonix_analytics_assert_css_declaration( $legal_container_selector, 'flex-direction: row !important', $head_html, 'container de links legais organiza em linha' );
+uonix_analytics_assert_css_declaration( $legal_container_selector, 'flex-wrap: wrap !important', $head_html, 'container de links legais quebra linha apenas quando necessário' );
+uonix_analytics_assert_css_declaration( $legal_container_selector, 'justify-content: center !important', $head_html, 'container de links legais centraliza horizontalmente' );
+
+// Seletores relacionais e de classe para robustez contra variações de markup do AdOpt
+uonix_analytics_assert_contains( 'span:has(> a[href*="politica"])', $head_html, 'seletor cobre link de politica por href' );
+uonix_analytics_assert_contains( 'span:has(> a[href*="termos"])', $head_html, 'seletor cobre link de termos por href' );
+uonix_analytics_assert_contains( '.adopt-c-heVgjB', $head_html, 'seletor cobre classe nativa do container AdOpt' );
+
+// Divisor entre links legais
+$divisor_selector = '#uonix-cookie-root #cookie-banner #adopt-divisor';
+uonix_analytics_assert_css_declaration( $divisor_selector, 'display: inline-flex !important', $head_html, 'divisor AdOpt é inline-flex (não quebra em bloco vertical)' );
+uonix_analytics_assert_css_declaration( $divisor_selector, 'align-items: center !important', $head_html, 'divisor AdOpt alinha ao centro no eixo vertical' );
+
+// Links legais individuais inquebráveis
+$legal_link_selector = '#uonix-cookie-root #cookie-banner a[href*="politica-de-privacidade"]';
+uonix_analytics_assert_css_declaration( $legal_link_selector, 'display: inline-flex !important', $head_html, 'links legais individuais usam inline-flex' );
+uonix_analytics_assert_css_declaration( $legal_link_selector, 'white-space: nowrap !important', $head_html, 'links legais preservam white-space: nowrap (sem quebra interna de palavras)' );
+uonix_analytics_assert_css_declaration( $legal_link_selector, 'color: #f76a0c !important', $head_html, 'links legais usam a cor primária laranja da Uonix' );
+uonix_analytics_assert_contains( 'a[href*="politica-de-cookies"]', $head_html, 'seletor de link cobre politica de cookies' );
+uonix_analytics_assert_contains( 'a[href*="termos-de-uso"]', $head_html, 'seletor de link cobre termos de uso' );
+uonix_analytics_assert_contains( 'a.adopt-c-gtasTX', $head_html, 'seletor cobre classe nativa dos links AdOpt' );
+
+// Largura desktop do banner
+uonix_analytics_assert_css_declaration( '#uonix-cookie-root #cookie-banner', 'max-width: 440px !important', $head_html, 'banner desktop possui max-width de 440px para acomodar os 3 links' );
+
+// Breakpoints responsivos de 480px e 360px
+uonix_analytics_assert_media_query_css( '@media (max-width: 480px)', '#cookie-banner', 'width: calc(100% - 24px) !important', $head_html, 'breakpoint de 480px ajusta largura para mobile' );
+uonix_analytics_assert_media_query_css( '@media (max-width: 360px)', '#adopt-divisor', 'display: none !important', $head_html, 'breakpoint de 360px oculta divisor para evitar hífens órfãos em telas ultra-compactas' );
 
 ob_start();
 uonix_render_analytics_body( $valid );
