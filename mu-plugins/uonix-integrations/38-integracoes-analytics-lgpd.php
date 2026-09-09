@@ -422,25 +422,25 @@ function uonix_render_analytics_head( $configuration = null ) {
         #cookie-banner a[href*="politica-de-cookies"],
         #cookie-banner a[href*="termos-de-uso"],
         #cookie-banner a.adopt-c-gtasTX {
-            position: relative !important; 
-            display: inline-flex !important; 
-            align-items: center !important; 
-            color: #f76a0c !important; 
-            font-weight: 700 !important; 
-            text-decoration: none !important; 
+            position: relative !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            color: #f76a0c !important;
+            font-weight: 700 !important;
+            text-decoration: none !important;
             margin: 0 !important;
             padding: 2px 0 !important;
             font-size: 12.5px !important;
             line-height: 1.3 !important;
             white-space: nowrap !important;
         }
-        
+
         /* Controle de margem para o 'Desenvolvido por AdOpt' */
         #uonix-cookie-root #cookie-banner small:last-child {
             margin-top: 12px !important;
             margin-bottom: 24px !important;
         }
-           
+
         #uonix-cookie-root #cookie-banner span:has(> #adopt-divisor) a::after,
         #uonix-cookie-root #cookie-banner span:has(> a[href*="politica"]) a::after,
         #uonix-cookie-root #cookie-banner span:has(> a[href*="termos"]) a::after,
@@ -454,15 +454,15 @@ function uonix_render_analytics_head( $configuration = null ) {
         #cookie-banner a[href*="politica-de-cookies"]::after,
         #cookie-banner a[href*="termos-de-uso"]::after,
         #cookie-banner a.adopt-c-gtasTX::after {
-            content: "" !important; 
-            position: absolute !important; 
-            left: 0 !important; 
-            right: 0 !important; 
-            bottom: -1px !important; 
+            content: "" !important;
+            position: absolute !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: -1px !important;
             height: 1.5px !important;
             background: rgba(247, 106, 12, 0.4) !important;
-            transform: scaleX(0) !important; 
-            transform-origin: left center !important; 
+            transform: scaleX(0) !important;
+            transform-origin: left center !important;
             transition: transform .25s ease !important;
         }
 
@@ -478,8 +478,8 @@ function uonix_render_analytics_head( $configuration = null ) {
         #cookie-banner a[href*="politica-de-privacidade"]:hover::after,
         #cookie-banner a[href*="politica-de-cookies"]:hover::after,
         #cookie-banner a[href*="termos-de-uso"]:hover::after,
-        #cookie-banner a.adopt-c-gtasTX:hover::after { 
-            transform: scaleX(1) !important; 
+        #cookie-banner a.adopt-c-gtasTX:hover::after {
+            transform: scaleX(1) !important;
         }
 
         @media (max-width: 480px) {
