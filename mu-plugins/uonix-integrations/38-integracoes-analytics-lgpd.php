@@ -344,7 +344,7 @@ function uonix_render_analytics_head( $configuration = null ) {
             margin: 0 !important;
             padding: 0px !important;
             width: 90% !important;
-            max-width: 420px !important;
+            max-width: 440px !important;
         }
 
         /* Título do Banner */
@@ -357,7 +357,7 @@ function uonix_render_analytics_head( $configuration = null ) {
         
         /* Textos Base do Banner */
         #uonix-cookie-root #cookie-banner small, 
-        #uonix-cookie-root #cookie-banner span {
+        #uonix-cookie-root #cookie-banner span:not(#adopt-divisor) {
             font-size: 13px !important;
             line-height: 1.5 !important;
             color: #555 !important;
@@ -365,41 +365,141 @@ function uonix_render_analytics_head( $configuration = null ) {
             margin-bottom: 8px !important;
         }
 
-		/* Links de Política de Privacidade e Cookies (Lado a Lado e Centralizados) */
-        #uonix-cookie-root #cookie-banner span:has(> a[href*="#"]) {
+        /* Links de Política de Privacidade, Cookies e Termos (Lado a Lado com quebra flexível) */
+        #uonix-cookie-root #cookie-banner span:has(> #adopt-divisor),
+        #uonix-cookie-root #cookie-banner span:has(> a[href*="politica"]),
+        #uonix-cookie-root #cookie-banner span:has(> a[href*="termos"]),
+        #uonix-cookie-root #cookie-banner span:has(> a[href*="#"]),
+        #uonix-cookie-root #cookie-banner .adopt-c-heVgjB,
+        #cookie-banner span:has(> #adopt-divisor),
+        #cookie-banner span:has(> a[href*="politica"]),
+        #cookie-banner span:has(> a[href*="termos"]),
+        #cookie-banner .adopt-c-heVgjB {
             display: flex !important;
             flex-direction: row !important;
             flex-wrap: wrap !important;
-            justify-content: center !important; /* <-- A MÁGICA AQUI: Centraliza no eixo horizontal */
-            gap: 15px !important;
+            justify-content: center !important;
             align-items: center !important;
-            margin-top: 12px !important;
-            margin-bottom: 15px !important;
-            width: 100% !important; /* Garante que ocupe a linha toda para o centro ficar exato */
+            column-gap: 8px !important;
+            row-gap: 6px !important;
+            margin-top: 14px !important;
+            margin-bottom: 14px !important;
+            width: 100% !important;
+            line-height: 1.4 !important;
+            text-align: center !important;
         }
         
-        #uonix-cookie-root #cookie-banner a[href*="#"] {
+        /* Divisores entre os links (inline, centralizados no eixo) */
+        #uonix-cookie-root #cookie-banner #adopt-divisor,
+        #uonix-cookie-root #cookie-banner span#adopt-divisor,
+        #cookie-banner #adopt-divisor,
+        #cookie-banner span#adopt-divisor {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            color: #94a3b8 !important;
+            font-size: 11px !important;
+            font-weight: 500 !important;
+            line-height: 1 !important;
+            margin: 0 !important;
+            padding: 0 1px !important;
+            width: auto !important;
+            height: auto !important;
+            user-select: none !important;
+        }
+
+        /* Estilização individual dos links legais */
+        #uonix-cookie-root #cookie-banner span:has(> #adopt-divisor) a,
+        #uonix-cookie-root #cookie-banner span:has(> a[href*="politica"]) a,
+        #uonix-cookie-root #cookie-banner span:has(> a[href*="termos"]) a,
+        #uonix-cookie-root #cookie-banner a[href*="politica-de-privacidade"],
+        #uonix-cookie-root #cookie-banner a[href*="politica-de-cookies"],
+        #uonix-cookie-root #cookie-banner a[href*="termos-de-uso"],
+        #uonix-cookie-root #cookie-banner a[href*="#"],
+        #uonix-cookie-root #cookie-banner a.adopt-c-gtasTX,
+        #cookie-banner span:has(> #adopt-divisor) a,
+        #cookie-banner a[href*="politica-de-privacidade"],
+        #cookie-banner a[href*="politica-de-cookies"],
+        #cookie-banner a[href*="termos-de-uso"],
+        #cookie-banner a.adopt-c-gtasTX {
             position: relative !important; 
-            display: inline-block !important; 
+            display: inline-flex !important; 
+            align-items: center !important; 
             color: #f76a0c !important; 
             font-weight: 700 !important; 
             text-decoration: none !important; 
             margin: 0 !important;
-		    font-size: 14px !important
+            padding: 2px 0 !important;
+            font-size: 12.5px !important;
+            line-height: 1.3 !important;
+            white-space: nowrap !important;
         }
-		
-		/* Controle de margem exclusivo para o 'Desenvolvido por AdOpt' */
+        
+        /* Controle de margem para o 'Desenvolvido por AdOpt' */
         #uonix-cookie-root #cookie-banner small:last-child {
-            margin-top: 15px !important;
-            margin-bottom: 35px !important;
+            margin-top: 12px !important;
+            margin-bottom: 24px !important;
         }
-		   
-        #uonix-cookie-root #cookie-banner a[href*="#"]::after {
-            content: "" !important; position: absolute !important; left: 0 !important; right: 0 !important; bottom: -2px !important; height: 1.5px !important;
+           
+        #uonix-cookie-root #cookie-banner span:has(> #adopt-divisor) a::after,
+        #uonix-cookie-root #cookie-banner span:has(> a[href*="politica"]) a::after,
+        #uonix-cookie-root #cookie-banner span:has(> a[href*="termos"]) a::after,
+        #uonix-cookie-root #cookie-banner a[href*="politica-de-privacidade"]::after,
+        #uonix-cookie-root #cookie-banner a[href*="politica-de-cookies"]::after,
+        #uonix-cookie-root #cookie-banner a[href*="termos-de-uso"]::after,
+        #uonix-cookie-root #cookie-banner a[href*="#"]::after,
+        #uonix-cookie-root #cookie-banner a.adopt-c-gtasTX::after,
+        #cookie-banner span:has(> #adopt-divisor) a::after,
+        #cookie-banner a[href*="politica-de-privacidade"]::after,
+        #cookie-banner a[href*="politica-de-cookies"]::after,
+        #cookie-banner a[href*="termos-de-uso"]::after,
+        #cookie-banner a.adopt-c-gtasTX::after {
+            content: "" !important; 
+            position: absolute !important; 
+            left: 0 !important; 
+            right: 0 !important; 
+            bottom: -1px !important; 
+            height: 1.5px !important;
             background: rgba(247, 106, 12, 0.4) !important;
-            transform: scaleX(0); transform-origin: left center !important; transition: transform .25s ease !important;
+            transform: scaleX(0) !important; 
+            transform-origin: left center !important; 
+            transition: transform .25s ease !important;
         }
-        #uonix-cookie-root #cookie-banner a[href*="#"]:hover::after { transform: scaleX(1) !important; }
+
+        #uonix-cookie-root #cookie-banner span:has(> #adopt-divisor) a:hover::after,
+        #uonix-cookie-root #cookie-banner span:has(> a[href*="politica"]) a:hover::after,
+        #uonix-cookie-root #cookie-banner span:has(> a[href*="termos"]) a:hover::after,
+        #uonix-cookie-root #cookie-banner a[href*="politica-de-privacidade"]:hover::after,
+        #uonix-cookie-root #cookie-banner a[href*="politica-de-cookies"]:hover::after,
+        #uonix-cookie-root #cookie-banner a[href*="termos-de-uso"]:hover::after,
+        #uonix-cookie-root #cookie-banner a[href*="#"]:hover::after,
+        #uonix-cookie-root #cookie-banner a.adopt-c-gtasTX:hover::after,
+        #cookie-banner span:has(> #adopt-divisor) a:hover::after,
+        #cookie-banner a[href*="politica-de-privacidade"]:hover::after,
+        #cookie-banner a[href*="politica-de-cookies"]:hover::after,
+        #cookie-banner a[href*="termos-de-uso"]:hover::after,
+        #cookie-banner a.adopt-c-gtasTX:hover::after { 
+            transform: scaleX(1) !important; 
+        }
+
+        @media (max-width: 480px) {
+            #uonix-cookie-root #cookie-banner {
+                left: 12px !important;
+                right: 12px !important;
+                bottom: 12px !important;
+                width: calc(100% - 24px) !important;
+                max-width: 100% !important;
+            }
+        }
+
+        @media (max-width: 360px) {
+            #uonix-cookie-root #cookie-banner span#adopt-divisor,
+            #uonix-cookie-root #cookie-banner #adopt-divisor,
+            #cookie-banner span#adopt-divisor,
+            #cookie-banner #adopt-divisor {
+                display: none !important;
+            }
+        }
         
 		   
 		   
