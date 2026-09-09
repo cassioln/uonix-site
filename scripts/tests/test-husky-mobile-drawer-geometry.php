@@ -93,6 +93,26 @@ test_assert(
     strpos($admin_content, 'rocket_clean_domain') !== false,
     '39-admin-editor-dashboard.php: Deve manter rocket_clean_domain para WP Rocket'
 );
-echo "ok   39-admin-editor-dashboard.php: Chamadas órfãs do LiteSpeed eliminadas, WP Rocket e wp_cache_flush preservados\n";
+test_assert(
+    strpos($admin_content, 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags') !== false,
+    '39-admin-editor-dashboard.php: Deve conter atalho para o painel AdOpt com link de tags'
+);
+test_assert(
+    strpos($admin_content, 'min-height: 200px') === false,
+    '39-admin-editor-dashboard.php: Não deve conter altura mínima fixa legada (min-height: 200px)'
+);
+test_assert(
+    strpos($admin_content, 'height: auto !important') !== false,
+    '39-admin-editor-dashboard.php: Cards do dashboard devem ter altura dinâmica (height: auto !important)'
+);
+test_assert(
+    strpos($admin_content, 'admin.php?page=fluent_forms_all_entries') !== false,
+    '39-admin-editor-dashboard.php: Deve conter atalho direto para Leads no Acesso Rápido'
+);
+test_assert(
+    strpos($admin_content, 'Meta Pixel Ativo') !== false,
+    '39-admin-editor-dashboard.php: Deve conter badge do Meta Pixel Ativo no bloco de tráfego'
+);
+echo "ok   39-admin-editor-dashboard.php: Atalhos AdOpt, Leads e Meta Pixel, cards dinâmicos sem min-height fixo, chamadas órfãs eliminadas\n";
 
-echo "\nPASS: Todos os contratos de geometria mobile e limpeza de cache foram aprovados com sucesso!\n";
+echo "\nPASS: Todos os contratos de geometria mobile, cache e cards dinâmicos foram aprovados com sucesso!\n";

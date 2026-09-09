@@ -415,52 +415,73 @@ function uonix_dashboard_css() {
         }
     }
 
-    /* --- PADRONIZAÇÃO DOS WIDGETS (CARDS) --- */
+    /* --- PADRONIZAÇÃO DOS WIDGETS (CARDS DINÂMICOS) --- */
     #dashboard-widgets .postbox {
-        border: none !important;
+        border: 1px solid #e2e8f0 !important;
         border-radius: 12px !important;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.04) !important;
+        box-shadow: 0 2px 8px -2px rgba(14, 55, 128, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03) !important;
         background: #ffffff !important;
         overflow: hidden;
+        margin-bottom: 20px !important;
+        height: auto !important;
+        min-height: 0 !important;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    #dashboard-widgets .postbox:hover {
+        border-color: #cbd5e1 !important;
+        box-shadow: 0 4px 16px rgba(14, 55, 128, 0.08), 0 1px 4px rgba(15, 23, 42, 0.04) !important;
     }
 
     #dashboard-widgets .postbox-header {
         border-bottom: 1px solid #f1f5f9 !important;
         background: #ffffff !important;
-        padding: 12px 15px !important;
+        padding: 12px 18px !important;
+        display: flex !important;
+        align-items: center !important;
+        min-height: 48px !important;
+        box-sizing: border-box !important;
     }
 
     #dashboard-widgets .postbox-header h2 {
-        font-size: 15px !important;
+        font-size: 14.5px !important;
         font-weight: 700 !important;
         color: #0e3780 !important;
+        letter-spacing: -0.01em !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: 1.3 !important;
     }
 
     #dashboard-widgets .inside {
-        padding: 20px !important;
+        padding: 14px 18px 16px 18px !important;
         margin: 0 !important;
+        height: auto !important;
+        min-height: 0 !important;
     }
 
     #dashboard-widgets .button-primary {
         background: #0e3780 !important;
         border-color: #0e3780 !important;
         color: #fff !important;
-        border-radius: 6px !important;
-        box-shadow: none !important;
+        border-radius: 8px !important;
+        box-shadow: 0 1px 3px rgba(14, 55, 128, 0.2) !important;
         text-shadow: none !important;
         font-weight: 600 !important;
-        padding: 6px 14px !important;
+        padding: 7px 16px !important;
+        transition: 0.15s ease;
     }
 
     #dashboard-widgets .button-primary:hover {
         background: #1a2b3c !important;
         border-color: #1a2b3c !important;
+        box-shadow: 0 2px 6px rgba(14, 55, 128, 0.3) !important;
     }
 
     /* --- ELEMENTOS INTERNOS UÔNIX --- */
     .uox-stat-box {
         text-align: center;
-        padding: 15px 0;
+        padding: 12px 0;
         border-bottom: 1px solid #f1f5f9;
     }
 
@@ -469,15 +490,16 @@ function uonix_dashboard_css() {
     }
 
     .uox-stat-number {
-        font-size: 32px;
+        font-size: 30px;
         font-weight: 800;
-        color: #0f172a;
+        color: #0e3780;
         line-height: 1;
-        margin-bottom: 5px;
+        margin-bottom: 4px;
+        letter-spacing: -0.02em;
     }
 
     .uox-stat-label {
-        font-size: 13px;
+        font-size: 12.5px;
         color: #64748b;
         font-weight: 500;
     }
@@ -485,18 +507,18 @@ function uonix_dashboard_css() {
     .uox-btn-group {
         display: flex;
         gap: 10px;
-        margin-top: 15px;
+        margin-top: 14px;
     }
 
     .uox-btn {
         flex: 1;
         text-align: center;
-        padding: 10px 12px;
-        border-radius: 6px;
+        padding: 9px 12px;
+        border-radius: 8px;
         font-size: 13px;
-        font-weight: 700;
+        font-weight: 600;
         text-decoration: none;
-        transition: 0.2s;
+        transition: 0.15s ease;
         border: 1px solid #cbd5e1;
         color: #0e3780;
         background: #ffffff;
@@ -504,34 +526,44 @@ function uonix_dashboard_css() {
         justify-content: center;
         align-items: center;
         gap: 6px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
     }
-	
-	.uox-dashboard-grid .uox-btn {
-		justify-content: left;
-	}
-	
+
+    .uox-dashboard-grid .uox-btn {
+        justify-content: flex-start;
+        padding: 10px 12px;
+    }
+
     .uox-btn:hover {
         background: #f8fafc;
         color: #1a2b3c;
         border-color: #94a3b8;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     }
 
     .uox-btn-primary {
         background: #0e3780;
         color: #ffffff !important;
         border-color: #0e3780;
+        box-shadow: 0 1px 3px rgba(14, 55, 128, 0.2);
     }
 
     .uox-btn-primary:hover {
         background: #1a2b3c;
         color: #ffffff !important;
         border-color: #1a2b3c;
+        box-shadow: 0 2px 6px rgba(14, 55, 128, 0.3);
     }
 
     .uox-list {
         list-style: none;
         padding: 0;
         margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        height: auto;
+        min-height: 0;
     }
 
     .uox-list li {
@@ -539,49 +571,74 @@ function uonix_dashboard_css() {
         justify-content: space-between;
         align-items: center;
         gap: 12px;
-        padding: 0 4px;
-        border-bottom: 1px dashed #e2e8f0;
-        font-size: 14px;
-        color: #475569;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: #f8fafc;
+        border: 1px solid #f1f5f9;
+        font-size: 13px;
+        font-weight: 500;
+        color: #334155;
+        min-height: 0;
+        box-sizing: border-box;
+        transition: background 0.15s ease, border-color 0.15s ease;
     }
-	
-    .uox-list li:last-child {
-        border-bottom: none;
-        padding-bottom: 0;
+
+    .uox-list li:hover {
+        background: #f1f5f9;
+        border-color: #e2e8f0;
     }
 
     .uox-list li span {
         min-width: 0;
         overflow-wrap: anywhere;
+        letter-spacing: -0.01em;
     }
 
     .uox-list li strong {
         flex-shrink: 0;
-        color: #0f172a;
-        font-weight: 800;
+        color: #0e3780;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        padding: 2px 10px;
+        border-radius: 9999px;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.3;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
     }
 
     .uox-badge {
         background: #dcfce7;
         color: #166534;
-        padding: 4px 10px;
-        border-radius: 12px;
+        padding: 3px 10px;
+        border-radius: 9999px;
         font-size: 11px;
-        font-weight: 800;
+        font-weight: 700;
         text-transform: uppercase;
+        letter-spacing: 0.02em;
+        display: inline-flex;
+        align-items: center;
     }
 
     .uox-badge-blue {
         background: #e0f2fe;
-        color: #0284c7;
-        border-color: #bae6fd;
+        color: #0369a1;
+        border: 1px solid #bae6fd;
     }
 
-    /* --- PAGINAÇÃO DOS RANKINGS --- */
+    .uox-badge-purple {
+        background: #ede9fe;
+        color: #6d28d9;
+        border: 1px solid #ddd6fe;
+    }
+
+    /* --- PAGINAÇÃO DOS RANKINGS DINÂMICA --- */
     .uox-pagination {
-        margin-top: 14px;
-        padding-top: 12px;
+        margin-top: 10px;
+        padding-top: 10px;
         border-top: 1px solid #f1f5f9;
+        min-height: 0;
+        height: auto;
     }
 
     .uox-pagination ul {
@@ -605,19 +662,19 @@ function uonix_dashboard_css() {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 30px;
-        height: 30px;
-        padding: 0 9px;
-        border-radius: 7px;
+        min-width: 28px;
+        height: 28px;
+        padding: 0 8px;
+        border-radius: 6px;
         border: 1px solid #dbe3ef;
         background: #ffffff;
         color: #0e3780;
-        font-size: 13px;
+        font-size: 12.5px;
         font-weight: 700;
         line-height: 1;
         text-decoration: none;
         box-sizing: border-box;
-        transition: 0.2s;
+        transition: 0.15s;
     }
 
     .uox-pagination a:hover {
@@ -642,7 +699,7 @@ function uonix_dashboard_css() {
 
     .uox-pagination .prev,
     .uox-pagination .next {
-        font-size: 16px;
+        font-size: 15px;
         font-weight: 800;
     }
 
@@ -650,39 +707,62 @@ function uonix_dashboard_css() {
     .uox-dashboard-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        margin-top: 15px;
+        gap: 10px;
+        margin-top: 12px;
     }
 
     .uox-dashboard-grid .uox-btn {
-        padding: 12px 10px;
+        padding: 10px 12px;
     }
 
     .uox-dashboard-grid .uox-btn-full {
         grid-column: 1 / -1;
-		justify-content: center;
+        justify-content: center;
     }
 
     .uox-dashboard-grid .dashicons {
         font-size: 18px;
         width: 18px;
         height: 18px;
+        color: #0e3780;
     }
-	
-	/* --- ALTURA FIXA DOS RANKINGS --- */
-	.uox-ranking-list {
-		min-height: 200px;
-	}
 
-	.uox-ranking-list li {
-		min-height: 43px;
-		box-sizing: border-box;
-	}
+    .uox-dashboard-grid .uox-btn-primary .dashicons {
+        color: #ffffff;
+    }
 
-	/* Reserva espaço visual para a paginação quando ela existir */
-	.uox-pagination {
-		min-height: 43px;
-	}
+    /* --- RANKINGS DINÂMICOS (SEM ALTURA FIXA) --- */
+    .uox-ranking-list {
+        min-height: 0;
+        height: auto;
+    }
+
+    .uox-ranking-list li {
+        min-height: 0;
+        box-sizing: border-box;
+    }
+
+    /* Destaque para o líder do ranking */
+    .uox-ranking-list li:first-child {
+        background: #eff6ff;
+        border-color: #dbeafe;
+    }
+
+    .uox-ranking-list li:first-child strong {
+        background: #0e3780;
+        color: #ffffff;
+        border-color: #0e3780;
+    }
+
+    .uox-list li.uox-empty {
+        justify-content: center;
+        text-align: center;
+        color: #94a3b8;
+        background: #f8fafc;
+        border: 1px dashed #cbd5e1;
+        padding: 14px;
+        font-style: italic;
+    }
 
     @media (max-width: 768px) {
         .uox-dashboard-grid {
@@ -816,7 +896,7 @@ function uox_render_ranking_origem_paginado($form_id, $chave_do_campo, $page_var
     echo '<ul class="uox-list uox-ranking-list">';
 
     if (empty($origens_pagina)) {
-        echo '<li><span>Nenhum dado encontrado.</span></li>';
+        echo '<li class="uox-empty"><span>Nenhum dado encontrado.</span></li>';
     } else {
         foreach ($origens_pagina as $nome => $quantidade) {
             echo '<li><span>' . esc_html($nome) . '</span> <strong>' . esc_html($quantidade) . '</strong></li>';
@@ -893,19 +973,23 @@ function uox_render_blog() {
     <?php
 }
 
-// Bloco 6: Tráfego (GA4)
+// Bloco 6: Tráfego (GA4 & Meta Pixel)
 function uox_render_trafego() {
     ?>
-    <p style="font-size: 13px; color: #64748b; margin-bottom: 15px; line-height: 1.5;">
-        O rastreamento do Google Analytics 4 (GA4) está ativo, captando métricas de visitas com segurança e respeitando a escolha de cookies dos usuários.
+    <p style="font-size: 13px; color: #64748b; margin-bottom: 12px; line-height: 1.5;">
+        O rastreamento de tráfego opera via Google Tag Manager (GTM), integrando <strong>Google Analytics 4</strong> e <strong>Meta Pixel</strong> sob governança e consentimento LGPD da AdOpt.
     </p>
-    <div style="margin-bottom: 15px;">
+    <div style="margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 6px;">
         <span class="uox-badge">Status LGPD: Blindado</span>
-        <span class="uox-badge uox-badge-blue" style="margin-left: 8px;">GA4 Ativo</span>
+        <span class="uox-badge uox-badge-blue">GA4 Ativo</span>
+        <span class="uox-badge uox-badge-purple">Meta Pixel Ativo</span>
     </div>
     <div class="uox-btn-group">
-        <a href="<?php echo esc_url( admin_url( 'admin.php?page=googlesitekit-dashboard' ) ); ?>" class="uox-btn">
-            Ver Relatórios de Acesso
+        <a href="<?php echo esc_url( admin_url( 'admin.php?page=uonix-analytics' ) ); ?>" class="uox-btn uox-btn-primary">
+            Central de Analytics
+        </a>
+        <a href="https://business.facebook.com/events_manager2" target="_blank" rel="noopener noreferrer" class="uox-btn">
+            Meta Events
         </a>
     </div>
     <?php
@@ -936,6 +1020,12 @@ function uox_render_quick_links() {
 		<a href="/wp-admin/upload.php?page=uonix-curriculos-recebidos" class="uox-btn">
             <span class="dashicons dashicons-media-text"></span> Currículos Recebidos
         </a>
+		<a href="/wp-admin/admin.php?page=fluent_forms_all_entries" class="uox-btn">
+            <span class="dashicons dashicons-email-alt"></span> Leads
+        </a>
+		<a href="https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags" target="_blank" rel="noopener noreferrer" class="uox-btn">
+            <span class="dashicons dashicons-shield"></span> Adopt
+        </a>
         <a href="/wp-admin/admin.php?page=uox-dados-globais" class="uox-btn uox-btn-primary uox-btn-full">
             <span class="dashicons dashicons-building"></span> Alterar Telefones e Endereço
         </a>
@@ -957,7 +1047,7 @@ function uox_render_crm_orcamentos() {
     ) );
     
     if ( empty( $orders ) ) {
-        echo '<ul class="uox-list"><li><span>Nenhum orçamento registrado no momento.</span></li></ul>';
+        echo '<ul class="uox-list"><li class="uox-empty"><span>Nenhum orçamento registrado no momento.</span></li></ul>';
         return;
     }
     
