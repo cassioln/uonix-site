@@ -626,6 +626,12 @@ function uonix_dashboard_css() {
         border: 1px solid #bae6fd;
     }
 
+    .uox-badge-purple {
+        background: #ede9fe;
+        color: #6d28d9;
+        border: 1px solid #ddd6fe;
+    }
+
     /* --- PAGINAÇÃO DOS RANKINGS DINÂMICA --- */
     .uox-pagination {
         margin-top: 10px;
@@ -967,19 +973,23 @@ function uox_render_blog() {
     <?php
 }
 
-// Bloco 6: Tráfego (GA4)
+// Bloco 6: Tráfego (GA4 & Meta Pixel)
 function uox_render_trafego() {
     ?>
-    <p style="font-size: 13px; color: #64748b; margin-bottom: 15px; line-height: 1.5;">
-        O rastreamento do Google Analytics 4 (GA4) está ativo, captando métricas de visitas com segurança e respeitando a escolha de cookies dos usuários.
+    <p style="font-size: 13px; color: #64748b; margin-bottom: 12px; line-height: 1.5;">
+        O rastreamento de tráfego opera via Google Tag Manager (GTM), integrando <strong>Google Analytics 4</strong> e <strong>Meta Pixel</strong> sob governança e consentimento LGPD da AdOpt.
     </p>
-    <div style="margin-bottom: 15px;">
+    <div style="margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 6px;">
         <span class="uox-badge">Status LGPD: Blindado</span>
-        <span class="uox-badge uox-badge-blue" style="margin-left: 8px;">GA4 Ativo</span>
+        <span class="uox-badge uox-badge-blue">GA4 Ativo</span>
+        <span class="uox-badge uox-badge-purple">Meta Pixel Ativo</span>
     </div>
     <div class="uox-btn-group">
-        <a href="<?php echo esc_url( admin_url( 'admin.php?page=googlesitekit-dashboard' ) ); ?>" class="uox-btn">
-            Ver Relatórios de Acesso
+        <a href="<?php echo esc_url( admin_url( 'admin.php?page=uonix-analytics' ) ); ?>" class="uox-btn uox-btn-primary">
+            Central de Analytics
+        </a>
+        <a href="https://business.facebook.com/events_manager2" target="_blank" rel="noopener noreferrer" class="uox-btn">
+            Meta Events
         </a>
     </div>
     <?php

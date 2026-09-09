@@ -157,7 +157,9 @@ assert( strpos( $output, 'Search Console' ) !== false, 'Search Console não est�
 assert( strpos( $output, 'Olhal de Ancoragem Modelo 210 Inox 304' ) !== false, 'Produto de teste não foi listado na tabela' );
 assert( strpos( $output, 'Fator de queda' ) !== false, 'Post de blog de teste não foi listado na tabela' );
 assert( strpos( $output, 'Ensaios de Arrancamento' ) !== false, 'Serviço de teste não foi listado na tabela' );
-echo "ok   Dashboard renderiza cards de KPI, tabelas de produtos, posts, serviços e atalhos\n";
+assert( strpos( $output, 'Meta Pixel' ) !== false, 'Meta Pixel não está presente no dashboard' );
+assert( strpos( $output, 'events_manager2' ) !== false, 'Link do Events Manager da Meta não está presente' );
+echo "ok   Dashboard renderiza cards de KPI, tabelas, atalhos Google e Meta Pixel\n";
 
 // Asserção 4: Usuário sem permissão é barrado com wp_die
 $GLOBALS['uonix_test_can_edit'] = false;

@@ -109,6 +109,10 @@ test_assert(
     strpos($admin_content, 'admin.php?page=fluent_forms_all_entries') !== false,
     '39-admin-editor-dashboard.php: Deve conter atalho direto para Leads no Acesso Rápido'
 );
-echo "ok   39-admin-editor-dashboard.php: Atalhos AdOpt e Leads, cards dinâmicos sem min-height fixo, chamadas órfãs eliminadas\n";
+test_assert(
+    strpos($admin_content, 'Meta Pixel Ativo') !== false,
+    '39-admin-editor-dashboard.php: Deve conter badge do Meta Pixel Ativo no bloco de tráfego'
+);
+echo "ok   39-admin-editor-dashboard.php: Atalhos AdOpt, Leads e Meta Pixel, cards dinâmicos sem min-height fixo, chamadas órfãs eliminadas\n";
 
 echo "\nPASS: Todos os contratos de geometria mobile, cache e cards dinâmicos foram aprovados com sucesso!\n";
