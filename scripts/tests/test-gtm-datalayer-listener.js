@@ -77,7 +77,8 @@ function simulateSubmission(codeToRun, assunto, useJQuery) {
     const handler = jqHandlers['fluentform_submission_success.uonixOrcamento'];
     if (!handler) throw new Error('Handler jQuery nao registrado');
     handler({}, { formId: '3', form_id: 3 });
-  } else {
+  }
+  if (!useJQuery || useJQuery === 'both') {
     const handler = docListeners['fluentform_submission_success'];
     if (!handler) throw new Error('Listener DOM nativo nao registrado');
     handler({ detail: { formId: '3', form: formElem } });
@@ -155,6 +156,12 @@ assert(
   'DOM nativo: form_assunto=orcamento dispara uonix_solicitar_orcamento'
 );
 
+const evDualChannel = simulateSubmission(scriptCode, 'orcamento', 'both');
+assert(
+  evDualChannel.length === 1 && evDualChannel[0].event === 'uonix_solicitar_orcamento',
+  'Mesmo sucesso recebido por jQuery e DOM dispara uma unica conversao'
+);
+
 // 2. Caminhos negativos: TODOS os outros assuntos NAO devem emitir evento
 const nonOrcamentoAssuntos = [
   'info',
@@ -224,7 +231,10 @@ function createBridgeEnvironment(initialLocalStorage = {}, initialAcceptedTags =
   const events = [];
 
   const localStorage = {
-    getItem: (key) => (key in store ? store[key] : null),
+    getItem: (key) => {
+      if (options.throwReads) throw new Error('storage indisponivel');
+      return key in store ? store[key] : null;
+    },
     setItem: (key, val) => {
       if (options.ignoreWrites) return;
       store[key] = String(val);
@@ -449,6 +459,36 @@ assert(
 assert(
   envStaleConsent.win.acceptedTags.includes('ExClwcP566'),
   'Ponte AdOpt: reaceite com storage residual preserva tags de terceiros'
+);
+
+// 4.12 Rejeicao deve falhar fechado com JSON malformado no storage
+const envMalformedStorage = createBridgeEnvironment(
+  { adoptConsentMode: '{json-invalido' },
+  ['third', 'marketing', 'statistics'],
+  { ignoreWrites: true }
+);
+vm.runInContext(bridgeCode, envMalformedStorage.ctx);
+envMalformedStorage.win.dataLayer.push('adopt-reject-all');
+assert(
+  !envMalformedStorage.win.acceptedTags.includes('marketing') &&
+  !envMalformedStorage.win.acceptedTags.includes('statistics') &&
+  envMalformedStorage.win.acceptedTags.includes('third'),
+  'Ponte AdOpt: reject-all remove categorias gerenciadas com JSON malformado'
+);
+
+// 4.13 Rejeicao deve falhar fechado quando localStorage.getItem lanca erro
+const envThrowingStorage = createBridgeEnvironment(
+  {},
+  ['third', 'marketing', 'statistics'],
+  { throwReads: true, ignoreWrites: true }
+);
+vm.runInContext(bridgeCode, envThrowingStorage.ctx);
+envThrowingStorage.win.dataLayer.push('adopt-reject-all');
+assert(
+  !envThrowingStorage.win.acceptedTags.includes('marketing') &&
+  !envThrowingStorage.win.acceptedTags.includes('statistics') &&
+  envThrowingStorage.win.acceptedTags.includes('third'),
+  'Ponte AdOpt: reject-all remove categorias gerenciadas com storage inacessivel'
 );
 
 if (failures > 0) {

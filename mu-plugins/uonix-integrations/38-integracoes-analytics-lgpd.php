@@ -298,71 +298,93 @@ function uonix_render_analytics_head( $configuration = null ) {
     
     <meta name="adopt-website-id" content="<?php echo esc_attr( $adopt_website_id ); ?>" />
     <!-- AdOpt: Carregamento e bloqueio de tags centralizados via Google Tag Manager (Tag AdOpt) -->
+    <script id="uonix-consent-mode-default">
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = window.gtag || function() { window.dataLayer.push(arguments); };
+    window.gtag('consent', 'default', {
+        ad_storage: 'denied',
+        analytics_storage: 'denied',
+        ad_user_data: 'denied',
+        ad_personalization: 'denied',
+        wait_for_update: 500
+    });
+    </script>
     <script id="uonix-adopt-categories-bridge">
     (function() {
         function syncCategories() {
-            try {
-                var raw = localStorage.getItem('adoptConsentMode');
-                var consent = raw ? JSON.parse(raw) : null;
-                var hasExplicitRejectState = typeof window._adoptExplicitlyRejected === 'boolean';
-                var reject = hasExplicitRejectState
-                    ? window._adoptExplicitlyRejected
-                    : localStorage.getItem('_adoptReject') === '1';
-                var runtimeConsent = window._adoptConsentOverride;
+            var runtimeConsent = window._adoptConsentOverride;
+            var hasExplicitRejectState = typeof window._adoptExplicitlyRejected === 'boolean';
+            var consent = null;
+            var storageFailed = false;
+            var storedReject = false;
 
-                var marketingGranted = false;
-                var statisticsGranted = false;
+            if (!runtimeConsent && !hasExplicitRejectState) {
+                try {
+                    var raw = localStorage.getItem('adoptConsentMode');
+                    consent = raw ? JSON.parse(raw) : null;
+                    storedReject = localStorage.getItem('_adoptReject') === '1';
+                } catch(e) {
+                    storageFailed = true;
+                }
+            }
 
-                if (!reject) {
-                    if (runtimeConsent) {
-                        marketingGranted = !!runtimeConsent.marketing;
-                        statisticsGranted = !!runtimeConsent.statistics;
-                        window._adoptMarketingGranted = marketingGranted;
-                        window._adoptStatisticsGranted = statisticsGranted;
-                    } else if (consent) {
-                        marketingGranted = !!(consent.marketing || consent.ad_storage === 'granted');
-                        statisticsGranted = !!(consent.statistics || consent.analytics_storage === 'granted');
-                        window._adoptMarketingGranted = marketingGranted;
-                        window._adoptStatisticsGranted = statisticsGranted;
-                    } else {
-                        if (window._adoptMarketingGranted) marketingGranted = true;
-                        if (window._adoptStatisticsGranted) statisticsGranted = true;
-                    }
+            var reject = hasExplicitRejectState
+                ? window._adoptExplicitlyRejected
+                : storageFailed || storedReject;
+            var marketingGranted = false;
+            var statisticsGranted = false;
+
+            if (!reject) {
+                if (runtimeConsent) {
+                    marketingGranted = !!runtimeConsent.marketing;
+                    statisticsGranted = !!runtimeConsent.statistics;
+                    window._adoptMarketingGranted = marketingGranted;
+                    window._adoptStatisticsGranted = statisticsGranted;
+                } else if (consent) {
+                    marketingGranted = !!(consent.marketing || consent.ad_storage === 'granted');
+                    statisticsGranted = !!(consent.statistics || consent.analytics_storage === 'granted');
+                    window._adoptMarketingGranted = marketingGranted;
+                    window._adoptStatisticsGranted = statisticsGranted;
                 } else {
-                    window._adoptMarketingGranted = false;
-                    window._adoptStatisticsGranted = false;
+                    if (window._adoptMarketingGranted) marketingGranted = true;
+                    if (window._adoptStatisticsGranted) statisticsGranted = true;
                 }
+            } else {
+                window._adoptMarketingGranted = false;
+                window._adoptStatisticsGranted = false;
+            }
 
-                var currentTags = Array.isArray(window.acceptedTags) ? window.acceptedTags : [];
-                var nextTags = [];
-                for (var i = 0; i < currentTags.length; i++) {
-                    var tag = currentTags[i];
-                    if (tag !== 'marketing' && tag !== 'statistics') {
-                        nextTags.push(tag);
+            var currentTags = Array.isArray(window.acceptedTags) ? window.acceptedTags : [];
+            var nextTags = [];
+            for (var i = 0; i < currentTags.length; i++) {
+                var tag = currentTags[i];
+                if (tag !== 'marketing' && tag !== 'statistics') {
+                    nextTags.push(tag);
+                }
+            }
+            if (marketingGranted) {
+                nextTags.push('marketing');
+            }
+            if (statisticsGranted) {
+                nextTags.push('statistics');
+            }
+
+            var changed = false;
+            if (currentTags.length !== nextTags.length) {
+                changed = true;
+            } else {
+                for (var j = 0; j < nextTags.length; j++) {
+                    if (currentTags.indexOf(nextTags[j]) === -1) {
+                        changed = true;
+                        break;
                     }
                 }
-                if (marketingGranted) {
-                    nextTags.push('marketing');
-                }
-                if (statisticsGranted) {
-                    nextTags.push('statistics');
-                }
+            }
 
-                var changed = false;
-                if (currentTags.length !== nextTags.length) {
-                    changed = true;
-                } else {
-                    for (var j = 0; j < nextTags.length; j++) {
-                        if (currentTags.indexOf(nextTags[j]) === -1) {
-                            changed = true;
-                            break;
-                        }
-                    }
-                }
+            window.acceptedTags = nextTags;
 
-                window.acceptedTags = nextTags;
-
-                if (changed) {
+            if (changed) {
+                try {
                     window.dataLayer = window.dataLayer || [];
                     window.dataLayer.push({
                         event: 'adopt_consent_updated',
@@ -370,8 +392,8 @@ function uonix_render_analytics_head( $configuration = null ) {
                         adopt_statistics: statisticsGranted,
                         accepted_tags: nextTags.slice()
                     });
-                }
-            } catch(e) {}
+                } catch(e) {}
+            }
         }
         syncCategories();
         window.dataLayer = window.dataLayer || [];
@@ -1070,9 +1092,17 @@ function uonix_render_analytics_conversion_footer() {
     ?>
     <script id="uonix-conversao-orcamento-datalayer">
     (function() {
+        var conversoesPendentes = {};
+
         function dispararConversaoSeOrcamento(formId, assunto) {
             var val = assunto && String(assunto).trim() ? String(assunto).trim() : '';
             if (val === 'orcamento') {
+                var chave = String(formId || '') + '|' + val;
+                if (conversoesPendentes[chave]) return;
+                conversoesPendentes[chave] = true;
+                setTimeout(function() {
+                    delete conversoesPendentes[chave];
+                }, 0);
                 window.dataLayer = window.dataLayer || [];
                 window.dataLayer.push({
                     'event': 'uonix_solicitar_orcamento',

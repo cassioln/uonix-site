@@ -174,6 +174,20 @@ uonix_render_analytics_head( $valid );
 $head_html = ob_get_clean();
 uonix_analytics_assert_contains( 'GTM-REAL123', $head_html, 'head injeta GTM que entrega GA4' );
 uonix_analytics_assert_contains( 'real-adopt-id', $head_html, 'head injeta AdOpt' );
+uonix_analytics_assert_contains( "window.gtag('consent', 'default'", $head_html, 'head define Consent Mode antes do carregamento do GTM' );
+uonix_analytics_assert_contains( "ad_storage: 'denied'", $head_html, 'Consent Mode nega ad_storage por padrão' );
+uonix_analytics_assert_contains( "analytics_storage: 'denied'", $head_html, 'Consent Mode nega analytics_storage por padrão' );
+uonix_analytics_assert_contains( "ad_user_data: 'denied'", $head_html, 'Consent Mode nega ad_user_data por padrão' );
+uonix_analytics_assert_contains( "ad_personalization: 'denied'", $head_html, 'Consent Mode nega ad_personalization por padrão' );
+$consent_default_position = strpos( $head_html, "window.gtag('consent', 'default'" );
+$gtm_start_position       = strpos( $head_html, "event:'gtm.js'" );
+uonix_analytics_assert_same(
+	true,
+	false !== $consent_default_position
+		&& false !== $gtm_start_position
+		&& $consent_default_position < $gtm_start_position,
+	'Consent Mode default denied é enfileirado antes do evento gtm.js'
+);
 
 $do_not_sell_selector = '#uonix-cookie-root #cookie-banner div:has(> #adopt-accept-all-button) > button:not(#adopt-preferences-button):not(#adopt-accept-all-button)';
 uonix_analytics_assert_css_declaration(
@@ -404,6 +418,7 @@ ob_start();
 uonix_render_analytics_head( $valid );
 $site_kit_head_html = ob_get_clean();
 uonix_analytics_assert_contains( 'real-adopt-id', $site_kit_head_html, 'Site Kit no GTM preserva o carregamento do AdOpt' );
+uonix_analytics_assert_contains( "window.gtag('consent', 'default'", $site_kit_head_html, 'Site Kit no GTM preserva o Consent Mode default denied antes do loader externo' );
 uonix_analytics_assert_not_contains( 'googletagmanager.com/gtm.js?id=', $site_kit_head_html, 'Site Kit no GTM suprime o snippet GTM legado no head' );
 
 ob_start();

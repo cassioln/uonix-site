@@ -36,10 +36,49 @@ function gtm_has_exact_consent_type( $tag, $expected_type ) {
 		&& $expected_type === $list[0]['value'];
 }
 
+function gtm_has_exact_filter( $filters, $expected_type, $expected_arg0, $expected_arg1 ) {
+	if ( ! is_array( $filters ) || 1 !== count( $filters ) ) {
+		return false;
+	}
+
+	$filter = $filters[0];
+	if (
+		! isset( $filter['type'], $filter['parameter'] )
+		|| $expected_type !== $filter['type']
+		|| ! is_array( $filter['parameter'] )
+		|| 2 !== count( $filter['parameter'] )
+		|| ! array_key_exists( 'negate', $filter )
+		|| false !== $filter['negate']
+	) {
+		return false;
+	}
+
+	$parameters = array();
+	foreach ( $filter['parameter'] as $parameter ) {
+		if (
+			3 !== count( $parameter )
+			|| ! isset( $parameter['type'], $parameter['key'], $parameter['value'] )
+			|| 'template' !== $parameter['type']
+			|| ! in_array( $parameter['key'], array( 'arg0', 'arg1' ), true )
+			|| isset( $parameters[ $parameter['key'] ] )
+		) {
+			return false;
+		}
+		$parameters[ $parameter['key'] ] = $parameter['value'];
+	}
+
+	return isset( $parameters['arg0'], $parameters['arg1'] )
+		&& $expected_arg0 === $parameters['arg0']
+		&& $expected_arg1 === $parameters['arg1'];
+}
+
 // -----------------------------------------------------------------------------
 // Parte 1: Validacao programatica do Manifesto GTM
 // -----------------------------------------------------------------------------
-$manifest_path = dirname( __DIR__, 2 ) . '/docs/gtm/uonix-google-ads-gtm-import.json';
+$manifest_path = getenv( 'UONIX_GTM_MANIFEST_PATH' );
+if ( false === $manifest_path || '' === $manifest_path ) {
+	$manifest_path = dirname( __DIR__, 2 ) . '/docs/gtm/uonix-google-ads-gtm-import.json';
+}
 gtm_assert( file_exists( $manifest_path ), 'docs/gtm/uonix-google-ads-gtm-import.json existe no repositorio' );
 
 $manifest_raw = file_get_contents( $manifest_path );
@@ -57,12 +96,14 @@ $triggers  = isset( $version['trigger'] ) ? $version['trigger'] : array();
 $variables = isset( $version['variable'] ) ? $version['variable'] : array();
 
 $tags_by_name      = array();
+$tags_by_id        = array();
 $triggers_by_id    = array();
 $triggers_by_name  = array();
 $variables_by_name = array();
 
 foreach ( $tags as $t ) {
 	$tags_by_name[ $t['name'] ] = $t;
+	$tags_by_id[ $t['tagId'] ]   = $t;
 }
 foreach ( $triggers as $tr ) {
 	$triggers_by_id[ $tr['triggerId'] ] = $tr;
@@ -75,6 +116,7 @@ foreach ( $variables as $v ) {
 // 1.0 Consistencia do snapshot canonico e placeholders fail-closed.
 $version_id = isset( $version['containerVersionId'] ) ? (string) $version['containerVersionId'] : '';
 gtm_assert( '' !== $version_id, 'Manifesto declara containerVersionId' );
+gtm_assert( '16' === $version_id, 'Manifesto canonico aponta para a versao live 16 auditada' );
 gtm_assert(
 	isset( $version['path'] ) && preg_match( '#/versions/' . preg_quote( $version_id, '#' ) . '$#', $version['path'] ),
 	'Path do manifesto aponta para o mesmo containerVersionId'
@@ -104,6 +146,22 @@ foreach ( $tags as $tag ) {
 			"Tag ativa {$tag['name']} nao referencia a variavel placeholder {$variable_name}"
 		);
 	}
+}
+
+gtm_assert( isset( $tags_by_id['15'] ), 'Tag 15 de conversao WhatsApp existe no snapshot live 16' );
+if ( isset( $tags_by_id['15'] ) ) {
+	$tag_whatsapp = $tags_by_id['15'];
+	gtm_assert( 'Google Ads - Conversão - Clique WhatsApp' === $tag_whatsapp['name'], 'Tag 15 mantem a identidade da conversao WhatsApp' );
+	gtm_assert( 'awct' === $tag_whatsapp['type'], 'Tag 15 permanece uma conversao Google Ads awct' );
+	gtm_assert( array_key_exists( 'paused', $tag_whatsapp ) && true === $tag_whatsapp['paused'], 'Tag 15 permanece explicitamente pausada enquanto o label e placeholder' );
+	gtm_assert( array( '10' ) === $tag_whatsapp['firingTriggerId'], 'Tag 15 permanece vinculada exclusivamente ao trigger de clique WhatsApp 10' );
+	gtm_assert( isset( $tag_whatsapp['tagFiringOption'] ) && 'oncePerEvent' === $tag_whatsapp['tagFiringOption'], 'Tag 15 dispara no maximo uma vez por evento quando reativada' );
+	gtm_assert(
+		isset( $tag_whatsapp['consentSettings']['consentStatus'] ) && 'needed' === $tag_whatsapp['consentSettings']['consentStatus'],
+		'Tag 15 permanece bloqueada por consentimento necessario'
+	);
+	gtm_assert( gtm_has_exact_consent_type( $tag_whatsapp, 'ad_storage' ), 'Tag 15 exige exclusivamente ad_storage' );
+	gtm_assert( false !== strpos( json_encode( $tag_whatsapp ), '{{Constante - Label WhatsApp}}' ), 'Tag 15 referencia a variavel de label auditada' );
 }
 
 // 1.1 Tag AdOpt
@@ -136,15 +194,14 @@ gtm_assert( isset( $triggers_by_name['Trigger LGPD - AdOpt Estatísticas'] ), 'T
 if ( isset( $triggers_by_name['Trigger LGPD - AdOpt Estatísticas'] ) ) {
 	$tr_stat = $triggers_by_name['Trigger LGPD - AdOpt Estatísticas'];
 	gtm_assert( 'customEvent' === $tr_stat['type'], 'Trigger de Estatisticas e do tipo customEvent' );
-	$filter_has_stat = false;
-	if ( isset( $tr_stat['filter'] ) ) {
-		foreach ( $tr_stat['filter'] as $f ) {
-			foreach ( $f['parameter'] as $p ) {
-				if ( 'statistics' === $p['value'] ) $filter_has_stat = true;
-			}
-		}
-	}
-	gtm_assert( $filter_has_stat, 'Trigger de Estatisticas filtra pela categoria statistics em Tags_Aceitas_AdOpt' );
+	gtm_assert(
+		gtm_has_exact_filter( isset( $tr_stat['customEventFilter'] ) ? $tr_stat['customEventFilter'] : array(), 'matchRegex', '{{_event}}', '^(adopt-accept-statistics|adopt-visitor-consent-ready|adopt_consent_updated)$' ),
+		'Trigger de Estatisticas escuta exatamente os eventos AdOpt auditados'
+	);
+	gtm_assert(
+		gtm_has_exact_filter( isset( $tr_stat['filter'] ) ? $tr_stat['filter'] : array(), 'contains', '{{Tags_Aceitas_AdOpt}}', 'statistics' ),
+		'Trigger de Estatisticas exige exatamente Tags_Aceitas_AdOpt contains statistics'
+	);
 }
 
 // 1.4 Trigger de Marketing
@@ -152,15 +209,14 @@ gtm_assert( isset( $triggers_by_name['Trigger LGPD - AdOpt Marketing'] ), 'Trigg
 if ( isset( $triggers_by_name['Trigger LGPD - AdOpt Marketing'] ) ) {
 	$tr_mkt = $triggers_by_name['Trigger LGPD - AdOpt Marketing'];
 	gtm_assert( 'customEvent' === $tr_mkt['type'], 'Trigger de Marketing e do tipo customEvent' );
-	$filter_has_mkt = false;
-	if ( isset( $tr_mkt['filter'] ) ) {
-		foreach ( $tr_mkt['filter'] as $f ) {
-			foreach ( $f['parameter'] as $p ) {
-				if ( 'marketing' === $p['value'] ) $filter_has_mkt = true;
-			}
-		}
-	}
-	gtm_assert( $filter_has_mkt, 'Trigger de Marketing filtra pela categoria marketing em Tags_Aceitas_AdOpt' );
+	gtm_assert(
+		gtm_has_exact_filter( isset( $tr_mkt['customEventFilter'] ) ? $tr_mkt['customEventFilter'] : array(), 'matchRegex', '{{_event}}', '^(adopt-accept-marketing|adopt-visitor-consent-ready|adopt_consent_updated)$' ),
+		'Trigger de Marketing escuta exatamente os eventos AdOpt auditados'
+	);
+	gtm_assert(
+		gtm_has_exact_filter( isset( $tr_mkt['filter'] ) ? $tr_mkt['filter'] : array(), 'contains', '{{Tags_Aceitas_AdOpt}}', 'marketing' ),
+		'Trigger de Marketing exige exatamente Tags_Aceitas_AdOpt contains marketing'
+	);
 }
 
 // 1.5 Trigger Solicitar Orcamento
@@ -168,25 +224,14 @@ gtm_assert( isset( $triggers_by_name['Evento - Solicitar Orçamento Uônix'] ), 
 if ( isset( $triggers_by_name['Evento - Solicitar Orçamento Uônix'] ) ) {
 	$tr_orc = $triggers_by_name['Evento - Solicitar Orçamento Uônix'];
 	gtm_assert( 'customEvent' === $tr_orc['type'], 'Trigger Solicitar Orcamento e do tipo customEvent' );
-	$has_event_name = false;
-	if ( isset( $tr_orc['customEventFilter'] ) ) {
-		foreach ( $tr_orc['customEventFilter'] as $cef ) {
-			foreach ( $cef['parameter'] as $p ) {
-				if ( 'uonix_solicitar_orcamento' === $p['value'] ) $has_event_name = true;
-			}
-		}
-	}
-	gtm_assert( $has_event_name, 'Trigger Solicitar Orcamento escuta o evento customizado uonix_solicitar_orcamento' );
-
-	$has_mkt_filter = false;
-	if ( isset( $tr_orc['filter'] ) ) {
-		foreach ( $tr_orc['filter'] as $f ) {
-			foreach ( $f['parameter'] as $p ) {
-				if ( 'marketing' === $p['value'] ) $has_mkt_filter = true;
-			}
-		}
-	}
-	gtm_assert( $has_mkt_filter, 'Trigger Solicitar Orcamento exige que Tags_Aceitas_AdOpt contenha marketing' );
+	gtm_assert(
+		gtm_has_exact_filter( isset( $tr_orc['customEventFilter'] ) ? $tr_orc['customEventFilter'] : array(), 'equals', '{{_event}}', 'uonix_solicitar_orcamento' ),
+		'Trigger Solicitar Orcamento escuta exatamente _event equals uonix_solicitar_orcamento'
+	);
+	gtm_assert(
+		gtm_has_exact_filter( isset( $tr_orc['filter'] ) ? $tr_orc['filter'] : array(), 'contains', '{{Tags_Aceitas_AdOpt}}', 'marketing' ),
+		'Trigger Solicitar Orcamento exige exatamente Tags_Aceitas_AdOpt contains marketing'
+	);
 }
 
 // 1.5.1 Contrato GTM: Declaracao explicita de negate: false em cada customEventFilter e filter
@@ -223,6 +268,12 @@ foreach ( $custom_triggers_to_check as $tr_id => $tr_name ) {
 		}
 	}
 }
+
+gtm_assert(
+	isset( $triggers_by_id['3'] )
+		&& gtm_has_exact_filter( $triggers_by_id['3']['customEventFilter'], 'equals', '{{_event}}', 'adopt-visitor-consent-ready' ),
+	'Trigger 3 escuta exclusivamente _event equals adopt-visitor-consent-ready'
+);
 
 // 1.6 GA4
 gtm_assert( isset( $tags_by_name['GA4 - Configuração'] ), 'Tag GA4 - Configuração existe' );
