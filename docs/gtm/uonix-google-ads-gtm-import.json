@@ -1,13 +1,13 @@
 {
   "exportFormatVersion": 2,
-  "exportTime": "2026-09-10T12:14:46.135Z",
+  "exportTime": "2026-09-10T15:14:27.000Z",
   "containerVersion": {
-    "path": "accounts/6348960683/containers/248910884/versions/15",
+    "path": "accounts/6348960683/containers/248910884/versions/16",
     "accountId": "6348960683",
     "containerId": "248910884",
-    "containerVersionId": "15",
-    "name": "Centralização AdOpt e Bloqueio LGPD com Conversão Estrita",
-    "description": "Centraliza AdOpt no GTM, vincula GA4 a estatísticas, Pixel/Remarketing/Conversão a marketing via window.acceptedTags e consentSettings, e restringe conversão Ads exclusivamente a uonix_solicitar_orcamento.",
+    "containerVersionId": "16",
+    "name": "v16 - Pausa conversão WhatsApp sem label",
+    "description": "Correção fail-closed: pausa a tag Google Ads de clique no WhatsApp enquanto o conversionLabel permanece placeholder. PR #164, SHA 0bcf9bfc38d11a4f9d854a32497abaa137d8ca4d.",
     "container": {
       "path": "accounts/6348960683/containers/248910884",
       "accountId": "6348960683",
@@ -233,7 +233,7 @@
             "value": "{{Constante - Label WhatsApp}}"
           }
         ],
-        "fingerprint": "1789040268436",
+        "fingerprint": "1789053068177",
         "firingTriggerId": [
           "10"
         ],
@@ -504,7 +504,7 @@
             "negate": false
           }
         ],
-        "fingerprint": "1789040270937"
+        "fingerprint": "1789042455340"
       },
       {
         "accountId": "6348960683",
@@ -548,7 +548,7 @@
             "negate": false
           }
         ],
-        "fingerprint": "1789040273479"
+        "fingerprint": "1789042457874"
       }
     ],
     "variable": [
@@ -657,7 +657,7 @@
         "name": "Form Element"
       }
     ],
-    "fingerprint": "1789040296825",
-    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/15?apiLink=version"
+    "fingerprint": "1789053120302",
+    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/16?apiLink=version"
   }
 }
