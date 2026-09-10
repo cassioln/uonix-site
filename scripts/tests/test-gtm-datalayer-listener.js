@@ -86,6 +86,47 @@ function simulateSubmission(codeToRun, assunto, useJQuery) {
   return events;
 }
 
+function simulateCrossFormSubmission(codeToRun) {
+  const events = [];
+  const docListeners = {};
+  const jqHandlers = {};
+  const budgetSubject = { name: 'form_assunto', value: 'orcamento' };
+  const newsletterForm = { querySelector: () => null };
+  const doc = {
+    readyState: 'complete',
+    addEventListener: (type, fn) => {
+      docListeners[type] = fn;
+    },
+    querySelector: (sel) => sel === '#fluentform_99' ? newsletterForm : null
+  };
+  const jqObj = {
+    off: () => jqObj,
+    on: (evt, handler) => {
+      jqHandlers[evt] = handler;
+      return jqObj;
+    }
+  };
+  const win = {
+    dataLayer: events,
+    document: doc,
+    jQuery: () => jqObj
+  };
+  const ctx = vm.createContext({
+    window: win,
+    document: doc,
+    setTimeout,
+    clearTimeout
+  });
+
+  vm.runInContext(codeToRun, ctx);
+  if (docListeners.change) {
+    docListeners.change({ target: budgetSubject });
+  }
+  jqHandlers['fluentform_submission_success.uonixOrcamento']({}, { formId: '99', form_id: 99 });
+
+  return events;
+}
+
 let failures = 0;
 function assert(condition, message) {
   if (!condition) {
@@ -148,6 +189,12 @@ for (const assunto of nonOrcamentoAssuntos) {
   );
 }
 
+const crossFormEvents = simulateCrossFormSubmission(scriptCode);
+assert(
+  crossFormEvents.every(event => !event || event.event !== 'uonix_solicitar_orcamento'),
+  'jQuery: assunto abandonado em outro formulario nao gera conversao no formulario concluido'
+);
+
 // 3. Teste de mutação: enfraquecer a guarda precisa ser detectado
 const mutatedScript = scriptCode.replace(/val === ['"]orcamento['"]/g, 'true');
 if (mutatedScript === scriptCode) {
@@ -171,7 +218,7 @@ if (!bridgeMatch) {
 }
 const bridgeCode = bridgeMatch[1];
 
-function createBridgeEnvironment(initialLocalStorage = {}, initialAcceptedTags = []) {
+function createBridgeEnvironment(initialLocalStorage = {}, initialAcceptedTags = [], options = {}) {
   const store = { ...initialLocalStorage };
   const storageListeners = [];
   const events = [];
@@ -179,10 +226,12 @@ function createBridgeEnvironment(initialLocalStorage = {}, initialAcceptedTags =
   const localStorage = {
     getItem: (key) => (key in store ? store[key] : null),
     setItem: (key, val) => {
+      if (options.ignoreWrites) return;
       store[key] = String(val);
       storageListeners.forEach(fn => fn({ key }));
     },
     removeItem: (key) => {
+      if (options.ignoreWrites) return;
       delete store[key];
       storageListeners.forEach(fn => fn({ key }));
     }
@@ -337,10 +386,15 @@ assert(!envRejectAllEvent.win.acceptedTags.includes('marketing'), 'Ponte AdOpt: 
 assert(!envRejectAllEvent.win.acceptedTags.includes('statistics'), 'Ponte AdOpt: adopt-reject mantem statistics revogado');
 
 // 4.10 Teste de mutação LGPD para adopt-reject-all: remover a revogação explícita deve falhar
-const mutatedRejectBridge = bridgeCode.replace(
-  'window._adoptExplicitlyRejected = true;',
-  '/* mutacao: omitir rejeicao explicita */'
-);
+const mutatedRejectBridge = bridgeCode
+  .replace(
+    'window._adoptExplicitlyRejected = true;',
+    '/* mutacao: omitir rejeicao explicita */'
+  )
+  .replace(
+    'window._adoptConsentOverride = { marketing: false, statistics: false };',
+    '/* mutacao: omitir override de categorias revogadas */'
+  );
 if (mutatedRejectBridge === bridgeCode) {
   console.error('FAIL: Falha ao aplicar mutacao de adopt-reject-all na ponte AdOpt');
   process.exit(1);
@@ -368,6 +422,33 @@ const mutationRejectDetected = envMutReject.win.acceptedTags.includes('marketing
 assert(
   mutationRejectDetected,
   'Teste de mutacao LGPD: omitir rejeicao explicita em adopt-reject-all deixa marketing ativo com storage residual (detectado com sucesso)'
+);
+
+// 4.11 Reaceite individual deve prevalecer sobre storage residual sem ressuscitar outra categoria
+const envStaleConsent = createBridgeEnvironment(
+  { adoptConsentMode: JSON.stringify({ marketing: true, statistics: true }) },
+  ['ExClwcP566'],
+  { ignoreWrites: true }
+);
+vm.runInContext(bridgeCode, envStaleConsent.ctx);
+envStaleConsent.win.dataLayer.push('adopt-reject-all');
+assert(
+  !envStaleConsent.win.acceptedTags.includes('marketing') &&
+  !envStaleConsent.win.acceptedTags.includes('statistics'),
+  'Ponte AdOpt: rejeicao explicita prevalece quando o storage residual nao aceita escrita'
+);
+envStaleConsent.win.dataLayer.push('adopt-accept-statistics');
+assert(
+  envStaleConsent.win.acceptedTags.includes('statistics'),
+  'Ponte AdOpt: reaceite de statistics funciona mesmo com storage residual'
+);
+assert(
+  !envStaleConsent.win.acceptedTags.includes('marketing'),
+  'Ponte AdOpt: reaceite de statistics nao ressuscita marketing residual'
+);
+assert(
+  envStaleConsent.win.acceptedTags.includes('ExClwcP566'),
+  'Ponte AdOpt: reaceite com storage residual preserva tags de terceiros'
 );
 
 if (failures > 0) {

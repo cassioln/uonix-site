@@ -16,6 +16,10 @@ define( 'ABSPATH', __DIR__ );
 $GLOBALS['uonix_test_menu_actions'] = array();
 $GLOBALS['uonix_test_menus']        = array();
 $GLOBALS['uonix_test_can_edit']     = true;
+$GLOBALS['uonix_test_analytics_configuration'] = array(
+	'gtm_container_id' => 'GTM-P8TR5CCH',
+	'adopt_website_id' => 'adopt-test-id',
+);
 
 function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
 	$GLOBALS['uonix_test_menu_actions'][] = array(
@@ -69,6 +73,10 @@ function get_option( $name, $default = false ) {
 		return array( 'google_verify' => 'gwb3yPi79I8knt2zh_ctf3tZuEyasOFwLCNoeE2TO1w' );
 	}
 	return $default;
+}
+
+function uonix_analytics_configuration() {
+	return $GLOBALS['uonix_test_analytics_configuration'];
 }
 
 function get_posts( $args = array() ) {
@@ -152,7 +160,9 @@ uonix_render_analytics_dashboard_page();
 $output = ob_get_clean();
 
 assert( strpos( $output, 'Central de Desempenho, Catálogo &amp; Analytics' ) !== false || strpos( $output, 'Central de Desempenho, Catálogo & Analytics' ) !== false, 'Header do dashboard não renderizou' );
-assert( strpos( $output, 'GTM-5F4Q3ZJ' ) !== false, 'GTM ID não está presente no status' );
+assert( strpos( $output, 'GTM-P8TR5CCH' ) !== false, 'GTM ID configurado não está presente no status' );
+assert( strpos( $output, 'GTM-5F4Q3ZJ' ) === false, 'Dashboard não pode exibir o GTM legado fixo' );
+assert( strpos( $output, 'Conformidade [Ativo]' ) === false, 'Dashboard não pode declarar conformidade LGPD sem evidência formal' );
 assert( strpos( $output, 'Search Console' ) !== false, 'Search Console não está presente' );
 assert( strpos( $output, 'Olhal de Ancoragem Modelo 210 Inox 304' ) !== false, 'Produto de teste não foi listado na tabela' );
 assert( strpos( $output, 'Fator de queda' ) !== false, 'Post de blog de teste não foi listado na tabela' );
@@ -161,7 +171,16 @@ assert( strpos( $output, 'Meta Pixel' ) !== false, 'Meta Pixel não está presen
 assert( strpos( $output, 'events_manager2' ) !== false, 'Link do Events Manager da Meta não está presente' );
 echo "ok   Dashboard renderiza cards de KPI, tabelas, atalhos Google e Meta Pixel\n";
 
-// Asserção 4: Usuário sem permissão é barrado com wp_die
+// Asserção 4: configuração ausente deve ser exibida de forma fail-closed.
+$GLOBALS['uonix_test_analytics_configuration'] = false;
+ob_start();
+uonix_render_analytics_dashboard_page();
+$output_without_analytics = ob_get_clean();
+assert( strpos( $output_without_analytics, 'GTM-P8TR5CCH' ) === false, 'Dashboard não pode exibir ID GTM quando a configuração está incompleta' );
+assert( strpos( $output_without_analytics, 'Não configurado' ) !== false, 'Dashboard deve sinalizar configuração de analytics ausente' );
+echo "ok   Dashboard falha fechado quando Analytics/AdOpt não estão configurados\n";
+
+// Asserção 5: Usuário sem permissão é barrado com wp_die
 $GLOBALS['uonix_test_can_edit'] = false;
 $blocked = false;
 try {

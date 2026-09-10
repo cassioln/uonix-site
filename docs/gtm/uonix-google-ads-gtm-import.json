@@ -220,6 +220,7 @@
         "tagId": "15",
         "name": "Google Ads - Conversão - Clique WhatsApp",
         "type": "awct",
+        "paused": true,
         "parameter": [
           {
             "type": "template",
@@ -657,6 +658,6 @@
       }
     ],
     "fingerprint": "1789040296825",
-    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/14?apiLink=version"
+    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/15?apiLink=version"
   }
 }

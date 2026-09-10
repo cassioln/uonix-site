@@ -304,13 +304,22 @@ function uonix_render_analytics_head( $configuration = null ) {
             try {
                 var raw = localStorage.getItem('adoptConsentMode');
                 var consent = raw ? JSON.parse(raw) : null;
-                var reject = localStorage.getItem('_adoptReject') === '1' || !!window._adoptExplicitlyRejected;
+                var hasExplicitRejectState = typeof window._adoptExplicitlyRejected === 'boolean';
+                var reject = hasExplicitRejectState
+                    ? window._adoptExplicitlyRejected
+                    : localStorage.getItem('_adoptReject') === '1';
+                var runtimeConsent = window._adoptConsentOverride;
 
                 var marketingGranted = false;
                 var statisticsGranted = false;
 
                 if (!reject) {
-                    if (consent) {
+                    if (runtimeConsent) {
+                        marketingGranted = !!runtimeConsent.marketing;
+                        statisticsGranted = !!runtimeConsent.statistics;
+                        window._adoptMarketingGranted = marketingGranted;
+                        window._adoptStatisticsGranted = statisticsGranted;
+                    } else if (consent) {
                         marketingGranted = !!(consent.marketing || consent.ad_storage === 'granted');
                         statisticsGranted = !!(consent.statistics || consent.analytics_storage === 'granted');
                         window._adoptMarketingGranted = marketingGranted;
@@ -373,26 +382,52 @@ function uonix_render_analytics_head( $configuration = null ) {
                 var arg = arguments[i];
                 var evtName = (typeof arg === 'string') ? arg : (arg && (arg.event || arg[0]));
                 if (evtName === 'adopt-accept-marketing') {
+                    var wasRejected = !!window._adoptExplicitlyRejected;
+                    try {
+                        wasRejected = wasRejected || localStorage.getItem('_adoptReject') === '1';
+                    } catch(err) {}
                     window._adoptExplicitlyRejected = false;
                     window._adoptMarketingGranted = true;
+                    window._adoptStatisticsGranted = wasRejected ? false : !!window._adoptStatisticsGranted;
+                    window._adoptConsentOverride = {
+                        marketing: true,
+                        statistics: window._adoptStatisticsGranted
+                    };
                     try {
                         if (localStorage.getItem('_adoptReject') === '1') localStorage.removeItem('_adoptReject');
                         var cur = localStorage.getItem('adoptConsentMode');
                         var parsed = cur ? JSON.parse(cur) : {};
                         parsed.marketing = true;
                         parsed.ad_storage = 'granted';
+                        if (wasRejected) {
+                            parsed.statistics = false;
+                            parsed.analytics_storage = 'denied';
+                        }
                         localStorage.setItem('adoptConsentMode', JSON.stringify(parsed));
                     } catch(err) {}
                     syncCategories();
                 } else if (evtName === 'adopt-accept-statistics') {
+                    var wasRejected = !!window._adoptExplicitlyRejected;
+                    try {
+                        wasRejected = wasRejected || localStorage.getItem('_adoptReject') === '1';
+                    } catch(err) {}
                     window._adoptExplicitlyRejected = false;
+                    window._adoptMarketingGranted = wasRejected ? false : !!window._adoptMarketingGranted;
                     window._adoptStatisticsGranted = true;
+                    window._adoptConsentOverride = {
+                        marketing: window._adoptMarketingGranted,
+                        statistics: true
+                    };
                     try {
                         if (localStorage.getItem('_adoptReject') === '1') localStorage.removeItem('_adoptReject');
                         var cur = localStorage.getItem('adoptConsentMode');
                         var parsed = cur ? JSON.parse(cur) : {};
                         parsed.statistics = true;
                         parsed.analytics_storage = 'granted';
+                        if (wasRejected) {
+                            parsed.marketing = false;
+                            parsed.ad_storage = 'denied';
+                        }
                         localStorage.setItem('adoptConsentMode', JSON.stringify(parsed));
                     } catch(err) {}
                     syncCategories();
@@ -400,6 +435,7 @@ function uonix_render_analytics_head( $configuration = null ) {
                     window._adoptExplicitlyRejected = false;
                     window._adoptMarketingGranted = true;
                     window._adoptStatisticsGranted = true;
+                    window._adoptConsentOverride = { marketing: true, statistics: true };
                     try {
                         if (localStorage.getItem('_adoptReject') === '1') localStorage.removeItem('_adoptReject');
                         var cur = localStorage.getItem('adoptConsentMode');
@@ -415,6 +451,7 @@ function uonix_render_analytics_head( $configuration = null ) {
                     window._adoptExplicitlyRejected = true;
                     window._adoptMarketingGranted = false;
                     window._adoptStatisticsGranted = false;
+                    window._adoptConsentOverride = { marketing: false, statistics: false };
                     try {
                         localStorage.setItem('_adoptReject', '1');
                         var cur = localStorage.getItem('adoptConsentMode');
@@ -436,6 +473,8 @@ function uonix_render_analytics_head( $configuration = null ) {
         };
         window.addEventListener('storage', function(e) {
             if (!e || !e.key || e.key === 'adoptConsentMode' || e.key === '_adoptReject') {
+                delete window._adoptConsentOverride;
+                delete window._adoptExplicitlyRejected;
                 syncCategories();
             }
         });
@@ -1031,19 +1070,8 @@ function uonix_render_analytics_conversion_footer() {
     ?>
     <script id="uonix-conversao-orcamento-datalayer">
     (function() {
-        var lastAssunto = '';
-        document.addEventListener('change', function(e) {
-            if (e.target && e.target.name === 'form_assunto') {
-                lastAssunto = e.target.value;
-            }
-        }, true);
-        document.addEventListener('submit', function(e) {
-            var el = e.target && e.target.querySelector ? e.target.querySelector('select[name="form_assunto"]') : null;
-            if (el) lastAssunto = el.value;
-        }, true);
-
         function dispararConversaoSeOrcamento(formId, assunto) {
-            var val = (assunto && String(assunto).trim()) ? String(assunto).trim() : lastAssunto;
+            var val = assunto && String(assunto).trim() ? String(assunto).trim() : '';
             if (val === 'orcamento') {
                 window.dataLayer = window.dataLayer || [];
                 window.dataLayer.push({
@@ -1051,7 +1079,6 @@ function uonix_render_analytics_conversion_footer() {
                     'origem_conversao': 'fluentform_orcamento',
                     'form_id': formId
                 });
-                lastAssunto = '';
             }
         }
 
@@ -1062,7 +1089,7 @@ function uonix_render_analytics_conversion_footer() {
                         var formId = data && (data.formId || data.form_id);
                         var form = formId ? document.querySelector('#fluentform_' + formId) : null;
                         var assuntoEl = form ? form.querySelector('select[name="form_assunto"]') : null;
-                        var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : lastAssunto;
+                        var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : '';
                         dispararConversaoSeOrcamento(formId, val);
                     } catch(err) {}
                 });
@@ -1075,7 +1102,7 @@ function uonix_render_analytics_conversion_footer() {
                     var form = detail && detail.form ? (detail.form.nodeType ? detail.form : detail.form[0]) : null;
                     if (!form && formId) form = document.querySelector('#fluentform_' + formId);
                     var assuntoEl = form ? form.querySelector('select[name="form_assunto"]') : null;
-                    var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : lastAssunto;
+                    var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : '';
                     dispararConversaoSeOrcamento(formId, val);
                 } catch(err) {}
             });

@@ -69,9 +69,20 @@ function uonix_render_analytics_dashboard_page() {
 	$total_services = count( $services_query );
 
 	// Verificação das integrações
-	$general_opts    = get_option( 'rank-math-options-general', array() );
-	$has_gsc_meta    = ! empty( $general_opts['google_verify'] );
-	$gtm_id          = 'GTM-5F4Q3ZJ';
+	$general_opts             = get_option( 'rank-math-options-general', array() );
+	$has_gsc_meta             = ! empty( $general_opts['google_verify'] );
+	$analytics_configuration  = function_exists( 'uonix_analytics_configuration' ) ? uonix_analytics_configuration() : false;
+	$analytics_is_configured  = is_array( $analytics_configuration )
+		&& ! empty( $analytics_configuration['gtm_container_id'] )
+		&& ! empty( $analytics_configuration['adopt_website_id'] );
+	$gtm_id                   = $analytics_is_configured ? $analytics_configuration['gtm_container_id'] : '';
+	$analytics_dot_class      = $analytics_is_configured ? 'uonix-dot-configured' : 'uonix-dot-inactive';
+	$gsc_dot_class            = $has_gsc_meta ? 'uonix-dot-configured' : 'uonix-dot-inactive';
+	$gtm_status               = $analytics_is_configured ? $gtm_id . ' [Configurado]' : 'Não configurado';
+	$ga4_status               = $analytics_is_configured ? 'Via GTM [Verificação externa]' : 'Não configurado';
+	$meta_status              = $analytics_is_configured ? 'Via GTM + LGPD [Verificação externa]' : 'Não configurado';
+	$gsc_status               = $has_gsc_meta ? 'Meta tag [Configurada]' : 'Meta tag [Não configurada]';
+	$adopt_status             = $analytics_is_configured ? 'Website ID [Configurado]' : 'Não configurado';
 	$gsc_domain_url  = 'https://search.google.com/search-console?resource_id=sc-domain:uonix.com.br';
 	$ga4_url         = 'https://analytics.google.com/analytics/web/';
 	$looker_url      = 'https://lookerstudio.google.com/';
@@ -102,29 +113,29 @@ function uonix_render_analytics_dashboard_page() {
 		<!-- Status das Tags & Rastreamento -->
 		<div class="uonix-status-strip">
 			<div class="uonix-status-item">
-				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-dot <?php echo esc_html( $analytics_dot_class ); ?>"></span>
 				<span class="uonix-status-label">Google Tag Manager:</span>
-				<strong><?php echo esc_html( $gtm_id ); ?> [Ativo]</strong>
+				<strong><?php echo esc_html( $gtm_status ); ?></strong>
 			</div>
 			<div class="uonix-status-item">
-				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-dot <?php echo esc_html( $analytics_dot_class ); ?>"></span>
 				<span class="uonix-status-label">Google Analytics 4:</span>
-				<strong>Coleta via GTM [Ativo]</strong>
+				<strong><?php echo esc_html( $ga4_status ); ?></strong>
 			</div>
 			<div class="uonix-status-item">
-				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-dot <?php echo esc_html( $analytics_dot_class ); ?>"></span>
 				<span class="uonix-status-label">Meta Pixel:</span>
-				<strong>GTM + LGPD [Ativo]</strong>
+				<strong><?php echo esc_html( $meta_status ); ?></strong>
 			</div>
 			<div class="uonix-status-item">
-				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-dot <?php echo esc_html( $gsc_dot_class ); ?>"></span>
 				<span class="uonix-status-label">Search Console:</span>
-				<strong>DNS + Meta Tag [Verificado]</strong>
+				<strong><?php echo esc_html( $gsc_status ); ?></strong>
 			</div>
 			<div class="uonix-status-item">
-				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-dot <?php echo esc_html( $analytics_dot_class ); ?>"></span>
 				<span class="uonix-status-label">LGPD AdOpt:</span>
-				<strong>Conformidade [Ativo]</strong>
+				<strong><?php echo esc_html( $adopt_status ); ?></strong>
 			</div>
 		</div>
 
@@ -503,10 +514,10 @@ function uonix_render_analytics_dashboard_page() {
 			width: 8px;
 			height: 8px;
 			border-radius: 50%;
-			background: #22c55e;
 			display: inline-block;
-			box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
 		}
+		.uonix-dot-configured { background: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2); }
+		.uonix-dot-inactive { background: #94a3b8; box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2); }
 		.uonix-status-label { color: #64748b; }
 
 		.uonix-kpi-grid {

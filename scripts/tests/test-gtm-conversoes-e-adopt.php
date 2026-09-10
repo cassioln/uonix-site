@@ -27,6 +27,15 @@ function gtm_assert( $condition, $message ) {
 	}
 }
 
+function gtm_has_exact_consent_type( $tag, $expected_type ) {
+	$list = isset( $tag['consentSettings']['consentType']['list'] )
+		? $tag['consentSettings']['consentType']['list']
+		: array();
+	return 1 === count( $list )
+		&& isset( $list[0]['value'] )
+		&& $expected_type === $list[0]['value'];
+}
+
 // -----------------------------------------------------------------------------
 // Parte 1: Validacao programatica do Manifesto GTM
 // -----------------------------------------------------------------------------
@@ -61,6 +70,40 @@ foreach ( $triggers as $tr ) {
 }
 foreach ( $variables as $v ) {
 	$variables_by_name[ $v['name'] ] = $v;
+}
+
+// 1.0 Consistencia do snapshot canonico e placeholders fail-closed.
+$version_id = isset( $version['containerVersionId'] ) ? (string) $version['containerVersionId'] : '';
+gtm_assert( '' !== $version_id, 'Manifesto declara containerVersionId' );
+gtm_assert(
+	isset( $version['path'] ) && preg_match( '#/versions/' . preg_quote( $version_id, '#' ) . '$#', $version['path'] ),
+	'Path do manifesto aponta para o mesmo containerVersionId'
+);
+gtm_assert(
+	isset( $version['tagManagerUrl'] ) && false !== strpos( $version['tagManagerUrl'], '/versions/' . $version_id ),
+	'tagManagerUrl do manifesto aponta para o mesmo containerVersionId'
+);
+
+$placeholder_variables = array();
+foreach ( $variables as $variable ) {
+	foreach ( isset( $variable['parameter'] ) ? $variable['parameter'] : array() as $parameter ) {
+		$value = isset( $parameter['value'] ) ? (string) $parameter['value'] : '';
+		if ( preg_match( '/(?:AQUI|PLACEHOLDER|TODO)/i', $value ) ) {
+			$placeholder_variables[] = $variable['name'];
+		}
+	}
+}
+foreach ( $tags as $tag ) {
+	if ( ! empty( $tag['paused'] ) ) {
+		continue;
+	}
+	$tag_json = json_encode( $tag );
+	foreach ( $placeholder_variables as $variable_name ) {
+		gtm_assert(
+			false === strpos( $tag_json, '{{' . $variable_name . '}}' ),
+			"Tag ativa {$tag['name']} nao referencia a variavel placeholder {$variable_name}"
+		);
+	}
 }
 
 // 1.1 Tag AdOpt
@@ -157,21 +200,26 @@ foreach ( $custom_triggers_to_check as $tr_id => $tr_name ) {
 	gtm_assert( isset( $triggers_by_id[ $tr_id ] ), "Trigger {$tr_id} ({$tr_name}) existe no manifesto" );
 	if ( isset( $triggers_by_id[ $tr_id ] ) ) {
 		$t = $triggers_by_id[ $tr_id ];
-		if ( isset( $t['customEventFilter'] ) ) {
-			foreach ( $t['customEventFilter'] as $idx => $cef ) {
-				gtm_assert(
-					array_key_exists( 'negate', $cef ) && false === $cef['negate'],
-					"Trigger {$tr_id} ({$tr_name}) customEventFilter[{$idx}] declara explicitamente negate === false"
-				);
-			}
+		$custom_event_filters = isset( $t['customEventFilter'] ) && is_array( $t['customEventFilter'] )
+			? $t['customEventFilter']
+			: array();
+		gtm_assert( ! empty( $custom_event_filters ), "Trigger {$tr_id} ({$tr_name}) declara customEventFilter obrigatorio" );
+		foreach ( $custom_event_filters as $idx => $cef ) {
+			gtm_assert(
+				array_key_exists( 'negate', $cef ) && false === $cef['negate'],
+				"Trigger {$tr_id} ({$tr_name}) customEventFilter[{$idx}] declara explicitamente negate === false"
+			);
 		}
-		if ( isset( $t['filter'] ) ) {
-			foreach ( $t['filter'] as $idx => $flt ) {
-				gtm_assert(
-					array_key_exists( 'negate', $flt ) && false === $flt['negate'],
-					"Trigger {$tr_id} ({$tr_name}) filter[{$idx}] declara explicitamente negate === false"
-				);
-			}
+
+		$filters = isset( $t['filter'] ) && is_array( $t['filter'] ) ? $t['filter'] : array();
+		if ( in_array( $tr_id, array( '21', '24', '25' ), true ) ) {
+			gtm_assert( ! empty( $filters ), "Trigger {$tr_id} ({$tr_name}) declara filter de categoria obrigatorio" );
+		}
+		foreach ( $filters as $idx => $flt ) {
+			gtm_assert(
+				array_key_exists( 'negate', $flt ) && false === $flt['negate'],
+				"Trigger {$tr_id} ({$tr_name}) filter[{$idx}] declara explicitamente negate === false"
+			);
 		}
 	}
 }
@@ -185,6 +233,7 @@ if ( isset( $tags_by_name['GA4 - Configuração'] ) ) {
 		isset( $tag_ga4['consentSettings']['consentStatus'] ) && 'needed' === $tag_ga4['consentSettings']['consentStatus'],
 		'GA4 declara consentStatus needed'
 	);
+	gtm_assert( gtm_has_exact_consent_type( $tag_ga4, 'analytics_storage' ), 'GA4 exige exclusivamente analytics_storage' );
 }
 
 // 1.7 Meta Pixel
@@ -196,6 +245,7 @@ if ( isset( $tags_by_name['Facebook Pixel - PageView'] ) ) {
 		isset( $tag_fb['consentSettings']['consentStatus'] ) && 'needed' === $tag_fb['consentSettings']['consentStatus'],
 		'Meta Pixel declara consentStatus needed'
 	);
+	gtm_assert( gtm_has_exact_consent_type( $tag_fb, 'ad_storage' ), 'Meta Pixel exige exclusivamente ad_storage' );
 }
 
 // 1.8 Google Ads Remarketing
@@ -207,6 +257,7 @@ if ( isset( $tags_by_name['Google Ads - Remarketing Geral'] ) ) {
 		isset( $tag_rem['consentSettings']['consentStatus'] ) && 'needed' === $tag_rem['consentSettings']['consentStatus'],
 		'Google Ads Remarketing declara consentStatus needed'
 	);
+	gtm_assert( gtm_has_exact_consent_type( $tag_rem, 'ad_storage' ), 'Google Ads Remarketing exige exclusivamente ad_storage' );
 }
 
 // 1.9 Google Ads Conversao Envio Formulario
@@ -220,6 +271,7 @@ if ( isset( $tags_by_name['Google Ads - Conversão - Envio de Formulário'] ) ) 
 		isset( $tag_conv['consentSettings']['consentStatus'] ) && 'needed' === $tag_conv['consentSettings']['consentStatus'],
 		'Tag de Conversao Ads declara consentStatus needed (ad_storage)'
 	);
+	gtm_assert( gtm_has_exact_consent_type( $tag_conv, 'ad_storage' ), 'Tag de Conversao Ads exige exclusivamente ad_storage' );
 }
 
 // -----------------------------------------------------------------------------
