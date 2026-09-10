@@ -304,14 +304,63 @@ function uonix_render_analytics_head( $configuration = null ) {
             try {
                 var raw = localStorage.getItem('adoptConsentMode');
                 var consent = raw ? JSON.parse(raw) : null;
-                window.acceptedTags = window.acceptedTags || [];
-                if (Array.isArray(window.acceptedTags)) {
-                    if ((consent && consent.marketing) || window._adoptMarketingGranted) {
-                        if (window.acceptedTags.indexOf('marketing') === -1) window.acceptedTags.push('marketing');
+                var reject = localStorage.getItem('_adoptReject') === '1';
+
+                var marketingGranted = false;
+                var statisticsGranted = false;
+
+                if (!reject) {
+                    if (consent) {
+                        marketingGranted = !!(consent.marketing || consent.ad_storage === 'granted');
+                        statisticsGranted = !!(consent.statistics || consent.analytics_storage === 'granted');
+                        window._adoptMarketingGranted = marketingGranted;
+                        window._adoptStatisticsGranted = statisticsGranted;
+                    } else {
+                        if (window._adoptMarketingGranted) marketingGranted = true;
+                        if (window._adoptStatisticsGranted) statisticsGranted = true;
                     }
-                    if ((consent && consent.statistics) || window._adoptStatisticsGranted) {
-                        if (window.acceptedTags.indexOf('statistics') === -1) window.acceptedTags.push('statistics');
+                } else {
+                    window._adoptMarketingGranted = false;
+                    window._adoptStatisticsGranted = false;
+                }
+
+                var currentTags = Array.isArray(window.acceptedTags) ? window.acceptedTags : [];
+                var nextTags = [];
+                for (var i = 0; i < currentTags.length; i++) {
+                    var tag = currentTags[i];
+                    if (tag !== 'marketing' && tag !== 'statistics') {
+                        nextTags.push(tag);
                     }
+                }
+                if (marketingGranted) {
+                    nextTags.push('marketing');
+                }
+                if (statisticsGranted) {
+                    nextTags.push('statistics');
+                }
+
+                var changed = false;
+                if (currentTags.length !== nextTags.length) {
+                    changed = true;
+                } else {
+                    for (var j = 0; j < nextTags.length; j++) {
+                        if (currentTags.indexOf(nextTags[j]) === -1) {
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+
+                window.acceptedTags = nextTags;
+
+                if (changed) {
+                    window.dataLayer = window.dataLayer || [];
+                    window.dataLayer.push({
+                        event: 'adopt_consent_updated',
+                        adopt_marketing: marketingGranted,
+                        adopt_statistics: statisticsGranted,
+                        accepted_tags: nextTags.slice()
+                    });
                 }
             } catch(e) {}
         }
@@ -322,17 +371,32 @@ function uonix_render_analytics_head( $configuration = null ) {
             var res = origPush.apply(this, arguments);
             for (var i = 0; i < arguments.length; i++) {
                 var arg = arguments[i];
-                if (arg === 'adopt-accept-marketing' || (arg && (arg.event === 'adopt-accept-marketing' || arg[0] === 'adopt-accept-marketing'))) {
+                var evtName = (typeof arg === 'string') ? arg : (arg && (arg.event || arg[0]));
+                if (evtName === 'adopt-accept-marketing') {
                     window._adoptMarketingGranted = true;
                     syncCategories();
-                }
-                if (arg === 'adopt-accept-statistics' || (arg && (arg.event === 'adopt-accept-statistics' || arg[0] === 'adopt-accept-statistics'))) {
+                } else if (evtName === 'adopt-accept-statistics') {
                     window._adoptStatisticsGranted = true;
+                    syncCategories();
+                } else if (evtName === 'adopt-accept-all') {
+                    window._adoptMarketingGranted = true;
+                    window._adoptStatisticsGranted = true;
+                    syncCategories();
+                } else if (evtName === 'adopt-reject-all' || evtName === 'adopt-reject') {
+                    window._adoptMarketingGranted = false;
+                    window._adoptStatisticsGranted = false;
+                    syncCategories();
+                } else if (evtName === 'adopt-visitor-consent-ready') {
                     syncCategories();
                 }
             }
             return res;
         };
+        window.addEventListener('storage', function(e) {
+            if (!e || !e.key || e.key === 'adoptConsentMode' || e.key === '_adoptReject') {
+                syncCategories();
+            }
+        });
         window.addEventListener('DOMContentLoaded', syncCategories);
         window.addEventListener('load', syncCategories);
     })();
@@ -983,15 +1047,28 @@ function uonix_render_analytics_conversion_footer() {
     </script>
     <?php
     if ( function_exists( 'is_wc_endpoint_url' ) && is_wc_endpoint_url( 'order-received' ) ) {
-        ?>
-        <script id="uonix-conversao-carrinho-datalayer">
-        window.dataLayer = window.dataLayer || [];
-        window.dataLayer.push({
-            'event': 'uonix_solicitar_orcamento',
-            'origem_conversao': 'woocommerce_order_received'
-        });
-        </script>
-        <?php
+        $uonix_order_id = function_exists( 'get_query_var' ) ? ( function_exists( 'absint' ) ? absint( get_query_var( 'order-received' ) ) : abs( (int) get_query_var( 'order-received' ) ) ) : 0;
+        if ( $uonix_order_id > 0 && function_exists( 'wc_get_order' ) ) {
+            $uonix_order = wc_get_order( $uonix_order_id );
+            if ( $uonix_order && is_object( $uonix_order ) && method_exists( $uonix_order, 'get_status' ) ) {
+                $uonix_order_status = (string) $uonix_order->get_status();
+                if ( 0 === strpos( $uonix_order_status, 'wc-' ) ) {
+                    $uonix_order_status = substr( $uonix_order_status, 3 );
+                }
+                if ( 'gplsquote-req' === $uonix_order_status ) {
+                    ?>
+                    <script id="uonix-conversao-carrinho-datalayer">
+                    window.dataLayer = window.dataLayer || [];
+                    window.dataLayer.push({
+                        'event': 'uonix_solicitar_orcamento',
+                        'origem_conversao': 'woocommerce_order_received',
+                        'order_id': <?php echo (int) $uonix_order_id; ?>
+                    });
+                    </script>
+                    <?php
+                }
+            }
+        }
     }
 }
 }

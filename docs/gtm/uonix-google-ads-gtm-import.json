@@ -1,11 +1,11 @@
 {
   "exportFormatVersion": 2,
-  "exportTime": "2026-09-10T11:38:34.452Z",
+  "exportTime": "2026-09-10T12:14:46.135Z",
   "containerVersion": {
-    "path": "accounts/6348960683/containers/248910884/versions/14",
+    "path": "accounts/6348960683/containers/248910884/versions/15",
     "accountId": "6348960683",
     "containerId": "248910884",
-    "containerVersionId": "14",
+    "containerVersionId": "15",
     "name": "Centralização AdOpt e Bloqueio LGPD com Conversão Estrita",
     "description": "Centraliza AdOpt no GTM, vincula GA4 a estatísticas, Pixel/Remarketing/Conversão a marketing via window.acceptedTags e consentSettings, e restringe conversão Ads exclusivamente a uonix_solicitar_orcamento.",
     "container": {
@@ -307,7 +307,8 @@
                 "key": "arg1",
                 "value": "adopt-visitor-consent-ready"
               }
-            ]
+            ],
+            "negate": false
           }
         ],
         "fingerprint": "1776125130562"
@@ -332,7 +333,8 @@
                 "key": "arg1",
                 "value": "whatsapp"
               }
-            ]
+            ],
+            "negate": false
           },
           {
             "type": "contains",
@@ -347,7 +349,8 @@
                 "key": "arg1",
                 "value": "marketing"
               }
-            ]
+            ],
+            "negate": false
           }
         ],
         "waitForTags": {
@@ -408,7 +411,8 @@
                 "key": "arg1",
                 "value": "order-received"
               }
-            ]
+            ],
+            "negate": false
           }
         ],
         "fingerprint": "1788995276369"
@@ -433,7 +437,8 @@
                 "key": "arg1",
                 "value": "uonix_solicitar_orcamento"
               }
-            ]
+            ],
+            "negate": false
           }
         ],
         "filter": [
@@ -450,7 +455,8 @@
                 "key": "arg1",
                 "value": "marketing"
               }
-            ]
+            ],
+            "negate": false
           }
         ],
         "fingerprint": "1789040237281"
@@ -473,9 +479,10 @@
               {
                 "type": "template",
                 "key": "arg1",
-                "value": "^(adopt-accept-marketing|adopt-visitor-consent-ready)$"
+                "value": "^(adopt-accept-marketing|adopt-visitor-consent-ready|adopt_consent_updated)$"
               }
-            ]
+            ],
+            "negate": false
           }
         ],
         "filter": [
@@ -492,7 +499,8 @@
                 "key": "arg1",
                 "value": "marketing"
               }
-            ]
+            ],
+            "negate": false
           }
         ],
         "fingerprint": "1789040270937"
@@ -515,9 +523,10 @@
               {
                 "type": "template",
                 "key": "arg1",
-                "value": "^(adopt-accept-statistics|adopt-visitor-consent-ready)$"
+                "value": "^(adopt-accept-statistics|adopt-visitor-consent-ready|adopt_consent_updated)$"
               }
-            ]
+            ],
+            "negate": false
           }
         ],
         "filter": [
@@ -534,7 +543,8 @@
                 "key": "arg1",
                 "value": "statistics"
               }
-            ]
+            ],
+            "negate": false
           }
         ],
         "fingerprint": "1789040273479"

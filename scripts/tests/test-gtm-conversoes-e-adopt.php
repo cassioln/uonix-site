@@ -146,6 +146,36 @@ if ( isset( $triggers_by_name['Evento - Solicitar Orçamento Uônix'] ) ) {
 	gtm_assert( $has_mkt_filter, 'Trigger Solicitar Orcamento exige que Tags_Aceitas_AdOpt contenha marketing' );
 }
 
+// 1.5.1 Contrato GTM: Declaracao explicita de negate: false em cada customEventFilter e filter
+$custom_triggers_to_check = array(
+	'3'  => 'Trigger LGPD - AdOpt',
+	'21' => 'Evento - Solicitar Orçamento Uônix',
+	'24' => 'Trigger LGPD - AdOpt Marketing',
+	'25' => 'Trigger LGPD - AdOpt Estatísticas',
+);
+foreach ( $custom_triggers_to_check as $tr_id => $tr_name ) {
+	gtm_assert( isset( $triggers_by_id[ $tr_id ] ), "Trigger {$tr_id} ({$tr_name}) existe no manifesto" );
+	if ( isset( $triggers_by_id[ $tr_id ] ) ) {
+		$t = $triggers_by_id[ $tr_id ];
+		if ( isset( $t['customEventFilter'] ) ) {
+			foreach ( $t['customEventFilter'] as $idx => $cef ) {
+				gtm_assert(
+					array_key_exists( 'negate', $cef ) && false === $cef['negate'],
+					"Trigger {$tr_id} ({$tr_name}) customEventFilter[{$idx}] declara explicitamente negate === false"
+				);
+			}
+		}
+		if ( isset( $t['filter'] ) ) {
+			foreach ( $t['filter'] as $idx => $flt ) {
+				gtm_assert(
+					array_key_exists( 'negate', $flt ) && false === $flt['negate'],
+					"Trigger {$tr_id} ({$tr_name}) filter[{$idx}] declara explicitamente negate === false"
+				);
+			}
+		}
+	}
+}
+
 // 1.6 GA4
 gtm_assert( isset( $tags_by_name['GA4 - Configuração'] ), 'Tag GA4 - Configuração existe' );
 if ( isset( $tags_by_name['GA4 - Configuração'] ) ) {
@@ -193,7 +223,7 @@ if ( isset( $tags_by_name['Google Ads - Conversão - Envio de Formulário'] ) ) 
 }
 
 // -----------------------------------------------------------------------------
-// Parte 2: Validacao das funcoes PHP de emissao de scripts
+// Parte 2: Validacao das funcoes PHP de emissao de scripts e fail-closed de WooCommerce
 // -----------------------------------------------------------------------------
 if ( ! function_exists( 'add_action' ) ) {
 	function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {}
@@ -201,10 +231,42 @@ if ( ! function_exists( 'add_action' ) ) {
 if ( ! function_exists( 'is_admin' ) ) {
 	function is_admin() { return false; }
 }
+if ( ! function_exists( 'absint' ) ) {
+	function absint( $maybeint ) {
+		return abs( (int) $maybeint );
+	}
+}
 
-$GLOBALS['uonix_test_is_order_received'] = false;
+if ( ! class_exists( 'WC_Order' ) ) {
+	class WC_Order {
+		protected $status;
+		public function __construct( $status = 'gplsquote-req' ) {
+			$this->status = $status;
+		}
+		public function get_status() {
+			return $this->status;
+		}
+	}
+}
+
+$GLOBALS['uonix_test_is_order_received']   = false;
+$GLOBALS['uonix_test_query_vars']           = array();
+$GLOBALS['uonix_test_orders']               = array();
+$GLOBALS['uonix_test_disable_wc_get_order'] = false;
+
 function is_wc_endpoint_url( $endpoint = '' ) {
 	return 'order-received' === $endpoint && ! empty( $GLOBALS['uonix_test_is_order_received'] );
+}
+
+function get_query_var( $var = '', $default = '' ) {
+	return isset( $GLOBALS['uonix_test_query_vars'][ $var ] ) ? $GLOBALS['uonix_test_query_vars'][ $var ] : $default;
+}
+
+function wc_get_order( $order_id ) {
+	if ( ! empty( $GLOBALS['uonix_test_disable_wc_get_order'] ) ) {
+		return false;
+	}
+	return isset( $GLOBALS['uonix_test_orders'][ $order_id ] ) ? $GLOBALS['uonix_test_orders'][ $order_id ] : false;
 }
 
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-integrations/38-integracoes-analytics-lgpd.php';
@@ -213,6 +275,8 @@ gtm_assert( function_exists( 'uonix_render_analytics_conversion_footer' ), 'Func
 
 // 2.1 Em pagina comum (is_order_received = false)
 $GLOBALS['uonix_test_is_order_received'] = false;
+$GLOBALS['uonix_test_query_vars']         = array();
+$GLOBALS['uonix_test_orders']             = array();
 ob_start();
 uonix_render_analytics_conversion_footer();
 $output_normal = ob_get_clean();
@@ -226,23 +290,117 @@ gtm_assert(
 	'Pagina comum NAO emite uonix-conversao-carrinho-datalayer'
 );
 
-// 2.2 Em pagina de confirmacao de pedido (is_order_received = true)
-$GLOBALS['uonix_test_is_order_received'] = true;
+// 2.2 Em pagina order-received com Pedido de Cotacao RFQ valido (status: gplsquote-req)
+$GLOBALS['uonix_test_is_order_received']     = true;
+$GLOBALS['uonix_test_query_vars']['order-received'] = 11027;
+$GLOBALS['uonix_test_orders'][11027]        = new WC_Order( 'gplsquote-req' );
+
 ob_start();
 uonix_render_analytics_conversion_footer();
-$output_order_received = ob_get_clean();
+$output_rfq = ob_get_clean();
 
 gtm_assert(
-	false !== strpos( $output_order_received, 'uonix-conversao-carrinho-datalayer' ),
-	'order-received emite uonix-conversao-carrinho-datalayer'
+	false !== strpos( $output_rfq, 'uonix-conversao-carrinho-datalayer' ),
+	'order-received com pedido RFQ gplsquote-req emite uonix-conversao-carrinho-datalayer'
 );
 gtm_assert(
-	false !== strpos( $output_order_received, "'event': 'uonix_solicitar_orcamento'" ),
-	'order-received emite o evento uonix_solicitar_orcamento'
+	false !== strpos( $output_rfq, "'event': 'uonix_solicitar_orcamento'" ),
+	'order-received com pedido RFQ emite o evento uonix_solicitar_orcamento'
 );
 gtm_assert(
-	false !== strpos( $output_order_received, "'origem_conversao': 'woocommerce_order_received'" ),
-	'order-received emite metadado de origem woocommerce_order_received'
+	false !== strpos( $output_rfq, "'origem_conversao': 'woocommerce_order_received'" ),
+	'order-received com pedido RFQ emite metadado de origem woocommerce_order_received'
+);
+gtm_assert(
+	false !== strpos( $output_rfq, "'order_id': 11027" ),
+	'order-received com pedido RFQ emite o order_id correto'
+);
+
+// 2.3 Em pagina order-received com status com prefixo 'wc-gplsquote-req'
+$GLOBALS['uonix_test_query_vars']['order-received'] = 11028;
+$GLOBALS['uonix_test_orders'][11028]        = new WC_Order( 'wc-gplsquote-req' );
+ob_start();
+uonix_render_analytics_conversion_footer();
+$output_rfq_prefix = ob_get_clean();
+
+gtm_assert(
+	false !== strpos( $output_rfq_prefix, 'uonix-conversao-carrinho-datalayer' ),
+	'order-received com pedido wc-gplsquote-req normaliza prefixo e emite conversao'
+);
+
+// 2.4 Negativo: Pedido comum com status 'processing' ou 'completed' NAO deve emitir
+foreach ( array( 'processing', 'completed' ) as $common_status ) {
+	$GLOBALS['uonix_test_query_vars']['order-received'] = 12001;
+	$GLOBALS['uonix_test_orders'][12001]        = new WC_Order( $common_status );
+	ob_start();
+	uonix_render_analytics_conversion_footer();
+	$output_common = ob_get_clean();
+
+	gtm_assert(
+		false === strpos( $output_common, 'uonix-conversao-carrinho-datalayer' ),
+		"order-received com pedido comum (status: {$common_status}) NAO emite conversao (fail-closed)"
+	);
+}
+
+// 2.5 Negativo: Outros status (on-hold, pending, cancelled, failed, refund) NAO devem emitir
+foreach ( array( 'on-hold', 'pending', 'cancelled', 'failed', 'refunded' ) as $other_status ) {
+	$GLOBALS['uonix_test_query_vars']['order-received'] = 12002;
+	$GLOBALS['uonix_test_orders'][12002]        = new WC_Order( $other_status );
+	ob_start();
+	uonix_render_analytics_conversion_footer();
+	$output_other = ob_get_clean();
+
+	gtm_assert(
+		false === strpos( $output_other, 'uonix-conversao-carrinho-datalayer' ),
+		"order-received com status {$other_status} NAO emite conversao (fail-closed)"
+	);
+}
+
+// 2.6 Negativo: ID do pedido ausente ou zero
+$GLOBALS['uonix_test_query_vars']['order-received'] = 0;
+ob_start();
+uonix_render_analytics_conversion_footer();
+$output_zero_id = ob_get_clean();
+
+gtm_assert(
+	false === strpos( $output_zero_id, 'uonix-conversao-carrinho-datalayer' ),
+	'order-received com ID de pedido 0 NAO emite conversao (fail-closed)'
+);
+
+// 2.7 Negativo: Pedido inexistente (wc_get_order retorna false/null)
+$GLOBALS['uonix_test_query_vars']['order-received'] = 99999;
+ob_start();
+uonix_render_analytics_conversion_footer();
+$output_nonexistent = ob_get_clean();
+
+gtm_assert(
+	false === strpos( $output_nonexistent, 'uonix-conversao-carrinho-datalayer' ),
+	'order-received com pedido inexistente NAO emite conversao (fail-closed)'
+);
+
+// 2.8 Negativo: wc_get_order indisponivel / erro
+$GLOBALS['uonix_test_disable_wc_get_order'] = true;
+$GLOBALS['uonix_test_query_vars']['order-received'] = 11027;
+ob_start();
+uonix_render_analytics_conversion_footer();
+$output_wc_disabled = ob_get_clean();
+
+gtm_assert(
+	false === strpos( $output_wc_disabled, 'uonix-conversao-carrinho-datalayer' ),
+	'order-received com wc_get_order indisponivel NAO emite conversao (fail-closed)'
+);
+$GLOBALS['uonix_test_disable_wc_get_order'] = false;
+
+// 2.9 Negativo: Objeto retornado nao possui metodo get_status
+$GLOBALS['uonix_test_query_vars']['order-received'] = 12003;
+$GLOBALS['uonix_test_orders'][12003]        = (object) array( 'id' => 12003 );
+ob_start();
+uonix_render_analytics_conversion_footer();
+$output_invalid_obj = ob_get_clean();
+
+gtm_assert(
+	false === strpos( $output_invalid_obj, 'uonix-conversao-carrinho-datalayer' ),
+	'order-received com objeto invalido sem get_status NAO emite conversao (fail-closed)'
 );
 
 // -----------------------------------------------------------------------------
