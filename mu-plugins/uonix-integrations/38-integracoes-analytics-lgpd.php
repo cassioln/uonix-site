@@ -50,10 +50,15 @@ if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
      * `useSnippet = true` é o DEFAULT do plugin, não uma escolha — por isso ele sozinho
      * não indica nada. O que importa é ter useSnippet TRUE **e** um ID preenchido.
      *
-     * @param array|null $options Options do Site Kit (injetável para teste).
-     * @return string ''  quando não injeta; nome do módulo quando injeta.
+     * @param array|null  $options                     Options do Site Kit (injetável para teste).
+     * @param string|null $expected_gtm_container_id   Container que a aplicação configurou.
+     * @return string '' quando não injeta; nome do módulo quando injeta; tagmanager-mismatch
+     *                quando o Site Kit injeta um container diferente do auditado.
      */
-    function uonix_site_kit_injeta_medicao( $options = null ) {
+    function uonix_site_kit_injeta_medicao( $options = null, $expected_gtm_container_id = null ) {
+        $expected_gtm_container_id = null === $expected_gtm_container_id
+            ? null
+            : trim( (string) $expected_gtm_container_id );
         /*
          * Módulo => campos cuja presença significa "tem tag para emitir".
          *
@@ -84,6 +89,9 @@ if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
             'tagmanager'  => array( 'containerID', 'ampContainerID' ),
         );
 
+        $tagmanager_detected = false;
+        $tagmanager_mismatch = false;
+
         foreach ( $modulos as $modulo => $campos_id ) {
             $chave = 'googlesitekit_' . $modulo . '_settings';
 
@@ -103,10 +111,27 @@ if ( ! function_exists( 'uonix_site_kit_injeta_medicao' ) ) {
             }
 
             foreach ( $campos_id as $campo ) {
-                if ( ! empty( $settings[ $campo ] ) && '' !== trim( (string) $settings[ $campo ] ) ) {
+                $configured_id = isset( $settings[ $campo ] )
+                    ? trim( (string) $settings[ $campo ] )
+                    : '';
+
+                if ( '' === $configured_id ) {
+                    continue;
+                }
+
+                if ( 'tagmanager' !== $modulo ) {
                     return $modulo;
                 }
+
+                $tagmanager_detected = true;
+                if ( null !== $expected_gtm_container_id && $configured_id !== $expected_gtm_container_id ) {
+                    $tagmanager_mismatch = true;
+                }
             }
+        }
+
+        if ( $tagmanager_detected ) {
+            return $tagmanager_mismatch ? 'tagmanager-mismatch' : 'tagmanager';
         }
 
         /*
@@ -180,7 +205,7 @@ if ( ! function_exists( 'uonix_analytics_configuration' ) ) {
          * compartilham gtag/dataLayer com o GA4 que vive no GTM e poderiam duplicar a
          * coleta. Para esses módulos, mantemos o recuo fail-closed já existente.
          */
-        if ( in_array( uonix_site_kit_injeta_medicao(), array( 'analytics-4', 'ads' ), true ) ) {
+        if ( in_array( uonix_site_kit_injeta_medicao( null, $gtm_container_id ), array( 'analytics-4', 'ads', 'tagmanager-mismatch' ), true ) ) {
             return false;
         }
 
@@ -222,7 +247,7 @@ if ( ! function_exists( 'uonix_analytics_should_render_gtm' ) ) {
      */
     function uonix_analytics_should_render_gtm( $configuration ) {
         return uonix_analytics_configuration_is_complete( $configuration )
-            && '' === uonix_site_kit_injeta_medicao();
+            && '' === uonix_site_kit_injeta_medicao( null, $configuration['gtm_container_id'] );
     }
 }
 

@@ -414,6 +414,38 @@ uonix_analytics_assert_same(
 	'Site Kit assumindo o GTM não invalida a configuração necessária ao AdOpt'
 );
 
+// Um container Site Kit diferente do configurado não pode assumir o fluxo:
+// aceitar este estado suprimiria o GTM auditado e encaminharia a medição para outro container.
+$GLOBALS['uonix_test_options'] = array(
+	'googlesitekit_tagmanager_settings' => array( 'useSnippet' => true, 'containerID' => 'GTM-FOREIGN999' ),
+);
+
+uonix_analytics_assert_same(
+	false,
+	uonix_analytics_configuration( 'production', true, 'GTM-REAL123', 'real-adopt-id' ),
+	'Site Kit com containerID diferente do GTM configurado bloqueia a configuração fail-closed'
+);
+
+// A rota AMP também não pode esconder um segundo container diferente do auditado.
+$GLOBALS['uonix_test_options'] = array(
+	'googlesitekit_tagmanager_settings' => array(
+		'useSnippet'    => true,
+		'containerID'   => 'GTM-REAL123',
+		'ampContainerID' => 'GTM-AMP-FOREIGN',
+	),
+);
+
+uonix_analytics_assert_same(
+	false,
+	uonix_analytics_configuration( 'production', true, 'GTM-REAL123', 'real-adopt-id' ),
+	'Site Kit com ampContainerID divergente também bloqueia a configuração fail-closed'
+);
+
+// Restaura o caso positivo para as asserções de renderização abaixo.
+$GLOBALS['uonix_test_options'] = array(
+	'googlesitekit_tagmanager_settings' => array( 'useSnippet' => true, 'containerID' => 'GTM-REAL123' ),
+);
+
 ob_start();
 uonix_render_analytics_head( $valid );
 $site_kit_head_html = ob_get_clean();

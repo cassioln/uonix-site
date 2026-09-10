@@ -131,6 +131,43 @@ foreach ( $variables as $v ) {
 	$variables_by_name[ $v['name'] ] = $v;
 }
 
+// O container auditado é uma allowlist fechada: uma tag extra ativa poderia
+// reintroduzir outro Measurement ID, outra conta Ads ou um label não confirmado
+// sem quebrar as asserções que apenas procuram as tags esperadas.
+$expected_tag_contract = array(
+	'4'  => array( 'Tag AdOpt', 'html' ),
+	'5'  => array( 'GA4 - Configuração', 'googtag' ),
+	'6'  => array( 'Facebook Pixel - PageView', 'html' ),
+	'12' => array( 'Google Ads - Vinculador de Conversões', 'gclidw' ),
+	'13' => array( 'Google Ads - Tag do Google', 'googtag' ),
+	'14' => array( 'Google Ads - Remarketing Geral', 'sp' ),
+	'15' => array( 'Google Ads - Conversão - Clique WhatsApp', 'awct' ),
+	'16' => array( 'Google Ads - Conversão - Envio de Formulário', 'awct' ),
+);
+$actual_tag_ids   = array_map(
+	function ( $tag ) {
+		return isset( $tag['tagId'] ) ? (string) $tag['tagId'] : '';
+	},
+	$tags
+);
+$expected_tag_ids = array_map( 'strval', array_keys( $expected_tag_contract ) );
+sort( $actual_tag_ids );
+sort( $expected_tag_ids );
+gtm_assert(
+	$expected_tag_ids === $actual_tag_ids,
+	'Container GTM declara exatamente as oito tags autorizadas, sem destinos ou conversoes extras'
+);
+foreach ( $expected_tag_contract as $expected_tag_id => $contract ) {
+	gtm_assert( isset( $tags_by_id[ $expected_tag_id ] ), "Tag {$expected_tag_id} autorizada existe no manifesto" );
+	if ( isset( $tags_by_id[ $expected_tag_id ] ) ) {
+		gtm_assert(
+			$contract[0] === $tags_by_id[ $expected_tag_id ]['name']
+				&& $contract[1] === $tags_by_id[ $expected_tag_id ]['type'],
+			"Tag {$expected_tag_id} mantem nome e tipo autorizados"
+		);
+	}
+}
+
 // 1.0 Consistencia do snapshot canonico e placeholders fail-closed.
 $version_id = isset( $version['containerVersionId'] ) ? (string) $version['containerVersionId'] : '';
 gtm_assert( '' !== $version_id, 'Manifesto declara containerVersionId' );
