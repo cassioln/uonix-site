@@ -1083,9 +1083,8 @@ function uonix_render_analytics_body( $configuration = null ) {
 add_action( 'wp_body_open', 'uonix_render_analytics_body', 10, 0 );
 
 /**
- * UONIX: Disparo de evento de conversao especifico para Solicitacao de Orcamento
- * - Fluent Forms: apenas quando o campo form_assunto tiver valor "orcamento"
- * - WooCommerce: pagina de confirmacao de pedido de orcamento (order-received)
+ * UONIX: Listener de conversao para Fluent Forms.
+ * Dispara apenas quando o campo form_assunto tiver valor "orcamento".
  */
 if ( ! function_exists( 'uonix_render_analytics_conversion_footer' ) ) {
 function uonix_render_analytics_conversion_footer() {
@@ -1094,9 +1093,29 @@ function uonix_render_analytics_conversion_footer() {
     (function() {
         var conversoesPendentes = {};
 
+        function obterElementoFormulario(formValue) {
+            if (!formValue) return null;
+            if (formValue.nodeType) return formValue;
+            if (formValue[0] && formValue[0].nodeType) return formValue[0];
+            return null;
+        }
+
+        function obterFormId(explicitFormId, form) {
+            var formId = explicitFormId ? String(explicitFormId).trim() : '';
+            if (!formId && form) {
+                if (typeof form.getAttribute === 'function') {
+                    formId = form.getAttribute('data-form_id') || form.getAttribute('data-form-id') || '';
+                }
+                if (!formId && form.id) formId = form.id;
+            }
+            var match = String(formId).match(/^fluentform_(\d+)$/);
+            if (match) formId = match[1];
+            return /^\d+$/.test(String(formId)) && Number(formId) > 0 ? String(formId) : '';
+        }
+
         function dispararConversaoSeOrcamento(formId, assunto) {
             var val = assunto && String(assunto).trim() ? String(assunto).trim() : '';
-            if (val === 'orcamento') {
+            if (formId && val === 'orcamento') {
                 var chave = String(formId || '') + '|' + val;
                 if (conversoesPendentes[chave]) return;
                 conversoesPendentes[chave] = true;
@@ -1107,7 +1126,8 @@ function uonix_render_analytics_conversion_footer() {
                 window.dataLayer.push({
                     'event': 'uonix_solicitar_orcamento',
                     'origem_conversao': 'fluentform_orcamento',
-                    'form_id': formId
+                    'form_id': formId,
+                    'transaction_id': null
                 });
             }
         }
@@ -1116,8 +1136,9 @@ function uonix_render_analytics_conversion_footer() {
             if (window.jQuery) {
                 window.jQuery(document).off('fluentform_submission_success.uonixOrcamento').on('fluentform_submission_success.uonixOrcamento', function(e, data) {
                     try {
-                        var formId = data && (data.formId || data.form_id);
-                        var form = formId ? document.querySelector('#fluentform_' + formId) : null;
+                        var form = obterElementoFormulario(data && data.form);
+                        var formId = obterFormId(data && (data.formId || data.form_id), form);
+                        if (!form && formId) form = document.querySelector('#fluentform_' + formId);
                         var assuntoEl = form ? form.querySelector('select[name="form_assunto"]') : null;
                         var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : '';
                         dispararConversaoSeOrcamento(formId, val);
@@ -1128,8 +1149,8 @@ function uonix_render_analytics_conversion_footer() {
             document.addEventListener('fluentform_submission_success', function(e) {
                 try {
                     var detail = e && e.detail;
-                    var formId = detail && (detail.formId || detail.form_id);
-                    var form = detail && detail.form ? (detail.form.nodeType ? detail.form : detail.form[0]) : null;
+                    var form = obterElementoFormulario(detail && detail.form);
+                    var formId = obterFormId(detail && (detail.formId || detail.form_id), form);
                     if (!form && formId) form = document.querySelector('#fluentform_' + formId);
                     var assuntoEl = form ? form.querySelector('select[name="form_assunto"]') : null;
                     var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : '';
@@ -1145,30 +1166,73 @@ function uonix_render_analytics_conversion_footer() {
     })();
     </script>
     <?php
-    if ( function_exists( 'is_wc_endpoint_url' ) && is_wc_endpoint_url( 'order-received' ) ) {
-        $uonix_order_id = function_exists( 'get_query_var' ) ? ( function_exists( 'absint' ) ? absint( get_query_var( 'order-received' ) ) : abs( (int) get_query_var( 'order-received' ) ) ) : 0;
-        if ( $uonix_order_id > 0 && function_exists( 'wc_get_order' ) ) {
-            $uonix_order = wc_get_order( $uonix_order_id );
-            if ( $uonix_order && is_object( $uonix_order ) && method_exists( $uonix_order, 'get_status' ) ) {
-                $uonix_order_status = (string) $uonix_order->get_status();
-                if ( 0 === strpos( $uonix_order_status, 'wc-' ) ) {
-                    $uonix_order_status = substr( $uonix_order_status, 3 );
-                }
-                if ( 'gplsquote-req' === $uonix_order_status ) {
-                    ?>
-                    <script id="uonix-conversao-carrinho-datalayer">
-                    window.dataLayer = window.dataLayer || [];
-                    window.dataLayer.push({
-                        'event': 'uonix_solicitar_orcamento',
-                        'origem_conversao': 'woocommerce_order_received',
-                        'order_id': <?php echo (int) $uonix_order_id; ?>
-                    });
-                    </script>
-                    <?php
-                }
-            }
-        }
-    }
 }
 }
 add_action( 'wp_footer', 'uonix_render_analytics_conversion_footer', 99, 0 );
+
+/**
+ * Emite a conversao RFQ somente no template thank-you, depois de o WooCommerce
+ * validar a chave, o cliente autenticado e a verificacao de e-mail do guest.
+ * A chave e o status sao validados novamente como defesa em profundidade.
+ */
+if ( ! function_exists( 'uonix_render_analytics_rfq_conversion' ) ) {
+function uonix_render_analytics_rfq_conversion( $order_id ) {
+    if ( ! function_exists( 'is_wc_endpoint_url' ) || ! is_wc_endpoint_url( 'order-received' ) ) {
+        return;
+    }
+
+    $uonix_order_id = function_exists( 'absint' ) ? absint( $order_id ) : abs( (int) $order_id );
+    if ( $uonix_order_id <= 0 || ! function_exists( 'wc_get_order' ) ) {
+        return;
+    }
+
+    $uonix_order = wc_get_order( $uonix_order_id );
+    if (
+        ! $uonix_order
+        || ! is_object( $uonix_order )
+        || ! method_exists( $uonix_order, 'get_status' )
+        || ! method_exists( $uonix_order, 'get_order_key' )
+    ) {
+        return;
+    }
+
+    $uonix_order_key_from_url = '';
+    if ( isset( $_GET['key'] ) && is_scalar( $_GET['key'] ) ) {
+        $uonix_order_key_from_url = (string) $_GET['key'];
+        if ( function_exists( 'wp_unslash' ) ) {
+            $uonix_order_key_from_url = wp_unslash( $uonix_order_key_from_url );
+        }
+        $uonix_order_key_from_url = function_exists( 'wc_clean' )
+            ? wc_clean( $uonix_order_key_from_url )
+            : trim( $uonix_order_key_from_url );
+    }
+
+    $uonix_expected_order_key = (string) $uonix_order->get_order_key();
+    $uonix_order_key_is_valid = '' !== $uonix_order_key_from_url
+        && '' !== $uonix_expected_order_key
+        && hash_equals( $uonix_expected_order_key, $uonix_order_key_from_url );
+    $uonix_order_status = (string) $uonix_order->get_status();
+    if ( 0 === strpos( $uonix_order_status, 'wc-' ) ) {
+        $uonix_order_status = substr( $uonix_order_status, 3 );
+    }
+
+    if ( ! $uonix_order_key_is_valid || 'gplsquote-req' !== $uonix_order_status ) {
+        return;
+    }
+    ?>
+    <script id="uonix-conversao-carrinho-datalayer">
+    (function() {
+        var orderId = <?php echo (int) $uonix_order_id; ?>;
+        window.dataLayer = window.dataLayer || [];
+        window.dataLayer.push({
+            'event': 'uonix_solicitar_orcamento',
+            'origem_conversao': 'woocommerce_order_received',
+            'order_id': orderId,
+            'transaction_id': 'uonix-rfq-order-' + orderId
+        });
+    })();
+    </script>
+    <?php
+}
+}
+add_action( 'woocommerce_thankyou', 'uonix_render_analytics_rfq_conversion', 10, 1 );

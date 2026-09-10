@@ -9,9 +9,10 @@
  * 3. Meta Pixel, Remarketing e Conversão Ads dependem de Marketing e exigem ad_storage;
  * 4. A tag de Conversao Ads de Orcamento escuta EXCLUSIVAMENTE uonix_solicitar_orcamento (Trigger 21),
  *    sem triggers genericos de formSubmission nem order-received;
- * 5. A funcao PHP uonix_render_analytics_conversion_footer emite os scripts esperados
- *    para o endpoint de order-received e para os formulários Fluent Forms;
- * 6. Executa a suite de caminhos positivos, negativos e resistencia a mutacao no JS.
+ * 5. O listener Fluent Forms fica no footer e a conversao WooCommerce e emitida
+ *    exclusivamente pelo hook woocommerce_thankyou, apos as guardas nativas;
+ * 6. Replays do mesmo pedido carregam transaction_id estavel ate o campo Order ID da tag Ads;
+ * 7. Executa a suite de caminhos positivos, negativos e resistencia a mutacao no JS.
  */
 
 define( 'ABSPATH', __DIR__ );
@@ -116,7 +117,7 @@ foreach ( $variables as $v ) {
 // 1.0 Consistencia do snapshot canonico e placeholders fail-closed.
 $version_id = isset( $version['containerVersionId'] ) ? (string) $version['containerVersionId'] : '';
 gtm_assert( '' !== $version_id, 'Manifesto declara containerVersionId' );
-gtm_assert( '16' === $version_id, 'Manifesto canonico aponta para a versao live 16 auditada' );
+gtm_assert( '17' === $version_id, 'Manifesto canonico aponta para a versao live 17 auditada' );
 gtm_assert(
 	isset( $version['path'] ) && preg_match( '#/versions/' . preg_quote( $version_id, '#' ) . '$#', $version['path'] ),
 	'Path do manifesto aponta para o mesmo containerVersionId'
@@ -148,7 +149,7 @@ foreach ( $tags as $tag ) {
 	}
 }
 
-gtm_assert( isset( $tags_by_id['15'] ), 'Tag 15 de conversao WhatsApp existe no snapshot live 16' );
+gtm_assert( isset( $tags_by_id['15'] ), 'Tag 15 de conversao WhatsApp existe no snapshot live 17' );
 if ( isset( $tags_by_id['15'] ) ) {
 	$tag_whatsapp = $tags_by_id['15'];
 	gtm_assert( 'Google Ads - Conversão - Clique WhatsApp' === $tag_whatsapp['name'], 'Tag 15 mantem a identidade da conversao WhatsApp' );
@@ -187,6 +188,34 @@ if ( isset( $variables_by_name['Tags_Aceitas_AdOpt'] ) ) {
 		if ( 'name' === $p['key'] ) $js_name = $p['value'];
 	}
 	gtm_assert( 'window.acceptedTags' === $js_name, 'Tags_Aceitas_AdOpt le exatamente window.acceptedTags' );
+}
+
+// A limpeza explicita com transaction_id:null depende do modelo persistente da
+// Data Layer v2; a entidade precisa ser unica e manter o contrato completo.
+$transaction_id_variables = array_values(
+	array_filter(
+		$variables,
+		function ( $variable ) {
+			return isset( $variable['name'] ) && 'DLV - transaction_id' === $variable['name'];
+		}
+	)
+);
+gtm_assert( 1 === count( $transaction_id_variables ), 'Existe exatamente uma variavel DLV - transaction_id no manifesto' );
+if ( 1 === count( $transaction_id_variables ) ) {
+	$transaction_id_variable   = $transaction_id_variables[0];
+	$transaction_id_parameters = isset( $transaction_id_variable['parameter'] )
+		? $transaction_id_variable['parameter']
+		: array();
+	$expected_parameters       = array(
+		array( 'type' => 'integer', 'key' => 'dataLayerVersion', 'value' => '2' ),
+		array( 'type' => 'boolean', 'key' => 'setDefaultValue', 'value' => 'false' ),
+		array( 'type' => 'template', 'key' => 'name', 'value' => 'transaction_id' ),
+	);
+	gtm_assert( 'v' === $transaction_id_variable['type'], 'DLV - transaction_id e do tipo Data Layer Variable (v)' );
+	gtm_assert(
+		$expected_parameters === $transaction_id_parameters,
+		'DLV - transaction_id usa Data Layer v2, sem valor padrao, e le exatamente transaction_id'
+	);
 }
 
 // 1.3 Trigger de Estatisticas
@@ -323,13 +352,54 @@ if ( isset( $tags_by_name['Google Ads - Conversão - Envio de Formulário'] ) ) 
 		'Tag de Conversao Ads declara consentStatus needed (ad_storage)'
 	);
 	gtm_assert( gtm_has_exact_consent_type( $tag_conv, 'ad_storage' ), 'Tag de Conversao Ads exige exclusivamente ad_storage' );
+	$order_id_parameters = array_values(
+		array_filter(
+			isset( $tag_conv['parameter'] ) ? $tag_conv['parameter'] : array(),
+			function ( $parameter ) {
+				return isset( $parameter['key'] ) && 'orderId' === $parameter['key'];
+			}
+		)
+	);
+	gtm_assert(
+		1 === count( $order_id_parameters )
+			&& isset( $order_id_parameters[0]['type'], $order_id_parameters[0]['value'] )
+			&& 'template' === $order_id_parameters[0]['type']
+			&& '{{DLV - transaction_id}}' === $order_id_parameters[0]['value'],
+		'Tag de Conversao Ads envia DLV - transaction_id no campo Order ID'
+	);
 }
 
 // -----------------------------------------------------------------------------
 // Parte 2: Validacao das funcoes PHP de emissao de scripts e fail-closed de WooCommerce
 // -----------------------------------------------------------------------------
+$GLOBALS['uonix_test_actions'] = array();
 if ( ! function_exists( 'add_action' ) ) {
-	function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {}
+	function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
+		$GLOBALS['uonix_test_actions'][] = array( $hook, $callback, $priority, $accepted_args );
+	}
+}
+
+function gtm_do_action( $hook, ...$args ) {
+	$callbacks = array_values(
+		array_filter(
+			$GLOBALS['uonix_test_actions'],
+			function ( $registered ) use ( $hook ) {
+				return $hook === $registered[0];
+			}
+		)
+	);
+	usort(
+		$callbacks,
+		function ( $left, $right ) {
+			return $left[2] <=> $right[2];
+		}
+	);
+	if ( empty( $args ) ) {
+		$args = array( '' );
+	}
+	foreach ( $callbacks as $registered ) {
+		call_user_func_array( $registered[1], array_slice( $args, 0, $registered[3] ) );
+	}
 }
 if ( ! function_exists( 'is_admin' ) ) {
 	function is_admin() { return false; }
@@ -343,11 +413,16 @@ if ( ! function_exists( 'absint' ) ) {
 if ( ! class_exists( 'WC_Order' ) ) {
 	class WC_Order {
 		protected $status;
-		public function __construct( $status = 'gplsquote-req' ) {
+		protected $order_key;
+		public function __construct( $status = 'gplsquote-req', $order_key = 'wc_order_key' ) {
 			$this->status = $status;
+			$this->order_key = $order_key;
 		}
 		public function get_status() {
 			return $this->status;
+		}
+		public function get_order_key() {
+			return $this->order_key;
 		}
 	}
 }
@@ -375,13 +450,24 @@ function wc_get_order( $order_id ) {
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-integrations/38-integracoes-analytics-lgpd.php';
 
 gtm_assert( function_exists( 'uonix_render_analytics_conversion_footer' ), 'Funcao uonix_render_analytics_conversion_footer existe' );
+gtm_assert( function_exists( 'uonix_render_analytics_rfq_conversion' ), 'Funcao uonix_render_analytics_rfq_conversion existe' );
+gtm_assert(
+	in_array( array( 'woocommerce_thankyou', 'uonix_render_analytics_rfq_conversion', 10, 1 ), $GLOBALS['uonix_test_actions'], true ),
+	'Conversao RFQ e registrada no hook woocommerce_thankyou apos as guardas nativas do WooCommerce'
+);
+
+function gtm_render_rfq_conversion( $order_id ) {
+	ob_start();
+	gtm_do_action( 'woocommerce_thankyou', $order_id );
+	return ob_get_clean();
+}
 
 // 2.1 Em pagina comum (is_order_received = false)
 $GLOBALS['uonix_test_is_order_received'] = false;
 $GLOBALS['uonix_test_query_vars']         = array();
 $GLOBALS['uonix_test_orders']             = array();
 ob_start();
-uonix_render_analytics_conversion_footer();
+gtm_do_action( 'wp_footer' );
 $output_normal = ob_get_clean();
 
 gtm_assert(
@@ -396,11 +482,18 @@ gtm_assert(
 // 2.2 Em pagina order-received com Pedido de Cotacao RFQ valido (status: gplsquote-req)
 $GLOBALS['uonix_test_is_order_received']     = true;
 $GLOBALS['uonix_test_query_vars']['order-received'] = 11027;
+$_GET['key']                                  = 'wc_order_key';
 $GLOBALS['uonix_test_orders'][11027]        = new WC_Order( 'gplsquote-req' );
 
 ob_start();
-uonix_render_analytics_conversion_footer();
-$output_rfq = ob_get_clean();
+gtm_do_action( 'wp_footer' );
+$output_rfq_footer = ob_get_clean();
+
+gtm_assert(
+	false === strpos( $output_rfq_footer, 'uonix-conversao-carrinho-datalayer' ),
+	'Footer generico NAO emite conversao WooCommerce antes das guardas nativas'
+);
+$output_rfq = gtm_render_rfq_conversion( 11027 );
 
 gtm_assert(
 	false !== strpos( $output_rfq, 'uonix-conversao-carrinho-datalayer' ),
@@ -415,29 +508,57 @@ gtm_assert(
 	'order-received com pedido RFQ emite metadado de origem woocommerce_order_received'
 );
 gtm_assert(
-	false !== strpos( $output_rfq, "'order_id': 11027" ),
+	false !== strpos( $output_rfq, 'var orderId = 11027' )
+		&& false !== strpos( $output_rfq, "'order_id': orderId" ),
 	'order-received com pedido RFQ emite o order_id correto'
+);
+gtm_assert(
+	false !== strpos( $output_rfq, "'transaction_id': 'uonix-rfq-order-' + orderId" ),
+	'order-received emite transaction_id estavel e sem PII derivado do pedido'
+);
+gtm_assert(
+	false === strpos( $output_rfq, 'sessionStorage' ) && false === strpos( $output_rfq, 'localStorage' ),
+	'order-received nao grava marcador client-side antes da elegibilidade por consentimento'
 );
 
 // 2.3 Em pagina order-received com status com prefixo 'wc-gplsquote-req'
 $GLOBALS['uonix_test_query_vars']['order-received'] = 11028;
+$_GET['key']                                  = 'wc_order_key';
 $GLOBALS['uonix_test_orders'][11028]        = new WC_Order( 'wc-gplsquote-req' );
-ob_start();
-uonix_render_analytics_conversion_footer();
-$output_rfq_prefix = ob_get_clean();
+$output_rfq_prefix = gtm_render_rfq_conversion( 11028 );
 
 gtm_assert(
 	false !== strpos( $output_rfq_prefix, 'uonix-conversao-carrinho-datalayer' ),
 	'order-received com pedido wc-gplsquote-req normaliza prefixo e emite conversao'
 );
 
+// 2.3b Negativo: chave ausente, vazia ou adulterada nunca qualifica a confirmacao RFQ.
+$invalid_order_keys = array(
+	'ausente'    => null,
+	'vazia'      => '',
+	'adulterada' => 'wc_order_key_tampered',
+);
+foreach ( $invalid_order_keys as $invalid_key_label => $invalid_order_key ) {
+	$GLOBALS['uonix_test_query_vars']['order-received'] = 11027;
+	if ( null === $invalid_order_key ) {
+		unset( $_GET['key'] );
+	} else {
+		$_GET['key'] = $invalid_order_key;
+	}
+	$output_invalid_key = gtm_render_rfq_conversion( 11027 );
+
+	gtm_assert(
+		false === strpos( $output_invalid_key, 'uonix-conversao-carrinho-datalayer' ),
+		"order-received RFQ com chave {$invalid_key_label} NAO emite conversao"
+	);
+}
+
 // 2.4 Negativo: Pedido comum com status 'processing' ou 'completed' NAO deve emitir
+$_GET['key'] = 'wc_order_key';
 foreach ( array( 'processing', 'completed' ) as $common_status ) {
 	$GLOBALS['uonix_test_query_vars']['order-received'] = 12001;
 	$GLOBALS['uonix_test_orders'][12001]        = new WC_Order( $common_status );
-	ob_start();
-	uonix_render_analytics_conversion_footer();
-	$output_common = ob_get_clean();
+	$output_common = gtm_render_rfq_conversion( 12001 );
 
 	gtm_assert(
 		false === strpos( $output_common, 'uonix-conversao-carrinho-datalayer' ),
@@ -446,12 +567,11 @@ foreach ( array( 'processing', 'completed' ) as $common_status ) {
 }
 
 // 2.5 Negativo: Outros status (on-hold, pending, cancelled, failed, refund) NAO devem emitir
+$_GET['key'] = 'wc_order_key';
 foreach ( array( 'on-hold', 'pending', 'cancelled', 'failed', 'refunded' ) as $other_status ) {
 	$GLOBALS['uonix_test_query_vars']['order-received'] = 12002;
 	$GLOBALS['uonix_test_orders'][12002]        = new WC_Order( $other_status );
-	ob_start();
-	uonix_render_analytics_conversion_footer();
-	$output_other = ob_get_clean();
+	$output_other = gtm_render_rfq_conversion( 12002 );
 
 	gtm_assert(
 		false === strpos( $output_other, 'uonix-conversao-carrinho-datalayer' ),
@@ -461,9 +581,7 @@ foreach ( array( 'on-hold', 'pending', 'cancelled', 'failed', 'refunded' ) as $o
 
 // 2.6 Negativo: ID do pedido ausente ou zero
 $GLOBALS['uonix_test_query_vars']['order-received'] = 0;
-ob_start();
-uonix_render_analytics_conversion_footer();
-$output_zero_id = ob_get_clean();
+$output_zero_id = gtm_render_rfq_conversion( 0 );
 
 gtm_assert(
 	false === strpos( $output_zero_id, 'uonix-conversao-carrinho-datalayer' ),
@@ -472,9 +590,7 @@ gtm_assert(
 
 // 2.7 Negativo: Pedido inexistente (wc_get_order retorna false/null)
 $GLOBALS['uonix_test_query_vars']['order-received'] = 99999;
-ob_start();
-uonix_render_analytics_conversion_footer();
-$output_nonexistent = ob_get_clean();
+$output_nonexistent = gtm_render_rfq_conversion( 99999 );
 
 gtm_assert(
 	false === strpos( $output_nonexistent, 'uonix-conversao-carrinho-datalayer' ),
@@ -484,9 +600,7 @@ gtm_assert(
 // 2.8 Negativo: wc_get_order indisponivel / erro
 $GLOBALS['uonix_test_disable_wc_get_order'] = true;
 $GLOBALS['uonix_test_query_vars']['order-received'] = 11027;
-ob_start();
-uonix_render_analytics_conversion_footer();
-$output_wc_disabled = ob_get_clean();
+$output_wc_disabled = gtm_render_rfq_conversion( 11027 );
 
 gtm_assert(
 	false === strpos( $output_wc_disabled, 'uonix-conversao-carrinho-datalayer' ),
@@ -497,9 +611,7 @@ $GLOBALS['uonix_test_disable_wc_get_order'] = false;
 // 2.9 Negativo: Objeto retornado nao possui metodo get_status
 $GLOBALS['uonix_test_query_vars']['order-received'] = 12003;
 $GLOBALS['uonix_test_orders'][12003]        = (object) array( 'id' => 12003 );
-ob_start();
-uonix_render_analytics_conversion_footer();
-$output_invalid_obj = ob_get_clean();
+$output_invalid_obj = gtm_render_rfq_conversion( 12003 );
 
 gtm_assert(
 	false === strpos( $output_invalid_obj, 'uonix-conversao-carrinho-datalayer' ),

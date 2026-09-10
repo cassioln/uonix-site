@@ -24,11 +24,21 @@ if (!match) {
 
 const scriptCode = match[1];
 
-function simulateSubmission(codeToRun, assunto, useJQuery) {
+function simulateSubmission(codeToRun, assunto, channel, options = {}) {
   const events = [];
+  const timers = [];
   let currentAssunto = assunto;
+  const runJQuery = channel === true || channel === 'real' || channel === 'both';
+  const runDom = channel === false || channel === 'dom-real' || channel === 'both';
+  const hasCustomFormId = Object.prototype.hasOwnProperty.call(options, 'formId');
+  const formAttributes = options.attributes || {};
 
   const formElem = {
+    id: hasCustomFormId ? options.formId : 'fluentform_3',
+    nodeType: 1,
+    getAttribute: (name) => Object.prototype.hasOwnProperty.call(formAttributes, name)
+      ? formAttributes[name]
+      : null,
     querySelector: (sel) => {
       if (sel && sel.includes('form_assunto')) {
         return currentAssunto !== null ? { value: currentAssunto } : null;
@@ -61,27 +71,46 @@ function simulateSubmission(codeToRun, assunto, useJQuery) {
   const win = {
     dataLayer: events,
     document: doc,
-    jQuery: useJQuery ? () => jqObj : undefined
+    jQuery: runJQuery ? () => jqObj : undefined
   };
 
   const ctx = vm.createContext({
     window: win,
     document: doc,
-    setTimeout,
+    setTimeout: options.controlTimers
+      ? (callback) => {
+        timers.push(callback);
+        return timers.length;
+      }
+      : setTimeout,
     clearTimeout
   });
 
   vm.runInContext(codeToRun, ctx);
 
-  if (useJQuery) {
-    const handler = jqHandlers['fluentform_submission_success.uonixOrcamento'];
-    if (!handler) throw new Error('Handler jQuery nao registrado');
-    handler({}, { formId: '3', form_id: 3 });
+  function dispatchSubmission() {
+    if (runJQuery) {
+      const handler = jqHandlers['fluentform_submission_success.uonixOrcamento'];
+      if (!handler) throw new Error('Handler jQuery nao registrado');
+      const payload = channel === 'real' || channel === 'both'
+        ? { form: [formElem], config: {}, response: {} }
+        : { formId: '3', form_id: 3 };
+      handler({}, payload);
+    }
+    if (runDom) {
+      const handler = docListeners['fluentform_submission_success'];
+      if (!handler) throw new Error('Listener DOM nativo nao registrado');
+      const detail = channel === 'dom-real' || channel === 'both'
+        ? { form: formElem }
+        : { formId: '3', form: formElem };
+      handler({ detail });
+    }
   }
-  if (!useJQuery || useJQuery === 'both') {
-    const handler = docListeners['fluentform_submission_success'];
-    if (!handler) throw new Error('Listener DOM nativo nao registrado');
-    handler({ detail: { formId: '3', form: formElem } });
+
+  dispatchSubmission();
+  if (options.repeatAfterMacrotask) {
+    while (timers.length) timers.shift()();
+    dispatchSubmission();
   }
 
   return events;
@@ -91,14 +120,27 @@ function simulateCrossFormSubmission(codeToRun) {
   const events = [];
   const docListeners = {};
   const jqHandlers = {};
-  const budgetSubject = { name: 'form_assunto', value: 'orcamento' };
-  const newsletterForm = { querySelector: () => null };
+  const budgetForm = {
+    id: 'fluentform_3',
+    nodeType: 1,
+    querySelector: (sel) => sel && sel.includes('form_assunto') ? { value: 'orcamento' } : null
+  };
+  const newsletterForm = {
+    id: 'fluentform_99',
+    nodeType: 1,
+    querySelector: () => null
+  };
   const doc = {
     readyState: 'complete',
     addEventListener: (type, fn) => {
       docListeners[type] = fn;
     },
-    querySelector: (sel) => sel === '#fluentform_99' ? newsletterForm : null
+    querySelector: (sel) => {
+      if (sel === '#fluentform_3') return budgetForm;
+      if (sel === '#fluentform_99') return newsletterForm;
+      if (sel && sel.includes('form_assunto')) return budgetForm.querySelector(sel);
+      return null;
+    }
   };
   const jqObj = {
     off: () => jqObj,
@@ -120,10 +162,11 @@ function simulateCrossFormSubmission(codeToRun) {
   });
 
   vm.runInContext(codeToRun, ctx);
-  if (docListeners.change) {
-    docListeners.change({ target: budgetSubject });
-  }
-  jqHandlers['fluentform_submission_success.uonixOrcamento']({}, { formId: '99', form_id: 99 });
+  jqHandlers['fluentform_submission_success.uonixOrcamento']({}, {
+    form: [newsletterForm],
+    config: {},
+    response: {}
+  });
 
   return events;
 }
@@ -148,6 +191,25 @@ assert(
   'jQuery: form_assunto=orcamento dispara uonix_solicitar_orcamento com metadados corretos'
 );
 
+const evJqOrcamentoRealPayload = simulateSubmission(scriptCode, 'orcamento', 'real');
+assert(
+  evJqOrcamentoRealPayload.length === 1 &&
+  evJqOrcamentoRealPayload[0].event === 'uonix_solicitar_orcamento' &&
+  evJqOrcamentoRealPayload[0].form_id === '3',
+  'jQuery: payload real do Fluent Forms ({form, config, response}) qualifica o formulario'
+);
+
+const evJqOrcamentoSemFormId = simulateSubmission(
+  scriptCode,
+  'orcamento',
+  'real',
+  { formId: '' }
+);
+assert(
+  evJqOrcamentoSemFormId.length === 0,
+  'jQuery: formulario real sem ID numerico positivo permanece fail-closed'
+);
+
 const evDomOrcamento = simulateSubmission(scriptCode, 'orcamento', false);
 assert(
   evDomOrcamento.length === 1 &&
@@ -156,10 +218,34 @@ assert(
   'DOM nativo: form_assunto=orcamento dispara uonix_solicitar_orcamento'
 );
 
+const evDomOrcamentoRealPayload = simulateSubmission(scriptCode, 'orcamento', 'dom-real');
+assert(
+  evDomOrcamentoRealPayload.length === 1 &&
+  evDomOrcamentoRealPayload[0].form_id === '3',
+  'DOM nativo: detail.form sem formId deriva o ID do formulario real'
+);
+
 const evDualChannel = simulateSubmission(scriptCode, 'orcamento', 'both');
 assert(
   evDualChannel.length === 1 && evDualChannel[0].event === 'uonix_solicitar_orcamento',
   'Mesmo sucesso recebido por jQuery e DOM dispara uma unica conversao'
+);
+
+const evRepeatedAfterMacrotask = simulateSubmission(
+  scriptCode,
+  'orcamento',
+  'both',
+  { controlTimers: true, repeatAfterMacrotask: true }
+);
+assert(
+  evRepeatedAfterMacrotask.length === 2,
+  'Novo sucesso na macrotarefa seguinte nao e suprimido pela deduplicacao jQuery/DOM'
+);
+
+assert(
+  Object.prototype.hasOwnProperty.call(evJqOrcamentoRealPayload[0], 'transaction_id') &&
+  evJqOrcamentoRealPayload[0].transaction_id === null,
+  'Fluent Forms limpa transaction_id para nao herdar um RFQ anterior no Data Layer v2'
 );
 
 // 2. Caminhos negativos: TODOS os outros assuntos NAO devem emitir evento
@@ -213,6 +299,68 @@ const mutatedEvents = simulateSubmission(mutatedScript, 'info', true);
 assert(
   mutatedEvents.length > 0,
   'Teste de mutacao: trocar guarda por "true" quebra o teste negativo de form_assunto=info'
+);
+
+const wooMatch = phpCode.match(/<script id="uonix-conversao-carrinho-datalayer">([\s\S]*?)<\/script>/);
+if (!wooMatch) {
+  console.error('FAIL: Script uonix-conversao-carrinho-datalayer nao encontrado no PHP!');
+  process.exit(1);
+}
+const wooScriptTemplate = wooMatch[1];
+function renderWooScript(orderId) {
+  const rendered = wooScriptTemplate.replace(
+    /<\?php\s+echo\s+\(int\)\s+\$uonix_order_id;\s*\?>/g,
+    String(orderId)
+  );
+  if (rendered.includes('<?php')) {
+    throw new Error('Fixture nao substituiu o order_id PHP no script WooCommerce');
+  }
+  return rendered;
+}
+const wooScriptCode = renderWooScript(11027);
+
+function simulateWooRender(codeToRun) {
+  const events = [];
+  const win = { dataLayer: events };
+  const ctx = vm.createContext({ window: win });
+  vm.runInContext(codeToRun, ctx);
+  return events;
+}
+
+const wooFirstRenderEvents = simulateWooRender(wooScriptCode);
+const wooReplayOtherContextEvents = simulateWooRender(wooScriptCode);
+const wooDifferentOrderEvents = simulateWooRender(renderWooScript(11028));
+assert(
+  wooFirstRenderEvents.length === 1 &&
+  wooReplayOtherContextEvents.length === 1 &&
+  wooFirstRenderEvents[0].transaction_id === 'uonix-rfq-order-11027' &&
+  wooReplayOtherContextEvents[0].transaction_id === wooFirstRenderEvents[0].transaction_id,
+  'WooCommerce: qualquer replay do mesmo pedido usa transaction_id estavel para deduplicacao no Google Ads'
+);
+assert(
+  wooDifferentOrderEvents.length === 1 &&
+  wooDifferentOrderEvents[0].transaction_id === 'uonix-rfq-order-11028' &&
+  wooDifferentOrderEvents[0].transaction_id !== wooFirstRenderEvents[0].transaction_id,
+  'WooCommerce: pedidos diferentes usam transaction_id diferentes'
+);
+
+assert(
+  !/sessionStorage|localStorage/.test(wooScriptCode),
+  'WooCommerce: deduplicacao nao grava marcador antes de o consentimento tornar a tag elegivel'
+);
+
+function conversionTagFirings(events, acceptedTags) {
+  return events.filter(
+    event => event.event === 'uonix_solicitar_orcamento' && acceptedTags.includes('marketing')
+  );
+}
+const beforeConsentTagFirings = conversionTagFirings(wooFirstRenderEvents, []);
+const afterConsentTagFirings = conversionTagFirings(wooReplayOtherContextEvents, ['marketing']);
+assert(
+  beforeConsentTagFirings.length === 0 &&
+  afterConsentTagFirings.length === 1 &&
+  afterConsentTagFirings[0].transaction_id === 'uonix-rfq-order-11027',
+  'WooCommerce: consentimento posterior ainda permite uma conversao deduplicavel em novo render'
 );
 
 // =============================================================================

@@ -1,13 +1,13 @@
 {
   "exportFormatVersion": 2,
-  "exportTime": "2026-09-10T15:14:27.000Z",
+  "exportTime": "2026-09-10T18:45:42.000Z",
   "containerVersion": {
-    "path": "accounts/6348960683/containers/248910884/versions/16",
+    "path": "accounts/6348960683/containers/248910884/versions/17",
     "accountId": "6348960683",
     "containerId": "248910884",
-    "containerVersionId": "16",
-    "name": "v16 - Pausa conversão WhatsApp sem label",
-    "description": "Correção fail-closed: pausa a tag Google Ads de clique no WhatsApp enquanto o conversionLabel permanece placeholder. PR #164, SHA 0bcf9bfc38d11a4f9d854a32497abaa137d8ca4d.",
+    "containerVersionId": "17",
+    "name": "v17 - Deduplicação RFQ por transaction_id",
+    "description": "Adiciona DLV transaction_id e configura Order ID na conversão de formulário/RFQ para deduplicar replays sem bloquear conversões após consentimento.",
     "container": {
       "path": "accounts/6348960683/containers/248910884",
       "accountId": "6348960683",
@@ -260,6 +260,11 @@
         "parameter": [
           {
             "type": "template",
+            "key": "orderId",
+            "value": "{{DLV - transaction_id}}"
+          },
+          {
+            "type": "template",
             "key": "conversionId",
             "value": "{{Constante - Google Ads ID}}"
           },
@@ -269,7 +274,7 @@
             "value": "{{Constante - Label Formulario}}"
           }
         ],
-        "fingerprint": "1789040245616",
+        "fingerprint": "1789065774699",
         "firingTriggerId": [
           "21"
         ],
@@ -611,6 +616,31 @@
           }
         ],
         "fingerprint": "1789038850547"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "27",
+        "name": "DLV - transaction_id",
+        "type": "v",
+        "parameter": [
+          {
+            "type": "integer",
+            "key": "dataLayerVersion",
+            "value": "2"
+          },
+          {
+            "type": "boolean",
+            "key": "setDefaultValue",
+            "value": "false"
+          },
+          {
+            "type": "template",
+            "key": "name",
+            "value": "transaction_id"
+          }
+        ],
+        "fingerprint": "1789065773139"
       }
     ],
     "builtInVariable": [
@@ -657,7 +687,7 @@
         "name": "Form Element"
       }
     ],
-    "fingerprint": "1789053120302",
-    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/16?apiLink=version"
+    "fingerprint": "1789065850300",
+    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/17?apiLink=version"
   }
 }
