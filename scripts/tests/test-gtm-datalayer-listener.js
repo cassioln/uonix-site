@@ -31,6 +31,8 @@ function simulateSubmission(codeToRun, assunto, channel, options = {}) {
   const runJQuery = channel === true || channel === 'real' || channel === 'both';
   const runDom = channel === false || channel === 'dom-real' || channel === 'both';
   const hasCustomFormId = Object.prototype.hasOwnProperty.call(options, 'formId');
+  const hasPayloadFormId = Object.prototype.hasOwnProperty.call(options, 'payloadFormId');
+  const payloadFormId = hasPayloadFormId ? options.payloadFormId : '3';
   const formAttributes = options.attributes || {};
 
   const formElem = {
@@ -94,7 +96,11 @@ function simulateSubmission(codeToRun, assunto, channel, options = {}) {
       if (!handler) throw new Error('Handler jQuery nao registrado');
       const payload = channel === 'real' || channel === 'both'
         ? { form: [formElem], config: {}, response: {} }
-        : { formId: '3', form_id: 3 };
+        : { formId: payloadFormId, form_id: payloadFormId };
+      if (hasPayloadFormId) {
+        payload.formId = payloadFormId;
+        payload.form_id = payloadFormId;
+      }
       handler({}, payload);
     }
     if (runDom) {
@@ -102,7 +108,11 @@ function simulateSubmission(codeToRun, assunto, channel, options = {}) {
       if (!handler) throw new Error('Listener DOM nativo nao registrado');
       const detail = channel === 'dom-real' || channel === 'both'
         ? { form: formElem }
-        : { formId: '3', form: formElem };
+        : { formId: payloadFormId, form: formElem };
+      if (hasPayloadFormId) {
+        detail.formId = payloadFormId;
+        detail.form_id = payloadFormId;
+      }
       handler({ detail });
     }
   }
@@ -209,6 +219,45 @@ assert(
   evJqOrcamentoSemFormId.length === 0,
   'jQuery: formulario real sem ID numerico positivo permanece fail-closed'
 );
+
+const zeroIdFixtures = [
+  {
+    label: 'id=fluentform_0',
+    options: { formId: 'fluentform_0' },
+    channels: ['real', 'dom-real']
+  },
+  {
+    label: 'data-form_id=0',
+    options: { formId: '', attributes: { 'data-form_id': '0' } },
+    channels: ['real', 'dom-real']
+  },
+  {
+    label: 'data-form-id=0',
+    options: { formId: '', attributes: { 'data-form-id': '0' } },
+    channels: ['real', 'dom-real']
+  },
+  {
+    label: 'formId explicito="0"',
+    options: { formId: '', payloadFormId: '0' },
+    channels: ['real', 'dom-real']
+  },
+  {
+    label: 'formId explicito=0',
+    options: { formId: '', payloadFormId: 0 },
+    channels: ['real', 'dom-real']
+  }
+];
+
+for (const fixture of zeroIdFixtures) {
+  for (const channel of fixture.channels) {
+    const events = simulateSubmission(scriptCode, 'orcamento', channel, fixture.options);
+    const channelLabel = channel === true || channel === 'real' ? 'jQuery' : 'DOM nativo';
+    assert(
+      events.length === 0,
+      `${channelLabel}: ${fixture.label} permanece fail-closed na fronteira de ID positivo`
+    );
+  }
+}
 
 const evDomOrcamento = simulateSubmission(scriptCode, 'orcamento', false);
 assert(
