@@ -298,6 +298,45 @@ function uonix_render_analytics_head( $configuration = null ) {
     
     <meta name="adopt-website-id" content="<?php echo esc_attr( $adopt_website_id ); ?>" />
     <!-- AdOpt: Carregamento e bloqueio de tags centralizados via Google Tag Manager (Tag AdOpt) -->
+    <script id="uonix-adopt-categories-bridge">
+    (function() {
+        function syncCategories() {
+            try {
+                var raw = localStorage.getItem('adoptConsentMode');
+                var consent = raw ? JSON.parse(raw) : null;
+                window.acceptedTags = window.acceptedTags || [];
+                if (Array.isArray(window.acceptedTags)) {
+                    if ((consent && consent.marketing) || window._adoptMarketingGranted) {
+                        if (window.acceptedTags.indexOf('marketing') === -1) window.acceptedTags.push('marketing');
+                    }
+                    if ((consent && consent.statistics) || window._adoptStatisticsGranted) {
+                        if (window.acceptedTags.indexOf('statistics') === -1) window.acceptedTags.push('statistics');
+                    }
+                }
+            } catch(e) {}
+        }
+        syncCategories();
+        window.dataLayer = window.dataLayer || [];
+        var origPush = window.dataLayer.push;
+        window.dataLayer.push = function() {
+            var res = origPush.apply(this, arguments);
+            for (var i = 0; i < arguments.length; i++) {
+                var arg = arguments[i];
+                if (arg === 'adopt-accept-marketing' || (arg && (arg.event === 'adopt-accept-marketing' || arg[0] === 'adopt-accept-marketing'))) {
+                    window._adoptMarketingGranted = true;
+                    syncCategories();
+                }
+                if (arg === 'adopt-accept-statistics' || (arg && (arg.event === 'adopt-accept-statistics' || arg[0] === 'adopt-accept-statistics'))) {
+                    window._adoptStatisticsGranted = true;
+                    syncCategories();
+                }
+            }
+            return res;
+        };
+        window.addEventListener('DOMContentLoaded', syncCategories);
+        window.addEventListener('load', syncCategories);
+    })();
+    </script>
 
     <style id="uonix-cookie-premium-controls">
         /* =========================================================
