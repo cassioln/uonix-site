@@ -146,6 +146,7 @@ $required_functions = array(
 	'uonix_analytics_configuration',
 	'uonix_render_analytics_head',
 	'uonix_render_analytics_body',
+	'uonix_render_analytics_conversion_footer',
 );
 
 foreach ( $required_functions as $required_function ) {
@@ -441,6 +442,22 @@ uonix_analytics_assert_same(
 	true,
 	is_array( uonix_analytics_configuration( 'production', true, 'GTM-REAL123', 'adopt-real-id' ) ),
 	'sem o Site Kit instalado, a configuração válida continua sendo aceita'
+);
+
+// Conversão estrita no footer
+ob_start();
+uonix_render_analytics_conversion_footer();
+$footer_html = ob_get_clean();
+
+uonix_analytics_assert_contains(
+	'uonix-conversao-orcamento-datalayer',
+	$footer_html,
+	'Footer renderiza listener de dataLayer para conversão'
+);
+uonix_analytics_assert_contains(
+	"val === 'orcamento'",
+	$footer_html,
+	'Footer preserva estritamente a guarda de form_assunto orcamento'
 );
 
 if ( 0 !== $failures ) {

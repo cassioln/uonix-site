@@ -881,7 +881,8 @@ add_action( 'wp_body_open', 'uonix_render_analytics_body', 10, 0 );
  * - Fluent Forms: apenas quando o campo form_assunto tiver valor "orcamento"
  * - WooCommerce: pagina de confirmacao de pedido de orcamento (order-received)
  */
-add_action( 'wp_footer', function() {
+if ( ! function_exists( 'uonix_render_analytics_conversion_footer' ) ) {
+function uonix_render_analytics_conversion_footer() {
     ?>
     <script id="uonix-conversao-orcamento-datalayer">
     (function() {
@@ -896,6 +897,19 @@ add_action( 'wp_footer', function() {
             if (el) lastAssunto = el.value;
         }, true);
 
+        function dispararConversaoSeOrcamento(formId, assunto) {
+            var val = (assunto && String(assunto).trim()) ? String(assunto).trim() : lastAssunto;
+            if (val === 'orcamento') {
+                window.dataLayer = window.dataLayer || [];
+                window.dataLayer.push({
+                    'event': 'uonix_solicitar_orcamento',
+                    'origem_conversao': 'fluentform_orcamento',
+                    'form_id': formId
+                });
+                lastAssunto = '';
+            }
+        }
+
         function registrarListener() {
             if (window.jQuery) {
                 window.jQuery(document).off('fluentform_submission_success.uonixOrcamento').on('fluentform_submission_success.uonixOrcamento', function(e, data) {
@@ -904,17 +918,22 @@ add_action( 'wp_footer', function() {
                         var form = formId ? document.querySelector('#fluentform_' + formId) : null;
                         var assuntoEl = form ? form.querySelector('select[name="form_assunto"]') : null;
                         var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : lastAssunto;
-                        if (val === 'orcamento') {
-                            window.dataLayer = window.dataLayer || [];
-                            window.dataLayer.push({
-                                'event': 'uonix_solicitar_orcamento',
-                                'origem_conversao': 'fluentform_orcamento',
-                                'form_id': formId
-                            });
-                        }
+                        dispararConversaoSeOrcamento(formId, val);
                     } catch(err) {}
                 });
             }
+
+            document.addEventListener('fluentform_submission_success', function(e) {
+                try {
+                    var detail = e && e.detail;
+                    var formId = detail && (detail.formId || detail.form_id);
+                    var form = detail && detail.form ? (detail.form.nodeType ? detail.form : detail.form[0]) : null;
+                    if (!form && formId) form = document.querySelector('#fluentform_' + formId);
+                    var assuntoEl = form ? form.querySelector('select[name="form_assunto"]') : null;
+                    var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : lastAssunto;
+                    dispararConversaoSeOrcamento(formId, val);
+                } catch(err) {}
+            });
         }
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', registrarListener);
@@ -935,4 +954,6 @@ add_action( 'wp_footer', function() {
         </script>
         <?php
     }
-}, 99 );
+}
+}
+add_action( 'wp_footer', 'uonix_render_analytics_conversion_footer', 99, 0 );
