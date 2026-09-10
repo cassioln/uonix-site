@@ -304,7 +304,7 @@ function uonix_render_analytics_head( $configuration = null ) {
             try {
                 var raw = localStorage.getItem('adoptConsentMode');
                 var consent = raw ? JSON.parse(raw) : null;
-                var reject = localStorage.getItem('_adoptReject') === '1';
+                var reject = localStorage.getItem('_adoptReject') === '1' || !!window._adoptExplicitlyRejected;
 
                 var marketingGranted = false;
                 var statisticsGranted = false;
@@ -373,18 +373,60 @@ function uonix_render_analytics_head( $configuration = null ) {
                 var arg = arguments[i];
                 var evtName = (typeof arg === 'string') ? arg : (arg && (arg.event || arg[0]));
                 if (evtName === 'adopt-accept-marketing') {
+                    window._adoptExplicitlyRejected = false;
                     window._adoptMarketingGranted = true;
+                    try {
+                        if (localStorage.getItem('_adoptReject') === '1') localStorage.removeItem('_adoptReject');
+                        var cur = localStorage.getItem('adoptConsentMode');
+                        var parsed = cur ? JSON.parse(cur) : {};
+                        parsed.marketing = true;
+                        parsed.ad_storage = 'granted';
+                        localStorage.setItem('adoptConsentMode', JSON.stringify(parsed));
+                    } catch(err) {}
                     syncCategories();
                 } else if (evtName === 'adopt-accept-statistics') {
+                    window._adoptExplicitlyRejected = false;
                     window._adoptStatisticsGranted = true;
+                    try {
+                        if (localStorage.getItem('_adoptReject') === '1') localStorage.removeItem('_adoptReject');
+                        var cur = localStorage.getItem('adoptConsentMode');
+                        var parsed = cur ? JSON.parse(cur) : {};
+                        parsed.statistics = true;
+                        parsed.analytics_storage = 'granted';
+                        localStorage.setItem('adoptConsentMode', JSON.stringify(parsed));
+                    } catch(err) {}
                     syncCategories();
                 } else if (evtName === 'adopt-accept-all') {
+                    window._adoptExplicitlyRejected = false;
                     window._adoptMarketingGranted = true;
                     window._adoptStatisticsGranted = true;
+                    try {
+                        if (localStorage.getItem('_adoptReject') === '1') localStorage.removeItem('_adoptReject');
+                        var cur = localStorage.getItem('adoptConsentMode');
+                        var parsed = cur ? JSON.parse(cur) : {};
+                        parsed.marketing = true;
+                        parsed.statistics = true;
+                        parsed.ad_storage = 'granted';
+                        parsed.analytics_storage = 'granted';
+                        localStorage.setItem('adoptConsentMode', JSON.stringify(parsed));
+                    } catch(err) {}
                     syncCategories();
                 } else if (evtName === 'adopt-reject-all' || evtName === 'adopt-reject') {
+                    window._adoptExplicitlyRejected = true;
                     window._adoptMarketingGranted = false;
                     window._adoptStatisticsGranted = false;
+                    try {
+                        localStorage.setItem('_adoptReject', '1');
+                        var cur = localStorage.getItem('adoptConsentMode');
+                        if (cur) {
+                            var parsed = JSON.parse(cur);
+                            parsed.marketing = false;
+                            parsed.statistics = false;
+                            parsed.ad_storage = 'denied';
+                            parsed.analytics_storage = 'denied';
+                            localStorage.setItem('adoptConsentMode', JSON.stringify(parsed));
+                        }
+                    } catch(err) {}
                     syncCategories();
                 } else if (evtName === 'adopt-visitor-consent-ready') {
                     syncCategories();

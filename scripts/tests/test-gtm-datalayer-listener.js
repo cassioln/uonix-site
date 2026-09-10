@@ -284,10 +284,95 @@ assert(
   'Teste de mutacao LGPD: supressao da remocao de marketing deixa residuo em acceptedTags (detectado com sucesso)'
 );
 
+// 4.9 Integração AdOpt: Evento adopt-reject-all com storage residual (cenário exato do revisor)
+const envRejectAllEvent = createBridgeEnvironment(
+  { adoptConsentMode: JSON.stringify({ marketing: true, statistics: true }) },
+  ['ExClwcP566']
+);
+vm.runInContext(bridgeCode, envRejectAllEvent.ctx);
+assert(
+  envRejectAllEvent.win.acceptedTags.includes('marketing') &&
+  envRejectAllEvent.win.acceptedTags.includes('statistics') &&
+  envRejectAllEvent.win.acceptedTags.includes('ExClwcP566'),
+  'Ponte AdOpt: inicializa com marketing, statistics e terceiros'
+);
+
+// Dispara adopt-reject-all pelo dataLayer
+envRejectAllEvent.win.dataLayer.push('adopt-reject-all');
+
+// (1) Ambas as categorias removidas imediatamente
+assert(!envRejectAllEvent.win.acceptedTags.includes('marketing'), 'Ponte AdOpt: adopt-reject-all remove marketing imediatamente');
+assert(!envRejectAllEvent.win.acceptedTags.includes('statistics'), 'Ponte AdOpt: adopt-reject-all remove statistics imediatamente');
+
+// (2) Categorias de terceiros preservadas
+assert(envRejectAllEvent.win.acceptedTags.includes('ExClwcP566'), 'Ponte AdOpt: adopt-reject-all preserva categorias de terceiros');
+
+// (3) Evento de atualizacao emitido com false/false
+const rejectAllSync = envRejectAllEvent.events.filter(e => e && e.event === 'adopt_consent_updated');
+assert(rejectAllSync.length > 0, 'Ponte AdOpt: adopt-reject-all dispara adopt_consent_updated');
+const lastRejectSync = rejectAllSync[rejectAllSync.length - 1];
+assert(
+  lastRejectSync.adopt_marketing === false && lastRejectSync.adopt_statistics === false,
+  'Ponte AdOpt: adopt_consent_updated reflete false/false apos adopt-reject-all'
+);
+
+// (4) Nova aceitação volta a habilitar APENAS a categoria aceita
+envRejectAllEvent.win.dataLayer.push('adopt-accept-marketing');
+assert(
+  envRejectAllEvent.win.acceptedTags.includes('marketing'),
+  'Ponte AdOpt: nova aceitacao com adopt-accept-marketing reabilita marketing'
+);
+assert(
+  !envRejectAllEvent.win.acceptedTags.includes('statistics'),
+  'Ponte AdOpt: nova aceitacao com adopt-accept-marketing mantem statistics revogado'
+);
+assert(
+  envRejectAllEvent.win.acceptedTags.includes('ExClwcP566'),
+  'Ponte AdOpt: terceiros permanecem preservados apos re-aceite'
+);
+
+// (5) Disparo de adopt-reject revoga novamente
+envRejectAllEvent.win.dataLayer.push('adopt-reject');
+assert(!envRejectAllEvent.win.acceptedTags.includes('marketing'), 'Ponte AdOpt: adopt-reject revoga marketing novamente');
+assert(!envRejectAllEvent.win.acceptedTags.includes('statistics'), 'Ponte AdOpt: adopt-reject mantem statistics revogado');
+
+// 4.10 Teste de mutação LGPD para adopt-reject-all: remover a revogação explícita deve falhar
+const mutatedRejectBridge = bridgeCode.replace(
+  'window._adoptExplicitlyRejected = true;',
+  '/* mutacao: omitir rejeicao explicita */'
+);
+if (mutatedRejectBridge === bridgeCode) {
+  console.error('FAIL: Falha ao aplicar mutacao de adopt-reject-all na ponte AdOpt');
+  process.exit(1);
+}
+
+const envMutReject = createBridgeEnvironment(
+  { adoptConsentMode: JSON.stringify({ marketing: true, statistics: true }) }
+);
+// Criamos um localStorage onde setItem('adoptConsentMode') é ignorado durante a mutação
+// para simular a CMP que ainda não atualizou o storage
+const rawStorage = { adoptConsentMode: JSON.stringify({ marketing: true, statistics: true }) };
+const fakeStorage = {
+  getItem: (k) => rawStorage[k] || null,
+  setItem: () => {},
+  removeItem: () => {}
+};
+envMutReject.win.localStorage = fakeStorage;
+envMutReject.ctx.localStorage = fakeStorage;
+
+vm.runInContext(mutatedRejectBridge, envMutReject.ctx);
+envMutReject.win.dataLayer.push('adopt-reject-all');
+// Na mutação, como a rejeição explícita foi removida e o storage simulava atraso,
+// o array continuaria contendo marketing!
+const mutationRejectDetected = envMutReject.win.acceptedTags.includes('marketing');
+assert(
+  mutationRejectDetected,
+  'Teste de mutacao LGPD: omitir rejeicao explicita em adopt-reject-all deixa marketing ativo com storage residual (detectado com sucesso)'
+);
+
 if (failures > 0) {
   console.error(`\nTotal de falhas: ${failures}`);
   process.exit(1);
 }
 
 console.log('\nTodos os testes de conversao, ponte AdOpt LGPD e resistencia a mutacao passaram com sucesso!');
-
