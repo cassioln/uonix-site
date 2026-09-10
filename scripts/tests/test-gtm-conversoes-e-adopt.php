@@ -12,7 +12,8 @@
  * 5. O listener Fluent Forms fica no footer e a conversao WooCommerce e emitida
  *    exclusivamente pelo hook woocommerce_thankyou, apos as guardas nativas;
  * 6. Replays do mesmo pedido carregam transaction_id estavel ate o campo Order ID da tag Ads;
- * 7. Executa a suite de caminhos positivos, negativos e resistencia a mutacao no JS.
+ * 7. A conta Google Ads ativa e 601-200-6717, sem reutilizar labels da conta anterior;
+ * 8. Executa a suite de caminhos positivos, negativos e resistencia a mutacao no JS.
  */
 
 define( 'ABSPATH', __DIR__ );
@@ -73,6 +74,22 @@ function gtm_has_exact_filter( $filters, $expected_type, $expected_arg0, $expect
 		&& $expected_arg1 === $parameters['arg1'];
 }
 
+function gtm_has_exact_parameter( $entity, $expected_key, $expected_value ) {
+	$matches = array_values(
+		array_filter(
+			isset( $entity['parameter'] ) ? $entity['parameter'] : array(),
+			function ( $parameter ) use ( $expected_key ) {
+				return isset( $parameter['key'] ) && $expected_key === $parameter['key'];
+			}
+		)
+	);
+
+	return 1 === count( $matches )
+		&& isset( $matches[0]['type'], $matches[0]['value'] )
+		&& 'template' === $matches[0]['type']
+		&& $expected_value === $matches[0]['value'];
+}
+
 // -----------------------------------------------------------------------------
 // Parte 1: Validacao programatica do Manifesto GTM
 // -----------------------------------------------------------------------------
@@ -117,7 +134,7 @@ foreach ( $variables as $v ) {
 // 1.0 Consistencia do snapshot canonico e placeholders fail-closed.
 $version_id = isset( $version['containerVersionId'] ) ? (string) $version['containerVersionId'] : '';
 gtm_assert( '' !== $version_id, 'Manifesto declara containerVersionId' );
-gtm_assert( '17' === $version_id, 'Manifesto canonico aponta para a versao live 17 auditada' );
+gtm_assert( '18' === $version_id, 'Manifesto canonico aponta para a versao live 18 auditada' );
 gtm_assert(
 	isset( $version['path'] ) && preg_match( '#/versions/' . preg_quote( $version_id, '#' ) . '$#', $version['path'] ),
 	'Path do manifesto aponta para o mesmo containerVersionId'
@@ -149,7 +166,55 @@ foreach ( $tags as $tag ) {
 	}
 }
 
-gtm_assert( isset( $tags_by_id['15'] ), 'Tag 15 de conversao WhatsApp existe no snapshot live 17' );
+$google_ads_id_variables = array_values(
+	array_filter(
+		$variables,
+		function ( $variable ) {
+			return isset( $variable['name'] ) && 'Constante - Google Ads ID' === $variable['name'];
+		}
+	)
+);
+gtm_assert( 1 === count( $google_ads_id_variables ), 'Existe exatamente uma variavel central de ID Google Ads' );
+if ( 1 === count( $google_ads_id_variables ) ) {
+	$google_ads_id_variable = $google_ads_id_variables[0];
+	gtm_assert( '7' === $google_ads_id_variable['variableId'], 'Variavel central Google Ads mantem o ID de entidade 7' );
+	gtm_assert( 'c' === $google_ads_id_variable['type'], 'Variavel central Google Ads permanece constante' );
+	gtm_assert(
+		array( array( 'type' => 'template', 'key' => 'value', 'value' => '6012006717' ) ) === $google_ads_id_variable['parameter'],
+		'Variavel central Google Ads aponta exatamente para a conta 601-200-6717'
+	);
+}
+
+gtm_assert( isset( $tags_by_id['13'] ), 'Tag 13 Google Tag existe no snapshot live 18' );
+if ( isset( $tags_by_id['13'] ) ) {
+	$tag_google = $tags_by_id['13'];
+	gtm_assert( 'Google Ads - Tag do Google' === $tag_google['name'] && 'googtag' === $tag_google['type'], 'Tag 13 mantem identidade e tipo Google Tag' );
+	gtm_assert( empty( $tag_google['paused'] ), 'Tag 13 Google Tag permanece ativa' );
+	gtm_assert( gtm_has_exact_parameter( $tag_google, 'tagId', 'AW-{{Constante - Google Ads ID}}' ), 'Tag 13 deriva AW-6012006717 da variavel central' );
+}
+
+gtm_assert( isset( $tags_by_id['14'] ), 'Tag 14 de remarketing existe no snapshot live 18' );
+if ( isset( $tags_by_id['14'] ) ) {
+	$tag_remarketing = $tags_by_id['14'];
+	gtm_assert( 'Google Ads - Remarketing Geral' === $tag_remarketing['name'] && 'sp' === $tag_remarketing['type'], 'Tag 14 mantem identidade e tipo de remarketing' );
+	gtm_assert( empty( $tag_remarketing['paused'] ), 'Tag 14 de remarketing permanece ativa' );
+	gtm_assert( gtm_has_exact_parameter( $tag_remarketing, 'conversionId', '{{Constante - Google Ads ID}}' ), 'Tag 14 deriva a conta 601-200-6717 da variavel central' );
+}
+
+foreach ( array( 'Constante - Label WhatsApp', 'Constante - Label Formulario' ) as $label_variable_name ) {
+	gtm_assert( isset( $variables_by_name[ $label_variable_name ] ), "Variavel {$label_variable_name} existe" );
+	if ( isset( $variables_by_name[ $label_variable_name ] ) ) {
+		$expected_placeholder = 'Constante - Label WhatsApp' === $label_variable_name
+			? 'ROTULO_WHATSAPP_AQUI'
+			: 'ROTULO_FORMULARIO_AQUI';
+		gtm_assert(
+			array( array( 'type' => 'template', 'key' => 'value', 'value' => $expected_placeholder ) ) === $variables_by_name[ $label_variable_name ]['parameter'],
+			"Variavel {$label_variable_name} permanece placeholder ate validacao na conta nova"
+		);
+	}
+}
+
+gtm_assert( isset( $tags_by_id['15'] ), 'Tag 15 de conversao WhatsApp existe no snapshot live 18' );
 if ( isset( $tags_by_id['15'] ) ) {
 	$tag_whatsapp = $tags_by_id['15'];
 	gtm_assert( 'Google Ads - Conversão - Clique WhatsApp' === $tag_whatsapp['name'], 'Tag 15 mantem a identidade da conversao WhatsApp' );
@@ -263,7 +328,7 @@ if ( isset( $triggers_by_name['Evento - Solicitar Orçamento Uônix'] ) ) {
 	);
 }
 
-// 1.5.1 Contrato GTM: Declaracao explicita de negate: false em cada customEventFilter e filter
+// 1.5.1 Contrato GTM: estrutura obrigatoria dos triggers criticos.
 $custom_triggers_to_check = array(
 	'3'  => 'Trigger LGPD - AdOpt',
 	'21' => 'Evento - Solicitar Orçamento Uônix',
@@ -278,21 +343,23 @@ foreach ( $custom_triggers_to_check as $tr_id => $tr_name ) {
 			? $t['customEventFilter']
 			: array();
 		gtm_assert( ! empty( $custom_event_filters ), "Trigger {$tr_id} ({$tr_name}) declara customEventFilter obrigatorio" );
-		foreach ( $custom_event_filters as $idx => $cef ) {
-			gtm_assert(
-				array_key_exists( 'negate', $cef ) && false === $cef['negate'],
-				"Trigger {$tr_id} ({$tr_name}) customEventFilter[{$idx}] declara explicitamente negate === false"
-			);
-		}
 
 		$filters = isset( $t['filter'] ) && is_array( $t['filter'] ) ? $t['filter'] : array();
 		if ( in_array( $tr_id, array( '21', '24', '25' ), true ) ) {
 			gtm_assert( ! empty( $filters ), "Trigger {$tr_id} ({$tr_name}) declara filter de categoria obrigatorio" );
 		}
-		foreach ( $filters as $idx => $flt ) {
+	}
+}
+
+// A API do GTM pode remover silenciosamente negate:false ao criar uma versao.
+// Validamos todos os filtros do container, inclusive click e pageview, para que
+// uma nova exportacao nao reintroduza esse defeito fora dos triggers customizados.
+foreach ( $triggers as $trigger ) {
+	foreach ( array( 'customEventFilter', 'filter', 'autoEventFilter' ) as $filter_field ) {
+		foreach ( isset( $trigger[ $filter_field ] ) ? $trigger[ $filter_field ] : array() as $filter_index => $filter ) {
 			gtm_assert(
-				array_key_exists( 'negate', $flt ) && false === $flt['negate'],
-				"Trigger {$tr_id} ({$tr_name}) filter[{$idx}] declara explicitamente negate === false"
+				array_key_exists( 'negate', $filter ) && false === $filter['negate'],
+				"Trigger {$trigger['triggerId']} ({$trigger['name']}) {$filter_field}[{$filter_index}] declara explicitamente negate === false"
 			);
 		}
 	}
@@ -308,6 +375,9 @@ gtm_assert(
 gtm_assert( isset( $tags_by_name['GA4 - Configuração'] ), 'Tag GA4 - Configuração existe' );
 if ( isset( $tags_by_name['GA4 - Configuração'] ) ) {
 	$tag_ga4 = $tags_by_name['GA4 - Configuração'];
+	gtm_assert( '5' === $tag_ga4['tagId'] && 'googtag' === $tag_ga4['type'], 'GA4 mantem a identidade da tag 5 e o tipo Google Tag' );
+	gtm_assert( empty( $tag_ga4['paused'] ), 'GA4 permanece ativo' );
+	gtm_assert( gtm_has_exact_parameter( $tag_ga4, 'tagId', 'G-RFY1BB1RM4' ), 'GA4 aponta para o stream web da propriedade 445033830' );
 	gtm_assert( in_array( '25', $tag_ga4['firingTriggerId'], true ), 'GA4 dispara via Trigger LGPD - AdOpt Estatísticas (25)' );
 	gtm_assert(
 		isset( $tag_ga4['consentSettings']['consentStatus'] ) && 'needed' === $tag_ga4['consentSettings']['consentStatus'],
@@ -344,6 +414,9 @@ if ( isset( $tags_by_name['Google Ads - Remarketing Geral'] ) ) {
 gtm_assert( isset( $tags_by_name['Google Ads - Conversão - Envio de Formulário'] ), 'Tag Google Ads - Conversão - Envio de Formulário existe' );
 if ( isset( $tags_by_name['Google Ads - Conversão - Envio de Formulário'] ) ) {
 	$tag_conv = $tags_by_name['Google Ads - Conversão - Envio de Formulário'];
+	gtm_assert( array_key_exists( 'paused', $tag_conv ) && true === $tag_conv['paused'], 'Tag de Conversao Ads permanece pausada enquanto o label da conta nova e placeholder' );
+	gtm_assert( gtm_has_exact_parameter( $tag_conv, 'conversionId', '{{Constante - Google Ads ID}}' ), 'Tag de Conversao Ads deriva a conta 601-200-6717 da variavel central' );
+	gtm_assert( gtm_has_exact_parameter( $tag_conv, 'conversionLabel', '{{Constante - Label Formulario}}' ), 'Tag de Conversao Ads referencia exclusivamente o label de formulario central' );
 	gtm_assert( array( '21' ) === $tag_conv['firingTriggerId'], 'Tag de Conversao Ads dispara EXCLUSIVAMENTE no Trigger 21 (uonix_solicitar_orcamento)' );
 	gtm_assert( ! in_array( '17', $tag_conv['firingTriggerId'], true ), 'Tag de Conversao Ads NAO contem trigger redundante de order-received (17)' );
 	gtm_assert( ! in_array( '11', $tag_conv['firingTriggerId'], true ), 'Tag de Conversao Ads NAO contem trigger generico de formSubmission (11)' );

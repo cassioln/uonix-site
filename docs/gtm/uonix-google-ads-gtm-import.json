@@ -1,13 +1,13 @@
 {
   "exportFormatVersion": 2,
-  "exportTime": "2026-09-10T18:45:42.000Z",
+  "exportTime": "2026-09-10T21:57:59.000Z",
   "containerVersion": {
-    "path": "accounts/6348960683/containers/248910884/versions/17",
+    "path": "accounts/6348960683/containers/248910884/versions/18",
     "accountId": "6348960683",
     "containerId": "248910884",
-    "containerVersionId": "17",
-    "name": "v17 - Deduplicação RFQ por transaction_id",
-    "description": "Adiciona DLV transaction_id e configura Order ID na conversão de formulário/RFQ para deduplicar replays sem bloquear conversões após consentimento.",
+    "containerVersionId": "18",
+    "name": "v18 - Destinos Google Ads e GA4 Uônix",
+    "description": "Google Ads: conta 601-200-6717 (AW-6012006717). GA4: propriedade 445033830, stream G-RFY1BB1RM4. Conversões WhatsApp e formulário permanecem pausadas até confirmação dos labels reais da nova conta Ads; label antigo não foi reutilizado.",
     "container": {
       "path": "accounts/6348960683/containers/248910884",
       "accountId": "6348960683",
@@ -84,10 +84,10 @@
           {
             "type": "template",
             "key": "tagId",
-            "value": "G-RBS6F6QBW9"
+            "value": "G-RFY1BB1RM4"
           }
         ],
-        "fingerprint": "1789040260581",
+        "fingerprint": "1789076009583",
         "firingTriggerId": [
           "25"
         ],
@@ -274,10 +274,11 @@
             "value": "{{Constante - Label Formulario}}"
           }
         ],
-        "fingerprint": "1789065774699",
+        "fingerprint": "1789076011044",
         "firingTriggerId": [
           "21"
         ],
+        "paused": true,
         "consentSettings": {
           "consentStatus": "needed",
           "consentType": {
@@ -567,10 +568,10 @@
           {
             "type": "template",
             "key": "value",
-            "value": "18440930520"
+            "value": "6012006717"
           }
         ],
-        "fingerprint": "1788977705388"
+        "fingerprint": "1789076006794"
       },
       {
         "accountId": "6348960683",
@@ -597,10 +598,10 @@
           {
             "type": "template",
             "key": "value",
-            "value": "1zQYCIeCxvIcENiJqdIE"
+            "value": "ROTULO_FORMULARIO_AQUI"
           }
         ],
-        "fingerprint": "1788995273676"
+        "fingerprint": "1789076008226"
       },
       {
         "accountId": "6348960683",
@@ -687,7 +688,7 @@
         "name": "Form Element"
       }
     ],
-    "fingerprint": "1789065850300",
-    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/17?apiLink=version"
+    "fingerprint": "1789076120652",
+    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/18?apiLink=version"
   }
 }
