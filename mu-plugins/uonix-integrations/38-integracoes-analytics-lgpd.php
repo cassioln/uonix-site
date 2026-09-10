@@ -297,7 +297,7 @@ function uonix_render_analytics_head( $configuration = null ) {
     ?>
     
     <meta name="adopt-website-id" content="<?php echo esc_attr( $adopt_website_id ); ?>" />
-    <script src="<?php echo esc_url( 'https://tag.goadopt.io/injector.js?website_code=' . rawurlencode( $adopt_website_id ) ); ?>" class="adopt-injector"></script>
+    <!-- AdOpt: Carregamento e bloqueio de tags centralizados via Google Tag Manager (Tag AdOpt) -->
 
     <style id="uonix-cookie-premium-controls">
         /* =========================================================
@@ -876,4 +876,63 @@ function uonix_render_analytics_body( $configuration = null ) {
 }
 add_action( 'wp_body_open', 'uonix_render_analytics_body', 10, 0 );
 
+/**
+ * UONIX: Disparo de evento de conversao especifico para Solicitacao de Orcamento
+ * - Fluent Forms: apenas quando o campo form_assunto tiver valor "orcamento"
+ * - WooCommerce: pagina de confirmacao de pedido de orcamento (order-received)
+ */
+add_action( 'wp_footer', function() {
+    ?>
+    <script id="uonix-conversao-orcamento-datalayer">
+    (function() {
+        var lastAssunto = '';
+        document.addEventListener('change', function(e) {
+            if (e.target && e.target.name === 'form_assunto') {
+                lastAssunto = e.target.value;
+            }
+        }, true);
+        document.addEventListener('submit', function(e) {
+            var el = e.target && e.target.querySelector ? e.target.querySelector('select[name="form_assunto"]') : null;
+            if (el) lastAssunto = el.value;
+        }, true);
 
+        function registrarListener() {
+            if (window.jQuery) {
+                window.jQuery(document).off('fluentform_submission_success.uonixOrcamento').on('fluentform_submission_success.uonixOrcamento', function(e, data) {
+                    try {
+                        var formId = data && (data.formId || data.form_id);
+                        var form = formId ? document.querySelector('#fluentform_' + formId) : null;
+                        var assuntoEl = form ? form.querySelector('select[name="form_assunto"]') : null;
+                        var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : lastAssunto;
+                        if (val === 'orcamento') {
+                            window.dataLayer = window.dataLayer || [];
+                            window.dataLayer.push({
+                                'event': 'uonix_solicitar_orcamento',
+                                'origem_conversao': 'fluentform_orcamento',
+                                'form_id': formId
+                            });
+                        }
+                    } catch(err) {}
+                });
+            }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', registrarListener);
+        } else {
+            registrarListener();
+        }
+    })();
+    </script>
+    <?php
+    if ( function_exists( 'is_wc_endpoint_url' ) && is_wc_endpoint_url( 'order-received' ) ) {
+        ?>
+        <script id="uonix-conversao-carrinho-datalayer">
+        window.dataLayer = window.dataLayer || [];
+        window.dataLayer.push({
+            'event': 'uonix_solicitar_orcamento',
+            'origem_conversao': 'woocommerce_order_received'
+        });
+        </script>
+        <?php
+    }
+}, 99 );
