@@ -1,13 +1,13 @@
 {
   "exportFormatVersion": 2,
-  "exportTime": "2026-09-10T21:57:59.000Z",
+  "exportTime": "2026-09-11T10:49:36.441Z",
   "containerVersion": {
-    "path": "accounts/6348960683/containers/248910884/versions/18",
+    "path": "accounts/6348960683/containers/248910884/versions/19",
     "accountId": "6348960683",
     "containerId": "248910884",
-    "containerVersionId": "18",
-    "name": "v18 - Destinos Google Ads e GA4 Uônix",
-    "description": "Google Ads: conta 601-200-6717 (AW-6012006717). GA4: propriedade 445033830, stream G-RFY1BB1RM4. Conversões WhatsApp e formulário permanecem pausadas até confirmação dos labels reais da nova conta Ads; label antigo não foi reutilizado.",
+    "containerVersionId": "19",
+    "name": "Remover conversões Ads sem labels reais",
+    "description": "Remove tags 15/16 e variáveis placeholder 8/9. Mantém GA4, Google Tag, Conversion Linker e remarketing.",
     "container": {
       "path": "accounts/6348960683/containers/248910884",
       "accountId": "6348960683",
@@ -201,84 +201,6 @@
           "24"
         ],
         "tagFiringOption": "oncePerEvent",
-        "consentSettings": {
-          "consentStatus": "needed",
-          "consentType": {
-            "type": "list",
-            "list": [
-              {
-                "type": "template",
-                "value": "ad_storage"
-              }
-            ]
-          }
-        }
-      },
-      {
-        "accountId": "6348960683",
-        "containerId": "248910884",
-        "tagId": "15",
-        "name": "Google Ads - Conversão - Clique WhatsApp",
-        "type": "awct",
-        "paused": true,
-        "parameter": [
-          {
-            "type": "template",
-            "key": "conversionId",
-            "value": "{{Constante - Google Ads ID}}"
-          },
-          {
-            "type": "template",
-            "key": "conversionLabel",
-            "value": "{{Constante - Label WhatsApp}}"
-          }
-        ],
-        "fingerprint": "1789053068177",
-        "firingTriggerId": [
-          "10"
-        ],
-        "tagFiringOption": "oncePerEvent",
-        "consentSettings": {
-          "consentStatus": "needed",
-          "consentType": {
-            "type": "list",
-            "list": [
-              {
-                "type": "template",
-                "value": "ad_storage"
-              }
-            ]
-          }
-        }
-      },
-      {
-        "accountId": "6348960683",
-        "containerId": "248910884",
-        "tagId": "16",
-        "name": "Google Ads - Conversão - Envio de Formulário",
-        "type": "awct",
-        "parameter": [
-          {
-            "type": "template",
-            "key": "orderId",
-            "value": "{{DLV - transaction_id}}"
-          },
-          {
-            "type": "template",
-            "key": "conversionId",
-            "value": "{{Constante - Google Ads ID}}"
-          },
-          {
-            "type": "template",
-            "key": "conversionLabel",
-            "value": "{{Constante - Label Formulario}}"
-          }
-        ],
-        "fingerprint": "1789076011044",
-        "firingTriggerId": [
-          "21"
-        ],
-        "paused": true,
         "consentSettings": {
           "consentStatus": "needed",
           "consentType": {
@@ -576,36 +498,6 @@
       {
         "accountId": "6348960683",
         "containerId": "248910884",
-        "variableId": "8",
-        "name": "Constante - Label WhatsApp",
-        "type": "c",
-        "parameter": [
-          {
-            "type": "template",
-            "key": "value",
-            "value": "ROTULO_WHATSAPP_AQUI"
-          }
-        ],
-        "fingerprint": "1788966738124"
-      },
-      {
-        "accountId": "6348960683",
-        "containerId": "248910884",
-        "variableId": "9",
-        "name": "Constante - Label Formulario",
-        "type": "c",
-        "parameter": [
-          {
-            "type": "template",
-            "key": "value",
-            "value": "ROTULO_FORMULARIO_AQUI"
-          }
-        ],
-        "fingerprint": "1789076008226"
-      },
-      {
-        "accountId": "6348960683",
-        "containerId": "248910884",
         "variableId": "23",
         "name": "Tags_Aceitas_AdOpt",
         "type": "j",
@@ -688,7 +580,7 @@
         "name": "Form Element"
       }
     ],
-    "fingerprint": "1789076120652",
-    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/18?apiLink=version"
+    "fingerprint": "1789123757767",
+    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/19?apiLink=version"
   }
 }

@@ -204,6 +204,28 @@ uonix_dashboard_assert( strpos( $output, 'Ensaios de Arrancamento' ) !== false, 
 uonix_dashboard_assert( strpos( $output, 'Meta Pixel' ) !== false, 'Meta Pixel não está presente no dashboard' );
 uonix_dashboard_assert( strpos( $output, 'events_manager2' ) !== false, 'Link do Events Manager da Meta não está presente' );
 
+// A central de marketing mostra somente fatos técnicos verificáveis localmente.
+uonix_dashboard_assert( strpos( $output, 'Destinos de marketing configurados' ) !== false, 'Dashboard apresenta a central de destinos de marketing' );
+uonix_dashboard_assert( strpos( $output, 'Google Ads via GTM' ) !== false, 'Dashboard apresenta card dedicado ao Google Ads via GTM' );
+uonix_dashboard_assert( strpos( $output, 'AW-6012006717' ) !== false, 'Dashboard mostra a conta técnica Google Ads auditada' );
+uonix_dashboard_assert( strpos( $output, 'Google Tag, vinculador de conversões e remarketing' ) !== false, 'Dashboard descreve somente a infraestrutura Ads ainda configurada' );
+uonix_dashboard_assert( strpos( $output, 'Validar campanhas, públicos e resultados no Google Ads' ) !== false, 'Dashboard direciona resultados Ads para validação externa' );
+uonix_dashboard_assert( strpos( $output, 'G-RFY1BB1RM4' ) !== false, 'Dashboard mostra Measurement ID GA4 auditado' );
+uonix_dashboard_assert( strpos( $output, 'Configuração local' ) !== false, 'Cards distinguem configuração local' );
+uonix_dashboard_assert( strpos( $output, 'Validar em' ) !== false, 'Cards distinguem plataforma de validação' );
+
+$visible_output = uonix_dashboard_visible_text( $output );
+$marketing_claim_patterns = array(
+	'/\b(?:convers(?:ão|oes)|lead|cliente)s?\s+(?:confirmad[oa]s?|realizad[oa]s?)\b/iu',
+	'/\b(?:ROAS|CPA|CPC|custo|gasto)\b/iu',
+	'/\beventos?\s+recebidos?\b/iu',
+	'/\bpalavras?-chave\s+que\s+trazem\s+clientes\b/iu',
+	'/\bvisitantes?\s+ativos?\b/iu',
+);
+foreach ( $marketing_claim_patterns as $pattern ) {
+	uonix_dashboard_assert( 0 === preg_match( $pattern, $visible_output ), "Dashboard nao contem alegacao de marketing nao verificavel: {$pattern}" );
+}
+
 $kpi_values = uonix_dashboard_span_texts( $output, 'uonix-kpi-value' );
 uonix_dashboard_assert( array( '2', '1', '1', 'Externa' ) === $kpi_values, 'KPIs exibem somente contagens locais e o estado externo de SEO' );
 $kpi_titles = uonix_dashboard_span_texts( $output, 'uonix-kpi-title' );
@@ -214,11 +236,10 @@ uonix_dashboard_assert(
 $schema_statuses = uonix_dashboard_span_texts( $output, 'uonix-tag uonix-tag-schema' );
 uonix_dashboard_assert( array( 'Verificação externa' ) === $schema_statuses, 'Dados estruturados de servicos sao apresentados exclusivamente como verificacao externa' );
 uonix_dashboard_assert(
-	1 === substr_count( $output, 'Consulte eventos recebidos, diagnósticos e qualidade diretamente no Meta Events Manager.' ),
-	'Card Meta usa exclusivamente a descricao neutra auditada'
+	1 === substr_count( $output, 'Abra a plataforma para verificar o recebimento, diagnósticos e qualidade do Pixel.' ),
+	'Card Meta direciona a confirmação de recebimento para a plataforma externa'
 );
 
-$visible_output = uonix_dashboard_visible_text( $output );
 $unsupported_claim_patterns = array(
 	'/100\s*%.{0,80}(?:SEO|conformidade)|(?:SEO|conformidade).{0,80}100\s*%/iu',
 	'/\bmonitoramento\s+em\s+tempo\s+real\b/iu',
@@ -236,8 +257,21 @@ ob_start();
 uonix_render_analytics_dashboard_page();
 $output_without_analytics = ob_get_clean();
 uonix_dashboard_assert( strpos( $output_without_analytics, 'GTM-P8TR5CCH' ) === false, 'Dashboard não pode exibir ID GTM quando a configuração está incompleta' );
+uonix_dashboard_assert( strpos( $output_without_analytics, 'AW-6012006717' ) === false, 'Dashboard não pode exibir ID Ads quando a configuração está incompleta' );
 uonix_dashboard_assert( strpos( $output_without_analytics, 'Não configurado' ) !== false, 'Dashboard deve sinalizar configuração de analytics ausente' );
 echo "ok   Dashboard falha fechado quando Analytics/AdOpt não estão configurados\n";
+
+// A configuração genérica não é prova da conta Ads: o container precisa ser o auditado.
+$GLOBALS['uonix_test_analytics_configuration'] = array(
+	'gtm_container_id' => 'GTM-FOREIGN999',
+	'adopt_website_id' => 'adopt-test-id',
+);
+ob_start();
+uonix_render_analytics_dashboard_page();
+$output_with_foreign_gtm = ob_get_clean();
+uonix_dashboard_assert( strpos( $output_with_foreign_gtm, 'AW-6012006717' ) === false, 'Dashboard não atribui conta Ads auditada a container GTM diferente' );
+uonix_dashboard_assert( strpos( $output_with_foreign_gtm, 'Requer validação do GTM' ) !== false, 'Dashboard falha fechado para Ads quando o container GTM não é o auditado' );
+echo "ok   Google Ads falha fechado quando o container GTM diverge do auditado\n";
 
 // Asserção 5: Usuário sem permissão é barrado com wp_die
 $GLOBALS['uonix_test_can_edit'] = false;
