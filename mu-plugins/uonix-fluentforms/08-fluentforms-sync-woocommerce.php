@@ -228,11 +228,14 @@ add_action( 'woocommerce_checkout_order_processed', function( $order_id ) {
             'capturalead_empresa'          => $empresa,
             'capturalead_telefone'         => $telefone,
             'capturalead_email'            => $email,
-            'capturalead_newsletters'      => $opt_in ? 'SIM' : 'NAO',
+            'capturalead_newsletters'      => $opt_in ? 'sim' : 'nao',
             'capturalead_origem'           => 'FORMULÁRIO DE SOLICITAÇÃO DE ORÇAMENTO',
         ), 4 );
     } catch ( \Throwable $e ) {
-        error_log( 'Uônix Woo-Sync Form 4 Error: ' . $e->getMessage() );
+        $error_details = $e instanceof \FluentForm\Framework\Validator\ValidationException
+            ? wp_json_encode( $e->errors() )
+            : $e->getMessage();
+        error_log( 'Uônix Woo-Sync Form 4 Error: ' . $error_details );
     }
 
     if ( $opt_in ) {

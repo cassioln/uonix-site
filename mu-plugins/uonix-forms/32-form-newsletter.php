@@ -524,7 +524,7 @@ function uonix_processar_newsletter_handler() {
                 '__fluent_form_embded_post_id' => $embedded_post_id,
                 '_wp_http_referer'             => $referer_path,
                 'capturalead_email'            => $email,
-                'capturalead_newsletters'      => array('sim'),
+                'capturalead_newsletters'      => 'sim',
                 'capturalead_origem'           => 'ASSINATURA NEWSLETTERS: ' . $origem
             ], 4);
         } catch (\Throwable $e) {

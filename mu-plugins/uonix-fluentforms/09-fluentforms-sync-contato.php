@@ -171,9 +171,7 @@ add_action('fluentform_submission_inserted', function ($entryId, $formData, $for
             'capturalead_origem'           => $origem_fluxo,
         ];
 
-        if ($opt_in) {
-            $payloadForm4['capturalead_newsletters'] = ['sim'];
-        }
+        $payloadForm4['capturalead_newsletters'] = $opt_in ? 'sim' : 'nao';
 
         $submissionHandler->handleSubmission($payloadForm4, 4);
 
