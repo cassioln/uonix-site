@@ -57,8 +57,20 @@ function esc_url( $url ) {
 	return filter_var( $url, FILTER_SANITIZE_URL ) ?: '';
 }
 
+function number_format_i18n( $number, $decimals = 0 ) {
+	return number_format( (float) $number, $decimals, ',', '.' );
+}
+
+function admin_url( $path = '' ) {
+	return 'https://uonix.com.br/wp-admin/' . $path;
+}
+
+function wp_nonce_field( $action ) {
+	echo '<input type="hidden" name="_wpnonce" value="fixture" />';
+}
+
 function current_user_can( $capability ) {
-	if ( 'edit_posts' === $capability ) {
+	if ( 'edit_posts' === $capability || 'manage_options' === $capability ) {
 		return $GLOBALS['uonix_test_can_edit'];
 	}
 	return false;
@@ -77,6 +89,34 @@ function get_option( $name, $default = false ) {
 
 function uonix_analytics_configuration() {
 	return $GLOBALS['uonix_test_analytics_configuration'];
+}
+
+function uonix_analytics_metrics_get_snapshot() {
+	return array(
+		'status'     => 'updated',
+		'updated_at' => '2026-09-11T12:00:00+00:00',
+		'periods'    => array(
+			'current'  => array( 'start' => '2026-08-11', 'end' => '2026-09-09' ),
+			'previous' => array( 'start' => '2026-07-12', 'end' => '2026-08-10' ),
+		),
+		'ga4'        => array(
+			'summary' => array(
+				'active_users' => array( 'current' => 42, 'previous' => 35, 'delta_percent' => 20, 'state' => 'comparable' ),
+				'sessions'     => array( 'current' => 60, 'previous' => 0, 'delta_percent' => null, 'state' => 'new' ),
+			),
+			'landing_pages' => array( array( 'path' => '/servicos/', 'sessions' => 18 ) ),
+		),
+		'search_console' => array(
+			'summary' => array(
+				'clicks'      => array( 'current' => 20, 'previous' => 10, 'delta_percent' => 100, 'state' => 'comparable' ),
+				'impressions' => array( 'current' => 100, 'previous' => 80, 'delta_percent' => 25, 'state' => 'comparable' ),
+				'ctr'         => array( 'current' => .2, 'previous' => .125, 'delta_percent' => 60, 'state' => 'comparable' ),
+				'position'    => array( 'current' => 8, 'previous' => 9, 'delta_percent' => -11.1, 'state' => 'comparable' ),
+			),
+			'queries' => array( array( 'query' => 'linha de vida', 'clicks' => 5, 'impressions' => 25, 'ctr' => .2, 'position' => 4 ) ),
+			'pages'   => array( array( 'page' => '/servicos/', 'clicks' => 6, 'impressions' => 30, 'ctr' => .2, 'position' => 5 ) ),
+		),
+	);
 }
 
 function get_posts( $args = array() ) {
@@ -213,6 +253,10 @@ uonix_dashboard_assert( strpos( $output, 'Validar campanhas, públicos e resulta
 uonix_dashboard_assert( strpos( $output, 'G-RFY1BB1RM4' ) !== false, 'Dashboard mostra Measurement ID GA4 auditado' );
 uonix_dashboard_assert( strpos( $output, 'Configuração local' ) !== false, 'Cards distinguem configuração local' );
 uonix_dashboard_assert( strpos( $output, 'Validar em' ) !== false, 'Cards distinguem plataforma de validação' );
+uonix_dashboard_assert( strpos( $output, 'Métricas agregadas dos últimos 30 dias' ) !== false, 'Dashboard apresenta métricas agregadas cacheadas' );
+uonix_dashboard_assert( strpos( $output, 'Usuários ativos' ) !== false && strpos( $output, 'Sessões' ) !== false, 'Dashboard apresenta resumo GA4' );
+uonix_dashboard_assert( strpos( $output, 'Cliques orgânicos' ) !== false && strpos( $output, 'Impressões orgânicas' ) !== false, 'Dashboard apresenta resumo Search Console' );
+uonix_dashboard_assert( strpos( $output, 'linha de vida' ) !== false && strpos( $output, '/servicos/' ) !== false, 'Dashboard apresenta rankings agregados sem query string' );
 
 $visible_output = uonix_dashboard_visible_text( $output );
 $marketing_claim_patterns = array(
@@ -227,11 +271,11 @@ foreach ( $marketing_claim_patterns as $pattern ) {
 }
 
 $kpi_values = uonix_dashboard_span_texts( $output, 'uonix-kpi-value' );
-uonix_dashboard_assert( array( '2', '1', '1', 'Externa' ) === $kpi_values, 'KPIs exibem somente contagens locais e o estado externo de SEO' );
+uonix_dashboard_assert( array( '42', '60', '20', '100', '2', '1', '1', 'Externa' ) === $kpi_values, 'KPIs exibem métricas agregadas cacheadas, contagens locais e o estado externo de SEO' );
 $kpi_titles = uonix_dashboard_span_texts( $output, 'uonix-kpi-title' );
 uonix_dashboard_assert(
-	array( 'Produtos Cadastrados', 'Artigos no Blog', 'Serviços Técnicos', 'Validação externa de SEO' ) === $kpi_titles,
-	'Titulos dos KPIs nao incluem alegacao de conformidade'
+	array( 'Usuários ativos', 'Sessões', 'Cliques orgânicos', 'Impressões orgânicas', 'Produtos Cadastrados', 'Artigos no Blog', 'Serviços Técnicos', 'Validação externa de SEO' ) === $kpi_titles,
+	'Titulos dos KPIs incluem apenas métricas agregadas e estados sem alegação de conformidade'
 );
 $schema_statuses = uonix_dashboard_span_texts( $output, 'uonix-tag uonix-tag-schema' );
 uonix_dashboard_assert( array( 'Verificação externa' ) === $schema_statuses, 'Dados estruturados de servicos sao apresentados exclusivamente como verificacao externa' );

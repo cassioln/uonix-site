@@ -98,6 +98,8 @@ function uonix_render_analytics_dashboard_page()
 	$looker_url = 'https://lookerstudio.google.com/';
 	$meta_events_url = 'https://business.facebook.com/events_manager2';
 	$meta_suite_url = 'https://business.facebook.com/latest/home';
+	$metrics_snapshot = function_exists( 'uonix_analytics_metrics_get_snapshot' ) ? uonix_analytics_metrics_get_snapshot() : false;
+	$metrics_status = is_array( $metrics_snapshot ) ? ( $metrics_snapshot['status'] ?? 'updated' ) : 'unavailable';
 	?>
 	<div class="wrap uonix-analytics-wrap">
 		<!-- Header Principal -->
@@ -199,6 +201,37 @@ function uonix_render_analytics_dashboard_page()
 					<a href="<?php echo esc_url($gsc_domain_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Search Console</a>
 				</div>
 			</div>
+		</section>
+
+		<section class="uonix-marketing-section" aria-labelledby="uonix-metrics-title">
+			<div class="uonix-panel-header">
+				<h2 id="uonix-metrics-title">Métricas agregadas dos últimos 30 dias</h2>
+				<p><?php echo esc_html( 'updated' === $metrics_status ? 'Fonte: GA4 Data API e Search Console API. Comparação com os 30 dias anteriores.' : ( 'stale' === $metrics_status ? 'Último snapshot disponível; atualização pendente.' : 'Conexão não configurada ou sem snapshot. Nenhuma métrica é exibida.' ) ); ?></p>
+				<?php if ( current_user_can( 'manage_options' ) ) : ?>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="uonix-metrics-refresh-form">
+						<input type="hidden" name="action" value="uonix_analytics_metrics_refresh" />
+						<?php wp_nonce_field( 'uonix_analytics_metrics_refresh' ); ?>
+						<button type="submit" class="button button-secondary">Atualizar métricas agora</button>
+						<span>Consulta somente leitura.</span>
+					</form>
+				<?php endif; ?>
+			</div>
+			<?php if ( is_array( $metrics_snapshot ) && isset( $metrics_snapshot['ga4'], $metrics_snapshot['search_console'] ) ) :
+				$ga4_summary = $metrics_snapshot['ga4']['summary'];
+				$gsc_summary = $metrics_snapshot['search_console']['summary'];
+				$metric_value = static function ( $metric, $percent = false ) { return $percent ? number_format_i18n( (float) $metric['current'] * 100, 1 ) . '%' : number_format_i18n( (float) $metric['current'] ); };
+			?>
+			<div class="uonix-kpi-grid">
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $ga4_summary['active_users'] ) ); ?></span><span class="uonix-kpi-title">Usuários ativos</span></div></div>
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $ga4_summary['sessions'] ) ); ?></span><span class="uonix-kpi-title">Sessões</span></div></div>
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['clicks'] ) ); ?></span><span class="uonix-kpi-title">Cliques orgânicos</span></div></div>
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['impressions'] ) ); ?></span><span class="uonix-kpi-title">Impressões orgânicas</span></div></div>
+			</div>
+			<div class="uonix-shortcuts-grid">
+				<div class="uonix-shortcut-card"><h3>Principais páginas de entrada</h3><ul class="uonix-shortcut-links"><?php foreach ( array_slice( $metrics_snapshot['ga4']['landing_pages'], 0, 10 ) as $row ) : ?><li><code><?php echo esc_html( $row['path'] ); ?></code> — <?php echo esc_html( number_format_i18n( (float) $row['sessions'] ) ); ?> sessões</li><?php endforeach; ?></ul></div>
+				<div class="uonix-shortcut-card"><h3>Principais consultas orgânicas</h3><ul class="uonix-shortcut-links"><?php foreach ( array_slice( $metrics_snapshot['search_console']['queries'], 0, 10 ) as $row ) : ?><li><?php echo esc_html( $row['query'] ); ?> — <?php echo esc_html( number_format_i18n( (float) $row['clicks'] ) ); ?> cliques</li><?php endforeach; ?></ul><p>O Search Console pode omitir linhas de baixo volume.</p></div>
+			</div>
+			<?php endif; ?>
 		</section>
 
 		<!-- Cards de Métricas Rápidas -->
