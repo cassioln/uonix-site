@@ -95,7 +95,7 @@ function uonix_render_analytics_dashboard_page()
 		<!-- Header Principal -->
 		<div class="uonix-analytics-header">
 			<div class="uonix-header-content">
-				<div class="uonix-header-badge">UÔNIX ENGENHARIA & FABRICAÇÃO</div>
+				<div class="uonix-header-badge">UÔNIX - ANCORAGEM PREDIAL</div>
 				<h1>Central de Desempenho, Catálogo & Analytics</h1>
 				<p>Consulte o catálogo e os artigos técnicos, e acesse as plataformas externas para verificar tráfego, tags
 					e indexação.</p>
@@ -241,10 +241,11 @@ function uonix_render_analytics_dashboard_page()
 									<td><span class="uonix-tag"><?php echo esc_html($cat_name); ?></span></td>
 									<td><code><?php echo esc_html($kw ? $kw : '—'); ?></code></td>
 									<td class="uonix-desc-col">
-										<?php echo esc_html($seo_title ? $seo_title : $product_post->post_title); ?></td>
+										<?php echo esc_html($seo_title ? $seo_title : $product_post->post_title); ?>
+									</td>
 									<td style="text-align:right; white-space:nowrap;">
-										<a href="<?php echo esc_url($permalink); ?>" target="_blank"
-											class="button button-small" title="Ver no site">
+										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
+											title="Ver no site">
 											<span class="dashicons dashicons-visibility"></span> Ver
 										</a>
 										<a href="<?php echo esc_url($edit_link); ?>" class="button button-small"
@@ -300,10 +301,11 @@ function uonix_render_analytics_dashboard_page()
 									<td><?php echo esc_html($date); ?></td>
 									<td><code><?php echo esc_html($kw ? $kw : '—'); ?></code></td>
 									<td class="uonix-desc-col">
-										<?php echo esc_html($seo_title ? $seo_title : $blog_post->post_title); ?></td>
+										<?php echo esc_html($seo_title ? $seo_title : $blog_post->post_title); ?>
+									</td>
 									<td style="text-align:right; white-space:nowrap;">
-										<a href="<?php echo esc_url($permalink); ?>" target="_blank"
-											class="button button-small" title="Ver no site">
+										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
+											title="Ver no site">
 											<span class="dashicons dashicons-visibility"></span> Ver
 										</a>
 										<a href="<?php echo esc_url($edit_link); ?>" class="button button-small"
@@ -360,10 +362,11 @@ function uonix_render_analytics_dashboard_page()
 									<td><code><?php echo esc_html($kw ? $kw : '—'); ?></code></td>
 									<td><span class="uonix-tag uonix-tag-schema">Verificação externa</span></td>
 									<td class="uonix-desc-col">
-										<?php echo esc_html($seo_title ? $seo_title : $service_post->post_title); ?></td>
+										<?php echo esc_html($seo_title ? $seo_title : $service_post->post_title); ?>
+									</td>
 									<td style="text-align:right; white-space:nowrap;">
-										<a href="<?php echo esc_url($permalink); ?>" target="_blank"
-											class="button button-small" title="Ver no site">
+										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
+											title="Ver no site">
 											<span class="dashicons dashicons-visibility"></span> Ver
 										</a>
 										<a href="<?php echo esc_url($edit_link); ?>" class="button button-small"
