@@ -57,6 +57,9 @@ jobs:
       - name: Test analytics policy
         run: php scripts/tests/test-analytics-policy.php
 
+      - name: Test Uônix Insights GA4 and Search Console metrics
+        run: php scripts/tests/test-admin-analytics-metrics.php
+
       - name: Test GTM conversions and AdOpt contract
         run: php scripts/tests/test-gtm-conversoes-e-adopt.php
 
