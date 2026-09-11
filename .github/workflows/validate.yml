@@ -215,6 +215,9 @@ jobs:
       - name: Test Turnstile API unavailable
         run: bash scripts/tests/test-turnstile-api-unavailable.sh
 
+      - name: Test Fluent Forms Form 4 lead mirrors
+        run: php scripts/tests/test-fluentforms-form4-lead-mirror.php
+
       - name: Test clone guards
         run: bash scripts/tests/test-clone-guards.sh
 

@@ -520,9 +520,7 @@ function uonix_processar_lead_customizado_handler() {
             'capturalead_origem'           => 'DOWNLOAD CHECKLIST ANCORAGEM',
         ];
 
-        if ($opt_in) {
-            $payload_form4['capturalead_newsletters'] = array('sim');
-        }
+        $payload_form4['capturalead_newsletters'] = $opt_in ? 'sim' : 'nao';
 
         $submissionHandler->handleSubmission($payload_form4, 4);
 

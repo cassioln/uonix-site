@@ -323,7 +323,7 @@ add_action('comment_post', function($comment_id) {
                 '_wp_http_referer'             => $path,
                 'capturalead_nome'             => $nome,
                 'capturalead_email'            => $email,
-                'capturalead_newsletters'      => $optin ? 'SIM' : 'NAO',
+                'capturalead_newsletters'      => $optin ? 'sim' : 'nao',
                 'capturalead_origem'           => 'COMENTÁRIOS NO BLOG',
                 'capturalead_empresa'          => $empresa
             ], UONIX_FLUENT_FORM_LEAD_ID);
