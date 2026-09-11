@@ -78,15 +78,23 @@ function uonix_render_analytics_dashboard_page()
 		&& !empty($analytics_configuration['gtm_container_id'])
 		&& !empty($analytics_configuration['adopt_website_id']);
 	$gtm_id = $analytics_is_configured ? $analytics_configuration['gtm_container_id'] : '';
+	$gtm_is_audited = $analytics_is_configured && 'GTM-P8TR5CCH' === $gtm_id;
 	$analytics_dot_class = $analytics_is_configured ? 'uonix-dot-configured' : 'uonix-dot-inactive';
+	$google_ads_dot_class = $gtm_is_audited ? 'uonix-dot-configured' : 'uonix-dot-inactive';
 	$gsc_dot_class = $has_gsc_meta ? 'uonix-dot-configured' : 'uonix-dot-inactive';
 	$gtm_status = $analytics_is_configured ? $gtm_id . ' [Configurado]' : 'Não configurado';
 	$ga4_status = $analytics_is_configured ? 'Via GTM [Verificação externa]' : 'Não configurado';
 	$meta_status = $analytics_is_configured ? 'Via GTM + LGPD [Verificação externa]' : 'Não configurado';
 	$gsc_status = $has_gsc_meta ? 'Meta tag [Configurada]' : 'Meta tag [Não configurada]';
 	$adopt_status = $analytics_is_configured ? 'Website ID [Configurado]' : 'Não configurado';
+	$google_ads_id = $gtm_is_audited ? 'AW-6012006717' : '';
+	$google_ads_status = $gtm_is_audited
+		? $google_ads_id . ' via GTM [Verificação externa]'
+		: ( $analytics_is_configured ? 'Requer validação do GTM' : 'Não configurado' );
 	$gsc_domain_url = 'https://search.google.com/search-console?resource_id=sc-domain:uonix.com.br';
 	$ga4_url = 'https://analytics.google.com/analytics/web/';
+	$google_ads_url = 'https://ads.google.com/aw/overview';
+	$gtm_url = 'https://tagmanager.google.com/#/container/accounts/6348960683/containers/248910884/workspaces';
 	$looker_url = 'https://lookerstudio.google.com/';
 	$meta_events_url = 'https://business.facebook.com/events_manager2';
 	$meta_suite_url = 'https://business.facebook.com/latest/home';
@@ -109,6 +117,10 @@ function uonix_render_analytics_dashboard_page()
 					class="uonix-btn uonix-btn-secondary">
 					<span class="dashicons dashicons-search"></span> Abrir Search Console
 				</a>
+				<a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener"
+					class="uonix-btn uonix-btn-ads">
+					<span class="dashicons dashicons-megaphone"></span> Abrir Google Ads
+				</a>
 				<a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener"
 					class="uonix-btn uonix-btn-meta">
 					<span class="dashicons dashicons-facebook-alt"></span> Meta Events Manager
@@ -129,6 +141,11 @@ function uonix_render_analytics_dashboard_page()
 				<strong><?php echo esc_html($ga4_status); ?></strong>
 			</div>
 			<div class="uonix-status-item">
+				<span class="uonix-status-dot <?php echo esc_html($google_ads_dot_class); ?>"></span>
+				<span class="uonix-status-label">Google Ads:</span>
+				<strong><?php echo esc_html($google_ads_status); ?></strong>
+			</div>
+			<div class="uonix-status-item">
 				<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
 				<span class="uonix-status-label">Meta Pixel:</span>
 				<strong><?php echo esc_html($meta_status); ?></strong>
@@ -144,6 +161,45 @@ function uonix_render_analytics_dashboard_page()
 				<strong><?php echo esc_html($adopt_status); ?></strong>
 			</div>
 		</div>
+
+		<!-- Destinos de marketing: fatos técnicos locais, sem métricas externas não consultadas. -->
+		<section class="uonix-marketing-section" aria-labelledby="uonix-marketing-title">
+			<div class="uonix-panel-header">
+				<h2 id="uonix-marketing-title">Destinos de marketing configurados</h2>
+				<p>Este painel confirma apenas a configuração local. Dados de audiência, campanhas e resultados devem ser conferidos na plataforma indicada.</p>
+			</div>
+			<div class="uonix-marketing-grid">
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-admin-generic uonix-sc-icon-gtm"></span><h3>Google Tag Manager</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gtm_status); ?></dd><dt>Finalidade</dt><dd>Centralizar tags e consentimento.</dd><dt>Validar em</dt><dd>Container, versão e Preview no GTM.</dd></dl>
+					<a href="<?php echo esc_url($gtm_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Google Tag Manager</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-chart-line uonix-sc-icon-ga"></span><h3>Google Analytics 4</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($analytics_is_configured ? 'G-RFY1BB1RM4 via GTM' : 'Não configurado'); ?></dd><dt>Finalidade</dt><dd>Mensuração estatística conforme consentimento.</dd><dt>Validar em</dt><dd>Relatórios, Eventos e DebugView no GA4.</dd></dl>
+					<a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Google Analytics</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-megaphone uonix-sc-icon-ads"></span><h3>Google Ads via GTM</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gtm_is_audited ? $google_ads_id . ' — Google Tag, vinculador de conversões e remarketing' : $google_ads_status); ?></dd><dt>Finalidade</dt><dd>Mensuração de mídia e remarketing conforme consentimento de marketing.</dd><dt>Validar em</dt><dd>Validar campanhas, públicos e resultados no Google Ads.</dd></dl>
+					<a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline uonix-btn-outline-ads">Abrir Google Ads</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-shield uonix-sc-icon-adopt"></span><h3>AdOpt e Consent Mode</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($adopt_status); ?></dd><dt>Finalidade</dt><dd>Controlar categorias estatísticas e de marketing.</dd><dt>Validar em</dt><dd>Banner e preferências na produção.</dd></dl>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-facebook-alt uonix-sc-icon-meta"></span><h3>Meta Pixel</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($meta_status); ?></dd><dt>Finalidade</dt><dd>PageView sujeito ao consentimento de marketing.</dd><dt>Validar em</dt><dd>Events Manager e diagnóstico da Meta.</dd></dl>
+					<a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline uonix-btn-outline-meta">Abrir Events Manager</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-search uonix-sc-icon-gsc"></span><h3>Google Search Console</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gsc_status); ?></dd><dt>Finalidade</dt><dd>Pesquisar desempenho orgânico e indexação.</dd><dt>Validar em</dt><dd>Desempenho, páginas e sitemaps no Search Console.</dd></dl>
+					<a href="<?php echo esc_url($gsc_domain_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Search Console</a>
+				</div>
+			</div>
+		</section>
 
 		<!-- Cards de Métricas Rápidas -->
 		<div class="uonix-kpi-grid">
@@ -400,8 +456,7 @@ function uonix_render_analytics_dashboard_page()
 							<span class="dashicons dashicons-chart-line uonix-sc-icon-ga"></span>
 							<h3>Google Analytics 4 (GA4)</h3>
 						</div>
-						<p>Visualize em tempo real: visitantes ativos, páginas mais acessadas, cidades de origem e
-							dispositivos.</p>
+						<p>Consulte relatórios de audiência, páginas, aquisição e eventos na propriedade configurada.</p>
 						<ul class="uonix-shortcut-links">
 							<li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">➔ Visão Geral do
 									Tráfego em Tempo Real</a></li>
@@ -419,8 +474,7 @@ function uonix_render_analytics_dashboard_page()
 							<span class="dashicons dashicons-search uonix-sc-icon-gsc"></span>
 							<h3>Google Search Console</h3>
 						</div>
-						<p>Acompanhe as palavras-chave que trazem clientes do Google, posições médias no ranking e indexação
-							de páginas.</p>
+						<p>Consulte consultas, páginas, impressões, cliques, posição média e indexação na propriedade do domínio.</p>
 						<ul class="uonix-shortcut-links">
 							<li><a href="<?php echo esc_url('https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain:uonix.com.br'); ?>"
 									target="_blank" rel="noopener">➔ Consultas de Pesquisa & Palavras-Chave</a></li>
@@ -435,10 +489,25 @@ function uonix_render_analytics_dashboard_page()
 
 					<div class="uonix-shortcut-card">
 						<div class="uonix-shortcut-header">
+							<span class="dashicons dashicons-megaphone uonix-sc-icon-ads"></span>
+							<h3>Google Ads</h3>
+						</div>
+						<p><?php echo esc_html($gtm_is_audited ? 'A conta técnica ' . $google_ads_id . ' usa Google Tag, vinculador e remarketing pelo GTM.' : 'A configuração do Google Ads requer validação do container GTM auditado.'); ?> Resultados devem ser confirmados no Google Ads.</p>
+						<ul class="uonix-shortcut-links">
+							<li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">➔ Campanhas e grupos de anúncios</a></li>
+							<li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">➔ Objetivos e diagnóstico de mensuração</a></li>
+							<li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">➔ Públicos de remarketing</a></li>
+						</ul>
+						<a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener"
+							class="uonix-btn uonix-btn-outline uonix-btn-outline-ads">Abrir Google Ads</a>
+					</div>
+
+					<div class="uonix-shortcut-card">
+						<div class="uonix-shortcut-header">
 							<span class="dashicons dashicons-facebook-alt uonix-sc-icon-meta"></span>
 							<h3>Meta Pixel (Facebook & Instagram)</h3>
 						</div>
-						<p>Consulte eventos recebidos, diagnósticos e qualidade diretamente no Meta Events Manager.</p>
+						<p>Abra a plataforma para verificar o recebimento, diagnósticos e qualidade do Pixel.</p>
 						<ul class="uonix-shortcut-links">
 							<li><a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener">➔
 									Gerenciador de Eventos (Events Manager)</a></li>
@@ -464,7 +533,7 @@ function uonix_render_analytics_dashboard_page()
 							<li><a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener">➔ Acessar
 									Looker Studio</a></li>
 							<li><a href="https://lookerstudio.google.com/gallery" target="_blank" rel="noopener">➔ Galeria
-									de Templates de E-commerce</a></li>
+									de modelos de relatórios</a></li>
 						</ul>
 						<a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener"
 							class="uonix-btn uonix-btn-outline">Abrir Looker Studio</a>
@@ -579,6 +648,18 @@ function uonix_render_analytics_dashboard_page()
 			color: #ffffff;
 		}
 
+		.uonix-btn-ads {
+			background: #f59e0b;
+			color: #1f2937;
+			border: 1px solid #f59e0b;
+		}
+
+		.uonix-btn-ads:hover {
+			background: #d97706;
+			border-color: #d97706;
+			color: #ffffff;
+		}
+
 		.uonix-btn-outline {
 			display: block;
 			text-align: center;
@@ -631,6 +712,67 @@ function uonix_render_analytics_dashboard_page()
 
 		.uonix-status-label {
 			color: #64748b;
+		}
+
+		.uonix-marketing-section {
+			margin-bottom: 24px;
+		}
+
+		.uonix-marketing-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+			gap: 16px;
+		}
+
+		.uonix-marketing-card {
+			background: #ffffff;
+			border: 1px solid #e2e8f0;
+			border-radius: 10px;
+			padding: 20px;
+			display: flex;
+			flex-direction: column;
+			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+		}
+
+		.uonix-marketing-card-header {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			margin-bottom: 14px;
+		}
+
+		.uonix-marketing-card-header h3 {
+			margin: 0;
+			font-size: 15px;
+			color: #0f172a;
+		}
+
+		.uonix-marketing-card dl {
+			margin: 0;
+		}
+
+		.uonix-marketing-card dt {
+			margin-top: 12px;
+			font-size: 11px;
+			font-weight: 700;
+			letter-spacing: 0.35px;
+			text-transform: uppercase;
+			color: #64748b;
+		}
+
+		.uonix-marketing-card dt:first-child {
+			margin-top: 0;
+		}
+
+		.uonix-marketing-card dd {
+			margin: 3px 0 0;
+			font-size: 13px;
+			line-height: 1.45;
+			color: #334155;
+		}
+
+		.uonix-marketing-card .uonix-btn-outline {
+			margin-top: auto;
 		}
 
 		.uonix-kpi-grid {
@@ -932,6 +1074,26 @@ function uonix_render_analytics_dashboard_page()
 			height: 24px;
 		}
 
+		.uonix-sc-icon-gtm,
+		.uonix-sc-icon-ads,
+		.uonix-sc-icon-adopt {
+			font-size: 24px;
+			width: 24px;
+			height: 24px;
+		}
+
+		.uonix-sc-icon-gtm {
+			color: #4285f4;
+		}
+
+		.uonix-sc-icon-ads {
+			color: #d97706;
+		}
+
+		.uonix-sc-icon-adopt {
+			color: #7c3aed;
+		}
+
 		.uonix-btn-outline-meta {
 			color: #1877f2;
 		}
@@ -940,6 +1102,16 @@ function uonix_render_analytics_dashboard_page()
 			background: #1877f2;
 			color: #ffffff;
 			border-color: #1877f2;
+		}
+
+		.uonix-btn-outline-ads {
+			color: #b45309;
+		}
+
+		.uonix-btn-outline-ads:hover {
+			background: #d97706;
+			color: #ffffff;
+			border-color: #d97706;
 		}
 	</style>
 
