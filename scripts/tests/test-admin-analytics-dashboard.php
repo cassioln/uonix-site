@@ -16,6 +16,10 @@ define( 'ABSPATH', __DIR__ );
 $GLOBALS['uonix_test_menu_actions'] = array();
 $GLOBALS['uonix_test_menus']        = array();
 $GLOBALS['uonix_test_can_edit']     = true;
+$GLOBALS['uonix_test_analytics_configuration'] = array(
+	'gtm_container_id' => 'GTM-P8TR5CCH',
+	'adopt_website_id' => 'adopt-test-id',
+);
 
 function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
 	$GLOBALS['uonix_test_menu_actions'][] = array(
@@ -71,6 +75,10 @@ function get_option( $name, $default = false ) {
 	return $default;
 }
 
+function uonix_analytics_configuration() {
+	return $GLOBALS['uonix_test_analytics_configuration'];
+}
+
 function get_posts( $args = array() ) {
 	$pt = $args['post_type'] ?? 'post';
 	if ( 'product' === $pt ) {
@@ -122,11 +130,38 @@ function get_the_date( $format, $id ) {
 	return '26/08/2026';
 }
 
+$failures = 0;
+function uonix_dashboard_assert( $condition, $message ) {
+	global $failures;
+	if ( ! $condition ) {
+		++$failures;
+		fwrite( STDERR, "FAIL: {$message}\n" );
+	}
+}
+
+function uonix_dashboard_visible_text( $html ) {
+	$without_code = preg_replace( '#<(?:script|style)\b[^>]*>.*?</(?:script|style)>#is', ' ', $html );
+	$without_tags = preg_replace( '/<[^>]+>/', ' ', $without_code );
+	$plain_text   = html_entity_decode( $without_tags, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+	return trim( preg_replace( '/\s+/u', ' ', $plain_text ) );
+}
+
+function uonix_dashboard_span_texts( $html, $class_name ) {
+	$pattern = '#<span class="' . preg_quote( $class_name, '#' ) . '">(.*?)</span>#is';
+	preg_match_all( $pattern, $html, $matches );
+	return array_map(
+		static function( $text ) {
+			return trim( html_entity_decode( strip_tags( $text ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
+		},
+		$matches[1]
+	);
+}
+
 // Carrega o arquivo a ser testado
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/52-admin-analytics-dashboard.php';
 
 // Asserção 1: Registra action admin_menu
-assert( ! empty( $GLOBALS['uonix_test_menu_actions'] ), 'Não registrou nenhuma action' );
+uonix_dashboard_assert( ! empty( $GLOBALS['uonix_test_menu_actions'] ), 'Não registrou nenhuma action' );
 $admin_menu_registered = false;
 foreach ( $GLOBALS['uonix_test_menu_actions'] as $act ) {
 	if ( 'admin_menu' === $act['hook'] ) {
@@ -134,16 +169,16 @@ foreach ( $GLOBALS['uonix_test_menu_actions'] as $act ) {
 		call_user_func( $act['callback'] );
 	}
 }
-assert( $admin_menu_registered, 'Action admin_menu não registrada' );
+uonix_dashboard_assert( $admin_menu_registered, 'Action admin_menu não registrada' );
 echo "ok   Action admin_menu registrada corretamente\n";
 
 // Asserção 2: Verifica parâmetros do menu
-assert( ! empty( $GLOBALS['uonix_test_menus'] ), 'Menu não foi adicionado via add_menu_page' );
+uonix_dashboard_assert( ! empty( $GLOBALS['uonix_test_menus'] ), 'Menu não foi adicionado via add_menu_page' );
 $menu = $GLOBALS['uonix_test_menus'][0];
-assert( 'Uônix Insights' === $menu['menu_title'], 'Título do menu incorreto' );
-assert( 'edit_posts' === $menu['capability'], 'Capability do menu incorreta' );
-assert( 'uonix-analytics' === $menu['menu_slug'], 'Slug do menu incorreto' );
-assert( 'dashicons-chart-area' === $menu['icon_url'], 'Ícone do menu incorreto' );
+uonix_dashboard_assert( 'Uônix Insights' === $menu['menu_title'], 'Título do menu incorreto' );
+uonix_dashboard_assert( 'edit_posts' === $menu['capability'], 'Capability do menu incorreta' );
+uonix_dashboard_assert( 'uonix-analytics' === $menu['menu_slug'], 'Slug do menu incorreto' );
+uonix_dashboard_assert( 'dashicons-chart-area' === $menu['icon_url'], 'Ícone do menu incorreto' );
 echo "ok   Menu Uônix Insights registrado com slug, permissões e ícone corretos\n";
 
 // Asserção 3: Renderização do dashboard com permissão
@@ -151,17 +186,60 @@ ob_start();
 uonix_render_analytics_dashboard_page();
 $output = ob_get_clean();
 
-assert( strpos( $output, 'Central de Desempenho, Catálogo &amp; Analytics' ) !== false || strpos( $output, 'Central de Desempenho, Catálogo & Analytics' ) !== false, 'Header do dashboard não renderizou' );
-assert( strpos( $output, 'GTM-5F4Q3ZJ' ) !== false, 'GTM ID não está presente no status' );
-assert( strpos( $output, 'Search Console' ) !== false, 'Search Console não está presente' );
-assert( strpos( $output, 'Olhal de Ancoragem Modelo 210 Inox 304' ) !== false, 'Produto de teste não foi listado na tabela' );
-assert( strpos( $output, 'Fator de queda' ) !== false, 'Post de blog de teste não foi listado na tabela' );
-assert( strpos( $output, 'Ensaios de Arrancamento' ) !== false, 'Serviço de teste não foi listado na tabela' );
-assert( strpos( $output, 'Meta Pixel' ) !== false, 'Meta Pixel não está presente no dashboard' );
-assert( strpos( $output, 'events_manager2' ) !== false, 'Link do Events Manager da Meta não está presente' );
+uonix_dashboard_assert( strpos( $output, 'Central de Desempenho, Catálogo &amp; Analytics' ) !== false || strpos( $output, 'Central de Desempenho, Catálogo & Analytics' ) !== false, 'Header do dashboard não renderizou' );
+uonix_dashboard_assert( strpos( $output, 'GTM-P8TR5CCH' ) !== false, 'GTM ID configurado não está presente no status' );
+uonix_dashboard_assert( strpos( $output, 'GTM-5F4Q3ZJ' ) === false, 'Dashboard não pode exibir o GTM legado fixo' );
+uonix_dashboard_assert( strpos( $output, 'Conformidade [Ativo]' ) === false, 'Dashboard não pode declarar conformidade LGPD sem evidência formal' );
+uonix_dashboard_assert( strpos( $output, '<span class="uonix-kpi-value">100%</span>' ) === false, 'Dashboard não pode declarar 100% de SEO sem medição' );
+uonix_dashboard_assert( strpos( $output, 'Conformidade de SEO' ) === false, 'Dashboard não pode declarar conformidade de SEO sem auditoria' );
+uonix_dashboard_assert( strpos( $output, 'Acompanhe em tempo real o catálogo' ) === false, 'Dashboard local não pode alegar monitoramento em tempo real' );
+uonix_dashboard_assert( strpos( $output, 'Service + Breadcrumb' ) === false, 'Dashboard não pode afirmar schemas por serviço sem inspecioná-los' );
+uonix_dashboard_assert( strpos( $output, 'disparos via GTM (PageView, Contact, Lead)' ) === false, 'Dashboard não pode afirmar eventos Meta sem verificação externa' );
+uonix_dashboard_assert( strpos( $output, 'Validação externa de SEO' ) !== false, 'Dashboard deve identificar SEO como validação externa' );
+uonix_dashboard_assert( strpos( $output, 'Verificação externa' ) !== false, 'Dashboard deve distinguir configuração local de verificação externa' );
+uonix_dashboard_assert( strpos( $output, 'Search Console' ) !== false, 'Search Console não está presente' );
+uonix_dashboard_assert( strpos( $output, 'Olhal de Ancoragem Modelo 210 Inox 304' ) !== false, 'Produto de teste não foi listado na tabela' );
+uonix_dashboard_assert( strpos( $output, 'Fator de queda' ) !== false, 'Post de blog de teste não foi listado na tabela' );
+uonix_dashboard_assert( strpos( $output, 'Ensaios de Arrancamento' ) !== false, 'Serviço de teste não foi listado na tabela' );
+uonix_dashboard_assert( strpos( $output, 'Meta Pixel' ) !== false, 'Meta Pixel não está presente no dashboard' );
+uonix_dashboard_assert( strpos( $output, 'events_manager2' ) !== false, 'Link do Events Manager da Meta não está presente' );
+
+$kpi_values = uonix_dashboard_span_texts( $output, 'uonix-kpi-value' );
+uonix_dashboard_assert( array( '2', '1', '1', 'Externa' ) === $kpi_values, 'KPIs exibem somente contagens locais e o estado externo de SEO' );
+$kpi_titles = uonix_dashboard_span_texts( $output, 'uonix-kpi-title' );
+uonix_dashboard_assert(
+	array( 'Produtos Cadastrados', 'Artigos no Blog', 'Serviços Técnicos', 'Validação externa de SEO' ) === $kpi_titles,
+	'Titulos dos KPIs nao incluem alegacao de conformidade'
+);
+$schema_statuses = uonix_dashboard_span_texts( $output, 'uonix-tag uonix-tag-schema' );
+uonix_dashboard_assert( array( 'Verificação externa' ) === $schema_statuses, 'Dados estruturados de servicos sao apresentados exclusivamente como verificacao externa' );
+uonix_dashboard_assert(
+	1 === substr_count( $output, 'Consulte eventos recebidos, diagnósticos e qualidade diretamente no Meta Events Manager.' ),
+	'Card Meta usa exclusivamente a descricao neutra auditada'
+);
+
+$visible_output = uonix_dashboard_visible_text( $output );
+$unsupported_claim_patterns = array(
+	'/100\s*%.{0,80}(?:SEO|conformidade)|(?:SEO|conformidade).{0,80}100\s*%/iu',
+	'/\bmonitoramento\s+em\s+tempo\s+real\b/iu',
+	'/\b(?:service|schema)\b.{0,80}\bbreadcrumb\b.{0,80}\b(?:validado|validados|validada|validadas|comprovado|comprovada|garantido|garantida|preservado|preservada)\b/iu',
+	'/\bGTM\b.{0,120}\b(?:entrega|dispara|envia|encaminha)\b.{0,120}\b(?:PageView|Contact|Lead|Pixel)\b/iu',
+);
+foreach ( $unsupported_claim_patterns as $pattern ) {
+	uonix_dashboard_assert( 0 === preg_match( $pattern, $visible_output ), "Dashboard nao contem alegacao nao observada: {$pattern}" );
+}
 echo "ok   Dashboard renderiza cards de KPI, tabelas, atalhos Google e Meta Pixel\n";
 
-// Asserção 4: Usuário sem permissão é barrado com wp_die
+// Asserção 4: configuração ausente deve ser exibida de forma fail-closed.
+$GLOBALS['uonix_test_analytics_configuration'] = false;
+ob_start();
+uonix_render_analytics_dashboard_page();
+$output_without_analytics = ob_get_clean();
+uonix_dashboard_assert( strpos( $output_without_analytics, 'GTM-P8TR5CCH' ) === false, 'Dashboard não pode exibir ID GTM quando a configuração está incompleta' );
+uonix_dashboard_assert( strpos( $output_without_analytics, 'Não configurado' ) !== false, 'Dashboard deve sinalizar configuração de analytics ausente' );
+echo "ok   Dashboard falha fechado quando Analytics/AdOpt não estão configurados\n";
+
+// Asserção 5: Usuário sem permissão é barrado com wp_die
 $GLOBALS['uonix_test_can_edit'] = false;
 $blocked = false;
 try {
@@ -171,7 +249,11 @@ try {
 } catch ( RuntimeException $e ) {
 	$blocked = ( strpos( $e->getMessage(), 'WP_DIE' ) !== false );
 }
-assert( $blocked, 'Usuário sem permissão edit_posts deveria ser bloqueado' );
+uonix_dashboard_assert( $blocked, 'Usuário sem permissão edit_posts deveria ser bloqueado' );
 echo "ok   Acesso sem permissão é bloqueado com segurança via wp_die\n";
+
+if ( 0 !== $failures ) {
+	exit( 1 );
+}
 
 echo "\nPASS: Módulo Uônix Insights (Painel Integrado de Analytics) aprovado em todos os testes!\n";

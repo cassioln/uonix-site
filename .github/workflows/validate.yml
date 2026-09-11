@@ -57,6 +57,9 @@ jobs:
       - name: Test analytics policy
         run: php scripts/tests/test-analytics-policy.php
 
+      - name: Test GTM conversions and AdOpt contract
+        run: php scripts/tests/test-gtm-conversoes-e-adopt.php
+
       - name: Test hook dispatch arguments
         run: php scripts/tests/test-hook-dispatch-arguments.php
 
@@ -328,6 +331,9 @@ jobs:
 
       - name: Test PhotoSwipe gallery modal and digital zoom
         run: node scripts/tests/test-photoswipe-gallery-modal.js
+
+      - name: Test GTM conversion datalayer listener
+        run: node scripts/tests/test-gtm-datalayer-listener.js
 
       - name: Test email migration passfile tooling
         run: python3 -m unittest discover --start-directory scripts/email-migration --pattern 'test_*.py' --verbose

@@ -3,8 +3,8 @@
  * Uonix Insights - Painel Integrado de Analytics, Catálogo e Performance no WP-Admin.
  *
  * Oferece uma visão centralizada para administradores e editores:
- * 1. KPIs rápidos do catálogo (produtos, serviços, blog e conformidade de SEO).
- * 2. Status das integrações ativas (GTM, GA4, LGPD AdOpt, Search Console).
+ * 1. KPIs rápidos do catálogo (produtos, serviços e blog) e atalhos para validação externa de SEO.
+ * 2. Estado da configuração local de GTM, GA4, LGPD AdOpt e Search Console.
  * 3. Tabelas detalhadas de Produtos, Artigos e Serviços com atalhos de SEO e links de busca direta.
  * 4. Hub de atalhos rápidos para Google Analytics 4, Search Console e Looker Studio.
  *
@@ -69,9 +69,20 @@ function uonix_render_analytics_dashboard_page() {
 	$total_services = count( $services_query );
 
 	// Verificação das integrações
-	$general_opts    = get_option( 'rank-math-options-general', array() );
-	$has_gsc_meta    = ! empty( $general_opts['google_verify'] );
-	$gtm_id          = 'GTM-5F4Q3ZJ';
+	$general_opts             = get_option( 'rank-math-options-general', array() );
+	$has_gsc_meta             = ! empty( $general_opts['google_verify'] );
+	$analytics_configuration  = function_exists( 'uonix_analytics_configuration' ) ? uonix_analytics_configuration() : false;
+	$analytics_is_configured  = is_array( $analytics_configuration )
+		&& ! empty( $analytics_configuration['gtm_container_id'] )
+		&& ! empty( $analytics_configuration['adopt_website_id'] );
+	$gtm_id                   = $analytics_is_configured ? $analytics_configuration['gtm_container_id'] : '';
+	$analytics_dot_class      = $analytics_is_configured ? 'uonix-dot-configured' : 'uonix-dot-inactive';
+	$gsc_dot_class            = $has_gsc_meta ? 'uonix-dot-configured' : 'uonix-dot-inactive';
+	$gtm_status               = $analytics_is_configured ? $gtm_id . ' [Configurado]' : 'Não configurado';
+	$ga4_status               = $analytics_is_configured ? 'Via GTM [Verificação externa]' : 'Não configurado';
+	$meta_status              = $analytics_is_configured ? 'Via GTM + LGPD [Verificação externa]' : 'Não configurado';
+	$gsc_status               = $has_gsc_meta ? 'Meta tag [Configurada]' : 'Meta tag [Não configurada]';
+	$adopt_status             = $analytics_is_configured ? 'Website ID [Configurado]' : 'Não configurado';
 	$gsc_domain_url  = 'https://search.google.com/search-console?resource_id=sc-domain:uonix.com.br';
 	$ga4_url         = 'https://analytics.google.com/analytics/web/';
 	$looker_url      = 'https://lookerstudio.google.com/';
@@ -84,7 +95,7 @@ function uonix_render_analytics_dashboard_page() {
 			<div class="uonix-header-content">
 				<div class="uonix-header-badge">UÔNIX ENGENHARIA & FABRICAÇÃO</div>
 				<h1>Central de Desempenho, Catálogo & Analytics</h1>
-				<p>Acompanhe em tempo real o catálogo B2B, artigos técnicos de ancoragem, status das tags e atalhos de monitoramento de tráfego.</p>
+				<p>Consulte o catálogo B2B e os artigos técnicos, e acesse as plataformas externas para verificar tráfego, tags e indexação.</p>
 			</div>
 			<div class="uonix-header-actions">
 				<a href="<?php echo esc_url( $ga4_url ); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-primary">
@@ -102,29 +113,29 @@ function uonix_render_analytics_dashboard_page() {
 		<!-- Status das Tags & Rastreamento -->
 		<div class="uonix-status-strip">
 			<div class="uonix-status-item">
-				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-dot <?php echo esc_html( $analytics_dot_class ); ?>"></span>
 				<span class="uonix-status-label">Google Tag Manager:</span>
-				<strong><?php echo esc_html( $gtm_id ); ?> [Ativo]</strong>
+				<strong><?php echo esc_html( $gtm_status ); ?></strong>
 			</div>
 			<div class="uonix-status-item">
-				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-dot <?php echo esc_html( $analytics_dot_class ); ?>"></span>
 				<span class="uonix-status-label">Google Analytics 4:</span>
-				<strong>Coleta via GTM [Ativo]</strong>
+				<strong><?php echo esc_html( $ga4_status ); ?></strong>
 			</div>
 			<div class="uonix-status-item">
-				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-dot <?php echo esc_html( $analytics_dot_class ); ?>"></span>
 				<span class="uonix-status-label">Meta Pixel:</span>
-				<strong>GTM + LGPD [Ativo]</strong>
+				<strong><?php echo esc_html( $meta_status ); ?></strong>
 			</div>
 			<div class="uonix-status-item">
-				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-dot <?php echo esc_html( $gsc_dot_class ); ?>"></span>
 				<span class="uonix-status-label">Search Console:</span>
-				<strong>DNS + Meta Tag [Verificado]</strong>
+				<strong><?php echo esc_html( $gsc_status ); ?></strong>
 			</div>
 			<div class="uonix-status-item">
-				<span class="uonix-status-dot uonix-dot-active"></span>
+				<span class="uonix-status-dot <?php echo esc_html( $analytics_dot_class ); ?>"></span>
 				<span class="uonix-status-label">LGPD AdOpt:</span>
-				<strong>Conformidade [Ativo]</strong>
+				<strong><?php echo esc_html( $adopt_status ); ?></strong>
 			</div>
 		</div>
 
@@ -157,9 +168,9 @@ function uonix_render_analytics_dashboard_page() {
 			<div class="uonix-kpi-card">
 				<div class="uonix-kpi-icon uonix-icon-orange"><span class="dashicons dashicons-awards"></span></div>
 				<div class="uonix-kpi-data">
-					<span class="uonix-kpi-value">100%</span>
-					<span class="uonix-kpi-title">Conformidade de SEO</span>
-					<span class="uonix-kpi-sub">Schemas @graph & Tags Limpas</span>
+					<span class="uonix-kpi-value">Externa</span>
+					<span class="uonix-kpi-title">Validação externa de SEO</span>
+					<span class="uonix-kpi-sub">Search Console & testes de schema</span>
 				</div>
 			</div>
 		</div>
@@ -302,7 +313,7 @@ function uonix_render_analytics_dashboard_page() {
 							<tr>
 								<th>Serviço</th>
 								<th>Palavra-Chave Principal</th>
-								<th>Schema Declarado</th>
+								<th>Dados Estruturados</th>
 								<th>Título SEO</th>
 								<th style="text-align:right;">Ações Rápidas</th>
 							</tr>
@@ -322,7 +333,7 @@ function uonix_render_analytics_dashboard_page() {
 									<span class="uonix-slug-badge">/servicos/<?php echo esc_html( $service_post->post_name ); ?>/</span>
 								</td>
 								<td><code><?php echo esc_html( $kw ? $kw : '—' ); ?></code></td>
-								<td><span class="uonix-tag uonix-tag-schema">Service + Breadcrumb</span></td>
+								<td><span class="uonix-tag uonix-tag-schema">Verificação externa</span></td>
 								<td class="uonix-desc-col"><?php echo esc_html( $seo_title ? $seo_title : $service_post->post_title ); ?></td>
 								<td style="text-align:right; white-space:nowrap;">
 									<a href="<?php echo esc_url( $permalink ); ?>" target="_blank" class="button button-small" title="Ver no site">
@@ -383,7 +394,7 @@ function uonix_render_analytics_dashboard_page() {
 							<span class="dashicons dashicons-facebook-alt uonix-sc-icon-meta"></span>
 							<h3>Meta Pixel (Facebook & Instagram)</h3>
 						</div>
-						<p>Acompanhe a entrega de eventos de conversão, disparos via GTM (PageView, Contact, Lead) e a saúde do Pixel.</p>
+						<p>Consulte eventos recebidos, diagnósticos e qualidade diretamente no Meta Events Manager.</p>
 						<ul class="uonix-shortcut-links">
 							<li><a href="<?php echo esc_url( $meta_events_url ); ?>" target="_blank" rel="noopener">➔ Gerenciador de Eventos (Events Manager)</a></li>
 							<li><a href="<?php echo esc_url( 'https://business.facebook.com/events_manager2/diagnostics' ); ?>" target="_blank" rel="noopener">➔ Diagnóstico & Qualidade dos Eventos</a></li>
@@ -503,10 +514,10 @@ function uonix_render_analytics_dashboard_page() {
 			width: 8px;
 			height: 8px;
 			border-radius: 50%;
-			background: #22c55e;
 			display: inline-block;
-			box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
 		}
+		.uonix-dot-configured { background: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2); }
+		.uonix-dot-inactive { background: #94a3b8; box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2); }
 		.uonix-status-label { color: #64748b; }
 
 		.uonix-kpi-grid {

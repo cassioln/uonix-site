@@ -146,6 +146,7 @@ $required_functions = array(
 	'uonix_analytics_configuration',
 	'uonix_render_analytics_head',
 	'uonix_render_analytics_body',
+	'uonix_render_analytics_conversion_footer',
 );
 
 foreach ( $required_functions as $required_function ) {
@@ -173,6 +174,20 @@ uonix_render_analytics_head( $valid );
 $head_html = ob_get_clean();
 uonix_analytics_assert_contains( 'GTM-REAL123', $head_html, 'head injeta GTM que entrega GA4' );
 uonix_analytics_assert_contains( 'real-adopt-id', $head_html, 'head injeta AdOpt' );
+uonix_analytics_assert_contains( "window.gtag('consent', 'default'", $head_html, 'head define Consent Mode antes do carregamento do GTM' );
+uonix_analytics_assert_contains( "ad_storage: 'denied'", $head_html, 'Consent Mode nega ad_storage por padrão' );
+uonix_analytics_assert_contains( "analytics_storage: 'denied'", $head_html, 'Consent Mode nega analytics_storage por padrão' );
+uonix_analytics_assert_contains( "ad_user_data: 'denied'", $head_html, 'Consent Mode nega ad_user_data por padrão' );
+uonix_analytics_assert_contains( "ad_personalization: 'denied'", $head_html, 'Consent Mode nega ad_personalization por padrão' );
+$consent_default_position = strpos( $head_html, "window.gtag('consent', 'default'" );
+$gtm_start_position       = strpos( $head_html, "event:'gtm.js'" );
+uonix_analytics_assert_same(
+	true,
+	false !== $consent_default_position
+		&& false !== $gtm_start_position
+		&& $consent_default_position < $gtm_start_position,
+	'Consent Mode default denied é enfileirado antes do evento gtm.js'
+);
 
 $do_not_sell_selector = '#uonix-cookie-root #cookie-banner div:has(> #adopt-accept-all-button) > button:not(#adopt-preferences-button):not(#adopt-accept-all-button)';
 uonix_analytics_assert_css_declaration(
@@ -399,10 +414,43 @@ uonix_analytics_assert_same(
 	'Site Kit assumindo o GTM não invalida a configuração necessária ao AdOpt'
 );
 
+// Um container Site Kit diferente do configurado não pode assumir o fluxo:
+// aceitar este estado suprimiria o GTM auditado e encaminharia a medição para outro container.
+$GLOBALS['uonix_test_options'] = array(
+	'googlesitekit_tagmanager_settings' => array( 'useSnippet' => true, 'containerID' => 'GTM-FOREIGN999' ),
+);
+
+uonix_analytics_assert_same(
+	false,
+	uonix_analytics_configuration( 'production', true, 'GTM-REAL123', 'real-adopt-id' ),
+	'Site Kit com containerID diferente do GTM configurado bloqueia a configuração fail-closed'
+);
+
+// A rota AMP também não pode esconder um segundo container diferente do auditado.
+$GLOBALS['uonix_test_options'] = array(
+	'googlesitekit_tagmanager_settings' => array(
+		'useSnippet'    => true,
+		'containerID'   => 'GTM-REAL123',
+		'ampContainerID' => 'GTM-AMP-FOREIGN',
+	),
+);
+
+uonix_analytics_assert_same(
+	false,
+	uonix_analytics_configuration( 'production', true, 'GTM-REAL123', 'real-adopt-id' ),
+	'Site Kit com ampContainerID divergente também bloqueia a configuração fail-closed'
+);
+
+// Restaura o caso positivo para as asserções de renderização abaixo.
+$GLOBALS['uonix_test_options'] = array(
+	'googlesitekit_tagmanager_settings' => array( 'useSnippet' => true, 'containerID' => 'GTM-REAL123' ),
+);
+
 ob_start();
 uonix_render_analytics_head( $valid );
 $site_kit_head_html = ob_get_clean();
 uonix_analytics_assert_contains( 'real-adopt-id', $site_kit_head_html, 'Site Kit no GTM preserva o carregamento do AdOpt' );
+uonix_analytics_assert_contains( "window.gtag('consent', 'default'", $site_kit_head_html, 'Site Kit no GTM preserva o Consent Mode default denied antes do loader externo' );
 uonix_analytics_assert_not_contains( 'googletagmanager.com/gtm.js?id=', $site_kit_head_html, 'Site Kit no GTM suprime o snippet GTM legado no head' );
 
 ob_start();
@@ -441,6 +489,22 @@ uonix_analytics_assert_same(
 	true,
 	is_array( uonix_analytics_configuration( 'production', true, 'GTM-REAL123', 'adopt-real-id' ) ),
 	'sem o Site Kit instalado, a configuração válida continua sendo aceita'
+);
+
+// Conversão estrita no footer
+ob_start();
+uonix_render_analytics_conversion_footer();
+$footer_html = ob_get_clean();
+
+uonix_analytics_assert_contains(
+	'uonix-conversao-orcamento-datalayer',
+	$footer_html,
+	'Footer renderiza listener de dataLayer para conversão'
+);
+uonix_analytics_assert_contains(
+	"val === 'orcamento'",
+	$footer_html,
+	'Footer preserva estritamente a guarda de form_assunto orcamento'
 );
 
 if ( 0 !== $failures ) {
