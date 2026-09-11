@@ -35,7 +35,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_get_config' ) ) {
 		}
 
 		$credentials = json_decode( (string) file_get_contents( $real_key_path ), true );
-		if ( ! is_array( $credentials ) || 'service_account' !== ( $credentials['type'] ?? '' ) || empty( $credentials['client_email'] ) || empty( $credentials['private_key'] ) || empty( $credentials['token_uri'] ) ) {
+		if ( ! is_array( $credentials ) || 'service_account' !== ( $credentials['type'] ?? '' ) || ! is_string( $credentials['client_email'] ?? null ) || '' === trim( $credentials['client_email'] ) || ! is_string( $credentials['private_key'] ?? null ) || '' === trim( $credentials['private_key'] ) || ! is_string( $credentials['token_uri'] ?? null ) || '' === trim( $credentials['token_uri'] ) ) {
 			return uonix_analytics_metrics_error( 'service_account_json_invalid' );
 		}
 
@@ -63,16 +63,20 @@ if ( ! function_exists( 'uonix_analytics_metrics_get_config' ) ) {
 
 if ( ! function_exists( 'uonix_analytics_metrics_compare' ) ) {
 	function uonix_analytics_metrics_compare( $current, $previous ) {
-		$current  = (float) $current;
-		$previous = (float) $previous;
-		$delta    = $current - $previous;
+		$current  = uonix_analytics_metrics_finite_number( $current );
+		$previous = uonix_analytics_metrics_finite_number( $previous );
+		if ( null === $current || null === $previous ) return uonix_analytics_metrics_error( 'metric_not_finite' );
+		$delta = $current - $previous;
+		if ( ! is_finite( $delta ) ) return uonix_analytics_metrics_error( 'metric_not_finite' );
 
 		if ( $previous > 0 ) {
+			$delta_percent = ( $delta / $previous ) * 100;
+			if ( ! is_finite( $delta_percent ) ) return uonix_analytics_metrics_error( 'metric_not_finite' );
 			return array(
 				'current'        => $current,
 				'previous'       => $previous,
 				'delta_absolute' => $delta,
-				'delta_percent'  => round( ( $delta / $previous ) * 100, 1 ),
+				'delta_percent'  => round( $delta_percent, 1 ),
 				'state'          => 'comparable',
 			);
 		}
@@ -113,18 +117,16 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_path' ) ) {
 if ( ! function_exists( 'uonix_analytics_metrics_sanitize_query' ) ) {
 	function uonix_analytics_metrics_sanitize_query( $query ) {
 		$query = trim( wp_strip_all_tags( (string) $query ) );
-		if ( '' === $query || strlen( $query ) > 120 ) {
-			return '';
+		for ( $i = 0; $i < 2; ++$i ) {
+			$decoded = html_entity_decode( rawurldecode( $query ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+			if ( $decoded === $query ) break;
+			$query = $decoded;
 		}
-		if ( preg_match( '/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/', $query ) ) {
-			return '';
-		}
-		if ( preg_match( '/(?:\+?\d[\s().-]*){8,}/', $query ) ) {
-			return '';
-		}
-		if ( preg_match( '#(?:https?://|www\.)#i', $query ) ) {
-			return '';
-		}
+		$query = trim( $query );
+		if ( '' === $query || strlen( $query ) > 120 ) return '';
+		if ( preg_match( '/[\w.+-]+\s*@\s*[\w.-]+\s*\.\s*[A-Za-z]{2,}/', $query ) ) return '';
+		if ( preg_match( '/(?:\+?\d[\s().-]*){8,}/', $query ) ) return '';
+		if ( preg_match( '#(?:https?://|www\.)#i', $query ) ) return '';
 		return $query;
 	}
 }
@@ -158,11 +160,13 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_ga4' ) ) {
 			}
 		}
 
+		$summary = array(
+			'active_users' => uonix_analytics_metrics_compare( $current['activeUsers'], $previous['activeUsers'] ),
+			'sessions' => uonix_analytics_metrics_compare( $current['sessions'], $previous['sessions'] ),
+		);
+		foreach ( $summary as $comparison ) if ( is_wp_error( $comparison ) ) return $comparison;
 		return array(
-			'summary' => array(
-				'active_users' => uonix_analytics_metrics_compare( isset( $current['activeUsers'] ) ? $current['activeUsers'] : 0, isset( $previous['activeUsers'] ) ? $previous['activeUsers'] : 0 ),
-				'sessions'     => uonix_analytics_metrics_compare( isset( $current['sessions'] ) ? $current['sessions'] : 0, isset( $previous['sessions'] ) ? $previous['sessions'] : 0 ),
-			),
+			'summary' => $summary,
 			'landing_pages' => $pages,
 		);
 	}
@@ -211,6 +215,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 			'ctr' => uonix_analytics_metrics_compare( $current['ctr'], $previous['ctr'] ),
 			'position' => uonix_analytics_metrics_compare( $current['position'], $previous['position'] ),
 		);
+		foreach ( $summary as $comparison ) if ( is_wp_error( $comparison ) ) return $comparison;
 
 		return array( 'summary' => $summary, 'queries' => $queries, 'pages' => $pages );
 	}
@@ -274,8 +279,62 @@ if ( ! function_exists( 'uonix_analytics_metrics_google_json' ) ) {
 		$response = null === $body ? wp_remote_get( $url, $args ) : wp_remote_post( $url, $args + array( 'body' => wp_json_encode( $body ) ) );
 		if ( is_wp_error( $response ) ) return uonix_analytics_metrics_error( 'google_transport_failed' );
 		$code = (int) wp_remote_retrieve_response_code( $response );
-		$data = json_decode( wp_remote_retrieve_body( $response ), true );
-		return $code >= 200 && $code < 300 && is_array( $data ) ? $data : uonix_analytics_metrics_error( 'google_http_' . $code );
+		$raw_body = wp_remote_retrieve_body( $response );
+		return $code >= 200 && $code < 300 && is_string( $raw_body ) ? $raw_body : uonix_analytics_metrics_error( 'google_http_' . $code );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_finite_number' ) ) {
+	function uonix_analytics_metrics_finite_number( $value ) {
+		if ( ! is_numeric( $value ) ) return null;
+		$number = (float) $value;
+		return is_finite( $number ) ? $number : null;
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_decode_ga4_report' ) ) {
+	function uonix_analytics_metrics_decode_ga4_report( $raw_body, $requires_dimension = false ) {
+		$report = json_decode( $raw_body );
+		if ( ! $report instanceof stdClass || ( $report->kind ?? null ) !== 'analyticsData#runReport' || ! isset( $report->metadata ) || ! $report->metadata instanceof stdClass ) return uonix_analytics_metrics_error( 'ga4_report_invalid' );
+		if ( ! property_exists( $report, 'rows' ) ) {
+			if ( property_exists( $report, 'rowCount' ) && 0 !== uonix_analytics_metrics_integer( $report->rowCount ) ) return uonix_analytics_metrics_error( 'ga4_row_count_invalid' );
+			return array( 'kind' => $report->kind, 'metadata' => array() );
+		}
+		if ( ! is_array( $report->rows ) ) return uonix_analytics_metrics_error( 'ga4_rows_invalid' );
+		$rows = array();
+		foreach ( $report->rows as $row ) {
+			if ( ! $row instanceof stdClass || ! isset( $row->metricValues ) || ! is_array( $row->metricValues ) || ! isset( $row->metricValues[0], $row->metricValues[1] ) || ! $row->metricValues[0] instanceof stdClass || ! $row->metricValues[1] instanceof stdClass || ! isset( $row->metricValues[0]->value, $row->metricValues[1]->value ) || ! is_numeric( $row->metricValues[0]->value ) || ! is_numeric( $row->metricValues[1]->value ) || null === uonix_analytics_metrics_finite_number( $row->metricValues[0]->value ) || null === uonix_analytics_metrics_finite_number( $row->metricValues[1]->value ) ) return uonix_analytics_metrics_error( 'ga4_row_invalid' );
+			if ( $requires_dimension && ( ! isset( $row->dimensionValues ) || ! is_array( $row->dimensionValues ) || ! isset( $row->dimensionValues[0] ) ) ) return uonix_analytics_metrics_error( 'ga4_dimension_invalid' );
+			if ( isset( $row->dimensionValues ) && ! is_array( $row->dimensionValues ) ) return uonix_analytics_metrics_error( 'ga4_dimension_invalid' );
+			$dimension_values = array();
+			foreach ( isset( $row->dimensionValues ) ? $row->dimensionValues : array() as $dimension ) {
+				if ( ! $dimension instanceof stdClass || ! isset( $dimension->value ) || ! is_string( $dimension->value ) || '' === $dimension->value ) return uonix_analytics_metrics_error( 'ga4_dimension_invalid' );
+				$dimension_values[] = array( 'value' => $dimension->value );
+			}
+			$rows[] = array( 'metricValues' => array( array( 'value' => $row->metricValues[0]->value ), array( 'value' => $row->metricValues[1]->value ) ), 'dimensionValues' => $dimension_values );
+		}
+		$decoded = array( 'kind' => $report->kind, 'metadata' => array(), 'rows' => $rows );
+		if ( property_exists( $report, 'rowCount' ) ) {
+			$row_count = uonix_analytics_metrics_integer( $report->rowCount );
+			if ( null === $row_count || $row_count < count( $rows ) || ( 0 === count( $rows ) && 0 !== $row_count ) ) return uonix_analytics_metrics_error( 'ga4_row_count_invalid' );
+			$decoded['rowCount'] = $row_count;
+		}
+		return $decoded;
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_decode_search_console_report' ) ) {
+	function uonix_analytics_metrics_decode_search_console_report( $raw_body, $requires_dimension = false ) {
+		$report = json_decode( $raw_body );
+		if ( ! $report instanceof stdClass || ! isset( $report->responseAggregationType ) || ! is_string( $report->responseAggregationType ) || '' === $report->responseAggregationType || ! property_exists( $report, 'rows' ) || ! is_array( $report->rows ) ) return uonix_analytics_metrics_error( 'search_console_report_invalid' );
+		$rows = array();
+		foreach ( $report->rows as $row ) {
+			if ( ! $row instanceof stdClass || ! isset( $row->clicks, $row->impressions, $row->ctr, $row->position ) || ! is_numeric( $row->clicks ) || ! is_numeric( $row->impressions ) || ! is_numeric( $row->ctr ) || ! is_numeric( $row->position ) || null === uonix_analytics_metrics_finite_number( $row->clicks ) || null === uonix_analytics_metrics_finite_number( $row->impressions ) || null === uonix_analytics_metrics_finite_number( $row->ctr ) || null === uonix_analytics_metrics_finite_number( $row->position ) ) return uonix_analytics_metrics_error( 'search_console_row_invalid' );
+			if ( isset( $row->keys ) && ! is_array( $row->keys ) ) return uonix_analytics_metrics_error( 'search_console_row_invalid' );
+			if ( $requires_dimension && ( ! isset( $row->keys ) || ! is_array( $row->keys ) || ! isset( $row->keys[0] ) || ! is_string( $row->keys[0] ) || '' === $row->keys[0] ) ) return uonix_analytics_metrics_error( 'search_console_row_invalid' );
+			$rows[] = array( 'keys' => isset( $row->keys ) ? $row->keys : array(), 'clicks' => $row->clicks, 'impressions' => $row->impressions, 'ctr' => $row->ctr, 'position' => $row->position );
+		}
+		return array( 'responseAggregationType' => $report->responseAggregationType, 'rows' => $rows );
 	}
 }
 
@@ -291,13 +350,40 @@ if ( ! function_exists( 'uonix_analytics_metrics_ga4_report' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_analytics_metrics_integer' ) ) {
+	function uonix_analytics_metrics_integer( $value ) {
+		if ( is_int( $value ) && $value >= 0 ) return $value;
+		if ( ! is_string( $value ) || ! preg_match( '/^(?:0|[1-9][0-9]*)$/', $value ) ) return null;
+		$maximum = (string) PHP_INT_MAX;
+		if ( strlen( $value ) > strlen( $maximum ) || ( strlen( $value ) === strlen( $maximum ) && strcmp( $value, $maximum ) > 0 ) ) return null;
+		return (int) $value;
+	}
+}
+
+
+if ( ! function_exists( 'uonix_analytics_metrics_empty_summary' ) ) {
+	function uonix_analytics_metrics_empty_summary( $metrics ) {
+		$summary = array();
+		foreach ( $metrics as $metric ) {
+			$summary[ $metric ] = 0;
+		}
+		return $summary;
+	}
+}
+
 if ( ! function_exists( 'uonix_analytics_metrics_ga4_rows' ) ) {
 	function uonix_analytics_metrics_ga4_rows( $report, $dimension_key = null ) {
 		$rows = array();
 		foreach ( isset( $report['rows'] ) && is_array( $report['rows'] ) ? $report['rows'] : array() as $row ) {
 			$dimensions = isset( $row['dimensionValues'] ) ? $row['dimensionValues'] : array();
 			$metrics = isset( $row['metricValues'] ) ? $row['metricValues'] : array();
-			$entry = array( 'activeUsers' => isset( $metrics[0]['value'] ) ? $metrics[0]['value'] : 0, 'sessions' => isset( $metrics[1]['value'] ) ? $metrics[1]['value'] : 0 );
+			$entry = array();
+			if ( isset( $metrics[0]['value'] ) && is_numeric( $metrics[0]['value'] ) ) {
+				$entry['activeUsers'] = $metrics[0]['value'];
+			}
+			if ( isset( $metrics[1]['value'] ) && is_numeric( $metrics[1]['value'] ) ) {
+				$entry['sessions'] = $metrics[1]['value'];
+			}
 			if ( null !== $dimension_key ) $entry[ $dimension_key ] = isset( $dimensions[0]['value'] ) ? $dimensions[0]['value'] : '';
 			$rows[] = $entry;
 		}
@@ -309,13 +395,26 @@ if ( ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
 	function uonix_analytics_metrics_search_console_rows( $access_token, $site_url, $period, $dimension = null ) {
 		$body = array( 'startDate' => $period['start'], 'endDate' => $period['end'], 'rowLimit' => null === $dimension ? 1 : 10 );
 		if ( null !== $dimension ) $body['dimensions'] = array( $dimension );
-		$report = uonix_analytics_metrics_google_json( 'https://www.googleapis.com/webmasters/v3/sites/' . rawurlencode( $site_url ) . '/searchAnalytics/query', $access_token, $body );
-		if ( is_wp_error( $report ) ) return $report;
-		$rows = array();
-		foreach ( isset( $report['rows'] ) && is_array( $report['rows'] ) ? $report['rows'] : array() as $row ) {
-			$rows[] = array( 'key' => isset( $row['keys'][0] ) ? $row['keys'][0] : '', 'clicks' => isset( $row['clicks'] ) ? $row['clicks'] : 0, 'impressions' => isset( $row['impressions'] ) ? $row['impressions'] : 0, 'ctr' => isset( $row['ctr'] ) ? $row['ctr'] : 0, 'position' => isset( $row['position'] ) ? $row['position'] : 0 );
-		}
-		return $rows;
+		return uonix_analytics_metrics_google_json( 'https://www.googleapis.com/webmasters/v3/sites/' . rawurlencode( $site_url ) . '/searchAnalytics/query', $access_token, $body );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
+	function uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages ) {
+		$ga_current = uonix_analytics_metrics_decode_ga4_report( $ga_current );
+		$ga_previous = uonix_analytics_metrics_decode_ga4_report( $ga_previous );
+		$ga_pages = uonix_analytics_metrics_decode_ga4_report( $ga_pages, true );
+		$gsc_current = uonix_analytics_metrics_decode_search_console_report( $gsc_current );
+		$gsc_previous = uonix_analytics_metrics_decode_search_console_report( $gsc_previous );
+		$gsc_queries = uonix_analytics_metrics_decode_search_console_report( $gsc_queries, true );
+		$gsc_pages = uonix_analytics_metrics_decode_search_console_report( $gsc_pages, true );
+		foreach ( array( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages ) as $report ) if ( is_wp_error( $report ) ) return $report;
+		$ga_current_rows = uonix_analytics_metrics_ga4_rows( $ga_current );
+		$ga_previous_rows = uonix_analytics_metrics_ga4_rows( $ga_previous );
+		return array(
+			'ga4' => array( 'summary_current' => isset( $ga_current_rows[0] ) ? $ga_current_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'summary_previous' => isset( $ga_previous_rows[0] ) ? $ga_previous_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'landing_pages' => array_map( function( $row ) { return array( 'path' => $row['path'], 'sessions' => $row['sessions'] ); }, uonix_analytics_metrics_ga4_rows( $ga_pages, 'path' ) ) ),
+			'search_console' => array( 'summary_current' => isset( $gsc_current['rows'][0] ) ? $gsc_current['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'summary_previous' => isset( $gsc_previous['rows'][0] ) ? $gsc_previous['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'queries' => array_map( function( $row ) { $row['query'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_queries['rows'] ), 'pages' => array_map( function( $row ) { $row['page'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_pages['rows'] ) ),
+		);
 	}
 }
 
@@ -330,13 +429,18 @@ if ( ! function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
 		$gsc_previous = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['previous'] );
 		$gsc_queries = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'query' );
 		$gsc_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'page' );
-		foreach ( array( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages ) as $result ) if ( is_wp_error( $result ) ) return $result;
-		$ga_current_rows = uonix_analytics_metrics_ga4_rows( $ga_current );
-		$ga_previous_rows = uonix_analytics_metrics_ga4_rows( $ga_previous );
-		return array(
-			'ga4' => array( 'summary_current' => isset( $ga_current_rows[0] ) ? $ga_current_rows[0] : array(), 'summary_previous' => isset( $ga_previous_rows[0] ) ? $ga_previous_rows[0] : array(), 'landing_pages' => array_map( function( $row ) { return array( 'path' => $row['path'], 'sessions' => $row['sessions'] ); }, uonix_analytics_metrics_ga4_rows( $ga_pages, 'path' ) ) ),
-			'search_console' => array( 'summary_current' => isset( $gsc_current[0] ) ? $gsc_current[0] : array(), 'summary_previous' => isset( $gsc_previous[0] ) ? $gsc_previous[0] : array(), 'queries' => array_map( function( $row ) { $row['query'] = $row['key']; return $row; }, $gsc_queries ), 'pages' => array_map( function( $row ) { $row['page'] = $row['key']; return $row; }, $gsc_pages ) ),
-		);
+		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_mark_stale' ) ) {
+	function uonix_analytics_metrics_mark_stale() {
+		$previous = uonix_analytics_metrics_get_snapshot();
+		if ( ! $previous ) return false;
+		$previous['status'] = 'stale';
+		$previous['error'] = 'sync_failed';
+		if ( function_exists( 'update_option' ) ) update_option( uonix_analytics_metrics_snapshot_option(), $previous, false );
+		return $previous;
 	}
 }
 
@@ -344,7 +448,8 @@ if ( ! function_exists( 'uonix_analytics_metrics_sync' ) ) {
 	function uonix_analytics_metrics_sync( $fetcher = null, $config = null ) {
 		$config = is_array( $config ) ? $config : uonix_analytics_metrics_get_config();
 		if ( is_wp_error( $config ) ) {
-			return $config;
+			$stale = uonix_analytics_metrics_mark_stale();
+			return $stale ? $stale : $config;
 		}
 		$lock_name = 'uonix_analytics_metrics_sync_lock';
 		$now = time();
@@ -373,14 +478,9 @@ if ( ! function_exists( 'uonix_analytics_metrics_sync' ) ) {
 			if ( function_exists( 'update_option' ) ) update_option( uonix_analytics_metrics_snapshot_option(), $snapshot, false );
 			return $snapshot;
 		} catch ( Throwable $error ) {
-			$previous = uonix_analytics_metrics_get_snapshot();
-			if ( $previous ) {
-				$previous['status'] = 'stale';
-				$previous['error'] = sanitize_key( $error->getMessage() );
-				if ( function_exists( 'update_option' ) ) update_option( uonix_analytics_metrics_snapshot_option(), $previous, false );
-				return $previous;
-			}
-			return uonix_analytics_metrics_error( sanitize_key( $error->getMessage() ) );
+			$previous = uonix_analytics_metrics_mark_stale();
+			if ( $previous ) return $previous;
+			return uonix_analytics_metrics_error( 'sync_failed' );
 		} finally {
 			delete_option( $lock_name );
 		}

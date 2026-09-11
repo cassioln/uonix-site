@@ -69,6 +69,65 @@ uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_compare' ), 'Hel
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_sanitize_query' ), 'Helper de sanitização de consulta existe' );
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_normalize_path' ), 'Helper de normalização de URL existe' );
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_get_config' ), 'Resolvedor de configuração existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_decode_ga4_report' ), 'Decoder bruto GA4 existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_decode_search_console_report' ), 'Decoder bruto Search Console existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_assemble_google_data' ), 'Montador de dados brutos Google existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_finite_number' ), 'Validador numérico finito existe' );
+
+if ( function_exists( 'uonix_analytics_metrics_finite_number' ) ) {
+	uonix_metrics_assert( null !== uonix_analytics_metrics_finite_number( '1.25' ), 'Número decimal finito é aceito' );
+	uonix_metrics_assert( null === uonix_analytics_metrics_finite_number( '1e309' ), 'Número infinito é rejeitado' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_compare' ) ) {
+	$overflow_compare = uonix_analytics_metrics_compare( '1e308', '1e-308' );
+	uonix_metrics_assert( is_wp_error( $overflow_compare ), 'Comparação rejeita variação percentual infinita' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_decode_ga4_report' ) && function_exists( 'uonix_analytics_metrics_decode_search_console_report' ) ) {
+	$ga4_empty_raw = '{"kind":"analyticsData#runReport","metadata":{}}';
+	uonix_metrics_assert( is_array( uonix_analytics_metrics_decode_ga4_report( $ga4_empty_raw ) ), 'Decoder GA4 aceita resposta vazia real em JSON bruto' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_report( '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"1"}' ) ), 'Decoder GA4 rejeita rowCount sem rows diferente de zero' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_report( '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"9223372036854775808"}' ) ), 'Decoder GA4 rejeita rowCount fora de faixa inteira' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_report( '{"kind":"analyticsData#runReport","metadata":{},"rows":{}}' ) ), 'Decoder GA4 rejeita objeto JSON onde contrato exige array' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_report( '{"kind":"analyticsData#runReport","metadata":{},"rows":{"0":{"metricValues":[{"value":"1"},{"value":"1"}]}}}' ) ), 'Decoder GA4 rejeita objeto JSON com chaves numéricas em rows' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_report( '{"kind":"analyticsData#runReport","metadata":{},"rows":[{"metricValues":{"0":{"value":"1"},"1":{"value":"1"}}}]}' ) ), 'Decoder GA4 rejeita objeto JSON com chaves numéricas em metricValues' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_report( '{"kind":"analyticsData#runReport","metadata":{},"rows":[{"metricValues":[{"value":"1"},{"value":"1"}],"dimensionValues":[]}]}' , true ) ), 'Decoder GA4 dimensional rejeita dimensionValues vazio' );
+	$gsc_empty_raw = '{"responseAggregationType":"byProperty","rows":[]}';
+	uonix_metrics_assert( is_array( uonix_analytics_metrics_decode_search_console_report( $gsc_empty_raw, false ) ), 'Decoder Search Console aceita resposta vazia real em JSON bruto' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_search_console_report( '{"responseAggregationType":"byProperty","rows":{}}', false ) ), 'Decoder Search Console rejeita objeto JSON onde contrato exige array' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_search_console_report( '{"responseAggregationType":"byProperty"}', false ) ), 'Decoder Search Console rejeita vazio sem coleção rows confirmada' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_search_console_report( '{"responseAggregationType":"byProperty","rows":[{"keys":{"0":"consulta"},"clicks":1,"impressions":2,"ctr":0.5,"position":3}]}' , true ) ), 'Decoder Search Console rejeita objeto JSON com chaves numéricas em keys' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_search_console_report( '{"responseAggregationType":"byProperty","rows":[{"clicks":"1e309","impressions":2,"ctr":0.5,"position":3}]}' , false ) ), 'Decoder Search Console rejeita métrica infinita' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
+	$ga4_empty_raw = '{"kind":"analyticsData#runReport","metadata":{}}';
+	$gsc_empty_raw = '{"responseAggregationType":"byProperty","rows":[]}';
+	$assembled = uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw );
+	uonix_metrics_assert( is_array( $assembled ) && isset( $assembled['ga4'], $assembled['search_console'] ), 'Bundle JSON bruto vazio monta dados agregados para sincronização' );
+	$raw_fixture_fetcher = static function () use ( $ga4_empty_raw, $gsc_empty_raw ) {
+		return uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw );
+	};
+	$raw_fixture_config = array( 'ga4_property_id' => '445033830', 'search_console_site_url' => 'sc-domain:uonix.com.br', 'credentials' => array() );
+	$raw_fixture_sync = uonix_analytics_metrics_sync( $raw_fixture_fetcher, $raw_fixture_config );
+	uonix_metrics_assert( is_array( $raw_fixture_sync ) && 'updated' === $raw_fixture_sync['status'], 'JSON bruto válido percorre montador e sincronização até o snapshot' );
+	$raw_invalid_sync = uonix_analytics_metrics_sync( static function () use ( $ga4_empty_raw, $gsc_empty_raw ) { return uonix_analytics_metrics_assemble_google_data( '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"1"}', $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw ); }, $raw_fixture_config );
+	uonix_metrics_assert( is_array( $raw_invalid_sync ) && 'stale' === $raw_invalid_sync['status'] && 'sync_failed' === $raw_invalid_sync['error'], 'JSON bruto inválido não persiste updated e preserva snapshot stale' );
+}
+
+
+if ( function_exists( 'uonix_analytics_metrics_empty_summary' ) ) {
+	$empty_ga4_summary = uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) );
+	uonix_metrics_assert( array( 'activeUsers' => 0, 'sessions' => 0 ) === $empty_ga4_summary, 'Resposta GA4 sem linhas vira estado sem dados explícito, não métrica ausente' );
+	$empty_gsc_summary = uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) );
+	uonix_metrics_assert( array( 'clicks' => 0, 'impressions' => 0, 'ctr' => 0, 'position' => 0 ) === $empty_gsc_summary, 'Resposta Search Console sem linhas vira estado sem dados explícito, não métrica ausente' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_ga4_rows' ) ) {
+	$malformed_ga4_rows = uonix_analytics_metrics_ga4_rows( array( 'rows' => array( array( 'metricValues' => array( array( 'value' => '3' ) ) ) ) ) );
+	uonix_metrics_assert( ! isset( $malformed_ga4_rows[0]['sessions'] ), 'Conversor GA4 não transforma métrica ausente em zero' );
+}
 
 if ( function_exists( 'uonix_analytics_metrics_get_config' ) ) {
 	$temp_dir = sys_get_temp_dir() . '/uonix-analytics-metrics-' . uniqid( '', true );
@@ -88,7 +147,11 @@ if ( function_exists( 'uonix_analytics_metrics_get_config' ) ) {
 	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_get_config( $key_path, WP_CONTENT_DIR, '0', 'sc-domain:uonix.com.br' ) ), 'Configuração rejeita propriedade GA4 inválida' );
 	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_get_config( $key_path, WP_CONTENT_DIR, '123456789', 'sc-domain:uonix.com.br' ) ), 'Configuração rejeita propriedade GA4 não auditada' );
 	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_get_config( $key_path, WP_CONTENT_DIR, '445033830', 'https://uonix.com.br' ) ), 'Configuração rejeita propriedade Search Console fora do formato domain' );
+	$invalid_key_path = $temp_dir . '/invalid-service-account.json';
+	file_put_contents( $invalid_key_path, json_encode( array( 'type' => 'service_account', 'client_email' => array( 'invalid' ), 'private_key' => '[REDACTED]', 'token_uri' => 'https://oauth2.googleapis.com/token' ) ) );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_get_config( $invalid_key_path, WP_CONTENT_DIR, '445033830', 'sc-domain:uonix.com.br' ) ), 'Configuração rejeita campos de credencial com tipo inválido antes de autenticar' );
 	unlink( $key_path );
+	unlink( $invalid_key_path );
 	rmdir( $temp_dir );
 }
 
@@ -111,6 +174,9 @@ if ( function_exists( 'uonix_analytics_metrics_normalize_path' ) ) {
 if ( function_exists( 'uonix_analytics_metrics_sanitize_query' ) ) {
 	uonix_metrics_assert( 'linha de vida' === uonix_analytics_metrics_sanitize_query( 'linha de vida' ), 'Consulta regular é preservada' );
 	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'contato@empresa.test' ), 'Consulta com e-mail é removida' );
+	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'contato%40empresa.test' ), 'Consulta com e-mail percent-encoded é removida' );
+	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'contato&#64;empresa.test' ), 'Consulta com e-mail em entidade HTML é removida' );
+	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'contato @ empresa.test' ), 'Consulta com e-mail separado por espaços é removida' );
 	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'ligue 11987654321' ), 'Consulta com telefone é removida' );
 	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'https://example.test/caminho' ), 'Consulta URL é removida' );
 }
@@ -169,6 +235,8 @@ if ( function_exists( 'uonix_analytics_metrics_sync' ) ) {
 	uonix_metrics_assert( is_array( $sync ) && 'updated' === $sync['status'] && 3.0 === $sync['ga4']['summary']['active_users']['current'], 'Sincronização armazena snapshot agregado com transport injetado' );
 	$stale = uonix_analytics_metrics_sync( static function () { throw new RuntimeException( 'transport failure' ); }, $test_config );
 	uonix_metrics_assert( is_array( $stale ) && 'stale' === $stale['status'] && 3.0 === $stale['ga4']['summary']['active_users']['current'], 'Falha posterior preserva último snapshot como desatualizado' );
+	$secret_error = uonix_analytics_metrics_sync( static function () { throw new RuntimeException( 'token email@example.test secret-marker' ); }, $test_config );
+	uonix_metrics_assert( is_array( $secret_error ) && 'stale' === $secret_error['status'] && 'sync_failed' === $secret_error['error'], 'Falha não persiste texto de exceção ou possível PII' );
 	$invalid_snapshot = uonix_analytics_metrics_sync(
 		static function () {
 			return array(
