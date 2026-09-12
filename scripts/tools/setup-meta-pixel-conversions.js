@@ -15,19 +15,18 @@ const EXPECTED_META_TAGS = [
   {
     name: 'Meta Pixel - Conversão - Solicitar Orçamento',
     triggerName: 'Evento - Solicitar Orçamento Uônix',
-    fallbackTriggerId: '52',
+    fallbackTriggerId: '21',
     html: `<script>
 (function() {
   if (typeof fbq !== 'function') return;
   var txId = {{DLV - transaction_id}} || undefined;
-  var orderId = {{DLV - order_id}} || undefined;
   fbq('track', 'Lead', {
     content_name: 'Solicitação de Orçamento Ancoragem Predial',
     content_category: 'Orçamento B2B',
     currency: 'BRL',
-    value: {{DLV - value}} || 0
+    value: 0
   }, {
-    eventID: txId || (orderId ? 'uonix-rfq-' + orderId : undefined)
+    eventID: txId
   });
 })();
 </script>`
@@ -86,8 +85,7 @@ const EXPECTED_META_TAGS = [
 (function() {
   if (typeof fbq !== 'function') return;
   fbq('track', 'AddToCart', {
-    content_ids: [{{DLV - item_id}} || ''],
-    content_name: {{DLV - item_name}} || 'Produto Uônix',
+    content_name: 'Produto Uônix',
     content_type: 'product'
   });
 })();
@@ -166,9 +164,10 @@ function validateMetaHtmlTag(currentTag, expectedDef, triggerId) {
     diffs.push('Snippet HTML do Meta Pixel diverge da definição canônica');
   }
 
-  const curTriggers = (currentTag.firingTriggerId || []).map(String);
-  if (!curTriggers.includes(String(triggerId))) {
-    diffs.push(`firingTriggerId divergente: esperado conter "${triggerId}", encontrado ${JSON.stringify(curTriggers)}`);
+  const curTriggers = (currentTag.firingTriggerId || []).map(String).sort();
+  const expectedTriggers = [String(triggerId)];
+  if (curTriggers.length !== expectedTriggers.length || curTriggers[0] !== expectedTriggers[0]) {
+    diffs.push(`firingTriggerId divergente: esperado ${JSON.stringify(expectedTriggers)}, encontrado ${JSON.stringify(curTriggers)}`);
   }
 
   const consent = currentTag.consentSettings;
@@ -181,6 +180,55 @@ function validateMetaHtmlTag(currentTag, expectedDef, triggerId) {
   }
 
   return { isAdherent: diffs.length === 0, differences: diffs };
+}
+
+function findExactlyOneByName(entities, name, entityType, errors) {
+  const matches = entities.filter(entity => entity.name === name);
+  if (matches.length !== 1) {
+    errors.push(`${entityType} "${name}" deve existir exatamente uma vez; encontrado: ${matches.length}`);
+    return null;
+  }
+  return matches[0];
+}
+
+function validateMetaPixelReadback({ variables, triggers, tags }) {
+  const errors = [];
+  const pixelVariable = findExactlyOneByName(variables, 'Constante - Meta Pixel ID', 'Variável', errors);
+  if (pixelVariable) {
+    const pixelValue = (pixelVariable.parameter || []).find(param => param.key === 'value')?.value;
+    if (pixelVariable.type !== 'c' || pixelValue !== META_PIXEL_ID) {
+      errors.push('Variável "Constante - Meta Pixel ID" diverge do contrato canônico');
+    }
+  }
+
+  const pageView = findExactlyOneByName(tags, 'Facebook Pixel - PageView', 'Tag', errors);
+  if (!pageView || pageView.type !== 'html' || pageView.paused === true) {
+    errors.push('Tag "Facebook Pixel - PageView" ausente, divergente ou pausada');
+  }
+
+  const triggersByName = new Map();
+  for (const trigger of triggers) {
+    if (!triggersByName.has(trigger.name)) triggersByName.set(trigger.name, []);
+    triggersByName.get(trigger.name).push(trigger);
+  }
+
+  for (const tagDef of EXPECTED_META_TAGS) {
+    const triggerMatches = triggersByName.get(tagDef.triggerName) || [];
+    if (triggerMatches.length !== 1) {
+      errors.push(`Trigger "${tagDef.triggerName}" deve existir exatamente uma vez; encontrado: ${triggerMatches.length}`);
+      continue;
+    }
+
+    const serverTag = findExactlyOneByName(tags, tagDef.name, 'Tag', errors);
+    if (serverTag) {
+      const validation = validateMetaHtmlTag(serverTag, tagDef, String(triggerMatches[0].triggerId));
+      if (!validation.isAdherent) {
+        errors.push(`Tag "${tagDef.name}" diverge: ${validation.differences.join('; ')}`);
+      }
+    }
+  }
+
+  return errors;
 }
 
 async function main(options = {}) {
@@ -229,8 +277,13 @@ async function main(options = {}) {
           type: 'c',
           parameter: [{ type: 'template', key: 'value', value: META_PIXEL_ID }]
         };
+        const journalEntry = { op: 'CREATE', type: 'variables', id: null, name: 'Constante - Meta Pixel ID' };
+        journal.push(journalEntry);
         pixelVar = await requestFn('POST', ws + '/variables', varData);
-        journal.push({ op: 'CREATE', type: 'variables', id: String(pixelVar.variableId), name: 'Constante - Meta Pixel ID' });
+        if (!pixelVar || !pixelVar.variableId) {
+          throw new Error('[FAIL-CLOSED] POST da variável Meta Pixel não retornou variableId; rollback seguro impossível.');
+        }
+        journalEntry.id = String(pixelVar.variableId);
         console.log('  Variável criada com ID:', pixelVar.variableId);
       }
     } else {
@@ -284,8 +337,13 @@ async function main(options = {}) {
         if (!apply) {
           console.log(`  [DRY-RUN] Tag "${tagDef.name}" não existe. Seria criada.`);
         } else {
+          const journalEntry = { op: 'CREATE', type: 'tags', id: null, name: tagDef.name };
+          journal.push(journalEntry);
           existingTag = await requestFn('POST', ws + '/tags', expectedTagPayload);
-          journal.push({ op: 'CREATE', type: 'tags', id: String(existingTag.tagId), name: tagDef.name });
+          if (!existingTag || !existingTag.tagId) {
+            throw new Error(`[FAIL-CLOSED] POST da tag "${tagDef.name}" não retornou tagId; rollback seguro impossível.`);
+          }
+          journalEntry.id = String(existingTag.tagId);
           console.log(`  Tag "${tagDef.name}" criada com ID: ${existingTag.tagId}`);
         }
       } else {
@@ -313,22 +371,13 @@ async function main(options = {}) {
     if (apply) {
       console.log('\n🔍 Realizando READBACK pós-aplicação do servidor GTM...');
       const freshTags = (await requestFn('GET', ws + '/tags')).tag || [];
-      const readbackErrors = [];
-
-      for (const tagDef of EXPECTED_META_TAGS) {
-        const matchedTrigger = triggerByName.get(tagDef.triggerName);
-        const firingId = matchedTrigger ? String(matchedTrigger.triggerId) : tagDef.fallbackTriggerId;
-        const serverTag = freshTags.find(t => t.name === tagDef.name);
-
-        if (!serverTag) {
-          readbackErrors.push(`Tag "${tagDef.name}" não encontrada no servidor GTM durante readback`);
-        } else {
-          const val = validateMetaHtmlTag(serverTag, tagDef, firingId);
-          if (!val.isAdherent) {
-            readbackErrors.push(`Tag "${tagDef.name}" no servidor diverge: ${val.differences.join('; ')}`);
-          }
-        }
-      }
+      const freshTriggers = (await requestFn('GET', ws + '/triggers')).trigger || [];
+      const freshVariables = (await requestFn('GET', ws + '/variables')).variable || [];
+      const readbackErrors = validateMetaPixelReadback({
+        variables: freshVariables,
+        triggers: freshTriggers,
+        tags: freshTags
+      });
 
       if (readbackErrors.length > 0) {
         throw new Error(`[FAIL-CLOSED] Readback pós-aplicação falhou: ${readbackErrors.join('; ')}`);
@@ -339,10 +388,27 @@ async function main(options = {}) {
     console.error(`\n🚨 [FAIL-CLOSED] Erro no ciclo de mutação do Meta Pixel: ${err.message}`);
     console.error('🔄 Iniciando ROLLBACK TRANSACIONAL compensatório...');
 
+    async function resolveAmbiguousCreate(entry) {
+      if (entry.id) return true;
+      const response = await requestFn('GET', `${ws}/${entry.type}`);
+      const collectionName = entry.type.slice(0, -1);
+      const matches = (response[collectionName] || []).filter(entity => entity.name === entry.name);
+      if (matches.length === 0) return false;
+      if (matches.length !== 1 || !matches[0][entry.type === 'variables' ? 'variableId' : 'tagId']) {
+        throw new Error(`não foi possível resolver CREATE ambíguo de ${entry.type} "${entry.name}"`);
+      }
+      entry.id = String(matches[0][entry.type === 'variables' ? 'variableId' : 'tagId']);
+      return true;
+    }
+
     for (let i = journal.length - 1; i >= 0; i--) {
       const entry = journal[i];
       try {
         if (entry.op === 'CREATE') {
+          if (!entry.id) {
+            const persisted = await resolveAmbiguousCreate(entry);
+            if (!persisted) continue;
+          }
           console.warn(`  [ROLLBACK] Removendo entidade ${entry.type}/${entry.id} ("${entry.name}")...`);
           await requestFn('DELETE', `${ws}/${entry.type}/${entry.id}`);
         } else if (entry.op === 'UPDATE') {
@@ -390,5 +456,6 @@ if (require.main === module) {
 module.exports = {
   main,
   EXPECTED_META_TAGS,
-  validateMetaHtmlTag
+  validateMetaHtmlTag,
+  validateMetaPixelReadback
 };

@@ -8,9 +8,12 @@ const {
   isPublishConfirmed
 } = require('./gtm-client.js');
 
+const CANONICAL_MANIFEST_VERSION = '32';
+const CANONICAL_MANIFEST_PATH = path.resolve(__dirname, '../../docs/gtm/uonix-gtm-v32-meta-pixel.json');
+
 /**
  * Calcula estruturalmente todas as ações necessárias para reconciliar o workspace
- * contra o manifesto canônico auditado (docs/gtm/uonix-google-ads-gtm-import.json).
+ * contra o manifesto canônico auditado mais recente do container.
  *
  * Garante:
  * 1. Ordem estrita de criação: 1º Variáveis -> 2º Triggers -> 3º Tags.
@@ -481,6 +484,23 @@ function computeSyncActions(manifest, currentState) {
   ];
 }
 
+function loadCanonicalManifest() {
+  if (!fs.existsSync(CANONICAL_MANIFEST_PATH)) {
+    throw new Error(`[FAIL-CLOSED] Manifesto canônico não encontrado em: ${CANONICAL_MANIFEST_PATH}`);
+  }
+
+  const manifest = JSON.parse(fs.readFileSync(CANONICAL_MANIFEST_PATH, 'utf8'));
+  const version = manifest.containerVersion || {};
+  const versionId = String(version.containerVersionId || '');
+  const versionPath = String(version.path || '');
+
+  if (versionId !== CANONICAL_MANIFEST_VERSION || !new RegExp(`/versions/${CANONICAL_MANIFEST_VERSION}$`).test(versionPath)) {
+    throw new Error('[FAIL-CLOSED] Manifesto canônico não é o snapshot v32 consistente exigido pelo reconciliador.');
+  }
+
+  return manifest;
+}
+
 async function syncGtmGovernance(options = {}) {
   const accountId = '6348960683';
   const containerId = '248910884';
@@ -509,12 +529,9 @@ async function syncGtmGovernance(options = {}) {
   console.log(`MODO: ${apply ? 'APLICAR MUTAÇÕES (--apply)' : 'DRY-RUN (somente planejamento/auditoria)'}`);
   console.log('========================================================================\n');
 
-  // 2. Carregar o manifesto canônico auditado
-  const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-google-ads-gtm-import.json');
-  if (!fs.existsSync(manifestPath)) {
-    throw new Error(`[FAIL-CLOSED] Manifesto canônico não encontrado em: ${manifestPath}`);
-  }
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  // O v31 é apenas um snapshot histórico. Reconciliá-lo depois do v32 apagaria
+  // as conversões Meta como entidades não autorizadas.
+  const manifest = loadCanonicalManifest();
 
   // 3. Obter estado atual do workspace
   const currentTags = (await requestFn('GET', ws + '/tags')).tag || [];
@@ -594,9 +611,14 @@ async function syncGtmGovernance(options = {}) {
           type: act.expected.type,
           parameter: act.expected.parameter
         };
+        const journalEntry = { op: 'CREATE', type: 'variables', id: null, name: act.name };
+        journal.push(journalEntry);
         const created = await requestFn('POST', ws + '/variables', payload);
-        const createdId = String(created?.variableId || act.expected.variableId);
-        journal.push({ op: 'CREATE', type: 'variables', id: createdId, name: act.name });
+        if (!created || !created.variableId) {
+          throw new Error(`[FAIL-CLOSED] POST de variável "${act.name}" não retornou variableId; estado remoto não pode ser compensado com segurança.`);
+        }
+        const createdId = String(created.variableId);
+        journalEntry.id = createdId;
       } else if (act.type === 'UPDATE_VARIABLE') {
         console.log(`- Sincronizando Variável ${act.id} com contrato canônico...`);
         journal.push({ op: 'UPDATE', type: 'variables', id: String(act.id), name: act.name, previousPayload: act.target });
@@ -614,9 +636,14 @@ async function syncGtmGovernance(options = {}) {
           customEventFilter: act.expected.customEventFilter,
           filter: act.expected.filter
         };
+        const journalEntry = { op: 'CREATE', type: 'triggers', id: null, name: act.name };
+        journal.push(journalEntry);
         const created = await requestFn('POST', ws + '/triggers', payload);
-        const newTriggerId = String(created?.triggerId || act.expected.triggerId);
-        journal.push({ op: 'CREATE', type: 'triggers', id: newTriggerId, name: act.name });
+        if (!created || !created.triggerId) {
+          throw new Error(`[FAIL-CLOSED] POST de trigger "${act.name}" não retornou triggerId; estado remoto não pode ser compensado com segurança.`);
+        }
+        const newTriggerId = String(created.triggerId);
+        journalEntry.id = newTriggerId;
         runtimeTriggerIdMap.set(String(act.expected.triggerId), newTriggerId);
         existingTriggerIds.add(newTriggerId);
       } else if (act.type === 'UPDATE_TRIGGER') {
@@ -649,9 +676,14 @@ async function syncGtmGovernance(options = {}) {
           consentSettings: act.expected.consentSettings,
           firingTriggerId: resolvedTriggers
         };
+        const journalEntry = { op: 'CREATE', type: 'tags', id: null, name: act.name };
+        journal.push(journalEntry);
         const created = await requestFn('POST', ws + '/tags', payload);
-        const createdId = String(created?.tagId || act.expected.tagId);
-        journal.push({ op: 'CREATE', type: 'tags', id: createdId, name: act.name });
+        if (!created || !created.tagId) {
+          throw new Error(`[FAIL-CLOSED] POST de tag "${act.name}" não retornou tagId; estado remoto não pode ser compensado com segurança.`);
+        }
+        const createdId = String(created.tagId);
+        journalEntry.id = createdId;
       } else if (act.type === 'UPDATE_TAG') {
         console.log(`- Sincronizando Tag ${act.id} com contrato canônico...`);
         journal.push({ op: 'UPDATE', type: 'tags', id: String(act.id), name: act.name, previousPayload: act.target });
@@ -729,6 +761,23 @@ async function syncGtmGovernance(options = {}) {
 
     const rollbackErrors = [];
 
+    async function resolveAmbiguousCreate(entry) {
+      if (entry.id) return true;
+      const response = await requestFn('GET', `${ws}/${entry.type}`);
+      const collectionName = entry.type.slice(0, -1);
+      const matches = (response[collectionName] || []).filter(entity => entity.name === entry.name);
+      if (matches.length === 0) return false;
+      if (matches.length !== 1) {
+        throw new Error(`não foi possível resolver CREATE ambíguo de ${entry.type} "${entry.name}": ${matches.length} entidades encontradas`);
+      }
+      const idField = entry.type === 'variables' ? 'variableId' : entry.type === 'triggers' ? 'triggerId' : 'tagId';
+      if (!matches[0][idField]) {
+        throw new Error(`CREATE ambíguo de ${entry.type} "${entry.name}" sem ${idField} no readback`);
+      }
+      entry.id = String(matches[0][idField]);
+      return true;
+    }
+
     async function compensateWithRetry(fn, desc, maxRetries = 2) {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
@@ -746,6 +795,15 @@ async function syncGtmGovernance(options = {}) {
     for (let i = journal.length - 1; i >= 0; i--) {
       const entry = journal[i];
       if (entry.op === 'CREATE') {
+        if (!entry.id) {
+          try {
+            const persisted = await resolveAmbiguousCreate(entry);
+            if (!persisted) continue;
+          } catch (err) {
+            rollbackErrors.push(`CREATE ambíguo de ${entry.type} "${entry.name}": ${err.message}`);
+            continue;
+          }
+        }
         console.warn(`  [ROLLBACK] Removendo entidade recém-criada ${entry.type}/${entry.id} ("${entry.name}")...`);
         await compensateWithRetry(
           () => requestFn('DELETE', `${ws}/${entry.type}/${entry.id}`),
@@ -785,11 +843,15 @@ async function syncGtmGovernance(options = {}) {
       );
     } else {
       console.log('\n📦 Criando nova versão a partir do Workspace verificado...');
+      const canonicalVersionId = String(manifest.containerVersion.containerVersionId);
       const versionRes = await requestFn('POST', ws + ':create_version', {
-        name: 'v31 - Governança Estrita Deduplicação Newsletter e Carrinho',
-        notes: 'Adiciona orderId: {{DLV - transaction_id}} na Tag 47 para deduplicação server-side e sincroniza regras AdOpt/negate:false.'
+        name: `v${canonicalVersionId} - Governança canônica do container`,
+        notes: `Sincroniza integralmente o manifesto canônico v${canonicalVersionId} após readback verde.`
       });
       const newVersionId = versionRes.containerVersion?.containerVersionId;
+      if (!newVersionId) {
+        throw new Error('[FAIL-CLOSED] create_version não retornou containerVersionId; publicação bloqueada.');
+      }
       console.log(`Versão criada: ${newVersionId}`);
 
       console.log('🚀 Publicando versão live...');

@@ -2,7 +2,7 @@
   "exportFormatVersion": 2,
   "exportTime": "2026-09-12T14:06:36.671Z",
   "containerVersion": {
-    "path": "accounts/6348960683/containers/248910884/versions/31",
+    "path": "accounts/6348960683/containers/248910884/versions/32",
     "accountId": "6348960683",
     "containerId": "248910884",
     "containerVersionId": "32",
@@ -554,7 +554,7 @@
           {
             "type": "template",
             "key": "html",
-            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  var txId = {{DLV - transaction_id}} || undefined;\n  var orderId = {{DLV - order_id}} || undefined;\n  fbq('track', 'Lead', {\n    content_name: 'Solicitação de Orçamento Ancoragem Predial',\n    content_category: 'Orçamento B2B',\n    currency: 'BRL',\n    value: {{DLV - value}} || 0\n  }, {\n    eventID: txId || (orderId ? 'uonix-rfq-' + orderId : undefined)\n  });\n})();\n</script>"
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  var txId = {{DLV - transaction_id}} || undefined;\n  fbq('track', 'Lead', {\n    content_name: 'Solicitação de Orçamento Ancoragem Predial',\n    content_category: 'Orçamento B2B',\n    currency: 'BRL',\n    value: 0\n  }, {\n    eventID: txId\n  });\n})();\n</script>"
           },
           {
             "type": "boolean",
@@ -563,7 +563,7 @@
           }
         ],
         "firingTriggerId": [
-          "52"
+          "21"
         ],
         "tagFiringOption": "oncePerEvent",
         "consentSettings": {
@@ -690,7 +690,7 @@
           {
             "type": "template",
             "key": "html",
-            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  fbq('track', 'AddToCart', {\n    content_ids: [{{DLV - item_id}} || ''],\n    content_name: {{DLV - item_name}} || 'Produto Uônix',\n    content_type: 'product'\n  });\n})();\n</script>"
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  fbq('track', 'AddToCart', {\n    content_name: 'Produto Uônix',\n    content_type: 'product'\n  });\n})();\n</script>"
           },
           {
             "type": "boolean",

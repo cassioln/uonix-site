@@ -1121,6 +1121,10 @@ if ( file_exists( $manifest_v32_path ) ) {
 
 	$v32_version = isset( $manifest_v32['containerVersion'] ) ? $manifest_v32['containerVersion'] : array();
 	gtm_assert( isset( $v32_version['containerVersionId'] ) && '32' === (string) $v32_version['containerVersionId'], 'Manifesto v32 declara containerVersionId 32' );
+	gtm_assert(
+		isset( $v32_version['path'] ) && false !== strpos( $v32_version['path'], '/versions/32' ),
+		'Manifesto v32 aponta path para a mesma versao 32'
+	);
 
 	// Validar variavel Constante - Meta Pixel ID
 	$v32_vars = isset( $v32_version['variable'] ) ? $v32_version['variable'] : array();
@@ -1193,6 +1197,32 @@ if ( file_exists( $manifest_v32_path ) ) {
 			}
 			gtm_assert( false !== strpos( $html_val, "if (typeof fbq !== 'function') return;" ), "Tag '{$expected_tag_name}' contem guarda fbq" );
 		}
+	}
+
+	$v32_triggers_by_id = array();
+	foreach ( isset( $v32_version['trigger'] ) ? $v32_version['trigger'] : array() as $trigger ) {
+		$v32_triggers_by_id[ (string) $trigger['triggerId'] ] = $trigger;
+	}
+	$lead_meta_tag = null;
+	foreach ( $v32_tags as $tag ) {
+		if ( 'Meta Pixel - Conversão - Solicitar Orçamento' === $tag['name'] ) {
+			$lead_meta_tag = $tag;
+			break;
+		}
+	}
+	gtm_assert( null !== $lead_meta_tag, 'Tag Meta Pixel Lead existe para validar trigger e payload' );
+	if ( null !== $lead_meta_tag ) {
+		gtm_assert( array( '21' ) === $lead_meta_tag['firingTriggerId'], 'Tag Meta Pixel Lead dispara exclusivamente pelo trigger 21 existente' );
+		gtm_assert( isset( $v32_triggers_by_id['21'] ), 'Trigger 21 do Meta Pixel Lead existe no manifesto v32' );
+		$lead_html = '';
+		foreach ( $lead_meta_tag['parameter'] as $param ) {
+			if ( 'html' === $param['key'] ) {
+				$lead_html = $param['value'];
+				break;
+			}
+		}
+		gtm_assert( false !== strpos( $lead_html, 'eventID: txId' ), 'Tag Meta Pixel Lead usa transaction_id para eventID' );
+		gtm_assert( false === strpos( $lead_html, 'DLV - order_id' ) && false === strpos( $lead_html, 'DLV - value' ), 'Tag Meta Pixel Lead nao referencia DLVs ausentes do manifesto' );
 	}
 }
 

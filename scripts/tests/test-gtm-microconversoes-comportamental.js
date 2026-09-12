@@ -19,7 +19,8 @@ const { main: setupNewsletter } = require('../tools/setup-newsletter-conversion.
 const {
   main: setupMetaPixel,
   EXPECTED_META_TAGS,
-  validateMetaHtmlTag: validateMetaHtmlTagFn
+  validateMetaHtmlTag: validateMetaHtmlTagFn,
+  validateMetaPixelReadback
 } = require('../tools/setup-meta-pixel-conversions.js');
 
 const phpPath = path.resolve(__dirname, '../../mu-plugins/uonix-integrations/38-integracoes-analytics-lgpd.php');
@@ -548,7 +549,7 @@ test('Prova de Mutação do Consumidor: remoção da guarda faria o consumidor a
 console.log('\n--- 5. Governança GTM: Validação Estrutural Estrita e Provas de Mutação ---');
 
 const gtmClient = require('../tools/gtm-client.js');
-const manifest = require('../../docs/gtm/uonix-google-ads-gtm-import.json');
+const manifest = require('../../docs/gtm/uonix-gtm-v32-meta-pixel.json');
 
 test('GTM Governança: bloqueia publish sem --apply', async () => {
   const origArgv = process.argv.slice();
@@ -561,12 +562,12 @@ test('GTM Governança: bloqueia publish sem --apply', async () => {
   process.argv = origArgv;
 });
 
-test('GTM Sincronizador: workspace vazio gera obrigatoriamente 39 ações canônicas', () => {
+test('GTM Sincronizador: workspace vazio gera obrigatoriamente 49 ações canônicas v32', () => {
   const actions = computeSyncActions(manifest, { tags: [], triggers: [], variables: [] });
-  assert.strictEqual(actions.length, 39, 'Workspace vazio deve gerar 39 ações de criação');
-  assert.strictEqual(actions.filter(a => a.type === 'CREATE_TAG').length, 15, '15 CREATE_TAG');
+  assert.strictEqual(actions.length, 49, 'Workspace vazio deve gerar 49 ações de criação');
+  assert.strictEqual(actions.filter(a => a.type === 'CREATE_TAG').length, 24, '24 CREATE_TAG');
   assert.strictEqual(actions.filter(a => a.type === 'CREATE_TRIGGER').length, 12, '12 CREATE_TRIGGER');
-  assert.strictEqual(actions.filter(a => a.type === 'CREATE_VARIABLE').length, 12, '12 CREATE_VARIABLE');
+  assert.strictEqual(actions.filter(a => a.type === 'CREATE_VARIABLE').length, 13, '13 CREATE_VARIABLE');
 });
 
 test('GTM Sincronizador: workspace canônico idêntico gera 0 ações (100% aderente)', () => {
@@ -873,7 +874,7 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
     const operationsLog = [];
     const fakeWs = 'ws-test-rollback-real';
 
-    const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-google-ads-gtm-import.json');
+    const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-gtm-v32-meta-pixel.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
     const canonicalVars = manifest.containerVersion?.variable || [];
@@ -917,7 +918,8 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
         customGtmRequest: fakeGtmRequest,
         apply: true,
         workspaceId: fakeWs,
-        publish: false
+        publish: false,
+        manifest
       });
     } catch (err) {
       caughtErr = err;
@@ -939,7 +941,7 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
     const operationsLog = [];
     const fakeWs = 'ws-test-readback-rollback';
 
-    const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-google-ads-gtm-import.json');
+    const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-gtm-v32-meta-pixel.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
     const canonicalVars = manifest.containerVersion?.variable || [];
@@ -981,7 +983,8 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
         customGtmRequest: fakeGtmRequest,
         apply: true,
         workspaceId: fakeWs,
-        publish: false
+        publish: false,
+        manifest
       });
     } catch (err) {
       caughtErr = err;
@@ -996,6 +999,39 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
     assert.ok(
       deleteOps[0].urlPath.includes('/variables/9995'),
       'DELETE compensatório executado para a variável 9995 devido a falha no readback'
+    );
+  });
+
+  await testAsync('Sincronizador GTM: ignora tentativa programática de substituir o contrato v32 pelo snapshot v31', async () => {
+    const operationsLog = [];
+    const v32Path = path.resolve(__dirname, '../../docs/gtm/uonix-gtm-v32-meta-pixel.json');
+    const v31Path = path.resolve(__dirname, '../../docs/gtm/uonix-google-ads-gtm-import.json');
+    const v32 = JSON.parse(fs.readFileSync(v32Path, 'utf8')).containerVersion;
+    const legacyV31 = JSON.parse(fs.readFileSync(v31Path, 'utf8'));
+
+    const fakeGtmRequest = async (method, urlPath) => {
+      operationsLog.push({ method, urlPath });
+      if (method !== 'GET') {
+        throw new Error(`SECURITY_BREACH: nenhuma mutação deveria ocorrer ao tentar injetar o snapshot v31 (${method} ${urlPath})`);
+      }
+      if (urlPath.endsWith('/variables')) return { variable: JSON.parse(JSON.stringify(v32.variable || [])) };
+      if (urlPath.endsWith('/triggers')) return { trigger: JSON.parse(JSON.stringify(v32.trigger || [])) };
+      if (urlPath.endsWith('/tags')) return { tag: JSON.parse(JSON.stringify(v32.tag || [])) };
+      return {};
+    };
+
+    await syncGtmGovernance({
+      customGtmRequest: fakeGtmRequest,
+      apply: true,
+      workspaceId: 'ws-test-reject-v31-override',
+      manifest: legacyV31,
+      manifestPath: v31Path
+    });
+
+    assert.strictEqual(
+      operationsLog.filter(op => op.method !== 'GET').length,
+      0,
+      'O entrypoint não pode aceitar v31 via options nem planejar DELETE de entidades Meta'
     );
   });
 
@@ -1221,7 +1257,8 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
 
     // Deduplicação via eventID para orçamentos e newsletters
     const leadTag = EXPECTED_META_TAGS.find(t => t.name === 'Meta Pixel - Conversão - Solicitar Orçamento');
-    assert.ok(leadTag.html.includes('eventID: txId || (orderId ? \'uonix-rfq-\' + orderId : undefined)'), 'Lead deve incluir eventID para deduplicação CAPI');
+    assert.ok(leadTag.html.includes('eventID: txId'), 'Lead deve incluir eventID estável para deduplicação CAPI');
+    assert.ok(!leadTag.html.includes('DLV - order_id') && !leadTag.html.includes('DLV - value'), 'Lead não deve depender de variáveis DLV ausentes do manifesto');
 
     const newsTag = EXPECTED_META_TAGS.find(t => t.name === 'Meta Pixel - Conversão - Assinatura Newsletter');
     assert.ok(newsTag.html.includes('eventID: txId'), 'Subscribe deve incluir eventID para deduplicação CAPI');
@@ -1302,6 +1339,26 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
     const resWrongConsent = validateMetaHtmlTagFn(wrongConsentTag, sampleDef, sampleDef.fallbackTriggerId);
     assert.strictEqual(resWrongConsent.isAdherent, false);
     assert.ok(resWrongConsent.differences.some(d => d.includes('consentType deve exigir "ad_storage"')));
+  });
+
+  test('Meta Pixel readback: rejeita variável não persistida, PageView ausente, duplicata e trigger adicional', () => {
+    const def = EXPECTED_META_TAGS[0];
+    const validMetaTag = {
+      name: def.name,
+      type: 'html',
+      parameter: [{ type: 'template', key: 'html', value: def.html }],
+      firingTriggerId: ['21', '999'],
+      tagFiringOption: 'oncePerEvent',
+      consentSettings: { consentStatus: 'needed', consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] } }
+    };
+    const errors = validateMetaPixelReadback({
+      variables: [{ name: 'Constante - Meta Pixel ID', type: 'c', parameter: [{ key: 'value', value: 'WRONG_PIXEL_ID' }] }],
+      triggers: [{ triggerId: '21', name: def.triggerName }],
+      tags: [validMetaTag, { ...validMetaTag }]
+    });
+    assert.ok(errors.some(error => error.includes('Constante - Meta Pixel ID') && error.includes('diverge')));
+    assert.ok(errors.some(error => error.includes('Facebook Pixel - PageView') && error.includes('exatamente uma vez')));
+    assert.ok(errors.some(error => error.includes(def.name) && error.includes('exatamente uma vez')));
   });
 
   await testAsync('Setup Meta Pixel: Rollback transacional compensatório desfaz mutações se erro ocorrer durante a criação', async () => {
