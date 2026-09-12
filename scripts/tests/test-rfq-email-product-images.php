@@ -10,9 +10,11 @@
  * 5. Produtos sem imagem degradando para placeholder.
  * 6. Imagem fonte ausente em disco degradando para fallback original.
  * 7. Resiliência a entradas anômalas (PHP_INT_MAX, números negativos, strings) sem ValueError.
- * 8. Probe de falha de permissão de escrita/IO degradando com segurança para fallback.
- * 9. Filtro CSS do cabeçalho injetando regras de 150px centralizadas.
- * 10. Validação do script de manutenção (bloqueio web e help CLI).
+ * 8. Probe de falha de permissão de escrita/IO degradando estritamente para fallback original.
+ * 9. Probe de cache corrompido (1 byte) com mtime recente: rejeição estrita e regeneração íntegra.
+ * 10. Probe de cache corrompido sem possibilidade de regeneração: degradação estrita para fallback.
+ * 11. Filtro CSS do cabeçalho injetando regras de 150px centralizadas.
+ * 12. Execução real em subprocessos CLI do script de manutenção (bloqueio require, flag desconhecida, help e fail-closed).
  */
 
 set_error_handler( function( $errno, $errstr, $errfile, $errline ) {
@@ -88,6 +90,8 @@ mkdir( $test_dir, 0777, true );
 
 $source_trans_file = $test_dir . '/source_trans.png';
 $source_rect_file  = $test_dir . '/source_rect.png';
+$source_broken_file = $test_dir . '/source_broken.png';
+file_put_contents( $source_broken_file, 'INVALID_PNG_DATA' );
 
 // Imagem 1: 100x50 com fundo transparente e miolo azul
 $im1 = imagecreatetruecolor( 100, 50 );
@@ -121,6 +125,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 $GLOBALS['wp_mock_attachments'] = array(
 	101 => $source_trans_file,
 	102 => $source_rect_file,
+	103 => $source_broken_file,
 	999 => $test_dir . '/non_existent_file.png', // Arquivo inexistente
 );
 
@@ -220,6 +225,7 @@ $GLOBALS['wp_mock_products'] = array(
 	3 => new WC_Product( 3, 0, 'variation', 1 ), // Variação herdando do produto 1
 	4 => new WC_Product( 4, 0, 'simple', 0 ),    // Sem imagem
 	5 => new WC_Product( 5, 999, 'simple', 0 ),  // Imagem inexistente em disco
+	6 => new WC_Product( 6, 103, 'simple', 0 ),  // Imagem corrompida em disco
 );
 
 if ( ! function_exists( 'wc_get_product' ) ) {
@@ -333,6 +339,11 @@ $prod5 = wc_get_product( 5 );
 $url5  = uonix_get_email_product_image_url( $prod5, 300 );
 rfq_test_assert( 'https://uonix.com.br/wp-content/uploads/original-999.png' === $url5, 'Arquivo fonte ausente em disco degrada graciosamente para fallback original' );
 
+// Produto com anexo com dados corrompidos (não é imagem válida)
+$prod6 = wc_get_product( 6 );
+$url6  = uonix_get_email_product_image_url( $prod6, 300 );
+rfq_test_assert( 'https://uonix.com.br/wp-content/uploads/original-103.png' === $url6, 'Arquivo fonte corrompido degrada graciosamente para fallback original sem falhar' );
+
 // Produto inválido / nulo
 $url_invalid = uonix_get_email_product_image_url( null );
 rfq_test_assert( '' === $url_invalid, 'Produto inválido retorna string vazia sem lançar erro' );
@@ -351,12 +362,36 @@ $url_str = uonix_get_email_product_image_url( $prod1, 'tamanho_invalido' );
 rfq_test_assert( false !== strpos( $url_str, 'email-thumb-101-300x300.jpg' ), 'Tamanho em string inválida é normalizado com segurança para 300' );
 
 // -----------------------------------------------------------------------------
-// 8. Probe de Falha de Permissão / IO (Fallback Seguro)
+// 8. Probe de Cache Corrompido (1 byte / inválido)
 // -----------------------------------------------------------------------------
-echo "\n7. Testando probe de falha de I/O e destino somente-leitura...\n";
+echo "\n7. Testando rejeição e regeneração de cache corrompido (1 byte)...\n";
+$corrupt_cache_file = $test_dir . '/email-thumbs/email-thumb-101-350x350.jpg';
+file_put_contents( $corrupt_cache_file, 'X' );
+touch( $corrupt_cache_file, time() + 3600 ); // Mtime posterior ao da fonte
+
+// O helper DEVE rejeitar o cache de 1 byte (getimagesize falha) e regenerar com sucesso
+$url_regenerated = uonix_get_email_product_image_url( $prod1, 350 );
+rfq_test_assert( false !== strpos( $url_regenerated, 'email-thumb-101-350x350.jpg' ), 'URL da miniatura regenerada retornada após rejeição do cache corrompido' );
+rfq_test_assert( filesize( $corrupt_cache_file ) > 1000, 'Arquivo de cache corrompido de 1 byte foi regenerado e possui tamanho válido (>1KB)' );
+$regen_info = @getimagesize( $corrupt_cache_file );
+rfq_test_assert( is_array( $regen_info ) && 350 === $regen_info[0] && 350 === $regen_info[1] && 'image/jpeg' === $regen_info['mime'], 'Arquivo regenerado é um JPEG válido de 350x350' );
+
+// Caso B: Cache corrompido onde a regeneração NÃO é possível (fonte quebrada):
+// Deve retornar estritamente a URL de fallback original e NUNCA a URL da miniatura de 1 byte
+$corrupt_cache_file6 = $test_dir . '/email-thumbs/email-thumb-103-300x300.jpg';
+file_put_contents( $corrupt_cache_file6, 'Z' );
+touch( $corrupt_cache_file6, time() + 3600 );
+
+$url_corrupt_fallback = uonix_get_email_product_image_url( $prod6, 300 );
+rfq_test_assert( 'https://uonix.com.br/wp-content/uploads/original-103.png' === $url_corrupt_fallback, 'Cache corrompido com falha de regeneração retorna estritamente a URL de fallback' );
+rfq_test_assert( false === strpos( $url_corrupt_fallback, 'email-thumbs' ), 'URL de miniatura inválida NUNCA é retornada se o cache estiver corrompido' );
+
+// -----------------------------------------------------------------------------
+// 9. Probe de Falha de Permissão / IO (Fallback Estrito)
+// -----------------------------------------------------------------------------
+echo "\n8. Testando probe de falha de I/O e destino somente-leitura...\n";
 $readonly_dir = $test_dir . '/readonly-test';
 mkdir( $readonly_dir, 0777, true );
-$bad_upload_dir = $readonly_dir;
 
 // Mock temporário de upload dir apontando para diretório não gravável
 $orig_test_dir = $test_dir;
@@ -364,10 +399,11 @@ $test_dir      = $readonly_dir;
 chmod( $readonly_dir, 0555 ); // Apenas leitura
 
 $prod1_io_test = wc_get_product( 1 );
-$url_io = uonix_get_email_product_image_url( $prod1_io_test, 250 ); // Tamanho não cacheado (250)
+$url_io = uonix_get_email_product_image_url( $prod1_io_test, 280 ); // Tamanho não cacheado (280)
 
-// Deve degradar para a URL original sem estourar erro fatal
-rfq_test_assert( false !== strpos( $url_io, 'original-101.png' ) || false !== strpos( $url_io, 'email-thumbs' ), 'Falha de I/O em disco degrada com integridade para fallback' );
+// Deve degradar estritamente para a URL original e NUNCA retornar a URL de email-thumbs
+rfq_test_assert( 'https://uonix.com.br/wp-content/uploads/original-101.png' === $url_io, 'Falha de I/O em disco retorna estritamente a URL original de fallback' );
+rfq_test_assert( false === strpos( $url_io, 'email-thumbs' ), 'Falha de I/O NUNCA retorna URL de miniatura não gravada' );
 
 // Restaura permissão para limpeza
 chmod( $readonly_dir, 0777 );
@@ -375,9 +411,9 @@ chmod( $readonly_dir, 0777 );
 $test_dir = $orig_test_dir;
 
 // -----------------------------------------------------------------------------
-// 9. Validação do Filtro CSS do Cabeçalho
+// 10. Validação do Filtro CSS do Cabeçalho
 // -----------------------------------------------------------------------------
-echo "\n8. Validando filtro de CSS para o cabeçalho...\n";
+echo "\n9. Validando filtro de CSS para o cabeçalho...\n";
 rfq_test_assert( isset( $GLOBALS['uonix_test_filters']['woocommerce_email_styles'] ), 'Filtro woocommerce_email_styles registrado' );
 
 $css = '';
@@ -389,21 +425,54 @@ rfq_test_assert( false !== strpos( $css, 'width: 150px !important' ), 'CSS cont�
 rfq_test_assert( false !== strpos( $css, 'text-align: center' ), 'CSS contém centralização de imagem' );
 
 // -----------------------------------------------------------------------------
-// 10. Validação do Script de Manutenção (generate-prod-email-thumbs.php)
+// 11. Execução Real de Subprocessos CLI do Script de Manutenção
 // -----------------------------------------------------------------------------
-echo "\n9. Validando conformidade do script de manutenção...\n";
-$maint_code = file_get_contents( $maintenance_file );
-rfq_test_assert( false !== strpos( $maint_code, "php_sapi_name() !== 'cli'" ), 'Script de manutenção bloqueia execução não-CLI' );
-rfq_test_assert( false !== strpos( $maint_code, "--execute" ), 'Script de manutenção suporta flag --execute' );
-rfq_test_assert( false !== strpos( $maint_code, "--dry-run" ), 'Script de manutenção suporta modo seguro --dry-run' );
-rfq_test_assert( false !== strpos( $maint_code, "filesize( \$dest_file ) > 0" ), 'Script de manutenção valida integridade física do arquivo em disco' );
+echo "\n10. Validando comportamento em subprocessos CLI reais (generate-prod-email-thumbs.php)...\n";
+
+// Subprocesso A: Inclusão acidental via require não executa o corpo nem muta disco
+$cmd_require = sprintf( 'php -r %s', escapeshellarg( "require '{$maintenance_file}'; echo 'REQUIRE_BLOCKED_OK';" ) );
+$out_require = shell_exec( $cmd_require );
+rfq_test_assert( false !== strpos( (string) $out_require, 'REQUIRE_BLOCKED_OK' ), 'Inclusão via require é bloqueada sem executar o loop principal' );
+
+// Subprocesso B: Flag desconhecida é rejeitada categoricamente com exit code 1
+$desc = array(
+	0 => array( 'pipe', 'r' ),
+	1 => array( 'pipe', 'w' ),
+	2 => array( 'pipe', 'w' ),
+);
+$proc_bad_flag = proc_open( "php '{$maintenance_file}' --flag-invalida", $desc, $pipes );
+$bad_flag_stderr = stream_get_contents( $pipes[2] );
+fclose( $pipes[0] );
+fclose( $pipes[1] );
+fclose( $pipes[2] );
+$status_bad_flag = proc_close( $proc_bad_flag );
+rfq_test_assert( 1 === $status_bad_flag, 'Invocação com flag desconhecida encerra com código de saída 1 (fail-closed)' );
+rfq_test_assert( false !== strpos( $bad_flag_stderr, 'Opção desconhecida' ), 'Invocação com flag desconhecida emite mensagem de erro no STDERR' );
+
+// Subprocesso C: Flag --help encerra com exit code 0 e texto informativo
+$proc_help = proc_open( "php '{$maintenance_file}' --help", $desc, $pipes );
+$help_stdout = stream_get_contents( $pipes[1] );
+fclose( $pipes[0] );
+fclose( $pipes[1] );
+fclose( $pipes[2] );
+$status_help = proc_close( $proc_help );
+rfq_test_assert( 0 === $status_help, 'Invocação com --help encerra com código de saída 0' );
+rfq_test_assert( false !== strpos( $help_stdout, '--dry-run' ) && false !== strpos( $help_stdout, '--execute' ), 'Texto de ajuda documenta --dry-run e --execute' );
+
+// Subprocesso D: Chamada sem flags (dry-run padrão) não possui mutação autorizada
+$maint_source = file_get_contents( $maintenance_file );
+rfq_test_assert( false !== strpos( $maint_source, "wp_upload_dir( null, false )" ), 'generate-prod-email-thumbs.php usa wp_upload_dir com create_dir=false' );
+rfq_test_assert( false !== strpos( $maint_source, "is_valid_jpeg" ) && false !== strpos( $maint_source, "CACHE INVÁLIDO/CORROMPIDO" ), 'generate-prod-email-thumbs.php valida integridade binária do cache e rejeita 1 byte' );
 
 // Limpeza de arquivos temporários do teste
 @unlink( $dest_file1 );
 @unlink( $dest_file2 );
+@unlink( $corrupt_cache_file );
+@unlink( $corrupt_cache_file6 );
 @rmdir( $test_dir . '/email-thumbs' );
 @unlink( $source_trans_file );
 @unlink( $source_rect_file );
+@unlink( $source_broken_file );
 @rmdir( $test_dir );
 
 echo "\n========================================================================\n";

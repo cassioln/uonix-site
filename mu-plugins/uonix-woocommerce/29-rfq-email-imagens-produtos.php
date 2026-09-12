@@ -68,9 +68,14 @@ function uonix_get_email_product_image_url( $product, $size = 300 ) {
 	$dest_path = $cache_dir . '/' . $filename;
 	$dest_url  = $cache_url . '/' . $filename;
 
-	// Se o arquivo em cache já existe, tem tamanho válido (>0) e é mais recente que a imagem fonte, retorna imediatamente
-	if ( file_exists( $dest_path ) && filesize( $dest_path ) > 0 && filemtime( $dest_path ) >= filemtime( $source_path ) ) {
-		return $dest_url;
+	// Validação estrita de integridade do cache existente:
+	// O arquivo deve existir, ter tamanho razoável (>100 bytes), mtime >= imagem fonte e ser um JPEG válido via getimagesize().
+	// Se for um arquivo corrompido (ex.: 1 byte ou truncado), a checagem falha e força a regeneração ou fallback.
+	if ( file_exists( $dest_path ) && filesize( $dest_path ) > 100 && filemtime( $dest_path ) >= filemtime( $source_path ) ) {
+		$cache_img_info = @getimagesize( $dest_path );
+		if ( is_array( $cache_img_info ) && ! empty( $cache_img_info[0] ) && ! empty( $cache_img_info[1] ) && ( $cache_img_info[2] === IMAGETYPE_JPEG || ( isset( $cache_img_info['mime'] ) && $cache_img_info['mime'] === 'image/jpeg' ) ) ) {
+			return $dest_url;
+		}
 	}
 
 	// Garante que o diretório de cache existe
@@ -116,13 +121,19 @@ function uonix_get_email_product_image_url( $product, $size = 300 ) {
 							$temp_path = $dest_path . '.' . uniqid( 'tmp_', true ) . '.tmp';
 							$written   = @imagejpeg( $canvas, $temp_path, 90 );
 
-							if ( true === $written && file_exists( $temp_path ) && filesize( $temp_path ) > 0 ) {
-								if ( @rename( $temp_path, $dest_path ) && file_exists( $dest_path ) && filesize( $dest_path ) > 0 ) {
-									if ( PHP_VERSION_ID < 80500 ) {
-										imagedestroy( $canvas );
-										imagedestroy( $im );
+							if ( true === $written && file_exists( $temp_path ) && filesize( $temp_path ) > 100 ) {
+								$temp_info = @getimagesize( $temp_path );
+								if ( is_array( $temp_info ) && ! empty( $temp_info[0] ) && ! empty( $temp_info[1] ) && ( $temp_info[2] === IMAGETYPE_JPEG || ( isset( $temp_info['mime'] ) && $temp_info['mime'] === 'image/jpeg' ) ) ) {
+									if ( @rename( $temp_path, $dest_path ) && file_exists( $dest_path ) && filesize( $dest_path ) > 100 ) {
+										$dest_info = @getimagesize( $dest_path );
+										if ( is_array( $dest_info ) && ! empty( $dest_info[0] ) && ! empty( $dest_info[1] ) && ( $dest_info[2] === IMAGETYPE_JPEG || ( isset( $dest_info['mime'] ) && $dest_info['mime'] === 'image/jpeg' ) ) ) {
+											if ( PHP_VERSION_ID < 80500 ) {
+												imagedestroy( $canvas );
+												imagedestroy( $im );
+											}
+											return $dest_url;
+										}
 									}
-									return $dest_url;
 								}
 							}
 						}
