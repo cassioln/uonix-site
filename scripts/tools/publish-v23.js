@@ -1,26 +1,16 @@
-const { gtmRequest } = require('./gtm-client.js');
+/**
+ * [DEPRECATED / FAIL-CLOSED] Script legado de publicação pontual v23 desativado.
+ *
+ * Publicações automáticas em workspaces dinâmicos sem parâmetros e sem confirmação
+ * foram permanentemente bloqueadas por governança analytics-as-code.
+ *
+ * Para sincronização canônica segura do container, utilize:
+ *   node scripts/tools/sync-canonical-gtm.js --workspace-id=<id> [--apply]
+ */
 
-async function publish() {
-  const base = '/accounts/6348960683/containers/248910884';
-  const wsList = await gtmRequest('GET', `${base}/workspaces`);
-  const wsId = wsList.workspace[0].workspaceId;
-  console.log('Using workspace:', wsId);
-
-  console.log('1. Criando versão a partir do Workspace...');
-  const res = await gtmRequest('POST', `${base}/workspaces/${wsId}:create_version`, {
-    name: 'v23 - Google Ads Microconversoes Carrinho e Checkout',
-    notes: 'Ajusta acionadores de Iniciar Finalização (domReady no checkout /finalizar-orcamento/) e Adicionar ao Carrinho (clique CSS selector + formSubmit).'
-  });
-
-  const versionId = res.containerVersion?.containerVersionId;
-  console.log(`Versão criada: ${versionId} (${res.containerVersion?.name})`);
-
-  console.log('2. Publicando versão live...');
-  const pubRes = await gtmRequest('POST', `${base}/versions/${versionId}:publish`);
-  console.log('Publicação concluída! Sucesso:', pubRes.compilerError ? 'com erro' : 'OK');
-}
-
-publish().catch(err => {
-  console.error('ERRO na publicação:', err);
-  process.exit(1);
-});
+console.error(
+  '[FAIL-CLOSED] O script "publish-v23.js" é legado e foi desativado por governança de segurança. ' +
+  'Ele não deve ser executado para evitar publicações acidentais no container live. ' +
+  'Utilize "node scripts/tools/sync-canonical-gtm.js --workspace-id=<id> [--apply]".'
+);
+process.exit(1);

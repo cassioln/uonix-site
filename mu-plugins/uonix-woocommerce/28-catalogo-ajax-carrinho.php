@@ -485,7 +485,13 @@ function uonix_loop_cart_scripts() {
 							window.syncUonixCart();
 						}
 						$(document.body).trigger('wc_fragments_refreshed');
-						$(document.body).trigger(actionType === 'remove' ? 'removed_from_cart' : 'added_to_cart', [res.data.fragments, res.data.cart_hash]);
+						if (actionType === 'remove') {
+							$(document.body).trigger('removed_from_cart', [res.data.fragments, res.data.cart_hash]);
+						} else if (actionType === 'decrement') {
+							$(document.body).trigger('uonix_cart_decremented', [res.data.fragments, res.data.cart_hash]);
+						} else if (actionType === 'add') {
+							$(document.body).trigger('added_to_cart', [res.data.fragments, res.data.cart_hash, $wrap, { actionType: 'add' }]);
+						}
 					} else {
 						// Em caso de erro, reverte para o estado anterior
 						updateControlState($wrap, currentQty);

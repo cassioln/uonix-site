@@ -341,6 +341,9 @@ jobs:
       - name: Test GTM conversion datalayer listener
         run: node scripts/tests/test-gtm-datalayer-listener.js
 
+      - name: Test GTM microconversions behavioural runtime
+        run: node scripts/tests/test-gtm-microconversoes-comportamental.js
+
       - name: Test email migration passfile tooling
         run: python3 -m unittest discover --start-directory scripts/email-migration --pattern 'test_*.py' --verbose
 

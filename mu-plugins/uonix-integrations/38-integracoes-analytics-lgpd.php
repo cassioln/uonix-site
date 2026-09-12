@@ -1275,21 +1275,78 @@ function uonix_render_analytics_rfq_conversion( $order_id ) {
     (function() {
         var orderId = <?php echo (int) $uonix_order_id; ?>;
         var newsDedupeKey = 'uonix_news_rfq_' + orderId;
-        try {
-            if (window.sessionStorage && window.sessionStorage.getItem(newsDedupeKey)) {
+
+        function hasMarketingConsent() {
+            if (window._adoptMarketingGranted === true) {
+                return true;
+            }
+            if (Array.isArray(window.acceptedTags) && window.acceptedTags.indexOf('marketing') !== -1) {
+                return true;
+            }
+            try {
+                var raw = localStorage.getItem('adoptConsentMode');
+                if (raw) {
+                    var parsed = JSON.parse(raw);
+                    if (parsed && (parsed.marketing === true || parsed.ad_storage === 'granted')) {
+                        return true;
+                    }
+                }
+            } catch(e) {}
+            return false;
+        }
+
+        function emitirConversaoNewsletter() {
+            try {
+                if (window.sessionStorage && window.sessionStorage.getItem(newsDedupeKey)) {
+                    return;
+                }
+            } catch(e) {}
+
+            // Nao grava no sessionStorage nem consome a conversao antes do consentimento efetivo de marketing
+            if (!hasMarketingConsent()) {
                 return;
             }
-            if (window.sessionStorage) {
-                window.sessionStorage.setItem(newsDedupeKey, '1');
-            }
-        } catch(e) {}
+
+            try {
+                if (window.sessionStorage) {
+                    window.sessionStorage.setItem(newsDedupeKey, '1');
+                }
+            } catch(e) {}
+
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+                'event': 'uonix_assinatura_newsletter',
+                'origem_conversao': 'woocommerce_order_received',
+                'order_id': orderId,
+                'transaction_id': 'uonix-rfq-news-' + orderId
+            });
+        }
+
+        // 1. Emissao imediata se consentimento ja estiver ativo
+        emitirConversaoNewsletter();
+
+        // 2. Reemissao na concessao tardia de consentimento
+        function onConsentGranted() {
+            emitirConversaoNewsletter();
+        }
+
+        window.addEventListener('adopt-accept-marketing', onConsentGranted, { passive: true });
+
+        // Escuta atualizacoes de consentimento no dataLayer
         window.dataLayer = window.dataLayer || [];
-        window.dataLayer.push({
-            'event': 'uonix_assinatura_newsletter',
-            'origem_conversao': 'woocommerce_order_received',
-            'order_id': orderId,
-            'transaction_id': 'uonix-rfq-news-' + orderId
-        });
+        var origPush = window.dataLayer.push;
+        window.dataLayer.push = function() {
+            var res = origPush.apply(this, arguments);
+            for (var i = 0; i < arguments.length; i++) {
+                var item = arguments[i];
+                if (item && (item.event === 'adopt_consent_updated' || item.event === 'adopt-accept-marketing')) {
+                    if (item.adopt_marketing === true || (item.accepted_tags && item.accepted_tags.indexOf('marketing') !== -1)) {
+                        emitirConversaoNewsletter();
+                    }
+                }
+            }
+            return res;
+        };
     })();
     </script>
     <?php endif; ?>
@@ -1299,9 +1356,33 @@ function uonix_render_analytics_rfq_conversion( $order_id ) {
 add_action( 'woocommerce_thankyou', 'uonix_render_analytics_rfq_conversion', 10, 1 );
 
 /**
+ * UONIX: Captura adicoes confirmadas ao carrinho via fluxo padrao (nao-AJAX) do WooCommerce.
+ */
+if ( ! function_exists( 'uonix_record_standard_add_to_cart' ) ) {
+function uonix_record_standard_add_to_cart( $cart_item_key, $product_id, $quantity ) {
+    if ( ( defined( 'DOING_AJAX' ) && DOING_AJAX ) || ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() ) ) {
+        return;
+    }
+    if ( function_exists( 'WC' ) && WC()->session ) {
+        $pending = WC()->session->get( 'uonix_pending_standard_add_to_cart', array() );
+        if ( ! is_array( $pending ) ) {
+            $pending = array();
+        }
+        $pending[] = array(
+            'product_id' => absint( $product_id ),
+            'quantity'   => max( 1, absint( $quantity ) ),
+            'timestamp'  => time(),
+        );
+        WC()->session->set( 'uonix_pending_standard_add_to_cart', $pending );
+    }
+}
+}
+add_action( 'woocommerce_add_to_cart', 'uonix_record_standard_add_to_cart', 10, 3 );
+
+/**
  * UONIX: Emissao e listeners das micro-conversoes do funil.
  * - Iniciar finalizacao de compra no checkout WooCommerce (/finalizar-orcamento/).
- * - Adicionar ao carrinho / orcamento via evento confirmado added_to_cart.
+ * - Adicionar ao carrinho / orcamento via evento confirmado added_to_cart (AJAX) ou flag confirmada server-side (nao-AJAX).
  * - Contato via formulario institucional/suporte (assunto != orcamento).
  * - Assinatura de newsletter em formularios Fluent Forms.
  */
@@ -1318,6 +1399,28 @@ function uonix_render_analytics_microconversions_footer() {
             window.dataLayer.push({
                 'event': 'uonix_iniciar_finalizacao',
                 'origem_conversao': 'woocommerce_checkout'
+            });
+        })();
+        </script>
+    <?php endif; ?>
+
+    <?php
+    // Adicao ao carrinho nao-AJAX confirmada via hook server-side
+    $has_standard_add = false;
+    if ( function_exists( 'WC' ) && WC()->session ) {
+        $pending_adds = WC()->session->get( 'uonix_pending_standard_add_to_cart', array() );
+        if ( ! empty( $pending_adds ) && is_array( $pending_adds ) ) {
+            WC()->session->__unset( 'uonix_pending_standard_add_to_cart' );
+            $has_standard_add = true;
+        }
+    }
+    if ( $has_standard_add ) : ?>
+        <script id="uonix-conversao-adicionar-carrinho-server-datalayer">
+        (function() {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+                'event': 'uonix_adicionar_ao_carrinho',
+                'origem_conversao': 'woocommerce_add_to_cart_standard'
             });
         })();
         </script>
@@ -1343,7 +1446,12 @@ function uonix_render_analytics_microconversions_footer() {
 
         // Listener nativo do WooCommerce: dispara exclusivamente apos confirmacao AJAX da adicao ao carrinho
         if (window.jQuery) {
-            window.jQuery(document.body).on('added_to_cart', function() {
+            window.jQuery(document.body).on('added_to_cart', function(event, fragments, cart_hash, button, extra) {
+                // Se algum argumento explicito trouxer tipo diferente de 'add' (ex: decrement ou remove), ignorar
+                var options = (extra && typeof extra === 'object') ? extra : ((button && typeof button === 'object' && button.actionType) ? button : null);
+                if (options && options.actionType && options.actionType !== 'add') {
+                    return;
+                }
                 dispararAdicionarCarrinho('ajax_added_to_cart');
             });
         }

@@ -1,13 +1,13 @@
 {
   "exportFormatVersion": 2,
-  "exportTime": "2026-09-12T06:11:03.513Z",
+  "exportTime": "2026-09-12T14:06:36.671Z",
   "containerVersion": {
-    "path": "accounts/6348960683/containers/248910884/versions/30",
+    "path": "accounts/6348960683/containers/248910884/versions/31",
     "accountId": "6348960683",
     "containerId": "248910884",
-    "containerVersionId": "30",
-    "name": "v30 - Governança Canônica Microconversões e Consentimento Estrito",
-    "description": "Tags awct com ad_storage needed, remoção da Tag 48 redundante, trigger restrito a added_to_cart e negate:false explícito.",
+    "containerVersionId": "31",
+    "name": "v31 - Governança Estrita Deduplicação Newsletter e Carrinho",
+    "description": "Adiciona orderId: {{DLV - transaction_id}} na Tag 47 para deduplicação server-side e sincroniza regras AdOpt/negate:false.",
     "container": {
       "path": "accounts/6348960683/containers/248910884",
       "accountId": "6348960683",
@@ -444,6 +444,11 @@
         "parameter": [
           {
             "type": "template",
+            "key": "orderId",
+            "value": "{{DLV - transaction_id}}"
+          },
+          {
+            "type": "template",
             "key": "conversionId",
             "value": "{{Constante - Google Ads ID}}"
           },
@@ -453,7 +458,7 @@
             "value": "{{Constante - Label Assinatura Newsletter}}"
           }
         ],
-        "fingerprint": "1789193346513",
+        "fingerprint": "1789221798455",
         "firingTriggerId": [
           "46"
         ],
@@ -1398,7 +1403,7 @@
         "name": "Form ID"
       }
     ],
-    "fingerprint": "1789193460444",
-    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/30?apiLink=version"
+    "fingerprint": "1789221981119",
+    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/31?apiLink=version"
   }
 }

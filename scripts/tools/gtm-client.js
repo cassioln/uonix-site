@@ -106,4 +106,67 @@ async function gtmRequest(method, path, data = null) {
   });
 }
 
-module.exports = { gtmRequest };
+/**
+ * Obtém e valida explicitamente o Workspace ID para impedir mutações cegas em workspaces incorretos.
+ * Exige --workspace-id=<id> ou GTM_WORKSPACE_ID.
+ */
+async function getVerifiedWorkspaceId(accountId = '6348960683', containerId = '248910884') {
+  let targetWsId = null;
+
+  for (let i = 0; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg.startsWith('--workspace-id=')) {
+      targetWsId = arg.split('=')[1].trim();
+    } else if (arg === '-w' || arg === '--workspace-id') {
+      targetWsId = (process.argv[i + 1] || '').trim();
+    }
+  }
+
+  if (!targetWsId && process.env.GTM_WORKSPACE_ID) {
+    targetWsId = process.env.GTM_WORKSPACE_ID.trim();
+  }
+
+  if (!targetWsId) {
+    throw new Error(
+      '[FAIL-CLOSED] Workspace ID obrigatório não fornecido. ' +
+      'Para evitar mutações cegas em workspaces incorretos, especifique explicitamente via --workspace-id=<id> ' +
+      'ou defina a variável de ambiente GTM_WORKSPACE_ID.'
+    );
+  }
+
+  const base = `/accounts/${accountId}/containers/${containerId}`;
+  const wsList = await gtmRequest('GET', base + '/workspaces');
+  const available = wsList.workspace || [];
+  const found = available.find(w => String(w.workspaceId) === String(targetWsId));
+
+  if (!found) {
+    const availableIds = available.map(w => `${w.workspaceId} ("${w.name}")`).join(', ');
+    throw new Error(
+      `[FAIL-CLOSED] Workspace '${targetWsId}' não encontrado no container ${containerId}. ` +
+      `Workspaces disponíveis: [${availableIds}]`
+    );
+  }
+
+  return found;
+}
+
+function isApplyRequested() {
+  return process.argv.includes('--apply');
+}
+
+function isPublishRequested() {
+  return process.argv.includes('--publish');
+}
+
+function isPublishConfirmed() {
+  return process.argv.includes('--confirm-publish');
+}
+
+module.exports = {
+  gtmRequest,
+  getVerifiedWorkspaceId,
+  isApplyRequested,
+  isPublishRequested,
+  isPublishConfirmed
+};
+

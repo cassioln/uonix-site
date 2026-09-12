@@ -175,7 +175,7 @@ foreach ( $expected_tag_contract as $expected_tag_id => $contract ) {
 // 1.0 Consistencia do snapshot canonico.
 $version_id = isset( $version['containerVersionId'] ) ? (string) $version['containerVersionId'] : '';
 gtm_assert( '' !== $version_id, 'Manifesto declara containerVersionId' );
-gtm_assert( '30' === $version_id, 'Manifesto canonico aponta para a versao live 30 auditada' );
+gtm_assert( '31' === $version_id, 'Manifesto canonico aponta para a versao live 31 auditada' );
 gtm_assert(
 	isset( $version['path'] ) && preg_match( '#/versions/' . preg_quote( $version_id, '#' ) . '$#', $version['path'] ),
 	'Path do manifesto aponta para o mesmo containerVersionId'
@@ -507,15 +507,26 @@ if ( ! class_exists( 'WC_Order' ) ) {
 	class WC_Order {
 		protected $status;
 		protected $order_key;
-		public function __construct( $status = 'gplsquote-req', $order_key = 'wc_order_key' ) {
-			$this->status = $status;
+		protected $meta = array();
+		public function __construct( $status = 'gplsquote-req', $order_key = 'wc_order_key', $meta = array() ) {
+			$this->status    = $status;
 			$this->order_key = $order_key;
+			$this->meta      = $meta;
 		}
 		public function get_status() {
 			return $this->status;
 		}
 		public function get_order_key() {
 			return $this->order_key;
+		}
+		public function get_meta( $key, $single = true ) {
+			if ( isset( $this->meta[ $key ] ) ) {
+				return $this->meta[ $key ];
+			}
+			return $single ? '' : array();
+		}
+		public function set_meta( $key, $value ) {
+			$this->meta[ $key ] = $value;
 		}
 	}
 }
@@ -610,8 +621,35 @@ gtm_assert(
 	'order-received emite transaction_id estavel e sem PII derivado do pedido'
 );
 gtm_assert(
-	false === strpos( $output_rfq, 'sessionStorage' ) && false === strpos( $output_rfq, 'localStorage' ),
-	'order-received nao grava marcador client-side antes da elegibilidade por consentimento'
+	false === strpos( $output_rfq, 'uonix-conversao-carrinho-newsletter-datalayer' ),
+	'order-received sem opt-in de newsletter NAO emite conversao de newsletter'
+);
+
+// 2.2b Pedido com opt-in de newsletter (_billing_newsletters = yes)
+$GLOBALS['uonix_test_orders'][11029] = new WC_Order( 'gplsquote-req', 'wc_order_key', array( '_billing_newsletters' => 'yes' ) );
+$GLOBALS['uonix_test_query_vars']['order-received'] = 11029;
+$_GET['key'] = 'wc_order_key';
+$output_rfq_news = gtm_render_rfq_conversion( 11029 );
+
+gtm_assert(
+	false !== strpos( $output_rfq_news, 'uonix-conversao-carrinho-newsletter-datalayer' ),
+	'order-received com opt-in de newsletter emite uonix-conversao-carrinho-newsletter-datalayer'
+);
+gtm_assert(
+	false !== strpos( $output_rfq_news, "'event': 'uonix_assinatura_newsletter'" ),
+	'order-received com opt-in emite o evento uonix_assinatura_newsletter'
+);
+gtm_assert(
+	false !== strpos( $output_rfq_news, "'transaction_id': 'uonix-rfq-news-' + orderId" ),
+	'order-received emite transaction_id exclusivo para newsletter no Google Ads'
+);
+gtm_assert(
+	false !== strpos( $output_rfq_news, 'hasMarketingConsent' ),
+	'Script de newsletter condiciona a execucao e gravacao no sessionStorage ao consentimento de marketing'
+);
+gtm_assert(
+	false !== strpos( $output_rfq_news, 'adopt-accept-marketing' ),
+	'Script de newsletter escuta adopt-accept-marketing para concessao tardia de consentimento'
 );
 
 // 2.3 Em pagina order-received com status com prefixo 'wc-gplsquote-req'
@@ -709,6 +747,60 @@ $output_invalid_obj = gtm_render_rfq_conversion( 12003 );
 gtm_assert(
 	false === strpos( $output_invalid_obj, 'uonix-conversao-carrinho-datalayer' ),
 	'order-received com objeto invalido sem get_status NAO emite conversao (fail-closed)'
+);
+
+// 2.10 Adicao ao carrinho padrao nao-AJAX
+class Uonix_Test_WC_Session {
+	private $data = array();
+	public function get( $key, $default = null ) {
+		return isset( $this->data[ $key ] ) ? $this->data[ $key ] : $default;
+	}
+	public function set( $key, $value ) {
+		$this->data[ $key ] = $value;
+	}
+	public function __unset( $key ) {
+		unset( $this->data[ $key ] );
+	}
+}
+
+class Uonix_Test_WC {
+	public $session;
+	public function __construct() {
+		$this->session = new Uonix_Test_WC_Session();
+	}
+}
+
+if ( ! function_exists( 'WC' ) ) {
+	function WC() {
+		global $uonix_test_wc_instance;
+		if ( ! isset( $uonix_test_wc_instance ) ) {
+			$uonix_test_wc_instance = new Uonix_Test_WC();
+		}
+		return $uonix_test_wc_instance;
+	}
+}
+
+uonix_record_standard_add_to_cart( 'item_123', 456, 2 );
+gtm_assert(
+	! empty( WC()->session->get( 'uonix_pending_standard_add_to_cart' ) ),
+	'uonix_record_standard_add_to_cart enfileira adicao na sessao do WooCommerce'
+);
+
+ob_start();
+uonix_render_analytics_microconversions_footer();
+$output_cart_standard = ob_get_clean();
+
+gtm_assert(
+	false !== strpos( $output_cart_standard, 'uonix-conversao-adicionar-carrinho-server-datalayer' ),
+	'Footer renderiza script de adicao ao carrinho para evento padrao nao-AJAX'
+);
+gtm_assert(
+	false !== strpos( $output_cart_standard, "'origem_conversao': 'woocommerce_add_to_cart_standard'" ),
+	'Evento server-side emite origem_conversao woocommerce_add_to_cart_standard'
+);
+gtm_assert(
+	empty( WC()->session->get( 'uonix_pending_standard_add_to_cart' ) ),
+	'Sessao e limpa apos emissao do evento nao-AJAX para evitar duplicacao'
 );
 
 // -----------------------------------------------------------------------------
