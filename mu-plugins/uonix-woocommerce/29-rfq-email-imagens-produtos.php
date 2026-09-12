@@ -104,13 +104,15 @@ function uonix_get_email_product_image_url( $product, $size = 300 ) {
 
 					imagejpeg( $canvas, $dest_path, 90 );
 
-					imagedestroy( $canvas );
-					imagedestroy( $im );
+					if ( PHP_VERSION_ID < 80500 ) {
+						imagedestroy( $canvas );
+						imagedestroy( $im );
+					}
 
 					if ( file_exists( $dest_path ) ) {
 						return $dest_url;
 					}
-				} else {
+				} elseif ( PHP_VERSION_ID < 80500 ) {
 					imagedestroy( $im );
 				}
 			}
