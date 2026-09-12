@@ -148,7 +148,7 @@ foreach ( $policies as $slug => $config ) {
 		echo "  [DRY-RUN] Seria atualizado o post ID {$post->ID} com o conteúdo canônico (" . strlen( $canonical_content ) . " bytes).\n\n";
 		$changes++;
 	} else {
-		// Modo APPLY: Backup prévio
+		// Modo APPLY: Backup prévio estritamente verificado
 		$backup_file = sprintf(
 			'%s/backup-%s-%d-%s.json',
 			$backup_dir,
@@ -164,8 +164,13 @@ foreach ( $policies as $slug => $config ) {
 			'timestamp'    => time(),
 			'date'         => date( 'c' ),
 		);
-		file_put_contents( $backup_file, json_encode( $backup_data, JSON_PRETTY_PRINT ) );
-		echo "  [BACKUP] Criado em: {$backup_file}\n";
+		$written = @file_put_contents( $backup_file, json_encode( $backup_data, JSON_PRETTY_PRINT ) );
+		if ( false === $written || ! file_exists( $backup_file ) || filesize( $backup_file ) === 0 ) {
+			echo "  [ERRO CRÍTICO] Falha ao criar arquivo de backup para o post ID {$post->ID}. Mutação abortada em fail-closed.\n\n";
+			$errors++;
+			continue;
+		}
+		echo "  [BACKUP VERIFICADO] Criado em: {$backup_file} (" . filesize( $backup_file ) . " bytes)\n";
 
 		// Aplica atualização garantindo integridade dos blocos Gutenberg/Kadence
 		if ( function_exists( 'kses_remove_filters' ) ) {
@@ -179,13 +184,26 @@ foreach ( $policies as $slug => $config ) {
 			kses_init_filters();
 		}
 
-		if ( is_wp_error( $update_result ) ) {
-			echo "  [ERRO] Falha ao atualizar post ID {$post->ID}: " . $update_result->get_error_message() . "\n\n";
+		if ( is_wp_error( $update_result ) || (int) $update_result <= 0 ) {
+			$err_msg = is_wp_error( $update_result ) ? $update_result->get_error_message() : 'Retorno inválido de wp_update_post';
+			echo "  [ERRO] Falha ao atualizar post ID {$post->ID}: {$err_msg}\n\n";
 			$errors++;
-		} else {
-			echo "  [SUCESSO] Post ID {$post->ID} atualizado com sucesso!\n\n";
-			$changes++;
+			continue;
 		}
+
+		// Readback Verificado: valida se o post gravado no banco reflete o conteúdo canônico
+		if ( function_exists( 'clean_post_cache' ) ) {
+			clean_post_cache( $post->ID );
+		}
+		$fresh_post = get_post( $post->ID );
+		if ( ! $fresh_post || false === strpos( $fresh_post->post_content, $config['check'] ) ) {
+			echo "  [ERRO CRÍTICO READBACK] Post ID {$post->ID} atualizado mas o readback falhou: chave obrigatória '{$config['check']}' não encontrada no banco!\n\n";
+			$errors++;
+			continue;
+		}
+
+		echo "  [SUCESSO & READBACK VERIFICADO] Post ID {$post->ID} atualizado e confirmado no banco!\n\n";
+		$changes++;
 	}
 }
 
@@ -202,6 +220,12 @@ echo "========================================================================\n
 
 if ( ! $UONIX_APPLY && $changes > 0 ) {
 	echo "\n🛡️  Modo DRY-RUN: Nenhuma alteração foi gravada.\n";
-	echo "Para aplicar de fato com backup prévio, execute:\n";
+	echo "Para aplicar de fato com backup prévio e readback verificado, execute:\n";
 	echo "  wp eval-file scripts/apply-legal-policies-production.php apply\n\n";
+}
+
+// Bloqueio Fail-Closed: se houver qualquer erro, encerra com código de saída 1
+if ( $errors > 0 ) {
+	echo "\n[FAIL-CLOSED] Execução finalizada com {$errors} erro(s). Abortando com código 1.\n";
+	exit( 1 );
 }

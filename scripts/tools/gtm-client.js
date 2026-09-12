@@ -150,6 +150,110 @@ async function getVerifiedWorkspaceId(accountId = '6348960683', containerId = '2
   return found;
 }
 
+function validateAwctTagContract(tag, expected) {
+  const diffs = [];
+  if (!tag) {
+    return { isAdherent: false, differences: ['Tag inexistente'] };
+  }
+  if (tag.type !== 'awct') {
+    diffs.push(`Tipo divergente: esperado "awct", encontrado "${tag.type}"`);
+  }
+  const expectedFiringOption = expected.tagFiringOption || 'oncePerEvent';
+  if (tag.tagFiringOption !== expectedFiringOption) {
+    diffs.push(`tagFiringOption divergente: esperado "${expectedFiringOption}", encontrado "${tag.tagFiringOption}"`);
+  }
+
+  // Verifica parâmetros
+  const params = tag.parameter || [];
+  if (expected.conversionId) {
+    const pId = params.find(p => p.key === 'conversionId')?.value;
+    if (pId !== expected.conversionId) {
+      diffs.push(`conversionId divergente: esperado "${expected.conversionId}", encontrado "${pId}"`);
+    }
+  }
+  if (expected.conversionLabel) {
+    const pLabel = params.find(p => p.key === 'conversionLabel')?.value;
+    if (pLabel !== expected.conversionLabel) {
+      diffs.push(`conversionLabel divergente: esperado "${expected.conversionLabel}", encontrado "${pLabel}"`);
+    }
+  }
+  if (expected.orderId) {
+    const pOrder = params.find(p => p.key === 'orderId')?.value;
+    if (pOrder !== expected.orderId) {
+      diffs.push(`orderId divergente: esperado "${expected.orderId}", encontrado "${pOrder}"`);
+    }
+  }
+
+  // Verifica consentSettings
+  if (!tag.consentSettings || tag.consentSettings.consentStatus !== 'needed') {
+    diffs.push(`consentStatus divergente: esperado "needed", encontrado "${tag.consentSettings?.consentStatus}"`);
+  }
+  const consentList = tag.consentSettings?.consentType?.list || [];
+  const consentValues = consentList.map(c => c.value);
+  if (consentValues.length !== 1 || consentValues[0] !== 'ad_storage') {
+    diffs.push(`consentType divergente: esperado estritamente ["ad_storage"], encontrado [${consentValues.join(', ')}]`);
+  }
+
+  // Verifica firingTriggerId
+  if (expected.firingTriggerId) {
+    const expectedTriggers = Array.isArray(expected.firingTriggerId) ? expected.firingTriggerId : [expected.firingTriggerId];
+    const currentTriggers = (tag.firingTriggerId || []).map(String);
+    const missing = expectedTriggers.filter(id => !currentTriggers.includes(String(id)));
+    if (missing.length > 0 || currentTriggers.length !== expectedTriggers.length) {
+      diffs.push(`firingTriggerId divergente: esperado [${expectedTriggers.join(', ')}], encontrado [${currentTriggers.join(', ')}]`);
+    }
+  }
+
+  return { isAdherent: diffs.length === 0, differences: diffs };
+}
+
+function validateCustomEventTriggerContract(trigger, expectedEvent) {
+  const diffs = [];
+  if (!trigger) {
+    return { isAdherent: false, differences: ['Trigger inexistente'] };
+  }
+  if (trigger.type !== 'customEvent') {
+    diffs.push(`Tipo de trigger divergente: esperado "customEvent", encontrado "${trigger.type}"`);
+  }
+
+  // Verifica customEventFilter
+  const cef = trigger.customEventFilter || [];
+  if (cef.length === 0) {
+    diffs.push('customEventFilter ausente');
+  } else {
+    for (const f of cef) {
+      if (f.negate !== false) {
+        diffs.push(`customEventFilter sem negate:false explícito (encontrado: ${f.negate})`);
+      }
+    }
+    const evtVal = cef[0]?.parameter?.find(p => p.key === 'arg1')?.value;
+    if (evtVal !== expectedEvent) {
+      diffs.push(`Evento customizado divergente: esperado "${expectedEvent}", encontrado "${evtVal}"`);
+    }
+  }
+
+  // Verifica filter (filtro de consentimento AdOpt)
+  const filters = trigger.filter || [];
+  if (filters.length === 0) {
+    diffs.push('Filtro de consentimento AdOpt ausente em trigger.filter');
+  } else {
+    for (const f of filters) {
+      if (f.negate !== false) {
+        diffs.push(`filter sem negate:false explícito (encontrado: ${f.negate})`);
+      }
+    }
+    const hasMarketing = filters.some(f =>
+      f.parameter?.some(p => p.value?.includes('Tags_Aceitas_AdOpt')) &&
+      f.parameter?.some(p => p.value === 'marketing')
+    );
+    if (!hasMarketing) {
+      diffs.push('Filtro AdOpt de marketing (Tags_Aceitas_AdOpt contendo "marketing") ausente');
+    }
+  }
+
+  return { isAdherent: diffs.length === 0, differences: diffs };
+}
+
 function isApplyRequested() {
   return process.argv.includes('--apply');
 }
@@ -167,6 +271,8 @@ module.exports = {
   getVerifiedWorkspaceId,
   isApplyRequested,
   isPublishRequested,
-  isPublishConfirmed
+  isPublishConfirmed,
+  validateAwctTagContract,
+  validateCustomEventTriggerContract
 };
 

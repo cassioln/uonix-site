@@ -220,6 +220,74 @@ foreach ( $awct_tags as $aw_tag ) {
 	);
 }
 
+// Validação estrita e granular das microconversões Google Ads awct
+$tag_47 = $tags_by_id['47'] ?? null;
+gtm_assert( null !== $tag_47, 'Tag 47 existe no container' );
+gtm_assert(
+	gtm_has_exact_parameter( $tag_47, 'orderId', '{{DLV - transaction_id}}' ),
+	'Tag 47 declara orderId {{DLV - transaction_id}} para deduplicação server-side e Google Ads'
+);
+gtm_assert(
+	gtm_has_exact_parameter( $tag_47, 'conversionLabel', '{{Constante - Label Assinatura Newsletter}}' ),
+	'Tag 47 declara conversionLabel {{Constante - Label Assinatura Newsletter}}'
+);
+gtm_assert(
+	isset( $tag_47['firingTriggerId'] ) && in_array( '46', array_map( 'strval', $tag_47['firingTriggerId'] ), true ),
+	'Tag 47 dispara exclusivamente pelo trigger 46 (Evento - Assinatura Newsletter Uônix)'
+);
+
+// Provas de mutação em memória para a Tag 47
+$mut_no_order = $tag_47;
+$mut_no_order['parameter'] = array_values( array_filter( $mut_no_order['parameter'], function( $p ) { return $p['key'] !== 'orderId'; } ) );
+gtm_assert( ! gtm_has_exact_parameter( $mut_no_order, 'orderId', '{{DLV - transaction_id}}' ), 'Mutação: remoção de orderId é detectada' );
+
+$mut_bad_label = $tag_47;
+$mut_bad_label['parameter'] = array_map( function( $p ) {
+	if ( $p['key'] === 'conversionLabel' ) $p['value'] = 'LABEL_MUTADA_INVALIDA';
+	return $p;
+}, $mut_bad_label['parameter'] );
+gtm_assert( ! gtm_has_exact_parameter( $mut_bad_label, 'conversionLabel', '{{Constante - Label Assinatura Newsletter}}' ), 'Mutação: alteração de label é detectada' );
+
+$mut_bad_trigger = $tag_47;
+$mut_bad_trigger['firingTriggerId'] = array( '999' );
+gtm_assert( ! in_array( '46', array_map( 'strval', $mut_bad_trigger['firingTriggerId'] ), true ), 'Mutação: alteração de trigger é detectada' );
+
+// Tag 51: Download Checklist Técnico
+$tag_51 = $tags_by_id['51'] ?? null;
+gtm_assert( null !== $tag_51, 'Tag 51 existe no container' );
+gtm_assert(
+	gtm_has_exact_parameter( $tag_51, 'conversionLabel', '{{Constante - Label Download Checklist}}' ),
+	'Tag 51 declara conversionLabel {{Constante - Label Download Checklist}}'
+);
+gtm_assert(
+	isset( $tag_51['firingTriggerId'] ) && in_array( '50', array_map( 'strval', $tag_51['firingTriggerId'] ), true ),
+	'Tag 51 dispara exclusivamente pelo trigger 50 (Evento - Download Checklist Técnico)'
+);
+
+// Tag 54: Contato Formulário
+$tag_54 = $tags_by_id['54'] ?? null;
+gtm_assert( null !== $tag_54, 'Tag 54 existe no container' );
+gtm_assert(
+	gtm_has_exact_parameter( $tag_54, 'conversionLabel', '{{Constante - Label Contato Formulario}}' ),
+	'Tag 54 declara conversionLabel {{Constante - Label Contato Formulario}}'
+);
+gtm_assert(
+	isset( $tag_54['firingTriggerId'] ) && in_array( '53', array_map( 'strval', $tag_54['firingTriggerId'] ), true ),
+	'Tag 54 dispara exclusivamente pelo trigger 53 (Evento - Contato via Formulário Uônix)'
+);
+
+// Tag 40: Adicionar ao Carrinho
+$tag_40 = $tags_by_id['40'] ?? null;
+gtm_assert( null !== $tag_40, 'Tag 40 existe no container' );
+gtm_assert(
+	gtm_has_exact_parameter( $tag_40, 'conversionLabel', '{{Constante - Label Adicionar Carrinho}}' ),
+	'Tag 40 declara conversionLabel {{Constante - Label Adicionar Carrinho}}'
+);
+gtm_assert(
+	isset( $tag_40['firingTriggerId'] ) && in_array( '55', array_map( 'strval', $tag_40['firingTriggerId'] ), true ),
+	'Tag 40 dispara exclusivamente pelo trigger 55 (Evento - Adicionar ao Carrinho Uônix)'
+);
+
 $google_ads_id_variables = array_values(
 	array_filter(
 		$variables,

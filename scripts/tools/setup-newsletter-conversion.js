@@ -3,7 +3,9 @@ const {
   getVerifiedWorkspaceId,
   isApplyRequested,
   isPublishRequested,
-  isPublishConfirmed
+  isPublishConfirmed,
+  validateAwctTagContract,
+  validateCustomEventTriggerContract
 } = require('./gtm-client.js');
 
 async function main() {
@@ -92,19 +94,12 @@ async function main() {
       console.log('  Trigger criado com ID:', existingTrigger.triggerId);
     }
   } else {
-    let trDivergent = false;
-    const evtParam = existingTrigger.customEventFilter?.[0]?.parameter?.find(p => p.key === 'arg1')?.value;
-    if (evtParam !== 'uonix_assinatura_newsletter') trDivergent = true;
-
-    const hasMarketing = (existingTrigger.filter || []).some(f =>
-      f.parameter?.some(p => p.value?.includes('Tags_Aceitas_AdOpt')) &&
-      f.parameter?.some(p => p.value === 'marketing')
-    );
-    if (!hasMarketing) trDivergent = true;
-
-    if (trDivergent) {
-      console.log(`  [DIVERGÊNCIA] Trigger ID ${existingTrigger.triggerId} diverge do contrato canônico.`);
+    const trValidation = validateCustomEventTriggerContract(existingTrigger, 'uonix_assinatura_newsletter');
+    if (!trValidation.isAdherent) {
+      console.log(`  [DIVERGÊNCIA] Trigger ID ${existingTrigger.triggerId} diverge do contrato canônico:`);
+      trValidation.differences.forEach(d => console.log(`    - ${d}`));
       if (apply) {
+        existingTrigger.type = expectedTriggerData.type;
         existingTrigger.customEventFilter = expectedTriggerData.customEventFilter;
         existingTrigger.filter = expectedTriggerData.filter;
         await gtmRequest('PUT', ws + '/triggers/' + existingTrigger.triggerId, existingTrigger);
@@ -160,17 +155,21 @@ async function main() {
       console.log('  Tag criada com ID:', existingTag.tagId);
     }
   } else {
-    let tagDivergent = false;
-    const hasOrderId = (existingTag.parameter || []).some(p => p.key === 'orderId' && p.value === '{{DLV - transaction_id}}');
-    if (!hasOrderId) tagDivergent = true;
+    const tagValidation = validateAwctTagContract(existingTag, {
+      conversionId: '{{Constante - Google Ads ID}}',
+      conversionLabel: '{{Constante - Label Assinatura Newsletter}}',
+      orderId: '{{DLV - transaction_id}}',
+      firingTriggerId: firingId,
+      tagFiringOption: 'oncePerEvent'
+    });
 
-    const hasAdStorage = existingTag.consentSettings?.consentStatus === 'needed';
-    if (!hasAdStorage) tagDivergent = true;
-
-    if (tagDivergent) {
-      console.log(`  [DIVERGÊNCIA] Tag ID ${existingTag.tagId} diverge do contrato (orderId/consentimento).`);
+    if (!tagValidation.isAdherent) {
+      console.log(`  [DIVERGÊNCIA] Tag ID ${existingTag.tagId} diverge do contrato canônico:`);
+      tagValidation.differences.forEach(d => console.log(`    - ${d}`));
       if (apply) {
+        existingTag.type = expectedTagData.type;
         existingTag.parameter = expectedTagData.parameter;
+        existingTag.tagFiringOption = expectedTagData.tagFiringOption;
         existingTag.consentSettings = expectedTagData.consentSettings;
         existingTag.firingTriggerId = [firingId];
         await gtmRequest('PUT', ws + '/tags/' + existingTag.tagId, existingTag);
@@ -181,9 +180,14 @@ async function main() {
     }
   }
 
-  // 4. Publicação sob demanda com dupla confirmação
+  // 4. Publicação sob demanda com dupla confirmação e exigência estrita de --apply
   if (isPublishRequested()) {
-    if (!isPublishConfirmed()) {
+    if (!apply) {
+      console.warn(
+        '\n[DRY-RUN] Flag --publish requer explicitamente a flag --apply para executar criação e publicação de versão. ' +
+        'Publicação bloqueada fail-closed em modo somente leitura.'
+      );
+    } else if (!isPublishConfirmed()) {
       console.warn(
         '\n⚠️ Flag --publish fornecida, mas requer confirmação via --confirm-publish para publicar live. ' +
         'Publicação bloqueada fail-closed.'

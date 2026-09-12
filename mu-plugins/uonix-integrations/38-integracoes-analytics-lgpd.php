@@ -1277,21 +1277,49 @@ function uonix_render_analytics_rfq_conversion( $order_id ) {
         var newsDedupeKey = 'uonix_news_rfq_' + orderId;
 
         function hasMarketingConsent() {
+            // 1. Precedência absoluta de rejeição explícita na janela ou ponte AdOpt
+            if (window._adoptExplicitlyRejected === true) {
+                return false;
+            }
+            if (window._adoptMarketingGranted === false) {
+                return false;
+            }
+
+            // 2. Rejeição explícita em storage (_adoptReject=1) invalida qualquer consentimento residual
+            var storage = null;
+            try {
+                storage = window.localStorage || (typeof localStorage !== 'undefined' ? localStorage : null);
+            } catch(e) {}
+
+            if (storage) {
+                try {
+                    if (storage.getItem('_adoptReject') === '1') {
+                        return false;
+                    }
+                } catch(e) {}
+            }
+
+            // 3. Ponte AdOpt ativa e confirmada
             if (window._adoptMarketingGranted === true) {
                 return true;
             }
-            if (Array.isArray(window.acceptedTags) && window.acceptedTags.indexOf('marketing') !== -1) {
-                return true;
+            if (Array.isArray(window.acceptedTags) && window.acceptedTags.length > 0) {
+                return window.acceptedTags.indexOf('marketing') !== -1;
             }
-            try {
-                var raw = localStorage.getItem('adoptConsentMode');
-                if (raw) {
-                    var parsed = JSON.parse(raw);
-                    if (parsed && (parsed.marketing === true || parsed.ad_storage === 'granted')) {
-                        return true;
+
+            // 4. Fallback de storage persistido (somente se não houver rejeição explícita)
+            if (storage) {
+                try {
+                    var raw = storage.getItem('adoptConsentMode');
+                    if (raw) {
+                        var parsed = JSON.parse(raw);
+                        if (parsed && (parsed.marketing === true || parsed.ad_storage === 'granted')) {
+                            return true;
+                        }
                     }
-                }
-            } catch(e) {}
+                } catch(e) {}
+            }
+
             return false;
         }
 
@@ -1451,6 +1479,12 @@ function uonix_render_analytics_microconversions_footer() {
                 var options = (extra && typeof extra === 'object') ? extra : ((button && typeof button === 'object' && button.actionType) ? button : null);
                 if (options && options.actionType && options.actionType !== 'add') {
                     return;
+                }
+                // Se trouxer quantidades confirmadas vs atual, validar que houve aumento real
+                if (options && typeof options.confirmedQty === 'number' && typeof options.currentQty === 'number') {
+                    if (options.confirmedQty <= options.currentQty) {
+                        return;
+                    }
                 }
                 dispararAdicionarCarrinho('ajax_added_to_cart');
             });

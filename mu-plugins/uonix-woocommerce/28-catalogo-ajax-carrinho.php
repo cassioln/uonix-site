@@ -490,7 +490,20 @@ function uonix_loop_cart_scripts() {
 						} else if (actionType === 'decrement') {
 							$(document.body).trigger('uonix_cart_decremented', [res.data.fragments, res.data.cart_hash]);
 						} else if (actionType === 'add') {
-							$(document.body).trigger('added_to_cart', [res.data.fragments, res.data.cart_hash, $wrap, { actionType: 'add' }]);
+							if (confirmedQty > currentQty) {
+								$(document.body).trigger('added_to_cart', [res.data.fragments, res.data.cart_hash, $wrap, {
+									actionType: 'add',
+									currentQty: currentQty,
+									confirmedQty: confirmedQty
+								}]);
+							} else {
+								$(document.body).trigger('uonix_cart_add_rejected', [res.data.fragments, res.data.cart_hash, $wrap, {
+									actionType: 'add',
+									currentQty: currentQty,
+									confirmedQty: confirmedQty,
+									limitReached: Boolean(res.data.limit_reached)
+								}]);
+							}
 						}
 					} else {
 						// Em caso de erro, reverte para o estado anterior

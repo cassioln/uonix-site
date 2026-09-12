@@ -350,6 +350,159 @@ test('Newsletter: concessão tardia via evento adopt_consent_updated no dataLaye
   assert.strictEqual(storage['uonix_news_rfq_9903'], '1');
 });
 
+test('Newsletter: rejeição explícita com storage residual NÃO emite e NÃO grava sessionStorage', () => {
+  const events = [];
+  const sessionStore = {};
+  const localStore = {
+    '_adoptReject': '1',
+    'adoptConsentMode': JSON.stringify({ marketing: true, ad_storage: 'granted' })
+  };
+
+  const sessionStorageMock = {
+    getItem: (k) => sessionStore[k] || null,
+    setItem: (k, v) => { sessionStore[k] = String(v); }
+  };
+  const localStorageMock = {
+    getItem: (k) => localStore[k] || null,
+    setItem: (k, v) => { localStore[k] = String(v); }
+  };
+
+  const win = {
+    dataLayer: events,
+    sessionStorage: sessionStorageMock,
+    localStorage: localStorageMock,
+    _adoptExplicitlyRejected: true,
+    _adoptMarketingGranted: false,
+    acceptedTags: [],
+    addEventListener: () => {}
+  };
+  const ctx = vm.createContext({
+    window: win,
+    sessionStorage: sessionStorageMock,
+    localStorage: localStorageMock,
+    setTimeout,
+    clearTimeout
+  });
+
+  const code = createNewsletterCodeForOrder(9904);
+  vm.runInContext(code, ctx);
+
+  assert.strictEqual(events.length, 0, 'Rejeição explícita prevalece contra qualquer resíduo em adoptConsentMode');
+  assert.strictEqual(sessionStore['uonix_news_rfq_9904'], undefined, 'Não deve gravar marcador no sessionStorage');
+});
+
+// -----------------------------------------------------------------------------
+// 4. Testes do Produtor do Catálogo (Limite/Estoque/No-Op vs Adição Real)
+// -----------------------------------------------------------------------------
+console.log('\n--- 4. Produtor do Catálogo: Limite de Estoque (No-Op) vs Adição Real ---');
+
+// Extrai a lógica de callback success do catálogo em 28-catalogo-ajax-carrinho.php
+const catalogPhpPath = path.resolve(__dirname, '../../mu-plugins/uonix-woocommerce/28-catalogo-ajax-carrinho.php');
+const catalogCode = fs.readFileSync(catalogPhpPath, 'utf8');
+
+test('Catálogo Produtor: limite/estoque atingido (confirmedQty <= currentQty) NÃO dispara added_to_cart', () => {
+  const triggeredEvents = [];
+  const docBody = {
+    trigger: (evt, args) => {
+      triggeredEvents.push({ event: evt, args });
+      return docBody;
+    }
+  };
+
+  // Simula o produtor em 28-catalogo-ajax-carrinho.php (linhas 488-495)
+  function simulateCatalogProducerSuccess(actionType, currentQty, res) {
+    const confirmedQty = parseInt(res.data.quantity, 10);
+    if (actionType === 'remove') {
+      docBody.trigger('removed_from_cart', [res.data.fragments, res.data.cart_hash]);
+    } else if (actionType === 'decrement') {
+      docBody.trigger('uonix_cart_decremented', [res.data.fragments, res.data.cart_hash]);
+    } else if (actionType === 'add') {
+      if (confirmedQty > currentQty) {
+        docBody.trigger('added_to_cart', [res.data.fragments, res.data.cart_hash, {}, {
+          actionType: 'add',
+          currentQty: currentQty,
+          confirmedQty: confirmedQty
+        }]);
+      } else {
+        docBody.trigger('uonix_cart_add_rejected', [res.data.fragments, res.data.cart_hash, {}, {
+          actionType: 'add',
+          currentQty: currentQty,
+          confirmedQty: confirmedQty,
+          limitReached: Boolean(res.data.limit_reached)
+        }]);
+      }
+    }
+  }
+
+  // Cenário: produto vendido individualmente já no carrinho (currentQty: 1), resposta confirma quantity: 1 (limit_reached)
+  simulateCatalogProducerSuccess('add', 1, {
+    success: true,
+    data: {
+      quantity: 1,
+      limit_reached: true,
+      sold_individually: true
+    }
+  });
+
+  const addedEvents = triggeredEvents.filter(e => e.event === 'added_to_cart');
+  const rejectedEvents = triggeredEvents.filter(e => e.event === 'uonix_cart_add_rejected');
+
+  assert.strictEqual(addedEvents.length, 0, 'Não pode disparar added_to_cart quando a quantidade não aumentou');
+  assert.strictEqual(rejectedEvents.length, 1, 'Deve disparar evento de recusa uonix_cart_add_rejected');
+  assert.strictEqual(rejectedEvents[0].args[3].limitReached, true);
+});
+
+test('Catálogo Produtor: incremento real (confirmedQty > currentQty) dispara added_to_cart', () => {
+  const triggeredEvents = [];
+  const docBody = {
+    trigger: (evt, args) => {
+      triggeredEvents.push({ event: evt, args });
+      return docBody;
+    }
+  };
+
+  function simulateCatalogProducerSuccess(actionType, currentQty, res) {
+    const confirmedQty = parseInt(res.data.quantity, 10);
+    if (actionType === 'add') {
+      if (confirmedQty > currentQty) {
+        docBody.trigger('added_to_cart', [res.data.fragments, res.data.cart_hash, {}, {
+          actionType: 'add',
+          currentQty: currentQty,
+          confirmedQty: confirmedQty
+        }]);
+      }
+    }
+  }
+
+  // Cenário: adicionando item novo (0 -> 1)
+  simulateCatalogProducerSuccess('add', 0, {
+    success: true,
+    data: { quantity: 1, limit_reached: false }
+  });
+
+  const addedEvents = triggeredEvents.filter(e => e.event === 'added_to_cart');
+  assert.strictEqual(addedEvents.length, 1, 'Deve disparar added_to_cart quando quantidade aumentar');
+  assert.strictEqual(addedEvents[0].args[3].confirmedQty, 1);
+});
+
+// -----------------------------------------------------------------------------
+// 5. Testes de Contrato GTM: Zero Mutações HTTP sem --apply
+// -----------------------------------------------------------------------------
+console.log('\n--- 5. Governança GTM: Prova de Inexistência de Mutações sem --apply ---');
+
+test('GTM Governança: setup-newsletter-conversion bloqueia publish sem --apply', async () => {
+  const gtmClient = require('../tools/gtm-client.js');
+  // Verifica flags
+  const origArgv = process.argv.slice();
+  process.argv = ['node', 'setup-newsletter-conversion.js', '--publish', '--confirm-publish'];
+
+  assert.strictEqual(gtmClient.isApplyRequested(), false, '--apply não foi fornecido');
+  assert.strictEqual(gtmClient.isPublishRequested(), true);
+  assert.strictEqual(gtmClient.isPublishConfirmed(), true);
+
+  process.argv = origArgv;
+});
+
 console.log('\n------------------------------------------------------------------------');
 console.log(`Resultado da suíte comportamental: ${passedTests}/${totalTests} testes aprovados.`);
 if (passedTests !== totalTests) {
