@@ -17,14 +17,20 @@ function customLookup(hostname, options, callback) {
   });
 }
 
-const keyPath = process.env.HOME + '/.config/gcloud/gtm-automation-key.json';
-const key = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
+function getKey() {
+  const keyPath = process.env.GTM_KEY_PATH || (process.env.HOME + '/.config/gcloud/gtm-automation-key.json');
+  if (!fs.existsSync(keyPath)) {
+    throw new Error(`[FAIL-CLOSED] Chave de automação GTM não encontrada em: ${keyPath}`);
+  }
+  return JSON.parse(fs.readFileSync(keyPath, 'utf8'));
+}
 
 function base64url(str) {
   return Buffer.from(str).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 async function getAccessToken() {
+  const key = getKey();
   return new Promise((resolve, reject) => {
     const now = Math.floor(Date.now() / 1000);
     const header = { alg: 'RS256', typ: 'JWT' };
