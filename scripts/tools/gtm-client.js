@@ -1,6 +1,21 @@
 const fs = require('fs');
 const crypto = require('crypto');
 const https = require('https');
+const dns = require('dns');
+
+function customLookup(hostname, options, callback) {
+  if (typeof options === 'function') { callback = options; options = {}; }
+  const isAll = options && options.all;
+  const resolver = new dns.Resolver();
+  resolver.setServers(['8.8.8.8', '1.1.1.1']);
+  resolver.resolve4(hostname, (err, addrs) => {
+    if (!err && addrs && addrs.length) {
+      if (isAll) return callback(null, addrs.map(a => ({ address: a, family: 4 })));
+      return callback(null, addrs[0], 4);
+    }
+    dns.lookup(hostname, options, callback);
+  });
+}
 
 const keyPath = process.env.HOME + '/.config/gcloud/gtm-automation-key.json';
 const key = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
@@ -31,6 +46,7 @@ async function getAccessToken() {
 
     const req = https.request(key.token_uri, {
       method: 'POST',
+      lookup: customLookup,
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Content-Length': postData.length
@@ -60,6 +76,7 @@ async function gtmRequest(method, path, data = null) {
     const url = `https://tagmanager.googleapis.com/tagmanager/v2${path}`;
     const options = {
       method: method,
+      lookup: customLookup,
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'

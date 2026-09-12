@@ -1244,6 +1244,19 @@ function uonix_render_analytics_rfq_conversion( $order_id ) {
     if ( ! $uonix_order_key_is_valid || 'gplsquote-req' !== $uonix_order_status ) {
         return;
     }
+    $news_optin = '';
+    if ( method_exists( $uonix_order, 'get_meta' ) ) {
+        $news_optin = $uonix_order->get_meta( 'billing_newsletters' );
+        if ( ! $news_optin ) {
+            $news_optin = $uonix_order->get_meta( '_billing_newsletters' );
+        }
+    } elseif ( function_exists( 'get_post_meta' ) ) {
+        $news_optin = get_post_meta( $uonix_order_id, 'billing_newsletters', true );
+        if ( ! $news_optin ) {
+            $news_optin = get_post_meta( $uonix_order_id, '_billing_newsletters', true );
+        }
+    }
+    $assina_news = in_array( strtolower( (string) $news_optin ), array( '1', 'sim', 'yes', 'true' ), true );
     ?>
     <script id="uonix-conversao-carrinho-datalayer">
     (function() {
@@ -1257,7 +1270,155 @@ function uonix_render_analytics_rfq_conversion( $order_id ) {
         });
     })();
     </script>
+    <?php if ( $assina_news ) : ?>
+    <script id="uonix-conversao-carrinho-newsletter-datalayer">
+    (function() {
+        window.dataLayer = window.dataLayer || [];
+        window.dataLayer.push({
+            'event': 'uonix_assinatura_newsletter',
+            'origem_conversao': 'woocommerce_order_received',
+            'order_id': <?php echo (int) $uonix_order_id; ?>
+        });
+    })();
+    </script>
+    <?php endif; ?>
     <?php
 }
 }
 add_action( 'woocommerce_thankyou', 'uonix_render_analytics_rfq_conversion', 10, 1 );
+
+/**
+ * UONIX: Emissao e listeners das micro-conversoes do funil.
+ * - Iniciar finalizacao de compra no checkout WooCommerce (/finalizar-orcamento/).
+ * - Adicionar ao carrinho / orcamento via clique ou evento AJAX added_to_cart.
+ * - Contato via formulario institucional/suporte (assunto != orcamento).
+ * - Assinatura de newsletter em formularios Fluent Forms.
+ */
+if ( ! function_exists( 'uonix_render_analytics_microconversions_footer' ) ) {
+function uonix_render_analytics_microconversions_footer() {
+    $is_checkout = function_exists( 'is_checkout' ) && is_checkout();
+    $is_order_received = function_exists( 'is_wc_endpoint_url' ) && is_wc_endpoint_url( 'order-received' );
+
+    // Se estiver no checkout ativo (antes de submeter)
+    if ( $is_checkout && ! $is_order_received ) : ?>
+        <script id="uonix-conversao-iniciar-finalizacao-datalayer">
+        (function() {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+                'event': 'uonix_iniciar_finalizacao',
+                'origem_conversao': 'woocommerce_checkout'
+            });
+        })();
+        </script>
+    <?php endif; ?>
+
+    <script id="uonix-conversao-adicionar-carrinho-listener">
+    (function() {
+        var adicionadoPendente = false;
+
+        function dispararAdicionarCarrinho(origem) {
+            if (adicionadoPendente) return;
+            adicionadoPendente = true;
+            setTimeout(function() {
+                adicionadoPendente = false;
+            }, 800);
+
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+                'event': 'uonix_adicionar_ao_carrinho',
+                'origem_conversao': origem || 'woocommerce_add_to_cart'
+            });
+        }
+
+        // Listener nativo do WooCommerce (evento jQuery disparado apos adicao AJAX)
+        if (window.jQuery) {
+            window.jQuery(document.body).on('added_to_cart', function() {
+                dispararAdicionarCarrinho('ajax_added_to_cart');
+            });
+        }
+
+        // Monitora cliques em botoes de adicionar ao carrinho/orcamento
+        document.addEventListener('click', function(e) {
+            var btn = e.target && e.target.closest ? e.target.closest('.single_add_to_cart_button, .ajax_add_to_cart, form.cart:not(.uonix-related-cart) button[type="submit"]') : null;
+            if (btn && !btn.disabled && !btn.classList.contains('disabled')) {
+                dispararAdicionarCarrinho('button_click');
+            }
+        }, true);
+    })();
+    </script>
+
+    <script id="uonix-conversao-contato-newsletter-listener">
+    (function() {
+        var pendentes = {};
+
+        function dispararContato(formId, assunto) {
+            var val = assunto && String(assunto).trim() ? String(assunto).trim() : '';
+            if (formId && val && val !== 'orcamento') {
+                var chave = 'contato|' + String(formId || '') + '|' + val;
+                if (pendentes[chave]) return;
+                pendentes[chave] = true;
+                setTimeout(function() { delete pendentes[chave]; }, 1000);
+                window.dataLayer = window.dataLayer || [];
+                window.dataLayer.push({
+                    'event': 'uonix_contato_formulario',
+                    'origem_conversao': 'fluentform_contato',
+                    'form_id': formId,
+                    'assunto': val
+                });
+            }
+        }
+
+        function dispararNewsletter(formId, form) {
+            var fIdStr = String(formId || '');
+            var assinou = (fIdStr === '2');
+            if (!assinou && form) {
+                var newsChecked = form.querySelector('input[name="form_newsletters"]:checked') ||
+                                   form.querySelector('input[name*="newsletter"]:checked') ||
+                                   form.querySelector('input[name="form_newsletters"][value="sim"]:checked');
+                if (newsChecked) assinou = true;
+            }
+            if (assinou) {
+                var chave = 'news|' + fIdStr;
+                if (pendentes[chave]) return;
+                pendentes[chave] = true;
+                setTimeout(function() { delete pendentes[chave]; }, 1000);
+                window.dataLayer = window.dataLayer || [];
+                window.dataLayer.push({
+                    'event': 'uonix_assinatura_newsletter',
+                    'origem_conversao': fIdStr === '2' ? 'fluentform_id_2' : 'fluentform_checkbox',
+                    'form_id': fIdStr || null
+                });
+            }
+        }
+
+        function processar(form, formId) {
+            if (!form) return;
+            var assuntoEl = form.querySelector('select[name="form_assunto"]');
+            var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : '';
+            dispararContato(formId, val);
+            dispararNewsletter(formId, form);
+        }
+
+        if (window.jQuery) {
+            window.jQuery(document).on('fluentform_submission_success.uonixContato', function(e, data) {
+                try {
+                    var form = (data && data.form && data.form[0]) ? data.form[0] : (e.target || null);
+                    var formId = (data && (data.formId || data.form_id)) ? (data.formId || data.form_id) : (form ? (form.getAttribute('data-form_id') || form.getAttribute('data-form-id') || (form.id ? form.id.replace('fluentform_', '') : '')) : '');
+                    processar(form, formId);
+                } catch(err) {}
+            });
+        }
+
+        document.addEventListener('fluentform_submission_success', function(e) {
+            try {
+                var form = (e && e.detail && e.detail.form) ? e.detail.form : (e.target || null);
+                var formId = (e && e.detail && (e.detail.formId || e.detail.form_id)) ? (e.detail.formId || e.detail.form_id) : (form ? (form.getAttribute('data-form_id') || form.getAttribute('data-form-id') || (form.id ? form.id.replace('fluentform_', '') : '')) : '');
+                processar(form, formId);
+            } catch(err) {}
+        });
+    })();
+    </script>
+    <?php
+}
+}
+add_action( 'wp_footer', 'uonix_render_analytics_microconversions_footer', 98, 0 );

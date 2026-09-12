@@ -417,6 +417,20 @@ function uonix_gerar_form_captura_html() {
                     formFieldsBlock.style.display = 'none';
                     successBlock.style.display = 'flex';
                     
+                    // Emissao no dataLayer para Google Ads / Analytics
+                    window.dataLayer = window.dataLayer || [];
+                    window.dataLayer.push({
+                        'event': 'uonix_download_checklist',
+                        'origem_conversao': 'form_captura_lead'
+                    });
+                    const newsCheck = form.querySelector('input[name="newsletters"]');
+                    if (newsCheck && newsCheck.checked) {
+                        window.dataLayer.push({
+                            'event': 'uonix_assinatura_newsletter',
+                            'origem_conversao': 'form_captura_lead'
+                        });
+                    }
+                    
                     // Força o Download automático programaticamente
                     const fileUrl = document.getElementById('ucf_download_link').href;
                     const tempLink = document.createElement('a');

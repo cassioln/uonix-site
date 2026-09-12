@@ -439,6 +439,11 @@ function uonix_gerar_form_newsletter_html($atts) {
                 if (data.success) {
                     formFieldsBlock.style.display = 'none';
                     successBlock.style.display = 'flex'; 
+                    window.dataLayer = window.dataLayer || [];
+                    window.dataLayer.push({
+                        'event': 'uonix_assinatura_newsletter',
+                        'origem_conversao': 'form_newsletter_customizado'
+                    });
                 } else {
                     feedbackError.style.display = 'block';
                     feedbackError.innerHTML = '⚠ ' + data.data.message;
