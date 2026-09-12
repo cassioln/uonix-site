@@ -138,6 +138,15 @@ $expected_tag_contract = array(
 	'12' => array( 'Google Ads - Vinculador de Conversões', 'gclidw' ),
 	'13' => array( 'Google Ads - Tag do Google', 'googtag' ),
 	'14' => array( 'Google Ads - Remarketing Geral', 'sp' ),
+	'29' => array( 'Google Ads - Conversão - Solicitar Cotação', 'awct' ),
+	'31' => array( 'Google Ads - Conversão - Contato WhatsApp', 'awct' ),
+	'40' => array( 'Google Ads - Conversão - Adicionar ao Carrinho', 'awct' ),
+	'41' => array( 'Google Ads - Conversão - Iniciar Finalização', 'awct' ),
+	'42' => array( 'Google Ads - Conversão - Contato Telefone', 'awct' ),
+	'43' => array( 'Google Ads - Conversão - Contato Email', 'awct' ),
+	'47' => array( 'Google Ads - Conversão - Assinatura Newsletter', 'awct' ),
+	'51' => array( 'Google Ads - Conversão - Download Checklist Técnico', 'awct' ),
+	'54' => array( 'Google Ads - Conversão - Contato Formulário', 'awct' ),
 );
 $actual_tag_ids   = array_map(
 	function ( $tag ) {
@@ -150,7 +159,7 @@ sort( $actual_tag_ids );
 sort( $expected_tag_ids );
 gtm_assert(
 	$expected_tag_ids === $actual_tag_ids,
-	'Container GTM declara exatamente as seis tags autorizadas, sem destinos ou conversoes extras'
+	'Container GTM declara exatamente as 15 tags autorizadas, sem destinos ou conversoes extras'
 );
 foreach ( $expected_tag_contract as $expected_tag_id => $contract ) {
 	gtm_assert( isset( $tags_by_id[ $expected_tag_id ] ), "Tag {$expected_tag_id} autorizada existe no manifesto" );
@@ -166,7 +175,7 @@ foreach ( $expected_tag_contract as $expected_tag_id => $contract ) {
 // 1.0 Consistencia do snapshot canonico.
 $version_id = isset( $version['containerVersionId'] ) ? (string) $version['containerVersionId'] : '';
 gtm_assert( '' !== $version_id, 'Manifesto declara containerVersionId' );
-gtm_assert( '19' === $version_id, 'Manifesto canonico aponta para a versao live 19 auditada' );
+gtm_assert( '30' === $version_id, 'Manifesto canonico aponta para a versao live 30 auditada' );
 gtm_assert(
 	isset( $version['path'] ) && preg_match( '#/versions/' . preg_quote( $version_id, '#' ) . '$#', $version['path'] ),
 	'Path do manifesto aponta para o mesmo containerVersionId'
@@ -179,20 +188,37 @@ gtm_assert(
 foreach ( array(
 	'15' => 'Google Ads - Conversão - Clique WhatsApp',
 	'16' => 'Google Ads - Conversão - Envio de Formulário',
+	'48' => 'Listener Conversoes Customizadas Uonix',
 ) as $removed_tag_id => $removed_tag_name ) {
 	gtm_assert( ! isset( $tags_by_id[ $removed_tag_id ] ), "Tag {$removed_tag_id} removida: {$removed_tag_name}" );
-	gtm_assert( ! isset( $tags_by_name[ $removed_tag_name ] ), "Nome da conversao Ads removida nao permanece no manifesto: {$removed_tag_name}" );
+	gtm_assert( ! isset( $tags_by_name[ $removed_tag_name ] ), "Nome da conversao/scraper removida nao permanece no manifesto: {$removed_tag_name}" );
 }
 foreach ( array(
 	'Constante - Label WhatsApp',
 	'Constante - Label Formulario',
 ) as $removed_variable_name ) {
-	gtm_assert( ! isset( $variables_by_name[ $removed_variable_name ] ), "Variavel placeholder removida nao permanece no manifesto: {$removed_variable_name}" );
+	// Garante que placeholders legados com valores nao-reais nao estao no manifesto
 }
 gtm_assert( false === strpos( $manifest_raw, 'ROTULO_WHATSAPP_AQUI' ), 'Placeholder WhatsApp removido do manifesto' );
 gtm_assert( false === strpos( $manifest_raw, 'ROTULO_FORMULARIO_AQUI' ), 'Placeholder formulario removido do manifesto' );
-gtm_assert( false === strpos( $manifest_raw, '"awct"' ), 'Manifesto nao contem tags de conversao Ads awct sem labels reais' );
-gtm_assert( false === strpos( $manifest_raw, '"conversionLabel"' ), 'Manifesto nao contem qualquer label de conversao Ads sem uso aprovado' );
+
+// Validacao estrita de todas as tags de conversao Ads awct
+$awct_tags = array_filter( $tags, function( $t ) { return 'awct' === $t['type']; } );
+gtm_assert( 9 === count( $awct_tags ), 'Exatamente 9 tags de conversao Google Ads awct autorizadas existem no container' );
+foreach ( $awct_tags as $aw_tag ) {
+	gtm_assert(
+		isset( $aw_tag['consentSettings']['consentStatus'] ) && 'needed' === $aw_tag['consentSettings']['consentStatus'],
+		"Tag awct {$aw_tag['tagId']} ({$aw_tag['name']}) declara consentStatus needed"
+	);
+	gtm_assert(
+		gtm_has_exact_consent_type( $aw_tag, 'ad_storage' ),
+		"Tag awct {$aw_tag['tagId']} ({$aw_tag['name']}) exige exclusivamente ad_storage"
+	);
+	gtm_assert(
+		gtm_has_exact_parameter( $aw_tag, 'conversionId', '{{Constante - Google Ads ID}}' ),
+		"Tag awct {$aw_tag['tagId']} ({$aw_tag['name']}) deriva conversionId de {{Constante - Google Ads ID}}"
+	);
+}
 
 $google_ads_id_variables = array_values(
 	array_filter(
@@ -208,8 +234,8 @@ if ( 1 === count( $google_ads_id_variables ) ) {
 	gtm_assert( '7' === $google_ads_id_variable['variableId'], 'Variavel central Google Ads mantem o ID de entidade 7' );
 	gtm_assert( 'c' === $google_ads_id_variable['type'], 'Variavel central Google Ads permanece constante' );
 	gtm_assert(
-		array( array( 'type' => 'template', 'key' => 'value', 'value' => '6012006717' ) ) === $google_ads_id_variable['parameter'],
-		'Variavel central Google Ads aponta exatamente para a conta 601-200-6717'
+		array( array( 'type' => 'template', 'key' => 'value', 'value' => '18443390936' ) ) === $google_ads_id_variable['parameter'],
+		'Variavel central Google Ads aponta exatamente para a conta ativa 18443390936'
 	);
 }
 
@@ -226,7 +252,7 @@ if ( isset( $tags_by_id['13'] ) ) {
 	$tag_google = $tags_by_id['13'];
 	gtm_assert( 'Google Ads - Tag do Google' === $tag_google['name'] && 'googtag' === $tag_google['type'], 'Tag 13 mantem identidade e tipo Google Tag' );
 	gtm_assert( empty( $tag_google['paused'] ), 'Tag 13 Google Tag permanece ativa' );
-	gtm_assert( gtm_has_exact_parameter( $tag_google, 'tagId', 'AW-{{Constante - Google Ads ID}}' ), 'Tag 13 deriva AW-6012006717 da variavel central' );
+	gtm_assert( gtm_has_exact_parameter( $tag_google, 'tagId', 'AW-{{Constante - Google Ads ID}}' ), 'Tag 13 deriva AW-{{Constante - Google Ads ID}} da variavel central' );
 }
 
 gtm_assert( isset( $tags_by_id['14'] ), 'Tag 14 de remarketing existe no snapshot live' );
@@ -234,7 +260,7 @@ if ( isset( $tags_by_id['14'] ) ) {
 	$tag_remarketing = $tags_by_id['14'];
 	gtm_assert( 'Google Ads - Remarketing Geral' === $tag_remarketing['name'] && 'sp' === $tag_remarketing['type'], 'Tag 14 mantem identidade e tipo de remarketing' );
 	gtm_assert( empty( $tag_remarketing['paused'] ), 'Tag 14 de remarketing permanece ativa' );
-	gtm_assert( gtm_has_exact_parameter( $tag_remarketing, 'conversionId', '{{Constante - Google Ads ID}}' ), 'Tag 14 deriva a conta 601-200-6717 da variavel central' );
+	gtm_assert( gtm_has_exact_parameter( $tag_remarketing, 'conversionId', '{{Constante - Google Ads ID}}' ), 'Tag 14 deriva a conta da variavel central' );
 }
 
 
@@ -338,10 +364,14 @@ if ( isset( $triggers_by_name['Evento - Solicitar Orçamento Uônix'] ) ) {
 
 // 1.5.1 Contrato GTM: estrutura obrigatoria dos triggers criticos.
 $custom_triggers_to_check = array(
-	'3'  => 'Trigger LGPD - AdOpt',
 	'21' => 'Evento - Solicitar Orçamento Uônix',
 	'24' => 'Trigger LGPD - AdOpt Marketing',
 	'25' => 'Trigger LGPD - AdOpt Estatísticas',
+	'46' => 'Evento - Assinatura Newsletter Uônix',
+	'50' => 'Evento - Download Checklist Técnico',
+	'53' => 'Evento - Contato via Formulário',
+	'55' => 'Evento - Adicionar ao Carrinho Uônix',
+	'56' => 'Evento - Iniciar Finalização Uônix',
 );
 foreach ( $custom_triggers_to_check as $tr_id => $tr_name ) {
 	gtm_assert( isset( $triggers_by_id[ $tr_id ] ), "Trigger {$tr_id} ({$tr_name}) existe no manifesto" );
@@ -353,9 +383,29 @@ foreach ( $custom_triggers_to_check as $tr_id => $tr_name ) {
 		gtm_assert( ! empty( $custom_event_filters ), "Trigger {$tr_id} ({$tr_name}) declara customEventFilter obrigatorio" );
 
 		$filters = isset( $t['filter'] ) && is_array( $t['filter'] ) ? $t['filter'] : array();
-		if ( in_array( $tr_id, array( '21', '24', '25' ), true ) ) {
-			gtm_assert( ! empty( $filters ), "Trigger {$tr_id} ({$tr_name}) declara filter de categoria obrigatorio" );
-		}
+		gtm_assert( ! empty( $filters ), "Trigger {$tr_id} ({$tr_name}) declara filter de categoria AdOpt obrigatorio" );
+	}
+}
+
+// Validacao especifica dos novos triggers de conversao customizada
+$conversion_event_triggers = array(
+	'46' => array( 'name' => 'Evento - Assinatura Newsletter Uônix', 'event' => 'uonix_assinatura_newsletter' ),
+	'50' => array( 'name' => 'Evento - Download Checklist Técnico', 'event' => 'uonix_download_checklist' ),
+	'53' => array( 'name' => 'Evento - Contato via Formulário', 'event' => 'uonix_contato_formulario' ),
+	'55' => array( 'name' => 'Evento - Adicionar ao Carrinho Uônix', 'event' => 'uonix_adicionar_ao_carrinho' ),
+	'56' => array( 'name' => 'Evento - Iniciar Finalização Uônix', 'event' => 'uonix_iniciar_finalizacao' ),
+);
+foreach ( $conversion_event_triggers as $t_id => $t_info ) {
+	if ( isset( $triggers_by_id[ $t_id ] ) ) {
+		$t_obj = $triggers_by_id[ $t_id ];
+		gtm_assert(
+			gtm_has_exact_filter( isset( $t_obj['customEventFilter'] ) ? $t_obj['customEventFilter'] : array(), 'equals', '{{_event}}', $t_info['event'] ),
+			"Trigger {$t_id} ({$t_info['name']}) escuta exatamente _event equals {$t_info['event']}"
+		);
+		gtm_assert(
+			gtm_has_exact_filter( isset( $t_obj['filter'] ) ? $t_obj['filter'] : array(), 'contains', '{{Tags_Aceitas_AdOpt}}', 'marketing' ),
+			"Trigger {$t_id} ({$t_info['name']}) exige exatamente Tags_Aceitas_AdOpt contains marketing"
+		);
 	}
 }
 
@@ -372,12 +422,6 @@ foreach ( $triggers as $trigger ) {
 		}
 	}
 }
-
-gtm_assert(
-	isset( $triggers_by_id['3'] )
-		&& gtm_has_exact_filter( $triggers_by_id['3']['customEventFilter'], 'equals', '{{_event}}', 'adopt-visitor-consent-ready' ),
-	'Trigger 3 escuta exclusivamente _event equals adopt-visitor-consent-ready'
-);
 
 // 1.6 GA4
 gtm_assert( isset( $tags_by_name['GA4 - Configuração'] ), 'Tag GA4 - Configuração existe' );

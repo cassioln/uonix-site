@@ -1273,11 +1273,22 @@ function uonix_render_analytics_rfq_conversion( $order_id ) {
     <?php if ( $assina_news ) : ?>
     <script id="uonix-conversao-carrinho-newsletter-datalayer">
     (function() {
+        var orderId = <?php echo (int) $uonix_order_id; ?>;
+        var newsDedupeKey = 'uonix_news_rfq_' + orderId;
+        try {
+            if (window.sessionStorage && window.sessionStorage.getItem(newsDedupeKey)) {
+                return;
+            }
+            if (window.sessionStorage) {
+                window.sessionStorage.setItem(newsDedupeKey, '1');
+            }
+        } catch(e) {}
         window.dataLayer = window.dataLayer || [];
         window.dataLayer.push({
             'event': 'uonix_assinatura_newsletter',
             'origem_conversao': 'woocommerce_order_received',
-            'order_id': <?php echo (int) $uonix_order_id; ?>
+            'order_id': orderId,
+            'transaction_id': 'uonix-rfq-news-' + orderId
         });
     })();
     </script>
@@ -1290,7 +1301,7 @@ add_action( 'woocommerce_thankyou', 'uonix_render_analytics_rfq_conversion', 10,
 /**
  * UONIX: Emissao e listeners das micro-conversoes do funil.
  * - Iniciar finalizacao de compra no checkout WooCommerce (/finalizar-orcamento/).
- * - Adicionar ao carrinho / orcamento via clique ou evento AJAX added_to_cart.
+ * - Adicionar ao carrinho / orcamento via evento confirmado added_to_cart.
  * - Contato via formulario institucional/suporte (assunto != orcamento).
  * - Assinatura de newsletter em formularios Fluent Forms.
  */
@@ -1321,7 +1332,7 @@ function uonix_render_analytics_microconversions_footer() {
             adicionadoPendente = true;
             setTimeout(function() {
                 adicionadoPendente = false;
-            }, 800);
+            }, 1000);
 
             window.dataLayer = window.dataLayer || [];
             window.dataLayer.push({
@@ -1330,20 +1341,12 @@ function uonix_render_analytics_microconversions_footer() {
             });
         }
 
-        // Listener nativo do WooCommerce (evento jQuery disparado apos adicao AJAX)
+        // Listener nativo do WooCommerce: dispara exclusivamente apos confirmacao AJAX da adicao ao carrinho
         if (window.jQuery) {
             window.jQuery(document.body).on('added_to_cart', function() {
                 dispararAdicionarCarrinho('ajax_added_to_cart');
             });
         }
-
-        // Monitora cliques em botoes de adicionar ao carrinho/orcamento
-        document.addEventListener('click', function(e) {
-            var btn = e.target && e.target.closest ? e.target.closest('.single_add_to_cart_button, .ajax_add_to_cart, form.cart:not(.uonix-related-cart) button[type="submit"]') : null;
-            if (btn && !btn.disabled && !btn.classList.contains('disabled')) {
-                dispararAdicionarCarrinho('button_click');
-            }
-        }, true);
     })();
     </script>
 

@@ -137,21 +137,83 @@ for (const rel of FORMULARIOS) {
   );
   if (js.length <= 500) continue;
 
-  // nome do parâmetro é livre: não é contrato (lição do PR #115)
+  function extraiRamo(conteudoJs, tipo) {
+    const re = new RegExp(`\\.${tipo}\\(\\s*\\w+\\s*=>\\s*\\{`);
+    const match = re.exec(conteudoJs);
+    if (!match) return null;
+    const startIdx = match.index + match[0].length;
+    let depth = 1;
+    let inString = false;
+    let stringChar = '';
+    let inComment = false;
+    let inLineComment = false;
+
+    for (let i = startIdx; i < conteudoJs.length; i++) {
+      const c = conteudoJs[i];
+      const next = conteudoJs[i + 1];
+
+      if (inLineComment) {
+        if (c === '\n') inLineComment = false;
+        continue;
+      }
+      if (inComment) {
+        if (c === '*' && next === '/') {
+          inComment = false;
+          i++;
+        }
+        continue;
+      }
+      if (inString) {
+        if (c === '\\') {
+          i++;
+          continue;
+        }
+        if (c === stringChar) {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (c === '/' && next === '/') {
+        inLineComment = true;
+        i++;
+        continue;
+      }
+      if (c === '/' && next === '*') {
+        inComment = true;
+        i++;
+        continue;
+      }
+      if (c === "'" || c === '"' || c === '`') {
+        inString = true;
+        stringChar = c;
+        continue;
+      }
+
+      if (c === '{') {
+        depth++;
+      } else if (c === '}') {
+        depth--;
+        if (depth === 0) {
+          return conteudoJs.slice(startIdx, i);
+        }
+      }
+    }
+    return null;
+  }
+
   const ramos = {
-    then: js.match(/\.then\(\s*\w+\s*=>\s*\{([\s\S]*?)\n\s*\}\)/),
-    catch: js.match(/\.catch\(\s*\w+\s*=>\s*\{([\s\S]*?)\n\s*\}\)/),
+    then: extraiRamo(js, 'then'),
+    catch: extraiRamo(js, 'catch'),
   };
 
-  for (const [qual, m] of Object.entries(ramos)) {
+  for (const [qual, corpo] of Object.entries(ramos)) {
     assert(
-      m !== null,
+      corpo !== null,
       `${nome}: não encontrei o ramo .${qual}(param => { ... }) do fetch. Sem ele não há o ` +
         `que executar, e a limpeza do watchdog fica sem verificação.`
     );
-    if (!m) continue;
-
-    const corpo = m[1];
+    if (!corpo) continue;
 
     // o corpo tem de conter código de verdade, não só espaço
     assert(
