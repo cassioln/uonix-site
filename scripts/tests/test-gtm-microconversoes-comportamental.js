@@ -16,6 +16,12 @@ const { syncGtmGovernance, computeSyncActions } = require('../tools/sync-canonic
 const { main: setupContact } = require('../tools/setup-contact-form-conversion.js');
 const { main: setupDownload } = require('../tools/setup-download-checklist-conversion.js');
 const { main: setupNewsletter } = require('../tools/setup-newsletter-conversion.js');
+const {
+  main: setupMetaPixel,
+  EXPECTED_META_TAGS,
+  validateMetaHtmlTag: validateMetaHtmlTagFn,
+  validateMetaPixelReadback
+} = require('../tools/setup-meta-pixel-conversions.js');
 
 const phpPath = path.resolve(__dirname, '../../mu-plugins/uonix-integrations/38-integracoes-analytics-lgpd.php');
 const phpCode = fs.readFileSync(phpPath, 'utf8');
@@ -543,7 +549,7 @@ test('Prova de Mutação do Consumidor: remoção da guarda faria o consumidor a
 console.log('\n--- 5. Governança GTM: Validação Estrutural Estrita e Provas de Mutação ---');
 
 const gtmClient = require('../tools/gtm-client.js');
-const manifest = require('../../docs/gtm/uonix-google-ads-gtm-import.json');
+const manifest = require('../../docs/gtm/uonix-gtm-v32-meta-pixel.json');
 
 test('GTM Governança: bloqueia publish sem --apply', async () => {
   const origArgv = process.argv.slice();
@@ -556,12 +562,12 @@ test('GTM Governança: bloqueia publish sem --apply', async () => {
   process.argv = origArgv;
 });
 
-test('GTM Sincronizador: workspace vazio gera obrigatoriamente 39 ações canônicas', () => {
+test('GTM Sincronizador: workspace vazio gera obrigatoriamente 49 ações canônicas v32', () => {
   const actions = computeSyncActions(manifest, { tags: [], triggers: [], variables: [] });
-  assert.strictEqual(actions.length, 39, 'Workspace vazio deve gerar 39 ações de criação');
-  assert.strictEqual(actions.filter(a => a.type === 'CREATE_TAG').length, 15, '15 CREATE_TAG');
+  assert.strictEqual(actions.length, 49, 'Workspace vazio deve gerar 49 ações de criação');
+  assert.strictEqual(actions.filter(a => a.type === 'CREATE_TAG').length, 24, '24 CREATE_TAG');
   assert.strictEqual(actions.filter(a => a.type === 'CREATE_TRIGGER').length, 12, '12 CREATE_TRIGGER');
-  assert.strictEqual(actions.filter(a => a.type === 'CREATE_VARIABLE').length, 12, '12 CREATE_VARIABLE');
+  assert.strictEqual(actions.filter(a => a.type === 'CREATE_VARIABLE').length, 13, '13 CREATE_VARIABLE');
 });
 
 test('GTM Sincronizador: workspace canônico idêntico gera 0 ações (100% aderente)', () => {
@@ -868,7 +874,7 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
     const operationsLog = [];
     const fakeWs = 'ws-test-rollback-real';
 
-    const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-google-ads-gtm-import.json');
+    const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-gtm-v32-meta-pixel.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
     const canonicalVars = manifest.containerVersion?.variable || [];
@@ -912,7 +918,8 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
         customGtmRequest: fakeGtmRequest,
         apply: true,
         workspaceId: fakeWs,
-        publish: false
+        publish: false,
+        manifest
       });
     } catch (err) {
       caughtErr = err;
@@ -934,7 +941,7 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
     const operationsLog = [];
     const fakeWs = 'ws-test-readback-rollback';
 
-    const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-google-ads-gtm-import.json');
+    const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-gtm-v32-meta-pixel.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
     const canonicalVars = manifest.containerVersion?.variable || [];
@@ -976,7 +983,8 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
         customGtmRequest: fakeGtmRequest,
         apply: true,
         workspaceId: fakeWs,
-        publish: false
+        publish: false,
+        manifest
       });
     } catch (err) {
       caughtErr = err;
@@ -991,6 +999,39 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
     assert.ok(
       deleteOps[0].urlPath.includes('/variables/9995'),
       'DELETE compensatório executado para a variável 9995 devido a falha no readback'
+    );
+  });
+
+  await testAsync('Sincronizador GTM: ignora tentativa programática de substituir o contrato v32 pelo snapshot v31', async () => {
+    const operationsLog = [];
+    const v32Path = path.resolve(__dirname, '../../docs/gtm/uonix-gtm-v32-meta-pixel.json');
+    const v31Path = path.resolve(__dirname, '../../docs/gtm/uonix-google-ads-gtm-import.json');
+    const v32 = JSON.parse(fs.readFileSync(v32Path, 'utf8')).containerVersion;
+    const legacyV31 = JSON.parse(fs.readFileSync(v31Path, 'utf8'));
+
+    const fakeGtmRequest = async (method, urlPath) => {
+      operationsLog.push({ method, urlPath });
+      if (method !== 'GET') {
+        throw new Error(`SECURITY_BREACH: nenhuma mutação deveria ocorrer ao tentar injetar o snapshot v31 (${method} ${urlPath})`);
+      }
+      if (urlPath.endsWith('/variables')) return { variable: JSON.parse(JSON.stringify(v32.variable || [])) };
+      if (urlPath.endsWith('/triggers')) return { trigger: JSON.parse(JSON.stringify(v32.trigger || [])) };
+      if (urlPath.endsWith('/tags')) return { tag: JSON.parse(JSON.stringify(v32.tag || [])) };
+      return {};
+    };
+
+    await syncGtmGovernance({
+      customGtmRequest: fakeGtmRequest,
+      apply: true,
+      workspaceId: 'ws-test-reject-v31-override',
+      manifest: legacyV31,
+      manifestPath: v31Path
+    });
+
+    assert.strictEqual(
+      operationsLog.filter(op => op.method !== 'GET').length,
+      0,
+      'O entrypoint não pode aceitar v31 via options nem planejar DELETE de entidades Meta'
     );
   });
 
@@ -1185,6 +1226,307 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
 
     assert.ok(caughtErr, 'Deve lançar erro ao detectar divergência no readback do servidor');
     assert.ok(caughtErr.message.includes('[FAIL-CLOSED] Publicação bloqueada'), 'Mensagem de erro esperada');
+    assert.ok(!operationsLog.some(op => op.urlPath.includes(':create_version')), 'Jamais deve criar versão');
+    assert.ok(!operationsLog.some(op => op.urlPath.includes(':publish')), 'Jamais deve publicar');
+  });
+
+  // -----------------------------------------------------------------------------
+  // 6. Automação e Validação do Meta Pixel (Facebook Ads)
+  // -----------------------------------------------------------------------------
+  console.log('\n--- 6. Automação e Validação do Meta Pixel (Facebook Ads) ---');
+
+  test('Meta Pixel: EXPECTED_META_TAGS declara exatamente 9 eventos padrão com governança LGPD e triggers mapeados', () => {
+    assert.strictEqual(EXPECTED_META_TAGS.length, 9, 'Devem existir exatamente 9 definições de tags');
+    const expectedNames = [
+      'Meta Pixel - Conversão - Solicitar Orçamento',
+      'Meta Pixel - Conversão - Contato Formulário',
+      'Meta Pixel - Conversão - Download Checklist Técnico',
+      'Meta Pixel - Conversão - Assinatura Newsletter',
+      'Meta Pixel - Conversão - Adicionar ao Carrinho',
+      'Meta Pixel - Conversão - Iniciar Finalização',
+      'Meta Pixel - Conversão - WhatsApp',
+      'Meta Pixel - Conversão - Telefone',
+      'Meta Pixel - Conversão - Email'
+    ];
+    for (const name of expectedNames) {
+      const found = EXPECTED_META_TAGS.find(t => t.name === name);
+      assert.ok(found, `Tag ${name} deve estar definida em EXPECTED_META_TAGS`);
+      assert.ok(found.html.includes("if (typeof fbq !== 'function') return;"), `Tag ${name} deve conter guarda de segurança fbq`);
+      assert.ok(found.triggerName && found.fallbackTriggerId, `Tag ${name} deve ter gatilho e fallback definidos`);
+    }
+
+    // Deduplicação via eventID para orçamentos e newsletters
+    const leadTag = EXPECTED_META_TAGS.find(t => t.name === 'Meta Pixel - Conversão - Solicitar Orçamento');
+    assert.ok(leadTag.html.includes('eventID: txId'), 'Lead deve incluir eventID estável para deduplicação CAPI');
+    assert.ok(!leadTag.html.includes('DLV - order_id') && !leadTag.html.includes('DLV - value'), 'Lead não deve depender de variáveis DLV ausentes do manifesto');
+
+    const newsTag = EXPECTED_META_TAGS.find(t => t.name === 'Meta Pixel - Conversão - Assinatura Newsletter');
+    assert.ok(newsTag.html.includes('eventID: txId'), 'Subscribe deve incluir eventID para deduplicação CAPI');
+  });
+
+  test('Meta Pixel validateMetaHtmlTag: aprova tag perfeitamente aderente ao contrato', () => {
+    const sampleDef = EXPECTED_META_TAGS[0];
+    const validTag = {
+      name: sampleDef.name,
+      type: 'html',
+      parameter: [
+        { type: 'template', key: 'html', value: sampleDef.html },
+        { type: 'boolean', key: 'supportDocumentWrite', value: 'false' }
+      ],
+      firingTriggerId: [sampleDef.fallbackTriggerId],
+      tagFiringOption: 'oncePerEvent',
+      consentSettings: {
+        consentStatus: 'needed',
+        consentType: {
+          type: 'list',
+          list: [{ type: 'template', value: 'ad_storage' }]
+        }
+      }
+    };
+    const res = validateMetaHtmlTagFn(validTag, sampleDef, sampleDef.fallbackTriggerId);
+    assert.strictEqual(res.isAdherent, true, 'Tag perfeitamente aderente deve ser aprovada');
+    assert.strictEqual(res.differences.length, 0, 'Não deve haver diferenças');
+  });
+
+  test('Meta Pixel validateMetaHtmlTag: rejeita tag com snippet divergente, tipo incorreto ou gatilho errado', () => {
+    const sampleDef = EXPECTED_META_TAGS[0];
+    const invalidTag = {
+      name: sampleDef.name,
+      type: 'awct', // incorreto: deveria ser html
+      parameter: [
+        { type: 'template', key: 'html', value: '<script>alert(1);</script>' }
+      ],
+      firingTriggerId: ['999'], // incorreto
+      tagFiringOption: 'oncePerEvent',
+      consentSettings: {
+        consentStatus: 'needed',
+        consentType: {
+          type: 'list',
+          list: [{ type: 'template', value: 'ad_storage' }]
+        }
+      }
+    };
+    const res = validateMetaHtmlTagFn(invalidTag, sampleDef, sampleDef.fallbackTriggerId);
+    assert.strictEqual(res.isAdherent, false, 'Tag inválida deve ser rejeitada');
+    assert.ok(res.differences.some(d => d.includes('Tipo divergente')), 'Deve reportar tipo divergente');
+    assert.ok(res.differences.some(d => d.includes('Snippet HTML do Meta Pixel diverge')), 'Deve reportar snippet divergente');
+    assert.ok(res.differences.some(d => d.includes('firingTriggerId divergente')), 'Deve reportar trigger divergente');
+  });
+
+  test('Meta Pixel validateMetaHtmlTag: rejeita tag com consentimento ausente ou sem ad_storage', () => {
+    const sampleDef = EXPECTED_META_TAGS[0];
+    const noConsentTag = {
+      name: sampleDef.name,
+      type: 'html',
+      parameter: [{ type: 'template', key: 'html', value: sampleDef.html }],
+      firingTriggerId: [sampleDef.fallbackTriggerId],
+      tagFiringOption: 'oncePerEvent'
+    };
+    const resNoConsent = validateMetaHtmlTagFn(noConsentTag, sampleDef, sampleDef.fallbackTriggerId);
+    assert.strictEqual(resNoConsent.isAdherent, false);
+    assert.ok(resNoConsent.differences.some(d => d.includes('consentSettings.consentStatus')));
+
+    const wrongConsentTag = {
+      ...noConsentTag,
+      consentSettings: {
+        consentStatus: 'needed',
+        consentType: {
+          type: 'list',
+          list: [{ type: 'template', value: 'analytics_storage' }]
+        }
+      }
+    };
+    const resWrongConsent = validateMetaHtmlTagFn(wrongConsentTag, sampleDef, sampleDef.fallbackTriggerId);
+    assert.strictEqual(resWrongConsent.isAdherent, false);
+    assert.ok(resWrongConsent.differences.some(d => d.includes('consentType deve exigir "ad_storage"')));
+  });
+
+  test('Meta Pixel readback: rejeita variável não persistida, PageView ausente, duplicata e trigger adicional', () => {
+    const def = EXPECTED_META_TAGS[0];
+    const validMetaTag = {
+      name: def.name,
+      type: 'html',
+      parameter: [{ type: 'template', key: 'html', value: def.html }],
+      firingTriggerId: ['21', '999'],
+      tagFiringOption: 'oncePerEvent',
+      consentSettings: { consentStatus: 'needed', consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] } }
+    };
+    const errors = validateMetaPixelReadback({
+      variables: [{ name: 'Constante - Meta Pixel ID', type: 'c', parameter: [{ key: 'value', value: 'WRONG_PIXEL_ID' }] }],
+      triggers: [{ triggerId: '21', name: def.triggerName }],
+      tags: [validMetaTag, { ...validMetaTag }]
+    });
+    assert.ok(errors.some(error => error.includes('Constante - Meta Pixel ID') && error.includes('diverge')));
+    assert.ok(errors.some(error => error.includes('Facebook Pixel - PageView') && error.includes('exatamente uma vez')));
+    assert.ok(errors.some(error => error.includes(def.name) && error.includes('exatamente uma vez')));
+  });
+
+  await testAsync('Setup Meta Pixel: Rollback transacional compensatório desfaz mutações se erro ocorrer durante a criação', async () => {
+    const operationsLog = [];
+    const fakeWs = 'ws-test-meta-rollback';
+    let tagCreationCount = 0;
+
+    const fakeGtmRequest = async (method, urlPath, body) => {
+      operationsLog.push({ method, urlPath, body });
+
+      if (method === 'GET') {
+        if (urlPath.endsWith('/variables')) {
+          return { variable: [] };
+        }
+        if (urlPath.endsWith('/triggers')) {
+          return {
+            trigger: [
+              { triggerId: '52', name: 'Evento - Solicitar Orçamento Uônix' },
+              { triggerId: '53', name: 'Evento - Contato via Formulário' },
+              { triggerId: '50', name: 'Evento - Download Checklist Técnico' },
+              { triggerId: '46', name: 'Evento - Assinatura Newsletter Uônix' },
+              { triggerId: '55', name: 'Evento - Adicionar ao Carrinho Uônix' },
+              { triggerId: '56', name: 'Evento - Iniciar Finalização Uônix' },
+              { triggerId: '10', name: 'Clique - WhatsApp Links' },
+              { triggerId: '36', name: 'Clique - Telefone tel' },
+              { triggerId: '37', name: 'Clique - Email mailto' }
+            ]
+          };
+        }
+        if (urlPath.endsWith('/tags')) {
+          return { tag: [] };
+        }
+        return {};
+      }
+
+      if (method === 'POST') {
+        if (urlPath.endsWith('/variables')) {
+          return { ...body, variableId: 'var-meta-id-created' };
+        }
+        if (urlPath.endsWith('/tags')) {
+          tagCreationCount++;
+          if (tagCreationCount >= 3) {
+            throw new Error('SIMULATED_GTM_API_NETWORK_FAILURE_ON_TAG_3');
+          }
+          return { ...body, tagId: `tag-meta-${tagCreationCount}` };
+        }
+      }
+
+      if (method === 'DELETE') {
+        return {};
+      }
+
+      return {};
+    };
+
+    let caughtErr = null;
+    try {
+      await setupMetaPixel({
+        customGtmRequest: fakeGtmRequest,
+        apply: true,
+        publish: false,
+        workspaceId: fakeWs,
+        throwOnError: true
+      });
+    } catch (err) {
+      caughtErr = err;
+    }
+
+    assert.ok(caughtErr, 'Deve lançar exceção no erro simulado');
+    assert.ok(caughtErr.message.includes('SIMULATED_GTM_API_NETWORK_FAILURE_ON_TAG_3'));
+
+    const deletes = operationsLog.filter(op => op.method === 'DELETE');
+    assert.ok(deletes.some(d => d.urlPath.includes('/tags/tag-meta-1')), 'Tag 1 criada deve ser desfeita via DELETE');
+    assert.ok(deletes.some(d => d.urlPath.includes('/tags/tag-meta-2')), 'Tag 2 criada deve ser desfeita via DELETE');
+    assert.ok(deletes.some(d => d.urlPath.includes('/variables/var-meta-id-created')), 'Variável criada deve ser desfeita via DELETE');
+  });
+
+  await testAsync('Setup Meta Pixel: Bloqueia publicação se o servidor GTM divergir do contrato no readback (fail-closed)', async () => {
+    const operationsLog = [];
+    const fakeWs = 'ws-test-meta-readback';
+
+    const corruptedServerTag = {
+      tagId: 'meta-corrupted-tag',
+      name: 'Meta Pixel - Conversão - Solicitar Orçamento',
+      type: 'html',
+      parameter: [
+        { type: 'template', key: 'html', value: '<script>// Corrupted tag payload</script>' }
+      ],
+      firingTriggerId: ['52'],
+      tagFiringOption: 'oncePerEvent',
+      consentSettings: {
+        consentStatus: 'needed',
+        consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] }
+      }
+    };
+
+    let serverTags = [JSON.parse(JSON.stringify(corruptedServerTag))];
+    let createdCount = 0;
+
+    const fakeGtmRequest = async (method, urlPath, body) => {
+      operationsLog.push({ method, urlPath, body });
+
+      if (method === 'GET') {
+        if (urlPath.endsWith('/variables')) {
+          return { variable: [{ name: 'Constante - Meta Pixel ID', variableId: '461', parameter: [{ key: 'value', value: '461430774437593' }] }] };
+        }
+        if (urlPath.endsWith('/triggers')) {
+          return {
+            trigger: [
+              { triggerId: '52', name: 'Evento - Solicitar Orçamento Uônix' },
+              { triggerId: '53', name: 'Evento - Contato via Formulário' },
+              { triggerId: '50', name: 'Evento - Download Checklist Técnico' },
+              { triggerId: '46', name: 'Evento - Assinatura Newsletter Uônix' },
+              { triggerId: '55', name: 'Evento - Adicionar ao Carrinho Uônix' },
+              { triggerId: '56', name: 'Evento - Iniciar Finalização Uônix' },
+              { triggerId: '10', name: 'Clique - WhatsApp Links' },
+              { triggerId: '36', name: 'Clique - Telefone tel' },
+              { triggerId: '37', name: 'Clique - Email mailto' }
+            ]
+          };
+        }
+        if (urlPath.endsWith('/tags')) {
+          // No readback, simula que o servidor manteve a tag 1 corrompida mesmo após PUT
+          return { tag: JSON.parse(JSON.stringify(serverTags)) };
+        }
+        return {};
+      }
+
+      if (method === 'POST' && urlPath.endsWith('/tags')) {
+        createdCount++;
+        const newTag = { ...body, tagId: `tag-created-${createdCount}` };
+        serverTags.push(newTag);
+        return newTag;
+      }
+
+      if (method === 'PUT' && urlPath.includes('/tags/')) {
+        // Simula falha silenciosa do servidor remoto que não persistiu o PUT
+        return corruptedServerTag;
+      }
+
+      if (method === 'DELETE') {
+        return {};
+      }
+
+      if (urlPath.includes(':create_version') || urlPath.includes(':publish')) {
+        throw new Error('SECURITY_BREACH: create_version ou publish NUNCA deveriam ser chamados em readback divergente do Meta Pixel!');
+      }
+
+      return {};
+    };
+
+    let caughtErr = null;
+    try {
+      await setupMetaPixel({
+        customGtmRequest: fakeGtmRequest,
+        apply: true,
+        publish: true,
+        confirmPublish: true,
+        workspaceId: fakeWs,
+        throwOnError: true
+      });
+    } catch (err) {
+      caughtErr = err;
+    }
+
+    assert.ok(caughtErr, 'Deve lançar erro ao detectar divergência no readback do Meta Pixel');
+    assert.ok(caughtErr.message.includes('[FAIL-CLOSED] Readback pós-aplicação falhou'), 'Mensagem de erro esperada');
+    assert.ok(caughtErr.message.includes('Snippet HTML do Meta Pixel diverge'), 'Deve reportar a divergência de snippet');
     assert.ok(!operationsLog.some(op => op.urlPath.includes(':create_version')), 'Jamais deve criar versão');
     assert.ok(!operationsLog.some(op => op.urlPath.includes(':publish')), 'Jamais deve publicar');
   });

@@ -1109,6 +1109,123 @@ gtm_assert( ! $res_missing_term['success'] && $res_missing_term['errors'] === 2,
 $res_valid_public = uonix_verify_public_policy_response( 200, '<html>_gcl_aw e Conversões e Atribuição Ads</html>', array( '_gcl_aw', 'Conversões e Atribuição Ads' ) );
 gtm_assert( $res_valid_public['success'] && 0 === $res_valid_public['errors'], 'Código real: verify-public com HTTP 200 e termos canônicos é aprovado' );
 
+// -----------------------------------------------------------------------------
+// Parte 6: Validacao do Manifesto v32 (Meta Pixel e Google Ads)
+// -----------------------------------------------------------------------------
+$manifest_v32_path = dirname( __DIR__, 2 ) . '/docs/gtm/uonix-gtm-v32-meta-pixel.json';
+if ( file_exists( $manifest_v32_path ) ) {
+	$manifest_v32_raw = file_get_contents( $manifest_v32_path );
+	$manifest_v32     = json_decode( $manifest_v32_raw, true );
+	gtm_assert( is_array( $manifest_v32 ), 'Manifesto v32 e um JSON valido' );
+	gtm_assert( isset( $manifest_v32['exportFormatVersion'] ) && 2 === $manifest_v32['exportFormatVersion'], 'Manifesto v32 exportFormatVersion e 2' );
+
+	$v32_version = isset( $manifest_v32['containerVersion'] ) ? $manifest_v32['containerVersion'] : array();
+	gtm_assert( isset( $v32_version['containerVersionId'] ) && '32' === (string) $v32_version['containerVersionId'], 'Manifesto v32 declara containerVersionId 32' );
+	gtm_assert(
+		isset( $v32_version['path'] ) && false !== strpos( $v32_version['path'], '/versions/32' ),
+		'Manifesto v32 aponta path para a mesma versao 32'
+	);
+
+	// Validar variavel Constante - Meta Pixel ID
+	$v32_vars = isset( $v32_version['variable'] ) ? $v32_version['variable'] : array();
+	$meta_id_var = null;
+	foreach ( $v32_vars as $v ) {
+		if ( isset( $v['name'] ) && 'Constante - Meta Pixel ID' === $v['name'] ) {
+			$meta_id_var = $v;
+			break;
+		}
+	}
+	gtm_assert( null !== $meta_id_var, 'Manifesto v32 contem a variavel Constante - Meta Pixel ID' );
+	if ( null !== $meta_id_var ) {
+		gtm_assert( 'c' === $meta_id_var['type'], 'Constante - Meta Pixel ID e do tipo constante (c)' );
+		$val_param = null;
+		foreach ( $meta_id_var['parameter'] as $p ) {
+			if ( 'value' === $p['key'] ) {
+				$val_param = $p['value'];
+				break;
+			}
+		}
+		gtm_assert( '461430774437593' === $val_param, 'Constante - Meta Pixel ID possui o ID oficial da Uonix (461430774437593)' );
+	}
+
+	// Validar tags do Meta Pixel
+	$v32_tags = isset( $v32_version['tag'] ) ? $v32_version['tag'] : array();
+	gtm_assert( 24 === count( $v32_tags ), 'Manifesto v32 declara exatamente 24 tags (15 anteriores + 9 do Meta Pixel)' );
+
+	$expected_meta_tags = array(
+		'Meta Pixel - Conversão - Solicitar Orçamento',
+		'Meta Pixel - Conversão - Contato Formulário',
+		'Meta Pixel - Conversão - Download Checklist Técnico',
+		'Meta Pixel - Conversão - Assinatura Newsletter',
+		'Meta Pixel - Conversão - Adicionar ao Carrinho',
+		'Meta Pixel - Conversão - Iniciar Finalização',
+		'Meta Pixel - Conversão - WhatsApp',
+		'Meta Pixel - Conversão - Telefone',
+		'Meta Pixel - Conversão - Email',
+	);
+
+	foreach ( $expected_meta_tags as $expected_tag_name ) {
+		$found_tag = null;
+		foreach ( $v32_tags as $t ) {
+			if ( isset( $t['name'] ) && $t['name'] === $expected_tag_name ) {
+				$found_tag = $t;
+				break;
+			}
+		}
+		gtm_assert( null !== $found_tag, "Tag Meta Pixel '{$expected_tag_name}' existe no manifesto v32" );
+		if ( null !== $found_tag ) {
+			gtm_assert( 'html' === $found_tag['type'], "Tag '{$expected_tag_name}' e do tipo html" );
+			gtm_assert( 'oncePerEvent' === $found_tag['tagFiringOption'], "Tag '{$expected_tag_name}' dispara oncePerEvent" );
+			gtm_assert( isset( $found_tag['consentSettings']['consentStatus'] ) && 'needed' === $found_tag['consentSettings']['consentStatus'], "Tag '{$expected_tag_name}' declara consentStatus needed" );
+			$consent_list = isset( $found_tag['consentSettings']['consentType']['list'] ) ? $found_tag['consentSettings']['consentType']['list'] : array();
+			$has_ad_storage = false;
+			foreach ( $consent_list as $c ) {
+				if ( isset( $c['value'] ) && 'ad_storage' === $c['value'] ) {
+					$has_ad_storage = true;
+					break;
+				}
+			}
+			gtm_assert( $has_ad_storage, "Tag '{$expected_tag_name}' exige explicitamente ad_storage" );
+
+			// Verificar script seguro com fbq check
+			$html_val = '';
+			foreach ( $found_tag['parameter'] as $p ) {
+				if ( 'html' === $p['key'] ) {
+					$html_val = $p['value'];
+					break;
+				}
+			}
+			gtm_assert( false !== strpos( $html_val, "if (typeof fbq !== 'function') return;" ), "Tag '{$expected_tag_name}' contem guarda fbq" );
+		}
+	}
+
+	$v32_triggers_by_id = array();
+	foreach ( isset( $v32_version['trigger'] ) ? $v32_version['trigger'] : array() as $trigger ) {
+		$v32_triggers_by_id[ (string) $trigger['triggerId'] ] = $trigger;
+	}
+	$lead_meta_tag = null;
+	foreach ( $v32_tags as $tag ) {
+		if ( 'Meta Pixel - Conversão - Solicitar Orçamento' === $tag['name'] ) {
+			$lead_meta_tag = $tag;
+			break;
+		}
+	}
+	gtm_assert( null !== $lead_meta_tag, 'Tag Meta Pixel Lead existe para validar trigger e payload' );
+	if ( null !== $lead_meta_tag ) {
+		gtm_assert( array( '21' ) === $lead_meta_tag['firingTriggerId'], 'Tag Meta Pixel Lead dispara exclusivamente pelo trigger 21 existente' );
+		gtm_assert( isset( $v32_triggers_by_id['21'] ), 'Trigger 21 do Meta Pixel Lead existe no manifesto v32' );
+		$lead_html = '';
+		foreach ( $lead_meta_tag['parameter'] as $param ) {
+			if ( 'html' === $param['key'] ) {
+				$lead_html = $param['value'];
+				break;
+			}
+		}
+		gtm_assert( false !== strpos( $lead_html, 'eventID: txId' ), 'Tag Meta Pixel Lead usa transaction_id para eventID' );
+		gtm_assert( false === strpos( $lead_html, 'DLV - order_id' ) && false === strpos( $lead_html, 'DLV - value' ), 'Tag Meta Pixel Lead nao referencia DLVs ausentes do manifesto' );
+	}
+}
+
 if ( $failures > 0 ) {
 	fwrite( STDERR, "\nTotal de falhas no contrato GTM e conversoes: {$failures}\n" );
 	exit( 1 );
