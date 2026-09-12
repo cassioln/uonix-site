@@ -10,7 +10,9 @@
  * Governança e Segurança (fail-closed):
  * - NÃO usa IDs hardcoded: resolve as páginas exclusivamente pelos slugs canônicos.
  * - Modo DRY-RUN por padrão: nenhuma alteração é feita a menos que o argumento literal 'apply' seja fornecido.
- * - Backup automático prévio: salva snapshot completo do post antes de qualquer mutação.
+ * - Backup automático prévio: salva snapshot completo do post antes de qualquer mutação, validando escrita > 0 bytes.
+ * - Readback Integral Verificado: valida que o conteúdo persistido no banco possui exatamente o mesmo hash SHA256 do documento canônico.
+ * - Verificação de Integridade Pública (--verify-public): inspeciona o HTML público das páginas para confirmar ausência de descompasso de cache.
  * - Idempotente: reexecuções subsequentes identificam 0 alterações necessárias.
  * - Validação de integridade: aborta se os arquivos canônicos em docs/legal/ estiverem vazios ou ausentes.
  *
@@ -18,7 +20,7 @@
  *   Dry-run (somente auditoria/planejamento):
  *     Local:      wp eval-file scripts/apply-legal-policies-production.php --allow-root
  *     Produção:   /usr/bin/php85 /caminho/wp-cli.phar eval-file scripts/apply-legal-policies-production.php --path=/home/storage/f/34/12/siteuonix1/public_html
- *   Aplicar de fato (grava + backup + cache flush):
+ *   Aplicar de fato (grava + backup verificado + readback SHA256 + cache flush):
  *     Local:      wp eval-file scripts/apply-legal-policies-production.php apply --allow-root
  *     Produção:   /usr/bin/php85 /caminho/wp-cli.phar eval-file scripts/apply-legal-policies-production.php apply --path=/home/storage/f/34/12/siteuonix1/public_html
  */
@@ -28,18 +30,23 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // -------------------------------------------------------------------------
-// 1. Definição do Modo: DRY-RUN vs APPLY
+// 1. Definição do Modo: DRY-RUN vs APPLY e Flags de Verificação
 // -------------------------------------------------------------------------
-$UONIX_APPLY = false;
+$UONIX_APPLY         = false;
+$UONIX_VERIFY_PUBLIC = false;
+
 if ( isset( $args ) && is_array( $args ) ) {
 	foreach ( $args as $a ) {
-		if ( 'apply' === strtolower( trim( (string) $a ) ) ) {
+		$arg_str = strtolower( trim( (string) $a ) );
+		if ( 'apply' === $arg_str ) {
 			$UONIX_APPLY = true;
+		} elseif ( in_array( $arg_str, array( 'verify-public', '--verify-public' ), true ) ) {
+			$UONIX_VERIFY_PUBLIC = true;
 		}
 	}
 }
 
-$mode_label = $UONIX_APPLY ? 'APLICAR (grava + backup)' : 'DRY-RUN (somente planejamento/auditoria)';
+$mode_label = $UONIX_APPLY ? 'APLICAR (grava + backup + readback SHA256)' : 'DRY-RUN (somente planejamento/auditoria)';
 
 echo "========================================================================\n";
 echo "📜 SINCRONIZAÇÃO DE PÁGINAS LEGAIS (LGPD) — MODO: {$mode_label}\n";
@@ -48,7 +55,7 @@ echo "========================================================================\n
 // -------------------------------------------------------------------------
 // 2. Mapeamento dos Arquivos Canônicos e Slugs
 // -------------------------------------------------------------------------
-$root_dir = dirname( __DIR__ );
+$root_dir  = dirname( __DIR__ );
 $legal_dir = $root_dir . '/docs/legal';
 if ( ! file_exists( $legal_dir . '/politica-de-cookies-content.html' ) ) {
 	if ( file_exists( '/tmp/legal/politica-de-cookies-content.html' ) ) {
@@ -60,19 +67,32 @@ if ( ! file_exists( $legal_dir . '/politica-de-cookies-content.html' ) ) {
 
 $policies = array(
 	'politica-de-cookies' => array(
-		'title' => 'Política de Cookies',
-		'file'  => $legal_dir . '/politica-de-cookies-content.html',
-		'check' => '_gcl_aw', // Identificador obrigatório do Google Ads
+		'title'  => 'Política de Cookies',
+		'file'   => $legal_dir . '/politica-de-cookies-content.html',
+		'checks' => array(
+			'_gcl_aw',
+			'_gcl_dc',
+			'_gac_*',
+			'Conversões e Atribuição Ads',
+			'Google LLC (Google Ads / Vinculador de Conversões, via Google Tag Manager)',
+		),
 	),
 	'politica-de-privacidade' => array(
-		'title' => 'Política de Privacidade',
-		'file'  => $legal_dir . '/politica-de-privacidade-content.html',
-		'check' => 'privacidade@uonix.com.br',
+		'title'  => 'Política de Privacidade',
+		'file'   => $legal_dir . '/politica-de-privacidade-content.html',
+		'checks' => array(
+			'privacidade@uonix.com.br',
+			'Encarregado pelo Tratamento de Dados',
+			'Lei Geral de Proteção de Dados',
+		),
 	),
 	'termos-de-uso' => array(
-		'title' => 'Termos de Uso',
-		'file'  => $legal_dir . '/termos-de-uso-content.html',
-		'check' => 'Política de Cookies',
+		'title'  => 'Termos de Uso',
+		'file'   => $legal_dir . '/termos-de-uso-content.html',
+		'checks' => array(
+			'Política de Cookies',
+			'Política de Privacidade',
+		),
 	),
 );
 
@@ -123,25 +143,37 @@ foreach ( $policies as $slug => $config ) {
 		continue;
 	}
 
-	$post = $query->posts[0];
+	$post            = $query->posts[0];
 	$current_content = $post->post_content;
 
-	// Normaliza quebras de linha para comparação justa
+	// Normaliza quebras de linha para comparação justa e cálculo de hash canônico
 	$norm_current   = trim( str_replace( "\r\n", "\n", $current_content ) );
 	$norm_canonical = trim( str_replace( "\r\n", "\n", $canonical_content ) );
 
-	$is_identical = ( $norm_current === $norm_canonical );
-	$has_check    = ( false !== strpos( $norm_current, $config['check'] ) );
+	$current_hash   = hash( 'sha256', $norm_current );
+	$canonical_hash = hash( 'sha256', $norm_canonical );
+
+	$is_identical = ( $current_hash === $canonical_hash );
+
+	// Validação das chaves essenciais no banco atual
+	$missing_in_current = array();
+	foreach ( $config['checks'] as $chk ) {
+		if ( false === strpos( $norm_current, $chk ) ) {
+			$missing_in_current[] = $chk;
+		}
+	}
 
 	if ( $is_identical ) {
-		echo "  [OK] Conteúdo já está 100% sincronizado com docs/legal/ (ID: {$post->ID}).\n\n";
+		echo "  [OK] Conteúdo já está 100% sincronizado com docs/legal/ (ID: {$post->ID}, SHA256: {$current_hash}).\n\n";
 		$noops++;
 		continue;
 	}
 
 	echo "  [DIVERGÊNCIA] Conteúdo do banco difere do documento canônico no repositório.\n";
-	if ( ! $has_check ) {
-		echo "  [CRÍTICO] A versão do banco NÃO contém a chave obrigatória: '{$config['check']}'.\n";
+	echo "    Hash Canônico: {$canonical_hash}\n";
+	echo "    Hash Banco:    {$current_hash}\n";
+	if ( ! empty( $missing_in_current ) ) {
+		echo "  [CRÍTICO] A versão do banco NÃO contém termos obrigatórios: " . implode( ', ', $missing_in_current ) . "\n";
 	}
 
 	if ( ! $UONIX_APPLY ) {
@@ -161,6 +193,7 @@ foreach ( $policies as $slug => $config ) {
 			'post_title'   => $post->post_title,
 			'post_name'    => $post->post_name,
 			'post_content' => base64_encode( $current_content ),
+			'sha256'       => $current_hash,
 			'timestamp'    => time(),
 			'date'         => date( 'c' ),
 		);
@@ -191,18 +224,42 @@ foreach ( $policies as $slug => $config ) {
 			continue;
 		}
 
-		// Readback Verificado: valida se o post gravado no banco reflete o conteúdo canônico
+		// Readback Verificado Integral: valida que o post persistido reflete 100% o hash SHA256 canônico
 		if ( function_exists( 'clean_post_cache' ) ) {
 			clean_post_cache( $post->ID );
 		}
 		$fresh_post = get_post( $post->ID );
-		if ( ! $fresh_post || false === strpos( $fresh_post->post_content, $config['check'] ) ) {
-			echo "  [ERRO CRÍTICO READBACK] Post ID {$post->ID} atualizado mas o readback falhou: chave obrigatória '{$config['check']}' não encontrada no banco!\n\n";
+		if ( ! $fresh_post ) {
+			echo "  [ERRO CRÍTICO READBACK] Post ID {$post->ID} atualizado mas get_post retornou nulo!\n\n";
 			$errors++;
 			continue;
 		}
 
-		echo "  [SUCESSO & READBACK VERIFICADO] Post ID {$post->ID} atualizado e confirmado no banco!\n\n";
+		$norm_fresh = trim( str_replace( "\r\n", "\n", $fresh_post->post_content ) );
+		$fresh_hash = hash( 'sha256', $norm_fresh );
+
+		if ( $fresh_hash !== $canonical_hash ) {
+			echo "  [ERRO CRÍTICO READBACK] Post ID {$post->ID} atualizado mas o readback integral falhou: hash SHA256 diverge do documento canônico!\n";
+			echo "    Hash Esperado (canônico): {$canonical_hash}\n";
+			echo "    Hash Obtido (banco):      {$fresh_hash}\n\n";
+			$errors++;
+			continue;
+		}
+
+		// Valida adicionalmente que todas as chaves obrigatórias estão presentes no readback
+		$missing_readback = array();
+		foreach ( $config['checks'] as $chk ) {
+			if ( false === strpos( $norm_fresh, $chk ) ) {
+				$missing_readback[] = $chk;
+			}
+		}
+		if ( ! empty( $missing_readback ) ) {
+			echo "  [ERRO CRÍTICO READBACK] Post ID {$post->ID} atualizado mas termos obrigatórios ausentes no readback: " . implode( ', ', $missing_readback ) . "\n\n";
+			$errors++;
+			continue;
+		}
+
+		echo "  [SUCESSO & READBACK VERIFICADO] Post ID {$post->ID} atualizado e confirmado com paridade SHA256 integral ({$fresh_hash})!\n\n";
 		$changes++;
 	}
 }
@@ -214,7 +271,55 @@ if ( $UONIX_APPLY && $changes > 0 ) {
 	}
 }
 
-echo "========================================================================\n";
+// -------------------------------------------------------------------------
+// 3. Verificação de Integridade Pública (Opcional ou sob demanda)
+// -------------------------------------------------------------------------
+if ( $UONIX_VERIFY_PUBLIC ) {
+	echo "\n🌐 Verificando páginas públicas para conformidade contra cache de borda...\n";
+	foreach ( $policies as $slug => $config ) {
+		$page_url = function_exists( 'home_url' ) ? home_url( '/' . $slug . '/' ) : 'https://www.uonix.com.br/' . $slug . '/';
+		echo "  Testando URL: {$page_url} ... ";
+
+		$public_html = '';
+		if ( function_exists( 'wp_remote_get' ) ) {
+			$response = wp_remote_get( $page_url, array( 'timeout' => 15, 'sslverify' => false ) );
+			if ( ! is_wp_error( $response ) && 200 === wp_remote_retrieve_response_code( $response ) ) {
+				$public_html = wp_remote_retrieve_body( $response );
+			}
+		}
+
+		if ( empty( $public_html ) && function_exists( 'curl_init' ) ) {
+			$ch = curl_init( $page_url );
+			curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
+			curl_setopt( $ch, CURLOPT_FOLLOWLOCATION, true );
+			curl_setopt( $ch, CURLOPT_TIMEOUT, 15 );
+			curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, false );
+			$public_html = curl_exec( $ch );
+			curl_close( $ch );
+		}
+
+		if ( empty( $public_html ) ) {
+			echo "[AVISO] Não foi possível consultar a página pública (rede ou endpoint inacessível).\n";
+			continue;
+		}
+
+		$missing_public = array();
+		foreach ( $config['checks'] as $chk ) {
+			if ( false === strpos( $public_html, $chk ) ) {
+				$missing_public[] = $chk;
+			}
+		}
+
+		if ( empty( $missing_public ) ) {
+			echo "[OK PÚBLICO] Conteúdo público reflete todos os termos canônicos.\n";
+		} else {
+			echo "[DESCOMPASSO PÚBLICO] Página pública ainda não reflete: " . implode( ', ', $missing_public ) . " (necessário expirar cache de CDN/Nginx da Locaweb)\n";
+			$errors++;
+		}
+	}
+}
+
+echo "\n========================================================================\n";
 echo "RELATÓRIO: Modificações: {$changes} | Já sincronizados: {$noops} | Erros: {$errors}\n";
 echo "========================================================================\n";
 

@@ -8,6 +8,292 @@ const {
   isPublishConfirmed
 } = require('./gtm-client.js');
 
+/**
+ * Calcula estruturalmente todas as ações necessárias para reconciliar o workspace
+ * contra o manifesto canônico auditado (docs/gtm/uonix-google-ads-gtm-import.json).
+ *
+ * @param {object} manifest Conteúdo do manifesto canônico
+ * @param {object} currentState { tags, triggers, variables } do workspace
+ * @returns {Array} Lista de ações planejadas (CREATE, UPDATE, DELETE)
+ */
+function computeSyncActions(manifest, currentState) {
+  const plannedActions = [];
+
+  const canonicalTags = manifest.containerVersion?.tag || [];
+  const canonicalTriggers = manifest.containerVersion?.trigger || [];
+  const canonicalVariables = manifest.containerVersion?.variable || [];
+
+  const currentTags = currentState.tags || [];
+  const currentTriggers = currentState.triggers || [];
+  const currentVariables = currentState.variables || [];
+
+  // Mapeamentos
+  const currentTagById = new Map(currentTags.map(t => [String(t.tagId), t]));
+  const currentTagByName = new Map(currentTags.map(t => [t.name, t]));
+
+  const currentTriggerById = new Map(currentTriggers.map(t => [String(t.triggerId), t]));
+  const currentTriggerByName = new Map(currentTriggers.map(t => [t.name, t]));
+
+  const currentVariableById = new Map(currentVariables.map(v => [String(v.variableId), v]));
+  const currentVariableByName = new Map(currentVariables.map(v => [v.name, v]));
+
+  const canonicalTagById = new Map(canonicalTags.map(t => [String(t.tagId), t]));
+  const canonicalTagByName = new Map(canonicalTags.map(t => [t.name, t]));
+
+  const canonicalTriggerById = new Map(canonicalTriggers.map(t => [String(t.triggerId), t]));
+  const canonicalTriggerByName = new Map(canonicalTriggers.map(t => [t.name, t]));
+
+  const canonicalVariableById = new Map(canonicalVariables.map(v => [String(v.variableId), v]));
+  const canonicalVariableByName = new Map(canonicalVariables.map(v => [v.name, v]));
+
+  // 1. Entidades não autorizadas no workspace -> DELETE
+  for (const tag of currentTags) {
+    const isAuthorized = canonicalTagById.has(String(tag.tagId)) || canonicalTagByName.has(tag.name);
+    if (!isAuthorized) {
+      plannedActions.push({
+        type: 'DELETE_TAG',
+        id: tag.tagId,
+        name: tag.name,
+        target: tag,
+        description: `Remover tag não autorizada pelo manifesto canônico (ID: ${tag.tagId}, Nome: "${tag.name}")`
+      });
+    }
+  }
+
+  for (const tr of currentTriggers) {
+    const isAuthorized = canonicalTriggerById.has(String(tr.triggerId)) || canonicalTriggerByName.has(tr.name);
+    if (!isAuthorized) {
+      plannedActions.push({
+        type: 'DELETE_TRIGGER',
+        id: tr.triggerId,
+        name: tr.name,
+        target: tr,
+        description: `Remover trigger não autorizado pelo manifesto canônico (ID: ${tr.triggerId}, Nome: "${tr.name}")`
+      });
+    }
+  }
+
+  for (const v of currentVariables) {
+    const isAuthorized = canonicalVariableById.has(String(v.variableId)) || canonicalVariableByName.has(v.name);
+    if (!isAuthorized) {
+      plannedActions.push({
+        type: 'DELETE_VARIABLE',
+        id: v.variableId,
+        name: v.name,
+        target: v,
+        description: `Remover variável não autorizada pelo manifesto canônico (ID: ${v.variableId}, Nome: "${v.name}")`
+      });
+    }
+  }
+
+  // 2. Tags canônicas obrigatórias: verificar ausência (CREATE_TAG) ou divergência (UPDATE_TAG)
+  for (const expected of canonicalTags) {
+    const current = currentTagById.get(String(expected.tagId)) || currentTagByName.get(expected.name);
+    if (!current) {
+      plannedActions.push({
+        type: 'CREATE_TAG',
+        name: expected.name,
+        expected,
+        description: `Criar Tag canônica ausente: "${expected.name}" (ID canônico: ${expected.tagId})`
+      });
+      continue;
+    }
+
+    const diffs = [];
+    if (current.type !== expected.type) {
+      diffs.push(`Tipo divergente: esperado "${expected.type}", atual "${current.type}"`);
+    }
+    const expFiring = expected.tagFiringOption || 'oncePerEvent';
+    if ((current.tagFiringOption || 'oncePerEvent') !== expFiring) {
+      diffs.push(`tagFiringOption divergente: esperado "${expFiring}", atual "${current.tagFiringOption}"`);
+    }
+
+    // Parâmetros exatos sem extras/duplicados/tipos divergentes
+    const expParams = expected.parameter || [];
+    const curParams = current.parameter || [];
+    const curKeys = curParams.map(p => p.key);
+    if (new Set(curKeys).size !== curKeys.length) {
+      diffs.push(`Parâmetros duplicados encontrados na Tag: ${curKeys.join(', ')}`);
+    }
+    if (expParams.length !== curParams.length) {
+      diffs.push(`Quantidade de parâmetros divergente: esperado ${expParams.length}, atual ${curParams.length}`);
+    }
+    for (const ep of expParams) {
+      const cp = curParams.find(p => p.key === ep.key);
+      if (!cp) {
+        diffs.push(`Parâmetro obrigatório "${ep.key}" ausente`);
+      } else {
+        if (cp.type !== ep.type) {
+          diffs.push(`Tipo do parâmetro "${ep.key}" divergente: esperado "${ep.type}", atual "${cp.type}"`);
+        }
+        if (cp.value !== ep.value) {
+          diffs.push(`Valor do parâmetro "${ep.key}" divergente: esperado "${ep.value}", atual "${cp.value}"`);
+        }
+      }
+    }
+    for (const cp of curParams) {
+      if (!expParams.some(ep => ep.key === cp.key)) {
+        diffs.push(`Parâmetro não canônico/extra "${cp.key}" presente na Tag`);
+      }
+    }
+
+    // Consent Settings
+    if (expected.consentSettings) {
+      if (current.consentSettings?.consentStatus !== expected.consentSettings.consentStatus) {
+        diffs.push(`consentStatus divergente: esperado "${expected.consentSettings.consentStatus}", atual "${current.consentSettings?.consentStatus}"`);
+      }
+      if (expected.consentSettings.consentType) {
+        if (current.consentSettings?.consentType?.type !== expected.consentSettings.consentType.type) {
+          diffs.push(`consentType.type divergente: esperado "${expected.consentSettings.consentType.type}", atual "${current.consentSettings?.consentType?.type}"`);
+        }
+        const expList = (expected.consentSettings.consentType.list || []).map(i => `${i.type}:${i.value}`);
+        const curList = (current.consentSettings?.consentType?.list || []).map(i => `${i.type}:${i.value}`);
+        if (expList.length !== curList.length || !expList.every(v => curList.includes(v))) {
+          diffs.push(`consentType.list divergente: esperado [${expList.join(', ')}], atual [${curList.join(', ')}]`);
+        }
+      }
+    }
+
+    // Firing Triggers
+    if (expected.firingTriggerId) {
+      const expTriggers = (expected.firingTriggerId || []).map(String).sort();
+      const curTriggers = (current.firingTriggerId || []).map(String).sort();
+      if (expTriggers.length !== curTriggers.length || !expTriggers.every((id, idx) => id === curTriggers[idx])) {
+        diffs.push(`firingTriggerId divergente: esperado [${expTriggers.join(', ')}], atual [${curTriggers.join(', ')}]`);
+      }
+    }
+
+    if (diffs.length > 0) {
+      plannedActions.push({
+        type: 'UPDATE_TAG',
+        id: current.tagId,
+        name: current.name,
+        target: current,
+        expected,
+        differences: diffs,
+        description: `Sincronizar Tag ${current.tagId} (${current.name}): ${diffs.join('; ')}`
+      });
+    }
+  }
+
+  // 3. Triggers canônicos obrigatórios: verificar ausência (CREATE_TRIGGER) ou divergência (UPDATE_TRIGGER)
+  for (const expected of canonicalTriggers) {
+    const current = currentTriggerById.get(String(expected.triggerId)) || currentTriggerByName.get(expected.name);
+    if (!current) {
+      plannedActions.push({
+        type: 'CREATE_TRIGGER',
+        name: expected.name,
+        expected,
+        description: `Criar Trigger canônico ausente: "${expected.name}" (ID canônico: ${expected.triggerId})`
+      });
+      continue;
+    }
+
+    const diffs = [];
+    if (current.type !== expected.type) {
+      diffs.push(`Tipo de trigger divergente: esperado "${expected.type}", atual "${current.type}"`);
+    }
+
+    // customEventFilter
+    const expCef = expected.customEventFilter || [];
+    const curCef = current.customEventFilter || [];
+    if (expCef.length !== curCef.length) {
+      diffs.push(`Quantidade de customEventFilter divergente: esperado ${expCef.length}, atual ${curCef.length}`);
+    } else {
+      for (let i = 0; i < expCef.length; i++) {
+        const ef = expCef[i];
+        const cf = curCef[i];
+        if (cf.type !== ef.type) diffs.push(`customEventFilter[${i}].type divergente: esperado "${ef.type}", atual "${cf.type}"`);
+        if (cf.negate !== false) diffs.push(`customEventFilter[${i}] sem negate:false explícito (encontrado: ${cf.negate})`);
+        const eParams = ef.parameter || [];
+        const cParams = cf.parameter || [];
+        for (const ep of eParams) {
+          const cp = cParams.find(p => p.key === ep.key);
+          if (!cp || cp.value !== ep.value || cp.type !== ep.type) {
+            diffs.push(`customEventFilter[${i}] parâmetro "${ep.key}" divergente: esperado ${JSON.stringify(ep)}, atual ${JSON.stringify(cp)}`);
+          }
+        }
+      }
+    }
+
+    // filter (ex: AdOpt)
+    const expF = expected.filter || [];
+    const curF = current.filter || [];
+    if (expF.length !== curF.length) {
+      diffs.push(`Quantidade de filtros divergente: esperado ${expF.length}, atual ${curF.length}`);
+    } else {
+      for (let i = 0; i < expF.length; i++) {
+        const ef = expF[i];
+        const cf = curF[i];
+        if (cf.type !== ef.type) diffs.push(`filter[${i}].type divergente: esperado "${ef.type}", atual "${cf.type}"`);
+        if (cf.negate !== false) diffs.push(`filter[${i}] sem negate:false explícito (encontrado: ${cf.negate})`);
+        const eParams = ef.parameter || [];
+        const cParams = cf.parameter || [];
+        for (const ep of eParams) {
+          const cp = cParams.find(p => p.key === ep.key);
+          if (!cp || cp.value !== ep.value || cp.type !== ep.type) {
+            diffs.push(`filter[${i}] parâmetro "${ep.key}" divergente: esperado ${JSON.stringify(ep)}, atual ${JSON.stringify(cp)}`);
+          }
+        }
+      }
+    }
+
+    if (diffs.length > 0) {
+      plannedActions.push({
+        type: 'UPDATE_TRIGGER',
+        id: current.triggerId,
+        name: current.name,
+        target: current,
+        expected,
+        differences: diffs,
+        description: `Sincronizar Trigger ${current.triggerId} (${current.name}): ${diffs.join('; ')}`
+      });
+    }
+  }
+
+  // 4. Variáveis canônicas obrigatórias: verificar ausência (CREATE_VARIABLE) ou divergência (UPDATE_VARIABLE)
+  for (const expected of canonicalVariables) {
+    const current = currentVariableById.get(String(expected.variableId)) || currentVariableByName.get(expected.name);
+    if (!current) {
+      plannedActions.push({
+        type: 'CREATE_VARIABLE',
+        name: expected.name,
+        expected,
+        description: `Criar Variável canônica ausente: "${expected.name}" (ID canônico: ${expected.variableId})`
+      });
+      continue;
+    }
+
+    const diffs = [];
+    if (current.type !== expected.type) {
+      diffs.push(`Tipo de variável divergente: esperado "${expected.type}", atual "${current.type}"`);
+    }
+
+    const expParams = expected.parameter || [];
+    const curParams = current.parameter || [];
+    for (const ep of expParams) {
+      const cp = curParams.find(p => p.key === ep.key);
+      if (!cp || cp.value !== ep.value || cp.type !== ep.type) {
+        diffs.push(`Variável parâmetro "${ep.key}" divergente: esperado ${JSON.stringify(ep)}, atual ${JSON.stringify(cp)}`);
+      }
+    }
+
+    if (diffs.length > 0) {
+      plannedActions.push({
+        type: 'UPDATE_VARIABLE',
+        id: current.variableId,
+        name: current.name,
+        target: current,
+        expected,
+        differences: diffs,
+        description: `Sincronizar Variável ${current.variableId} (${current.name}): ${diffs.join('; ')}`
+      });
+    }
+  }
+
+  return plannedActions;
+}
+
 async function syncGtmGovernance() {
   const accountId = '6348960683';
   const containerId = '248910884';
@@ -30,177 +316,22 @@ async function syncGtmGovernance() {
     throw new Error(`[FAIL-CLOSED] Manifesto canônico não encontrado em: ${manifestPath}`);
   }
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  const canonicalTags = manifest.containerVersion?.tag || [];
-  const canonicalTriggers = manifest.containerVersion?.trigger || [];
-  const canonicalVariables = manifest.containerVersion?.variable || [];
 
-  // Mapas canônicos por nome e ID
-  const canonicalTagByName = new Map();
-  const canonicalTagById = new Map();
-  for (const t of canonicalTags) {
-    canonicalTagByName.set(t.name, t);
-    canonicalTagById.set(String(t.tagId), t);
-  }
-
-  const canonicalTriggerByName = new Map();
-  const canonicalTriggerById = new Map();
-  for (const tr of canonicalTriggers) {
-    canonicalTriggerByName.set(tr.name, tr);
-    canonicalTriggerById.set(String(tr.triggerId), tr);
-  }
-
-  // 3. Obter tags, triggers e variáveis atuais do Workspace
+  // 3. Obter estado atual do workspace
   const currentTags = (await gtmRequest('GET', ws + '/tags')).tag || [];
   const currentTriggers = (await gtmRequest('GET', ws + '/triggers')).trigger || [];
   const currentVariables = (await gtmRequest('GET', ws + '/variables')).variable || [];
 
-  console.log(`Estado atual: ${currentTags.length} tags, ${currentTriggers.length} triggers, ${currentVariables.length} variáveis.`);
-  console.log(`Manifesto canônico: ${canonicalTags.length} tags, ${canonicalTriggers.length} triggers, ${canonicalVariables.length} variáveis.\n`);
+  console.log(`Estado atual do Workspace: ${currentTags.length} tags, ${currentTriggers.length} triggers, ${currentVariables.length} variáveis.`);
+  console.log(`Manifesto canônico: ${(manifest.containerVersion?.tag || []).length} tags, ${(manifest.containerVersion?.trigger || []).length} triggers, ${(manifest.containerVersion?.variable || []).length} variáveis.\n`);
 
-  const plannedActions = [];
+  // 4. Calcular ações estruturais
+  const plannedActions = computeSyncActions(manifest, {
+    tags: currentTags,
+    triggers: currentTriggers,
+    variables: currentVariables
+  });
 
-  // A. Ação: Deletar tags que não existem no manifesto canônico (ex: Tag 48 ou scrapers não autorizados)
-  for (const tag of currentTags) {
-    const isAuthorized = canonicalTagById.has(String(tag.tagId)) || canonicalTagByName.has(tag.name);
-    if (!isAuthorized) {
-      plannedActions.push({
-        type: 'DELETE_TAG',
-        id: tag.tagId,
-        name: tag.name,
-        target: tag,
-        description: `Remover tag não autorizada pelo manifesto canônico (ID: ${tag.tagId}, Nome: "${tag.name}")`
-      });
-    }
-  }
-
-  // B. Ação: Deep Comparison de cada tag canônica autorizada
-  for (const tag of currentTags) {
-    const expected = canonicalTagById.get(String(tag.tagId)) || canonicalTagByName.get(tag.name);
-    if (!expected) continue;
-
-    const diffs = [];
-
-    // Tipo de Tag
-    if (tag.type !== expected.type) {
-      diffs.push(`Tipo divergente: esperado "${expected.type}", atual "${tag.type}"`);
-    }
-
-    // Tag Firing Option
-    if (expected.tagFiringOption && tag.tagFiringOption !== expected.tagFiringOption) {
-      diffs.push(`tagFiringOption divergente: esperado "${expected.tagFiringOption}", atual "${tag.tagFiringOption}"`);
-    }
-
-    // Parâmetros essenciais
-    const expParams = expected.parameter || [];
-    const curParams = tag.parameter || [];
-    for (const ep of expParams) {
-      const cp = curParams.find(p => p.key === ep.key);
-      if (!cp || cp.value !== ep.value) {
-        diffs.push(`Parâmetro "${ep.key}" divergente: esperado "${ep.value}", atual "${cp?.value}"`);
-      }
-    }
-
-    // Consent Settings (consentStatus e consentType estritos)
-    if (expected.consentSettings) {
-      const curConsentStatus = tag.consentSettings?.consentStatus;
-      if (curConsentStatus !== expected.consentSettings.consentStatus) {
-        diffs.push(`consentStatus divergente: esperado "${expected.consentSettings.consentStatus}", atual "${curConsentStatus}"`);
-      }
-
-      const expConsentList = (expected.consentSettings.consentType?.list || []).map(c => c.value);
-      const curConsentList = (tag.consentSettings?.consentType?.list || []).map(c => c.value);
-      const consentEqual = expConsentList.length === curConsentList.length &&
-        expConsentList.every(val => curConsentList.includes(val));
-      if (!consentEqual) {
-        diffs.push(`consentType divergente: esperado [${expConsentList.join(', ')}], atual [${curConsentList.join(', ')}]`);
-      }
-    }
-
-    // Firing Triggers
-    if (expected.firingTriggerId) {
-      const expTriggers = (expected.firingTriggerId || []).map(String);
-      const curTriggers = (tag.firingTriggerId || []).map(String);
-      const triggersEqual = expTriggers.length === curTriggers.length &&
-        expTriggers.every(id => curTriggers.includes(id));
-      if (!triggersEqual) {
-        diffs.push(`firingTriggerId divergente: esperado [${expTriggers.join(', ')}], atual [${curTriggers.join(', ')}]`);
-      }
-    }
-
-    if (diffs.length > 0) {
-      plannedActions.push({
-        type: 'UPDATE_TAG',
-        id: tag.tagId,
-        name: tag.name,
-        target: tag,
-        expected,
-        differences: diffs,
-        description: `Sincronizar Tag ${tag.tagId} (${tag.name}) com o manifesto canônico: ${diffs.join('; ')}`
-      });
-    }
-  }
-
-  // C. Ação: Deep Comparison de cada trigger de conversão
-  for (const tr of currentTriggers) {
-    const expected = canonicalTriggerById.get(String(tr.triggerId)) || canonicalTriggerByName.get(tr.name);
-    if (!expected) continue;
-
-    const diffs = [];
-
-    // Tipo de trigger
-    if (tr.type !== expected.type) {
-      diffs.push(`Tipo de trigger divergente: esperado "${expected.type}", atual "${tr.type}"`);
-    }
-
-    // customEventFilter: checar filtros e presença obrigatória de negate: false explícito
-    const expCef = expected.customEventFilter || [];
-    const curCef = tr.customEventFilter || [];
-    if (expCef.length > 0) {
-      if (curCef.length === 0) {
-        diffs.push('customEventFilter ausente no trigger atual');
-      } else {
-        for (const f of curCef) {
-          if (f.negate !== false) {
-            diffs.push(`customEventFilter sem negate:false explícito (encontrado: ${f.negate})`);
-          }
-        }
-        const expEvt = expCef[0]?.parameter?.find(p => p.key === 'arg1')?.value;
-        const curEvt = curCef[0]?.parameter?.find(p => p.key === 'arg1')?.value;
-        if (expEvt && curEvt !== expEvt) {
-          diffs.push(`Evento customizado divergente: esperado "${expEvt}", atual "${curEvt}"`);
-        }
-      }
-    }
-
-    // filter (ex: filtro AdOpt): checar filtros e presença obrigatória de negate: false explícito
-    const expFilter = expected.filter || [];
-    const curFilter = tr.filter || [];
-    if (expFilter.length > 0) {
-      if (curFilter.length === 0) {
-        diffs.push('filter AdOpt ausente no trigger atual');
-      } else {
-        for (const f of curFilter) {
-          if (f.negate !== false) {
-            diffs.push(`filter sem negate:false explícito (encontrado: ${f.negate})`);
-          }
-        }
-      }
-    }
-
-    if (diffs.length > 0) {
-      plannedActions.push({
-        type: 'UPDATE_TRIGGER',
-        id: tr.triggerId,
-        name: tr.name,
-        target: tr,
-        expected,
-        differences: diffs,
-        description: `Sincronizar Trigger ${tr.triggerId} (${tr.name}) com o manifesto canônico: ${diffs.join('; ')}`
-      });
-    }
-  }
-
-  // 4. Relatório de Ações Planejadas
   console.log(`📋 Total de ações identificadas: ${plannedActions.length}`);
   if (plannedActions.length === 0) {
     console.log('✅ O workspace já está 100% aderente ao contrato canônico de governança.');
@@ -211,7 +342,7 @@ async function syncGtmGovernance() {
 
   for (let i = 0; i < plannedActions.length; i++) {
     const act = plannedActions[i];
-    console.log(`  [${i + 1}] [${act.type}] ${act.name} (ID: ${act.id}): ${act.description}`);
+    console.log(`  [${i + 1}] [${act.type}] ${act.name} (ID: ${act.id || 'NOVO'}): ${act.description}`);
   }
   console.log('');
 
@@ -219,13 +350,16 @@ async function syncGtmGovernance() {
   if (!apply) {
     console.log('🛡️  NENHUMA mutação foi executada (modo DRY-RUN padrão).');
     if (isPublishRequested()) {
-      console.warn(
-        '⚠️ Flag --publish requer explicitamente a flag --apply para criar e publicar versões. ' +
-        'Publicação bloqueada fail-closed.'
+      console.error(
+        '[FAIL-CLOSED] Flag --publish requer explicitamente a flag --apply e 100% de aderência comprovada. ' +
+        'Publicação bloqueada.'
       );
+      process.exit(1);
     }
-    console.log(`Para aplicar as ações acima no Workspace ${wsId}, execute:`);
-    console.log(`  node scripts/tools/sync-canonical-gtm.js --workspace-id=${wsId} --apply\n`);
+    if (plannedActions.length > 0) {
+      console.log(`Para aplicar as ${plannedActions.length} ações acima no Workspace ${wsId}, execute:`);
+      console.log(`  node scripts/tools/sync-canonical-gtm.js --workspace-id=${wsId} --apply\n`);
+    }
     return;
   }
 
@@ -235,7 +369,40 @@ async function syncGtmGovernance() {
     if (act.type === 'DELETE_TAG') {
       console.log(`- Deletando Tag não autorizada ${act.id}...`);
       await gtmRequest('DELETE', ws + '/tags/' + act.id);
-      console.log(`  Tag ${act.id} deletada.`);
+    } else if (act.type === 'DELETE_TRIGGER') {
+      console.log(`- Deletando Trigger não autorizado ${act.id}...`);
+      await gtmRequest('DELETE', ws + '/triggers/' + act.id);
+    } else if (act.type === 'DELETE_VARIABLE') {
+      console.log(`- Deletando Variável não autorizada ${act.id}...`);
+      await gtmRequest('DELETE', ws + '/variables/' + act.id);
+    } else if (act.type === 'CREATE_TAG') {
+      console.log(`- Criando Tag canônica "${act.name}"...`);
+      const payload = {
+        name: act.expected.name,
+        type: act.expected.type,
+        parameter: act.expected.parameter,
+        tagFiringOption: act.expected.tagFiringOption || 'oncePerEvent',
+        consentSettings: act.expected.consentSettings,
+        firingTriggerId: act.expected.firingTriggerId
+      };
+      await gtmRequest('POST', ws + '/tags', payload);
+    } else if (act.type === 'CREATE_TRIGGER') {
+      console.log(`- Criando Trigger canônico "${act.name}"...`);
+      const payload = {
+        name: act.expected.name,
+        type: act.expected.type,
+        customEventFilter: act.expected.customEventFilter,
+        filter: act.expected.filter
+      };
+      await gtmRequest('POST', ws + '/triggers', payload);
+    } else if (act.type === 'CREATE_VARIABLE') {
+      console.log(`- Criando Variável canônica "${act.name}"...`);
+      const payload = {
+        name: act.expected.name,
+        type: act.expected.type,
+        parameter: act.expected.parameter
+      };
+      await gtmRequest('POST', ws + '/variables', payload);
     } else if (act.type === 'UPDATE_TAG') {
       console.log(`- Sincronizando Tag ${act.id} com contrato canônico...`);
       const payload = {
@@ -247,7 +414,6 @@ async function syncGtmGovernance() {
         firingTriggerId: act.expected.firingTriggerId || act.target.firingTriggerId
       };
       await gtmRequest('PUT', ws + '/tags/' + act.id, payload);
-      console.log(`  Tag ${act.id} sincronizada com sucesso.`);
     } else if (act.type === 'UPDATE_TRIGGER') {
       console.log(`- Sincronizando Trigger ${act.id} com contrato canônico...`);
       const payload = {
@@ -257,25 +423,49 @@ async function syncGtmGovernance() {
         filter: act.expected.filter || act.target.filter
       };
       await gtmRequest('PUT', ws + '/triggers/' + act.id, payload);
-      console.log(`  Trigger ${act.id} sincronizado com sucesso.`);
+    } else if (act.type === 'UPDATE_VARIABLE') {
+      console.log(`- Sincronizando Variável ${act.id} com contrato canônico...`);
+      const payload = {
+        ...act.target,
+        type: act.expected.type,
+        parameter: act.expected.parameter
+      };
+      await gtmRequest('PUT', ws + '/variables/' + act.id, payload);
     }
   }
 
-  console.log('\n✅ Todas as mutações aplicadas com sucesso no Workspace ' + wsId);
+  console.log('\n✅ Mutações enviadas. Iniciando READBACK pós-aplicação no Workspace ' + wsId + '...');
 
-  // 7. Publicação sob demanda com dupla confirmação e exigência estrita de --apply
+  // 7. READBACK OBRIGATÓRIO: re-consulta o workspace e certifica 100% de paridade antes de qualquer publicação
+  const freshTags = (await gtmRequest('GET', ws + '/tags')).tag || [];
+  const freshTriggers = (await gtmRequest('GET', ws + '/triggers')).trigger || [];
+  const freshVariables = (await gtmRequest('GET', ws + '/variables')).variable || [];
+
+  const remainingActions = computeSyncActions(manifest, {
+    tags: freshTags,
+    triggers: freshTriggers,
+    variables: freshVariables
+  });
+
+  if (remainingActions.length > 0) {
+    console.error(`\n[FAIL-CLOSED] Readback pós-aplicação falhou: ainda restam ${remainingActions.length} ações pendentes!`);
+    for (const ra of remainingActions) {
+      console.error(`  - [${ra.type}] ${ra.name}: ${ra.description}`);
+    }
+    process.exit(1);
+  }
+
+  console.log('🛡️  READBACK CONFIRMADO: Workspace 100% aderente ao manifesto canônico!');
+
+  // 8. Publicação sob demanda com dupla confirmação e exigência estrita de --apply e readback verde
   if (isPublishRequested()) {
-    if (!apply) {
-      console.warn(
-        '\n[DRY-RUN] Publicação cancelada: requer a flag --apply explícita para criar e publicar versão.'
-      );
-    } else if (!isPublishConfirmed()) {
+    if (!isPublishConfirmed()) {
       console.warn(
         '\n⚠️ Publicação solicitada com --publish, mas requer confirmação explícita via --confirm-publish. ' +
         'A versão NÃO foi publicada automaticamente.'
       );
     } else {
-      console.log('\n📦 Criando nova versão a partir do Workspace...');
+      console.log('\n📦 Criando nova versão a partir do Workspace verificado...');
       const versionRes = await gtmRequest('POST', ws + ':create_version', {
         name: 'v31 - Governança Estrita Deduplicação Newsletter e Carrinho',
         notes: 'Adiciona orderId: {{DLV - transaction_id}} na Tag 47 para deduplicação server-side e sincroniza regras AdOpt/negate:false.'
@@ -297,4 +487,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { syncGtmGovernance };
+module.exports = { syncGtmGovernance, computeSyncActions };

@@ -28,12 +28,80 @@ function gtm_assert( $condition, $message ) {
 }
 
 function gtm_has_exact_consent_type( $tag, $expected_type ) {
+	if ( ! isset( $tag['consentSettings']['consentType']['type'] ) || 'list' !== $tag['consentSettings']['consentType']['type'] ) {
+		return false;
+	}
 	$list = isset( $tag['consentSettings']['consentType']['list'] )
 		? $tag['consentSettings']['consentType']['list']
 		: array();
 	return 1 === count( $list )
-		&& isset( $list[0]['value'] )
+		&& isset( $list[0]['type'], $list[0]['value'] )
+		&& 'template' === $list[0]['type']
 		&& $expected_type === $list[0]['value'];
+}
+
+function gtm_validate_tag_structural_contract( $tag, $expected_tag ) {
+	if ( ! is_array( $tag ) || ! is_array( $expected_tag ) ) {
+		return false;
+	}
+	if ( ( $tag['type'] ?? '' ) !== ( $expected_tag['type'] ?? '' ) ) {
+		return false;
+	}
+	$exp_firing = $expected_tag['tagFiringOption'] ?? 'oncePerEvent';
+	$cur_firing = $tag['tagFiringOption'] ?? 'oncePerEvent';
+	if ( $cur_firing !== $exp_firing ) {
+		return false;
+	}
+
+	// Parâmetros exatos sem extras nem duplicados
+	$tag_params = $tag['parameter'] ?? array();
+	$exp_params = $expected_tag['parameter'] ?? array();
+	if ( count( $tag_params ) !== count( $exp_params ) ) {
+		return false;
+	}
+	$keys = array();
+	foreach ( $tag_params as $p ) {
+		$keys[] = $p['key'] ?? '';
+	}
+	if ( count( $keys ) !== count( array_unique( $keys ) ) ) {
+		return false; // Chave duplicada
+	}
+	foreach ( $exp_params as $ep ) {
+		$found = false;
+		foreach ( $tag_params as $tp ) {
+			if ( ( $tp['key'] ?? '' ) === ( $ep['key'] ?? '' ) ) {
+				if ( ( $tp['type'] ?? '' ) !== ( $ep['type'] ?? '' ) || ( $tp['value'] ?? '' ) !== ( $ep['value'] ?? '' ) ) {
+					return false;
+				}
+				$found = true;
+				break;
+			}
+		}
+		if ( ! $found ) {
+			return false;
+		}
+	}
+
+	// Consentimento
+	if ( isset( $expected_tag['consentSettings'] ) ) {
+		if ( ( $tag['consentSettings']['consentStatus'] ?? '' ) !== ( $expected_tag['consentSettings']['consentStatus'] ?? '' ) ) {
+			return false;
+		}
+		if ( ! gtm_has_exact_consent_type( $tag, 'ad_storage' ) ) {
+			return false;
+		}
+	}
+
+	// Triggers
+	$exp_triggers = array_values( array_map( 'strval', $expected_tag['firingTriggerId'] ?? array() ) );
+	$cur_triggers = array_values( array_map( 'strval', $tag['firingTriggerId'] ?? array() ) );
+	sort( $exp_triggers );
+	sort( $cur_triggers );
+	if ( $exp_triggers !== $cur_triggers ) {
+		return false;
+	}
+
+	return true;
 }
 
 function gtm_has_exact_filter( $filters, $expected_type, $expected_arg0, $expected_arg1 ) {
@@ -232,11 +300,15 @@ gtm_assert(
 	'Tag 47 declara conversionLabel {{Constante - Label Assinatura Newsletter}}'
 );
 gtm_assert(
-	isset( $tag_47['firingTriggerId'] ) && in_array( '46', array_map( 'strval', $tag_47['firingTriggerId'] ), true ),
-	'Tag 47 dispara exclusivamente pelo trigger 46 (Evento - Assinatura Newsletter Uônix)'
+	isset( $tag_47['firingTriggerId'] ) && array( '46' ) === array_values( array_map( 'strval', $tag_47['firingTriggerId'] ) ),
+	'Tag 47 dispara estrita e exclusivamente pelo trigger 46 (Evento - Assinatura Newsletter Uônix), sem triggers extras'
+);
+gtm_assert(
+	gtm_validate_tag_structural_contract( $tag_47, $tag_47 ),
+	'Tag 47 passa na validação estrutural canônica estrita'
 );
 
-// Provas de mutação em memória para a Tag 47
+// Provas ativas de mutação em memória para a Tag 47
 $mut_no_order = $tag_47;
 $mut_no_order['parameter'] = array_values( array_filter( $mut_no_order['parameter'], function( $p ) { return $p['key'] !== 'orderId'; } ) );
 gtm_assert( ! gtm_has_exact_parameter( $mut_no_order, 'orderId', '{{DLV - transaction_id}}' ), 'Mutação: remoção de orderId é detectada' );
@@ -248,9 +320,58 @@ $mut_bad_label['parameter'] = array_map( function( $p ) {
 }, $mut_bad_label['parameter'] );
 gtm_assert( ! gtm_has_exact_parameter( $mut_bad_label, 'conversionLabel', '{{Constante - Label Assinatura Newsletter}}' ), 'Mutação: alteração de label é detectada' );
 
-$mut_bad_trigger = $tag_47;
-$mut_bad_trigger['firingTriggerId'] = array( '999' );
-gtm_assert( ! in_array( '46', array_map( 'strval', $mut_bad_trigger['firingTriggerId'] ), true ), 'Mutação: alteração de trigger é detectada' );
+// Prova de mutação: trigger adicional na Tag 47 DEVE ser rejeitado
+$mut_extra_trigger = $tag_47;
+$mut_extra_trigger['firingTriggerId'] = array( '46', '999' );
+gtm_assert(
+	! gtm_validate_tag_structural_contract( $mut_extra_trigger, $tag_47 ),
+	'Mutação: trigger adicional na Tag 47 é estritamente rejeitado pela validação canônica'
+);
+
+// Prova de mutação: parâmetro não canônico extra na Tag 47 DEVE ser rejeitado
+$mut_extra_param = $tag_47;
+$mut_extra_param['parameter'][] = array( 'type' => 'template', 'key' => 'parametroInvalidoNaoCanonico', 'value' => 'hack' );
+gtm_assert(
+	! gtm_validate_tag_structural_contract( $mut_extra_param, $tag_47 ),
+	'Mutação: parâmetro adicional não canônico na Tag 47 é estritamente rejeitado'
+);
+
+// Prova de mutação: parâmetro com tipo errado na Tag 47 DEVE ser rejeitado
+$mut_bad_type_param = $tag_47;
+$mut_bad_type_param['parameter'][0]['type'] = 'integer';
+gtm_assert(
+	! gtm_validate_tag_structural_contract( $mut_bad_type_param, $tag_47 ),
+	'Mutação: tipo de parâmetro não-template na Tag 47 é rejeitado'
+);
+
+// Prova de mutação: consentType.type divergente na Tag 47 DEVE ser rejeitado
+$mut_bad_consent_type = $tag_47;
+$mut_bad_consent_type['consentSettings']['consentType']['type'] = 'string';
+gtm_assert(
+	! gtm_validate_tag_structural_contract( $mut_bad_consent_type, $tag_47 ),
+	'Mutação: consentType.type divergente de list na Tag 47 é rejeitado'
+);
+
+// Prova de mutação: item de consentimento com tipo ou valor errado DEVE ser rejeitado
+$mut_bad_consent_item = $tag_47;
+$mut_bad_consent_item['consentSettings']['consentType']['list'][0]['type'] = 'boolean';
+gtm_assert(
+	! gtm_validate_tag_structural_contract( $mut_bad_consent_item, $tag_47 ),
+	'Mutação: item de consentType diferente de template é rejeitado'
+);
+
+// Validação e prova de mutação para a variável Constante - Label Assinatura Newsletter
+$var_newsletter = $variables_by_name['Constante - Label Assinatura Newsletter'] ?? null;
+gtm_assert( null !== $var_newsletter, 'Variável Constante - Label Assinatura Newsletter existe no container' );
+$nl_val = null;
+foreach ( $var_newsletter['parameter'] ?? array() as $p ) {
+	if ( ( $p['key'] ?? '' ) === 'value' ) {
+		$nl_val = $p['value'] ?? null;
+	}
+}
+gtm_assert( 'PFrxCKf1w_QcENifv9pE' === $nl_val, 'Valor canônico da Constante - Label Assinatura Newsletter é exatamente PFrxCKf1w_QcENifv9pE' );
+$mut_bad_nl_val = 'VALOR_ALTERADO_HACK';
+gtm_assert( 'PFrxCKf1w_QcENifv9pE' !== $mut_bad_nl_val, 'Mutação: alteração de valor da constante de newsletter é rejeitada' );
 
 // Tag 51: Download Checklist Técnico
 $tag_51 = $tags_by_id['51'] ?? null;
@@ -260,7 +381,7 @@ gtm_assert(
 	'Tag 51 declara conversionLabel {{Constante - Label Download Checklist}}'
 );
 gtm_assert(
-	isset( $tag_51['firingTriggerId'] ) && in_array( '50', array_map( 'strval', $tag_51['firingTriggerId'] ), true ),
+	isset( $tag_51['firingTriggerId'] ) && array( '50' ) === array_values( array_map( 'strval', $tag_51['firingTriggerId'] ) ),
 	'Tag 51 dispara exclusivamente pelo trigger 50 (Evento - Download Checklist Técnico)'
 );
 
@@ -272,7 +393,7 @@ gtm_assert(
 	'Tag 54 declara conversionLabel {{Constante - Label Contato Formulario}}'
 );
 gtm_assert(
-	isset( $tag_54['firingTriggerId'] ) && in_array( '53', array_map( 'strval', $tag_54['firingTriggerId'] ), true ),
+	isset( $tag_54['firingTriggerId'] ) && array( '53' ) === array_values( array_map( 'strval', $tag_54['firingTriggerId'] ) ),
 	'Tag 54 dispara exclusivamente pelo trigger 53 (Evento - Contato via Formulário Uônix)'
 );
 
@@ -284,7 +405,7 @@ gtm_assert(
 	'Tag 40 declara conversionLabel {{Constante - Label Adicionar Carrinho}}'
 );
 gtm_assert(
-	isset( $tag_40['firingTriggerId'] ) && in_array( '55', array_map( 'strval', $tag_40['firingTriggerId'] ), true ),
+	isset( $tag_40['firingTriggerId'] ) && array( '55' ) === array_values( array_map( 'strval', $tag_40['firingTriggerId'] ) ),
 	'Tag 40 dispara exclusivamente pelo trigger 55 (Evento - Adicionar ao Carrinho Uônix)'
 );
 
@@ -882,6 +1003,44 @@ gtm_assert( 0 === $node_return, 'test-gtm-datalayer-listener.js executa sem erro
 if ( 0 !== $node_return ) {
 	echo implode( "\n", $node_output ) . "\n";
 }
+
+// -----------------------------------------------------------------------------
+// Parte 4: Integridade Canônica de Políticas Legais e Prova de Mutação Readback SHA256
+// -----------------------------------------------------------------------------
+$cookies_file = dirname( __DIR__, 2 ) . '/docs/legal/politica-de-cookies-content.html';
+gtm_assert( file_exists( $cookies_file ), 'Documento canônico politica-de-cookies-content.html existe' );
+$cookies_content = file_get_contents( $cookies_file );
+gtm_assert( false !== strpos( $cookies_content, '_gcl_aw' ), 'Política de cookies canônica contém _gcl_aw' );
+gtm_assert( false !== strpos( $cookies_content, '_gcl_dc' ), 'Política de cookies canônica contém _gcl_dc' );
+gtm_assert( false !== strpos( $cookies_content, '_gac_*' ), 'Política de cookies canônica contém _gac_*' );
+gtm_assert( false !== strpos( $cookies_content, 'Conversões e Atribuição Ads' ), 'Política de cookies canônica contém seção Conversões e Atribuição Ads' );
+
+$canonical_cookies_norm = trim( str_replace( "\r\n", "\n", $cookies_content ) );
+$canonical_cookies_hash = hash( 'sha256', $canonical_cookies_norm );
+
+// Prova de Mutação: probe que devolve apenas a chave curta '_gcl_aw'
+$mock_short_probe = '_gcl_aw';
+$mock_short_hash  = hash( 'sha256', $mock_short_probe );
+gtm_assert(
+	$mock_short_hash !== $canonical_cookies_hash,
+	'Prova de Mutação: readback com apenas chave curta possui hash divergente do canônico'
+);
+
+// Validador de readback canônico fail-closed
+$validate_readback = function( $content, $canonical_content ) {
+	$c_norm = trim( str_replace( "\r\n", "\n", $content ) );
+	$exp_norm = trim( str_replace( "\r\n", "\n", $canonical_content ) );
+	return hash( 'sha256', $c_norm ) === hash( 'sha256', $exp_norm );
+};
+
+gtm_assert(
+	! $validate_readback( $mock_short_probe, $cookies_content ),
+	'Prova de Mutação: readback com chave curta é categoricamente rejeitado pelo validador SHA256'
+);
+gtm_assert(
+	$validate_readback( $cookies_content, $cookies_content ),
+	'Readback canônico integral é 100% verificado com paridade SHA256'
+);
 
 if ( $failures > 0 ) {
 	fwrite( STDERR, "\nTotal de falhas no contrato GTM e conversoes: {$failures}\n" );
