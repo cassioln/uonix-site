@@ -1088,8 +1088,20 @@ gtm_assert( function_exists( 'uonix_verify_public_policy_response' ), 'Função 
 $res_timeout = uonix_verify_public_policy_response( 0, '', array( '_gcl_aw' ), 'Connection timed out' );
 gtm_assert( ! $res_timeout['success'] && $res_timeout['errors'] > 0, 'Código real: verify-public com timeout/inacessível resulta em erro (fail-closed)' );
 
-$res_http_500 = uonix_verify_public_policy_response( 500, 'Internal Server Error', array( '_gcl_aw' ) );
-gtm_assert( ! $res_http_500['success'] && $res_http_500['errors'] > 0, 'Código real: verify-public com HTTP 500 resulta em erro (fail-closed)' );
+// PROVA DE MUTAÇÃO ESTRITA: O HTML contém TODOS os termos canônicos esperados.
+// Se a guarda de status HTTP for removida ou afrouxada, o teste aprovaria erroneamente pelo loop de termos.
+// Com a guarda ativa (200 !== $http_code), DEVE rejeitar com erro estrito.
+$html_with_all_terms = '<html><body>_gcl_aw e Conversões e Atribuição Ads (erro de servidor)</body></html>';
+$canonical_terms     = array( '_gcl_aw', 'Conversões e Atribuição Ads' );
+
+$res_http_500 = uonix_verify_public_policy_response( 500, $html_with_all_terms, $canonical_terms );
+gtm_assert( ! $res_http_500['success'] && $res_http_500['errors'] > 0, 'Código real: verify-public com HTTP 500 resulta em erro estrito mesmo contendo termos canônicos no HTML (mutation-proof)' );
+
+$res_http_403 = uonix_verify_public_policy_response( 403, $html_with_all_terms, $canonical_terms );
+gtm_assert( ! $res_http_403['success'] && $res_http_403['errors'] > 0, 'Código real: verify-public com HTTP 403 resulta em erro estrito mesmo contendo termos canônicos no HTML' );
+
+$res_http_404 = uonix_verify_public_policy_response( 404, $html_with_all_terms, $canonical_terms );
+gtm_assert( ! $res_http_404['success'] && $res_http_404['errors'] > 0, 'Código real: verify-public com HTTP 404 resulta em erro estrito mesmo contendo termos canônicos no HTML' );
 
 $res_missing_term = uonix_verify_public_policy_response( 200, '<html>Sem cookies ads</html>', array( '_gcl_aw', 'Conversões e Atribuição Ads' ) );
 gtm_assert( ! $res_missing_term['success'] && $res_missing_term['errors'] === 2, 'Código real: verify-public com termos ausentes resulta em erro não-zero' );

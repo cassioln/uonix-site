@@ -12,6 +12,10 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
+const { syncGtmGovernance, computeSyncActions } = require('../tools/sync-canonical-gtm.js');
+const { main: setupContact } = require('../tools/setup-contact-form-conversion.js');
+const { main: setupDownload } = require('../tools/setup-download-checklist-conversion.js');
+const { main: setupNewsletter } = require('../tools/setup-newsletter-conversion.js');
 
 const phpPath = path.resolve(__dirname, '../../mu-plugins/uonix-integrations/38-integracoes-analytics-lgpd.php');
 const phpCode = fs.readFileSync(phpPath, 'utf8');
@@ -40,6 +44,18 @@ function test(name, fn) {
   totalTests++;
   try {
     fn();
+    passedTests++;
+    console.log(`  PASS: ${name}`);
+  } catch (err) {
+    console.error(`  FAIL: ${name}`);
+    console.error(`        ${err.message}`);
+  }
+}
+
+async function testAsync(name, fn) {
+  totalTests++;
+  try {
+    await fn();
     passedTests++;
     console.log(`  PASS: ${name}`);
   } catch (err) {
@@ -527,7 +543,6 @@ test('Prova de Mutação do Consumidor: remoção da guarda faria o consumidor a
 console.log('\n--- 5. Governança GTM: Validação Estrutural Estrita e Provas de Mutação ---');
 
 const gtmClient = require('../tools/gtm-client.js');
-const { computeSyncActions } = require('../tools/sync-canonical-gtm.js');
 const manifest = require('../../docs/gtm/uonix-google-ads-gtm-import.json');
 
 test('GTM Governança: bloqueia publish sem --apply', async () => {
@@ -843,38 +858,342 @@ test('Validador AWCT: detecta divergência de conversionLabel com formato solto 
   assert.ok(resFull.differences.some(d => d.includes('conversionLabel') && d.includes('divergente')));
 });
 
-test('Sincronizador GTM: Rollback Transacional compensatório reverte criações em ordem inversa em caso de falha', () => {
-  const createdLog = [];
-  const deletedLog = [];
+(async () => {
+  // -----------------------------------------------------------------------------
+  // 6. Testes Comportamentais Reais de Governança GTM e Rollback Transacional
+  // -----------------------------------------------------------------------------
+  console.log('\n--- 6. Governança GTM: Rollback Transacional e Readback do Servidor ---');
 
-  const fakeEntities = [
-    { type: 'variables', id: '101', name: 'Var1' },
-    { type: 'variables', id: '102', name: 'Var2' },
-    { type: 'triggers', id: '201', name: 'Trig1' },
-    { type: 'tags', id: '301', name: 'Tag1' }
-  ];
+  await testAsync('Sincronizador GTM: Rollback Transacional REAL reverte mutações em caso de falha durante aplicação', async () => {
+    const operationsLog = [];
+    const fakeWs = 'ws-test-rollback-real';
 
-  try {
-    for (const ent of fakeEntities) {
-      createdLog.push(ent);
-      if (ent.id === '301') {
-        throw new Error('SIMULATED_GTM_MUTATION_FAILURE_ON_TAG');
+    const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-google-ads-gtm-import.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+    const canonicalVars = manifest.containerVersion?.variable || [];
+    const canonicalTriggers = manifest.containerVersion?.trigger || [];
+    const canonicalTags = manifest.containerVersion?.tag || [];
+
+    // Omitimos 1 variável e 1 trigger para que syncGtmGovernance planeje CREATE
+    const initialVars = canonicalVars.slice(1);
+    const initialTriggers = canonicalTriggers.slice(1);
+    const initialTags = canonicalTags;
+
+    const fakeGtmRequest = async (method, urlPath, body) => {
+      operationsLog.push({ method, urlPath, body });
+
+      if (method === 'GET') {
+        if (urlPath.endsWith('/variables')) return { variable: initialVars };
+        if (urlPath.endsWith('/triggers')) return { trigger: initialTriggers };
+        if (urlPath.endsWith('/tags')) return { tag: initialTags };
+        return {};
       }
+
+      if (method === 'POST') {
+        if (urlPath.endsWith('/variables')) {
+          return { variableId: '9991', name: body.name };
+        }
+        if (urlPath.endsWith('/triggers')) {
+          throw new Error('SIMULATED_TRIGGER_MUTATION_FAILURE');
+        }
+      }
+
+      if (method === 'DELETE') {
+        return { success: true };
+      }
+
+      return {};
+    };
+
+    let caughtErr = null;
+    try {
+      await syncGtmGovernance({
+        customGtmRequest: fakeGtmRequest,
+        apply: true,
+        workspaceId: fakeWs,
+        publish: false
+      });
+    } catch (err) {
+      caughtErr = err;
     }
-  } catch (err) {
-    for (let i = createdLog.length - 1; i >= 0; i--) {
-      deletedLog.push(createdLog[i].id);
+
+    assert.ok(caughtErr, 'syncGtmGovernance deve lançar exceção ao falhar uma mutação no servidor');
+    assert.strictEqual(caughtErr.message, 'SIMULATED_TRIGGER_MUTATION_FAILURE');
+
+    // PROVA DE MUTAÇÃO: A função REAL syncGtmGovernance deve ter acionado o rollback compensatório
+    const deleteOps = operationsLog.filter(op => op.method === 'DELETE');
+    assert.ok(deleteOps.length >= 1, 'Deve ter ocorrido pelo menos 1 DELETE compensatório');
+    assert.ok(
+      deleteOps.some(op => op.urlPath.includes('/variables/9991')),
+      'A variável 9991 criada antes da falha deve ter sido revertida via DELETE compensatório'
+    );
+  });
+
+  await testAsync('Sincronizador GTM: Readback pós-aplicação falho aciona rollback transacional de todas as mutações', async () => {
+    const operationsLog = [];
+    const fakeWs = 'ws-test-readback-rollback';
+
+    const manifestPath = path.resolve(__dirname, '../../docs/gtm/uonix-google-ads-gtm-import.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+    const canonicalVars = manifest.containerVersion?.variable || [];
+    const canonicalTriggers = manifest.containerVersion?.trigger || [];
+    const canonicalTags = manifest.containerVersion?.tag || [];
+
+    // Omitimos 1 variável para forçar CREATE
+    const initialVars = canonicalVars.slice(1);
+    const initialTriggers = canonicalTriggers;
+    const initialTags = canonicalTags;
+
+    const fakeGtmRequest = async (method, urlPath, body) => {
+      operationsLog.push({ method, urlPath, body });
+
+      if (method === 'GET') {
+        // No readback pós-aplicação, simula que o servidor GTM ainda não reflete a variável criada
+        if (urlPath.endsWith('/variables')) return { variable: initialVars };
+        if (urlPath.endsWith('/triggers')) return { trigger: initialTriggers };
+        if (urlPath.endsWith('/tags')) return { tag: initialTags };
+        return {};
+      }
+
+      if (method === 'POST') {
+        if (urlPath.endsWith('/variables')) {
+          return { variableId: '9995', name: body.name };
+        }
+      }
+
+      if (method === 'DELETE') {
+        return { success: true };
+      }
+
+      return {};
+    };
+
+    let caughtErr = null;
+    try {
+      await syncGtmGovernance({
+        customGtmRequest: fakeGtmRequest,
+        apply: true,
+        workspaceId: fakeWs,
+        publish: false
+      });
+    } catch (err) {
+      caughtErr = err;
     }
+
+    assert.ok(caughtErr, 'Readback divergente deve lançar erro fail-closed');
+    assert.ok(caughtErr.message.includes('[FAIL-CLOSED] Readback pós-aplicação detectou ações pendentes'));
+
+    // PROVA DE ROLLBACK: Como o readback está dentro do try transacional, a entidade 9995 deve ter sofrido DELETE
+    const deleteOps = operationsLog.filter(op => op.method === 'DELETE');
+    assert.strictEqual(deleteOps.length, 1, 'Deve executar exatamente 1 DELETE compensatório');
+    assert.ok(
+      deleteOps[0].urlPath.includes('/variables/9995'),
+      'DELETE compensatório executado para a variável 9995 devido a falha no readback'
+    );
+  });
+
+  await testAsync('Setup Contato Form: Bloqueia publicação se o servidor GTM divergir do contrato no readback', async () => {
+    const operationsLog = [];
+    const fakeWs = 'ws-test-contact-readback';
+
+    const wrongServerTag = {
+      tagId: '54',
+      name: 'Google Ads - Conversão - Contato Formulário',
+      type: 'awct',
+      parameter: [
+        { type: 'template', key: 'conversionId', value: '{{Constante - Google Ads ID}}' },
+        { type: 'template', key: 'conversionLabel', value: 'WRONG_LABEL_STILL_ON_SERVER' }
+      ],
+      firingTriggerId: ['53'],
+      tagFiringOption: 'oncePerEvent',
+      consentSettings: {
+        consentStatus: 'needed',
+        consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] }
+      }
+    };
+
+    const fakeGtmRequest = async (method, urlPath, body) => {
+      operationsLog.push({ method, urlPath, body });
+
+      if (method === 'GET') {
+        if (urlPath.endsWith('/variables')) {
+          return { variable: [{ name: 'Constante - Label Contato Formulario', variableId: '52', parameter: [{ key: 'value', value: 'RVZmCKznyfQcENifv9pE' }] }] };
+        }
+        if (urlPath.endsWith('/triggers')) {
+          return { trigger: [{ name: 'Evento - Contato via Formulário', triggerId: '53', type: 'customEvent', customEventFilter: [{ type: 'equals', negate: false, parameter: [{ key: 'arg0', value: '{{_event}}' }, { key: 'arg1', value: 'uonix_contato_formulario' }] }] }] };
+        }
+        if (urlPath.endsWith('/tags')) {
+          return { tag: [JSON.parse(JSON.stringify(wrongServerTag))] };
+        }
+        return {};
+      }
+
+      if (method === 'PUT') return body;
+
+      if (urlPath.includes(':create_version') || urlPath.includes(':publish')) {
+        throw new Error('SECURITY_BREACH: create_version ou publish NUNCA deveriam ser chamados em readback divergente!');
+      }
+
+      return {};
+    };
+
+    let caughtErr = null;
+    try {
+      await setupContact({
+        customGtmRequest: fakeGtmRequest,
+        apply: true,
+        publish: true,
+        confirmPublish: true,
+        workspaceId: fakeWs,
+        throwOnError: true
+      });
+    } catch (err) {
+      caughtErr = err;
+    }
+
+    assert.ok(caughtErr, 'Deve lançar erro ao detectar divergência no readback do servidor');
+    assert.ok(caughtErr.message.includes('[FAIL-CLOSED] Publicação bloqueada'), 'Mensagem de erro esperada');
+    assert.ok(!operationsLog.some(op => op.urlPath.includes(':create_version')), 'Jamais deve criar versão');
+    assert.ok(!operationsLog.some(op => op.urlPath.includes(':publish')), 'Jamais deve publicar');
+  });
+
+  await testAsync('Setup Download Checklist: Bloqueia publicação se o servidor GTM divergir do contrato no readback', async () => {
+    const operationsLog = [];
+    const fakeWs = 'ws-test-download-readback';
+
+    const wrongServerTag = {
+      tagId: '51',
+      name: 'Google Ads - Conversão - Download Checklist Técnico',
+      type: 'awct',
+      parameter: [
+        { type: 'template', key: 'conversionId', value: '{{Constante - Google Ads ID}}' },
+        { type: 'template', key: 'conversionLabel', value: 'WRONG_LABEL_STILL_ON_SERVER' }
+      ],
+      firingTriggerId: ['50'],
+      tagFiringOption: 'oncePerEvent',
+      consentSettings: {
+        consentStatus: 'needed',
+        consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] }
+      }
+    };
+
+    const fakeGtmRequest = async (method, urlPath, body) => {
+      operationsLog.push({ method, urlPath, body });
+
+      if (method === 'GET') {
+        if (urlPath.endsWith('/variables')) {
+          return { variable: [{ name: 'Constante - Label Download Checklist', variableId: '49', parameter: [{ key: 'value', value: 'nXYDCKKayPQcENifv9pE' }] }] };
+        }
+        if (urlPath.endsWith('/triggers')) {
+          return { trigger: [{ name: 'Evento - Download Checklist Técnico', triggerId: '50', type: 'customEvent', customEventFilter: [{ type: 'equals', negate: false, parameter: [{ key: 'arg0', value: '{{_event}}' }, { key: 'arg1', value: 'uonix_download_checklist_tecnico' }] }] }] };
+        }
+        if (urlPath.endsWith('/tags')) {
+          return { tag: [JSON.parse(JSON.stringify(wrongServerTag))] };
+        }
+        return {};
+      }
+
+      if (method === 'PUT') return body;
+
+      if (urlPath.includes(':create_version') || urlPath.includes(':publish')) {
+        throw new Error('SECURITY_BREACH: create_version ou publish NUNCA deveriam ser chamados em readback divergente!');
+      }
+
+      return {};
+    };
+
+    let caughtErr = null;
+    try {
+      await setupDownload({
+        customGtmRequest: fakeGtmRequest,
+        apply: true,
+        publish: true,
+        confirmPublish: true,
+        workspaceId: fakeWs,
+        throwOnError: true
+      });
+    } catch (err) {
+      caughtErr = err;
+    }
+
+    assert.ok(caughtErr, 'Deve lançar erro ao detectar divergência no readback do servidor');
+    assert.ok(caughtErr.message.includes('[FAIL-CLOSED] Publicação bloqueada'), 'Mensagem de erro esperada');
+    assert.ok(!operationsLog.some(op => op.urlPath.includes(':create_version')), 'Jamais deve criar versão');
+    assert.ok(!operationsLog.some(op => op.urlPath.includes(':publish')), 'Jamais deve publicar');
+  });
+
+  await testAsync('Setup Newsletter: Bloqueia publicação se o servidor GTM divergir do contrato no readback', async () => {
+    const operationsLog = [];
+    const fakeWs = 'ws-test-newsletter-readback';
+
+    const wrongServerTag = {
+      tagId: '47',
+      name: 'Google Ads - Conversão - Assinatura Newsletter',
+      type: 'awct',
+      parameter: [
+        { type: 'template', key: 'conversionId', value: '{{Constante - Google Ads ID}}' },
+        { type: 'template', key: 'conversionLabel', value: 'WRONG_LABEL_STILL_ON_SERVER' }
+      ],
+      firingTriggerId: ['46'],
+      tagFiringOption: 'oncePerEvent',
+      consentSettings: {
+        consentStatus: 'needed',
+        consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] }
+      }
+    };
+
+    const fakeGtmRequest = async (method, urlPath, body) => {
+      operationsLog.push({ method, urlPath, body });
+
+      if (method === 'GET') {
+        if (urlPath.endsWith('/variables')) {
+          return { variable: [{ name: 'Constante - Label Assinatura Newsletter', variableId: '45', parameter: [{ key: 'value', value: 'PFrxCKf1w_QcENifv9pE' }] }] };
+        }
+        if (urlPath.endsWith('/triggers')) {
+          return { trigger: [{ name: 'Evento - Assinatura Newsletter Uônix', triggerId: '46', type: 'customEvent', customEventFilter: [{ type: 'equals', negate: false, parameter: [{ key: 'arg0', value: '{{_event}}' }, { key: 'arg1', value: 'uonix_assinatura_newsletter' }] }] }] };
+        }
+        if (urlPath.endsWith('/tags')) {
+          return { tag: [JSON.parse(JSON.stringify(wrongServerTag))] };
+        }
+        return {};
+      }
+
+      if (method === 'PUT') return body;
+
+      if (urlPath.includes(':create_version') || urlPath.includes(':publish')) {
+        throw new Error('SECURITY_BREACH: create_version ou publish NUNCA deveriam ser chamados em readback divergente!');
+      }
+
+      return {};
+    };
+
+    let caughtErr = null;
+    try {
+      await setupNewsletter({
+        customGtmRequest: fakeGtmRequest,
+        apply: true,
+        publish: true,
+        confirmPublish: true,
+        workspaceId: fakeWs,
+        throwOnError: true
+      });
+    } catch (err) {
+      caughtErr = err;
+    }
+
+    assert.ok(caughtErr, 'Deve lançar erro ao detectar divergência no readback do servidor');
+    assert.ok(caughtErr.message.includes('[FAIL-CLOSED] Publicação bloqueada'), 'Mensagem de erro esperada');
+    assert.ok(!operationsLog.some(op => op.urlPath.includes(':create_version')), 'Jamais deve criar versão');
+    assert.ok(!operationsLog.some(op => op.urlPath.includes(':publish')), 'Jamais deve publicar');
+  });
+
+  console.log('\n------------------------------------------------------------------------');
+  console.log(`Resultado da suíte comportamental: ${passedTests}/${totalTests} testes aprovados.`);
+  if (passedTests !== totalTests) {
+    process.exit(1);
+  } else {
+    console.log('✅ Todos os testes comportamentais passaram com 100% de sucesso.');
   }
-
-  assert.strictEqual(deletedLog.length, 4, 'Todas as 4 entidades criadas devem sofrer rollback compensatório');
-  assert.deepStrictEqual(deletedLog, ['301', '201', '102', '101'], 'Rollback deve ocorrer na ordem estritamente inversa (Tags -> Triggers -> Variáveis)');
-});
-
-console.log('\n------------------------------------------------------------------------');
-console.log(`Resultado da suíte comportamental: ${passedTests}/${totalTests} testes aprovados.`);
-if (passedTests !== totalTests) {
-  process.exit(1);
-} else {
-  console.log('✅ Todos os testes comportamentais passaram com 100% de sucesso.');
-}
+})();

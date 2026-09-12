@@ -479,19 +479,31 @@ function computeSyncActions(manifest, currentState) {
   ];
 }
 
-async function syncGtmGovernance() {
+async function syncGtmGovernance(options = {}) {
   const accountId = '6348960683';
   const containerId = '248910884';
   const base = `/accounts/${accountId}/containers/${containerId}`;
 
+  const requestFn = options.customGtmRequest || gtmRequest;
+  const apply = options.apply !== undefined ? options.apply : isApplyRequested();
+  const publishRequested = options.publish !== undefined ? options.publish : isPublishRequested();
+  const publishConfirmed = options.confirmPublish !== undefined ? options.confirmPublish : isPublishConfirmed();
+
   // 1. Obter e validar workspace explicitamente
-  const wsObj = await getVerifiedWorkspaceId(accountId, containerId);
-  const wsId = wsObj.workspaceId;
+  let wsId;
+  let wsName = 'default';
+  if (options.workspaceId) {
+    wsId = options.workspaceId;
+    wsName = options.workspaceName || wsId;
+  } else {
+    const wsObj = await getVerifiedWorkspaceId(accountId, containerId);
+    wsId = wsObj.workspaceId;
+    wsName = wsObj.name;
+  }
   const ws = `${base}/workspaces/${wsId}`;
-  const apply = isApplyRequested();
 
   console.log('========================================================================');
-  console.log(`🧭 GOVERNANÇA GTM CANÔNICA — WORKSPACE ${wsId} ("${wsObj.name}")`);
+  console.log(`🧭 GOVERNANÇA GTM CANÔNICA — WORKSPACE ${wsId} ("${wsName}")`);
   console.log(`MODO: ${apply ? 'APLICAR MUTAÇÕES (--apply)' : 'DRY-RUN (somente planejamento/auditoria)'}`);
   console.log('========================================================================\n');
 
@@ -503,9 +515,9 @@ async function syncGtmGovernance() {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
   // 3. Obter estado atual do workspace
-  const currentTags = (await gtmRequest('GET', ws + '/tags')).tag || [];
-  const currentTriggers = (await gtmRequest('GET', ws + '/triggers')).trigger || [];
-  const currentVariables = (await gtmRequest('GET', ws + '/variables')).variable || [];
+  const currentTags = (await requestFn('GET', ws + '/tags')).tag || [];
+  const currentTriggers = (await requestFn('GET', ws + '/triggers')).trigger || [];
+  const currentVariables = (await requestFn('GET', ws + '/variables')).variable || [];
 
   console.log(`Estado atual do Workspace: ${currentTags.length} tags, ${currentTriggers.length} triggers, ${currentVariables.length} variáveis.`);
   console.log(`Manifesto canônico: ${(manifest.containerVersion?.tag || []).length} tags, ${(manifest.containerVersion?.trigger || []).length} triggers, ${(manifest.containerVersion?.variable || []).length} variáveis.\n`);
@@ -520,7 +532,7 @@ async function syncGtmGovernance() {
   console.log(`📋 Total de ações identificadas: ${plannedActions.length}`);
   if (plannedActions.length === 0) {
     console.log('✅ O workspace já está 100% aderente ao contrato canônico de governança.');
-    if (!isPublishRequested()) {
+    if (!publishRequested) {
       return;
     }
   }
@@ -534,7 +546,7 @@ async function syncGtmGovernance() {
   // 5. Se não houver --apply, encerra como DRY-RUN fail-closed
   if (!apply) {
     console.log('🛡️  NENHUMA mutação foi executada (modo DRY-RUN padrão).');
-    if (isPublishRequested()) {
+    if (publishRequested) {
       console.error(
         '[FAIL-CLOSED] Flag --publish requer explicitamente a flag --apply e 100% de aderência comprovada. ' +
         'Publicação bloqueada.'
@@ -548,8 +560,8 @@ async function syncGtmGovernance() {
     return;
   }
 
-  // 6. Execução no modo --apply em ordem estrita de dependências
-  console.log('🚀 Executando mutações planejadas no Workspace...');
+  // 6. Execução no modo --apply em ordem estrita de dependências com Journal Transacional
+  console.log('🚀 Executando mutações planejadas no Workspace com rastreamento transacional...');
 
   function isBuiltInTrigger(triggerId) {
     const idStr = String(triggerId);
@@ -569,8 +581,7 @@ async function syncGtmGovernance() {
   // Trigger nativo global "All Pages" (2147479553) e triggers de sistema são pré-existentes
   existingTriggerIds.add('2147479553');
 
-  const createdEntities = [];
-  const updatedSnapshots = [];
+  const journal = [];
 
   try {
     for (const act of plannedActions) {
@@ -581,18 +592,18 @@ async function syncGtmGovernance() {
           type: act.expected.type,
           parameter: act.expected.parameter
         };
-        const created = await gtmRequest('POST', ws + '/variables', payload);
+        const created = await requestFn('POST', ws + '/variables', payload);
         const createdId = String(created?.variableId || act.expected.variableId);
-        createdEntities.push({ type: 'variables', id: createdId, name: act.name });
+        journal.push({ op: 'CREATE', type: 'variables', id: createdId, name: act.name });
       } else if (act.type === 'UPDATE_VARIABLE') {
         console.log(`- Sincronizando Variável ${act.id} com contrato canônico...`);
-        updatedSnapshots.push({ type: 'variables', id: String(act.id), name: act.name, previousPayload: act.target });
+        journal.push({ op: 'UPDATE', type: 'variables', id: String(act.id), name: act.name, previousPayload: act.target });
         const payload = {
           ...act.target,
           type: act.expected.type,
           parameter: act.expected.parameter
         };
-        await gtmRequest('PUT', ws + '/variables/' + act.id, payload);
+        await requestFn('PUT', ws + '/variables/' + act.id, payload);
       } else if (act.type === 'CREATE_TRIGGER') {
         console.log(`- Criando Trigger canônico "${act.name}"...`);
         const payload = {
@@ -601,21 +612,21 @@ async function syncGtmGovernance() {
           customEventFilter: act.expected.customEventFilter,
           filter: act.expected.filter
         };
-        const created = await gtmRequest('POST', ws + '/triggers', payload);
+        const created = await requestFn('POST', ws + '/triggers', payload);
         const newTriggerId = String(created?.triggerId || act.expected.triggerId);
-        createdEntities.push({ type: 'triggers', id: newTriggerId, name: act.name });
+        journal.push({ op: 'CREATE', type: 'triggers', id: newTriggerId, name: act.name });
         runtimeTriggerIdMap.set(String(act.expected.triggerId), newTriggerId);
         existingTriggerIds.add(newTriggerId);
       } else if (act.type === 'UPDATE_TRIGGER') {
         console.log(`- Sincronizando Trigger ${act.id} com contrato canônico...`);
-        updatedSnapshots.push({ type: 'triggers', id: String(act.id), name: act.name, previousPayload: act.target });
+        journal.push({ op: 'UPDATE', type: 'triggers', id: String(act.id), name: act.name, previousPayload: act.target });
         const payload = {
           ...act.target,
           type: act.expected.type,
           customEventFilter: act.expected.customEventFilter || act.target.customEventFilter,
           filter: act.expected.filter || act.target.filter
         };
-        await gtmRequest('PUT', ws + '/triggers/' + act.id, payload);
+        await requestFn('PUT', ws + '/triggers/' + act.id, payload);
         runtimeTriggerIdMap.set(String(act.expected.triggerId), String(act.id));
         existingTriggerIds.add(String(act.id));
       } else if (act.type === 'CREATE_TAG') {
@@ -636,12 +647,12 @@ async function syncGtmGovernance() {
           consentSettings: act.expected.consentSettings,
           firingTriggerId: resolvedTriggers
         };
-        const created = await gtmRequest('POST', ws + '/tags', payload);
+        const created = await requestFn('POST', ws + '/tags', payload);
         const createdId = String(created?.tagId || act.expected.tagId);
-        createdEntities.push({ type: 'tags', id: createdId, name: act.name });
+        journal.push({ op: 'CREATE', type: 'tags', id: createdId, name: act.name });
       } else if (act.type === 'UPDATE_TAG') {
         console.log(`- Sincronizando Tag ${act.id} com contrato canônico...`);
-        updatedSnapshots.push({ type: 'tags', id: String(act.id), name: act.name, previousPayload: act.target });
+        journal.push({ op: 'UPDATE', type: 'tags', id: String(act.id), name: act.name, previousPayload: act.target });
         const expTriggers = act.expected.firingTriggerId || act.target.firingTriggerId;
         const resolvedTriggers = expTriggers ? expTriggers.map(id => runtimeTriggerIdMap.get(String(id)) || String(id)) : undefined;
         if (resolvedTriggers) {
@@ -664,92 +675,115 @@ async function syncGtmGovernance() {
         if (!act.expected.priority) {
           delete payload.priority;
         }
-        await gtmRequest('PUT', ws + '/tags/' + act.id, payload);
+        await requestFn('PUT', ws + '/tags/' + act.id, payload);
       } else if (act.type === 'DELETE_TAG') {
+        journal.push({ op: 'DELETE', type: 'tags', id: String(act.id), name: act.name, previousPayload: act.target });
         console.log(`- Deletando Tag ${act.id} ("${act.name}")...`);
-        await gtmRequest('DELETE', ws + '/tags/' + act.id);
+        await requestFn('DELETE', ws + '/tags/' + act.id);
       } else if (act.type === 'DELETE_TRIGGER') {
+        journal.push({ op: 'DELETE', type: 'triggers', id: String(act.id), name: act.name, previousPayload: act.target });
         console.log(`- Deletando Trigger ${act.id} ("${act.name}")...`);
-        await gtmRequest('DELETE', ws + '/triggers/' + act.id);
+        await requestFn('DELETE', ws + '/triggers/' + act.id);
         existingTriggerIds.delete(String(act.id));
       } else if (act.type === 'DELETE_VARIABLE') {
+        journal.push({ op: 'DELETE', type: 'variables', id: String(act.id), name: act.name, previousPayload: act.target });
         console.log(`- Deletando Variável ${act.id} ("${act.name}")...`);
-        await gtmRequest('DELETE', ws + '/variables/' + act.id);
+        await requestFn('DELETE', ws + '/variables/' + act.id);
       }
     }
+
+    console.log('\n✅ Mutações enviadas. Iniciando READBACK pós-aplicação no Workspace ' + wsId + '...');
+
+    // 7. READBACK OBRIGATÓRIO DENTRO DO ESCOPO TRANSACIONAL
+    const freshTags = (await requestFn('GET', ws + '/tags')).tag || [];
+    const freshTriggers = (await requestFn('GET', ws + '/triggers')).trigger || [];
+    const freshVariables = (await requestFn('GET', ws + '/variables')).variable || [];
+
+    const readbackErrors = [];
+    for (const tag of freshTags) {
+      if (tag.paused === true) {
+        readbackErrors.push(`Tag "${tag.name}" (ID: ${tag.tagId}) está pausada no workspace`);
+      }
+    }
+
+    const remainingActions = computeSyncActions(manifest, {
+      tags: freshTags,
+      triggers: freshTriggers,
+      variables: freshVariables
+    });
+
+    if (remainingActions.length > 0 || readbackErrors.length > 0) {
+      const msgs = [
+        ...remainingActions.map(ra => `[${ra.type}] ${ra.name}: ${ra.description}`),
+        ...readbackErrors
+      ];
+      throw new Error(`[FAIL-CLOSED] Readback pós-aplicação detectou ações pendentes ou inconsistências: ${msgs.join('; ')}`);
+    }
+
+    console.log('🛡️  READBACK CONFIRMADO: Workspace 100% aderente ao manifesto canônico!');
   } catch (execErr) {
-    console.error(`\n🚨 [FAIL-CLOSED] Erro durante mutação no workspace: ${execErr.message}`);
+    console.error(`\n🚨 [FAIL-CLOSED] Erro no ciclo transacional do Workspace: ${execErr.message}`);
     console.error('🔄 Iniciando ROLLBACK TRANSACIONAL compensatório para preservar integridade do Workspace...');
 
-    // 1. Reverter entidades criadas na ordem inversa (tags -> triggers -> variables)
-    for (let i = createdEntities.length - 1; i >= 0; i--) {
-      const ent = createdEntities[i];
-      try {
-        console.warn(`  [ROLLBACK] Removendo entidade recém-criada ${ent.type}/${ent.id} ("${ent.name}")...`);
-        await gtmRequest('DELETE', `${ws}/${ent.type}/${ent.id}`);
-      } catch (rbErr) {
-        console.error(`  [ERRO NO ROLLBACK] Falha ao deletar ${ent.type}/${ent.id}: ${rbErr.message}`);
+    const rollbackErrors = [];
+
+    async function compensateWithRetry(fn, desc, maxRetries = 2) {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          await fn();
+          return;
+        } catch (err) {
+          if (attempt === maxRetries) {
+            rollbackErrors.push(`${desc} falhou na tentativa ${attempt}: ${err.message}`);
+          }
+        }
       }
     }
 
-    // 2. Reverter updates com o snapshot anterior
-    for (let i = updatedSnapshots.length - 1; i >= 0; i--) {
-      const snap = updatedSnapshots[i];
-      try {
-        console.warn(`  [ROLLBACK] Restaurando snapshot anterior de ${snap.type}/${snap.id} ("${snap.name}")...`);
-        await gtmRequest('PUT', `${ws}/${snap.type}/${snap.id}`, snap.previousPayload);
-      } catch (rbErr) {
-        console.error(`  [ERRO NO ROLLBACK] Falha ao restaurar ${snap.type}/${snap.id}: ${rbErr.message}`);
+    // Reverte o journal na ordem estritamente inversa
+    for (let i = journal.length - 1; i >= 0; i--) {
+      const entry = journal[i];
+      if (entry.op === 'CREATE') {
+        console.warn(`  [ROLLBACK] Removendo entidade recém-criada ${entry.type}/${entry.id} ("${entry.name}")...`);
+        await compensateWithRetry(
+          () => requestFn('DELETE', `${ws}/${entry.type}/${entry.id}`),
+          `DELETE compensatório de ${entry.type}/${entry.id}`
+        );
+      } else if (entry.op === 'UPDATE') {
+        console.warn(`  [ROLLBACK] Restaurando snapshot anterior de ${entry.type}/${entry.id} ("${entry.name}")...`);
+        await compensateWithRetry(
+          () => requestFn('PUT', `${ws}/${entry.type}/${entry.id}`, entry.previousPayload),
+          `PUT compensatório de ${entry.type}/${entry.id}`
+        );
+      } else if (entry.op === 'DELETE') {
+        console.warn(`  [ROLLBACK] Recriando entidade deletada ${entry.type}/${entry.id} ("${entry.name}")...`);
+        await compensateWithRetry(
+          () => requestFn('POST', `${ws}/${entry.type}`, entry.previousPayload),
+          `POST compensatório de ${entry.type}/${entry.id}`
+        );
       }
     }
 
-    console.error('🛡️  Rollback transacional concluído.');
+    if (rollbackErrors.length > 0) {
+      console.error('⚠️ Atenção: falha em uma ou mais compensações durante o rollback:');
+      rollbackErrors.forEach(e => console.error(`  - ${e}`));
+    } else {
+      console.error('🛡️  Rollback transacional concluído com sucesso. Workspace restaurado.');
+    }
+
     throw execErr;
   }
 
-  console.log('\n✅ Mutações enviadas. Iniciando READBACK pós-aplicação no Workspace ' + wsId + '...');
-
-  // 7. READBACK OBRIGATÓRIO: re-consulta o workspace e certifica 100% de paridade antes de qualquer publicação
-  const freshTags = (await gtmRequest('GET', ws + '/tags')).tag || [];
-  const freshTriggers = (await gtmRequest('GET', ws + '/triggers')).trigger || [];
-  const freshVariables = (await gtmRequest('GET', ws + '/variables')).variable || [];
-
-  const readbackErrors = [];
-  for (const tag of freshTags) {
-    if (tag.paused === true) {
-      readbackErrors.push(`Tag "${tag.name}" (ID: ${tag.tagId}) está pausada no workspace`);
-    }
-  }
-
-  const remainingActions = computeSyncActions(manifest, {
-    tags: freshTags,
-    triggers: freshTriggers,
-    variables: freshVariables
-  });
-
-  if (remainingActions.length > 0 || readbackErrors.length > 0) {
-    console.error(`\n[FAIL-CLOSED] Readback pós-aplicação falhou!`);
-    for (const ra of remainingActions) {
-      console.error(`  - Ação pendente: [${ra.type}] ${ra.name}: ${ra.description}`);
-    }
-    for (const err of readbackErrors) {
-      console.error(`  - Erro estrutural: ${err}`);
-    }
-    process.exit(1);
-  }
-
-  console.log('🛡️  READBACK CONFIRMADO: Workspace 100% aderente ao manifesto canônico!');
-
   // 8. Publicação sob demanda com dupla confirmação e exigência estrita de --apply e readback verde
-  if (isPublishRequested()) {
-    if (!isPublishConfirmed()) {
+  if (publishRequested) {
+    if (!publishConfirmed) {
       console.warn(
         '\n⚠️ Publicação solicitada com --publish, mas requer confirmação explícita via --confirm-publish. ' +
         'A versão NÃO foi publicada automaticamente.'
       );
     } else {
       console.log('\n📦 Criando nova versão a partir do Workspace verificado...');
-      const versionRes = await gtmRequest('POST', ws + ':create_version', {
+      const versionRes = await requestFn('POST', ws + ':create_version', {
         name: 'v31 - Governança Estrita Deduplicação Newsletter e Carrinho',
         notes: 'Adiciona orderId: {{DLV - transaction_id}} na Tag 47 para deduplicação server-side e sincroniza regras AdOpt/negate:false.'
       });
@@ -757,7 +791,7 @@ async function syncGtmGovernance() {
       console.log(`Versão criada: ${newVersionId}`);
 
       console.log('🚀 Publicando versão live...');
-      await gtmRequest('POST', base + '/versions/' + newVersionId + ':publish');
+      await requestFn('POST', base + '/versions/' + newVersionId + ':publish');
       console.log(`🎉 Versão ${newVersionId} publicada com sucesso no container live!`);
     }
   }
