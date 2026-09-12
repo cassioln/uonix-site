@@ -155,13 +155,7 @@ async function main() {
       console.log('  Tag criada com ID:', existingTag.tagId);
     }
   } else {
-    const tagValidation = validateAwctTagContract(existingTag, {
-      conversionId: '{{Constante - Google Ads ID}}',
-      conversionLabel: '{{Constante - Label Assinatura Newsletter}}',
-      orderId: '{{DLV - transaction_id}}',
-      firingTriggerId: firingId,
-      tagFiringOption: 'oncePerEvent'
-    });
+    const tagValidation = validateAwctTagContract(existingTag, expectedTagData);
 
     if (!tagValidation.isAdherent) {
       console.log(`  [DIVERGÊNCIA] Tag ID ${existingTag.tagId} diverge do contrato canônico:`);

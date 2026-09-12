@@ -67,29 +67,47 @@ if ( ! file_exists( $legal_dir . '/politica-de-cookies-content.html' ) ) {
 
 $policies = array(
 	'politica-de-cookies' => array(
-		'title'  => 'Política de Cookies',
-		'file'   => $legal_dir . '/politica-de-cookies-content.html',
-		'checks' => array(
+		'title'         => 'Política de Cookies',
+		'file'          => $legal_dir . '/politica-de-cookies-content.html',
+		'checks_db'     => array(
 			'_gcl_aw',
 			'_gcl_dc',
 			'_gac_*',
 			'Conversões e Atribuição Ads',
 			'Google LLC (Google Ads / Vinculador de Conversões, via Google Tag Manager)',
 		),
+		'checks_public' => array(
+			'_gcl_aw',
+			'_gcl_dc',
+			'_gac_*',
+			'Conversões e Atribuição Ads',
+			'Google LLC',
+		),
 	),
 	'politica-de-privacidade' => array(
-		'title'  => 'Política de Privacidade',
-		'file'   => $legal_dir . '/politica-de-privacidade-content.html',
-		'checks' => array(
+		'title'         => 'Política de Privacidade',
+		'file'          => $legal_dir . '/politica-de-privacidade-content.html',
+		'checks_db'     => array(
+			'[uonix email_lgpd]',
+			'Canal de Privacidade e Atendimento ao Titular',
+			'Autoridade Nacional de Proteção de Dados',
+			'Lei Geral de Proteção de Dados',
+		),
+		'checks_public' => array(
 			'privacidade@uonix.com.br',
-			'Encarregado pelo Tratamento de Dados',
+			'Canal de Privacidade e Atendimento ao Titular',
+			'Autoridade Nacional de Proteção de Dados',
 			'Lei Geral de Proteção de Dados',
 		),
 	),
 	'termos-de-uso' => array(
-		'title'  => 'Termos de Uso',
-		'file'   => $legal_dir . '/termos-de-uso-content.html',
-		'checks' => array(
+		'title'         => 'Termos de Uso',
+		'file'          => $legal_dir . '/termos-de-uso-content.html',
+		'checks_db'     => array(
+			'Política de Cookies',
+			'Política de Privacidade',
+		),
+		'checks_public' => array(
 			'Política de Cookies',
 			'Política de Privacidade',
 		),
@@ -157,7 +175,7 @@ foreach ( $policies as $slug => $config ) {
 
 	// Validação das chaves essenciais no banco atual
 	$missing_in_current = array();
-	foreach ( $config['checks'] as $chk ) {
+	foreach ( $config['checks_db'] as $chk ) {
 		if ( false === strpos( $norm_current, $chk ) ) {
 			$missing_in_current[] = $chk;
 		}
@@ -246,9 +264,9 @@ foreach ( $policies as $slug => $config ) {
 			continue;
 		}
 
-		// Valida adicionalmente que todas as chaves obrigatórias estão presentes no readback
+		// Valida adicionalmente que todas as chaves obrigatórias de banco estão presentes no readback
 		$missing_readback = array();
-		foreach ( $config['checks'] as $chk ) {
+		foreach ( $config['checks_db'] as $chk ) {
 			if ( false === strpos( $norm_fresh, $chk ) ) {
 				$missing_readback[] = $chk;
 			}
@@ -272,7 +290,7 @@ if ( $UONIX_APPLY && $changes > 0 ) {
 }
 
 // -------------------------------------------------------------------------
-// 3. Verificação de Integridade Pública (Opcional ou sob demanda)
+// 3. Verificação de Integridade Pública (Opcional ou sob demanda com fail-closed)
 // -------------------------------------------------------------------------
 if ( $UONIX_VERIFY_PUBLIC ) {
 	echo "\n🌐 Verificando páginas públicas para conformidade contra cache de borda...\n";
@@ -280,10 +298,16 @@ if ( $UONIX_VERIFY_PUBLIC ) {
 		$page_url = function_exists( 'home_url' ) ? home_url( '/' . $slug . '/' ) : 'https://www.uonix.com.br/' . $slug . '/';
 		echo "  Testando URL: {$page_url} ... ";
 
-		$public_html = '';
+		$public_html  = '';
+		$http_code    = 0;
+		$error_detail = '';
+
 		if ( function_exists( 'wp_remote_get' ) ) {
 			$response = wp_remote_get( $page_url, array( 'timeout' => 15, 'sslverify' => false ) );
-			if ( ! is_wp_error( $response ) && 200 === wp_remote_retrieve_response_code( $response ) ) {
+			if ( is_wp_error( $response ) ) {
+				$error_detail = $response->get_error_message();
+			} else {
+				$http_code   = (int) wp_remote_retrieve_response_code( $response );
 				$public_html = wp_remote_retrieve_body( $response );
 			}
 		}
@@ -295,25 +319,30 @@ if ( $UONIX_VERIFY_PUBLIC ) {
 			curl_setopt( $ch, CURLOPT_TIMEOUT, 15 );
 			curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, false );
 			$public_html = curl_exec( $ch );
+			$http_code   = (int) curl_getinfo( $ch, CURLINFO_HTTP_CODE );
+			if ( curl_errno( $ch ) ) {
+				$error_detail = curl_error( $ch );
+			}
 			curl_close( $ch );
 		}
 
-		if ( empty( $public_html ) ) {
-			echo "[AVISO] Não foi possível consultar a página pública (rede ou endpoint inacessível).\n";
+		if ( empty( $public_html ) || 200 !== $http_code ) {
+			echo "[ERRO CRÍTICO PÚBLICO] Não foi possível consultar a página pública (HTTP {$http_code}; erro: {$error_detail}).\n";
+			$errors++;
 			continue;
 		}
 
 		$missing_public = array();
-		foreach ( $config['checks'] as $chk ) {
+		foreach ( $config['checks_public'] as $chk ) {
 			if ( false === strpos( $public_html, $chk ) ) {
 				$missing_public[] = $chk;
 			}
 		}
 
 		if ( empty( $missing_public ) ) {
-			echo "[OK PÚBLICO] Conteúdo público reflete todos os termos canônicos.\n";
+			echo "[OK PÚBLICO] Conteúdo público reflete todos os termos canônicos (HTTP 200).\n";
 		} else {
-			echo "[DESCOMPASSO PÚBLICO] Página pública ainda não reflete: " . implode( ', ', $missing_public ) . " (necessário expirar cache de CDN/Nginx da Locaweb)\n";
+			echo "[ERRO DESCOMPASSO PÚBLICO] Página pública ainda não reflete termos obrigatórios: " . implode( ', ', $missing_public ) . " (necessário expirar cache de CDN/Nginx da Locaweb)\n";
 			$errors++;
 		}
 	}

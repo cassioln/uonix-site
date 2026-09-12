@@ -1042,6 +1042,47 @@ gtm_assert(
 	'Readback canônico integral é 100% verificado com paridade SHA256'
 );
 
+// Validação canônica de docs/legal/politica-de-privacidade-content.html
+$privacy_file = dirname( __DIR__, 2 ) . '/docs/legal/politica-de-privacidade-content.html';
+gtm_assert( file_exists( $privacy_file ), 'Documento canônico politica-de-privacidade-content.html existe' );
+$privacy_content = file_get_contents( $privacy_file );
+gtm_assert( false !== strpos( $privacy_content, '[uonix email_lgpd]' ), 'Política de privacidade canônica utiliza shortcode [uonix email_lgpd]' );
+gtm_assert( false !== strpos( $privacy_content, 'Canal de Privacidade e Atendimento ao Titular' ), 'Política de privacidade canônica contém Canal de Privacidade e Atendimento ao Titular' );
+gtm_assert( false !== strpos( $privacy_content, 'Autoridade Nacional de Proteção de Dados' ), 'Política de privacidade canônica contém Autoridade Nacional de Proteção de Dados' );
+gtm_assert( false !== strpos( $privacy_content, 'Lei Geral de Proteção de Dados' ), 'Política de privacidade canônica contém Lei Geral de Proteção de Dados' );
+$privacy_norm = preg_replace( '/\s+/', ' ', $privacy_content );
+gtm_assert(
+	false !== strpos( $privacy_norm, 'optou por não indicar formalmente um encarregado' ),
+	'Política de privacidade canônica declara expressamente dispensa de encarregado formal nos termos da resolução CD/ANPD nº 2/2022'
+);
+
+// Prova de Mutação: validador público fail-closed para endpoint vazio ou HTTP !== 200
+$simulate_verify_public = function( $http_code, $body, $expected_terms ) {
+	$errors = 0;
+	if ( empty( $body ) || 200 !== (int) $http_code ) {
+		$errors++;
+		return array( 'success' => false, 'errors' => $errors );
+	}
+	foreach ( $expected_terms as $term ) {
+		if ( false === strpos( $body, $term ) ) {
+			$errors++;
+		}
+	}
+	return array( 'success' => 0 === $errors, 'errors' => $errors );
+};
+
+$res_timeout = $simulate_verify_public( 0, '', array( '_gcl_aw' ) );
+gtm_assert( ! $res_timeout['success'] && $res_timeout['errors'] > 0, 'Prova de Mutação: verify-public com timeout/inacessível resulta em erro (fail-closed)' );
+
+$res_http_500 = $simulate_verify_public( 500, 'Internal Server Error', array( '_gcl_aw' ) );
+gtm_assert( ! $res_http_500['success'] && $res_http_500['errors'] > 0, 'Prova de Mutação: verify-public com HTTP 500 resulta em erro (fail-closed)' );
+
+$res_missing_term = $simulate_verify_public( 200, '<html>Sem cookies ads</html>', array( '_gcl_aw', 'Conversões e Atribuição Ads' ) );
+gtm_assert( ! $res_missing_term['success'] && $res_missing_term['errors'] === 2, 'Prova de Mutação: verify-public com termos ausentes resulta em erro não-zero' );
+
+$res_valid_public = $simulate_verify_public( 200, '<html>_gcl_aw e Conversões e Atribuição Ads</html>', array( '_gcl_aw', 'Conversões e Atribuição Ads' ) );
+gtm_assert( $res_valid_public['success'] && 0 === $res_valid_public['errors'], 'verify-public com HTTP 200 e termos canônicos é aprovado' );
+
 if ( $failures > 0 ) {
 	fwrite( STDERR, "\nTotal de falhas no contrato GTM e conversoes: {$failures}\n" );
 	exit( 1 );

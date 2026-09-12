@@ -637,6 +637,141 @@ test('Prova de Mutação Trigger 46: rejeita filtro AdOpt com tipo divergente de
   assert.strictEqual(res.isAdherent, false, 'Deve rejeitar filtro AdOpt com tipo diferente de contains');
 });
 
+test('Prova de Mutação Contrato Tag 47: rejeita tag com paused: true', () => {
+  const tag47 = manifest.containerVersion.tag.find(t => t.tagId === '47');
+  const mutated = JSON.parse(JSON.stringify(tag47));
+  mutated.paused = true;
+  const res = gtmClient.validateAwctTagContract(mutated, tag47);
+  assert.strictEqual(res.isAdherent, false, 'Deve rejeitar tag pausada');
+  assert.ok(res.differences.some(d => d.includes('pausada')));
+});
+
+test('Prova de Mutação Trigger 46: rejeita arg0 AdOpt não exato', () => {
+  const tr46 = manifest.containerVersion.trigger.find(t => t.triggerId === '46');
+  const mutated = JSON.parse(JSON.stringify(tr46));
+  mutated.filter[0].parameter.find(p => p.key === 'arg0').value = '{{Outro_Tags_Aceitas_AdOpt}}';
+  const res = gtmClient.validateCustomEventTriggerContract(mutated, 'uonix_assinatura_newsletter');
+  assert.strictEqual(res.isAdherent, false, 'Deve rejeitar arg0 AdOpt não exato');
+});
+
+test('Prova de Mutação Trigger 46: rejeita filtros AdOpt duplicados ou extras', () => {
+  const tr46 = manifest.containerVersion.trigger.find(t => t.triggerId === '46');
+  const mutated = JSON.parse(JSON.stringify(tr46));
+  mutated.filter.push(JSON.parse(JSON.stringify(mutated.filter[0])));
+  const res = gtmClient.validateCustomEventTriggerContract(mutated, 'uonix_assinatura_newsletter');
+  assert.strictEqual(res.isAdherent, false, 'Deve rejeitar filtros AdOpt duplicados/extras');
+});
+
+test('GTM Sincronizador: workspace vazio gera ações estritamente ordenadas por dependência', () => {
+  const actions = computeSyncActions(manifest, { tags: [], triggers: [], variables: [] });
+  assert.ok(actions.length > 0, 'Workspace vazio gera ações de criação');
+
+  const varIndices = actions.map((a, idx) => a.type === 'CREATE_VARIABLE' ? idx : -1).filter(i => i >= 0);
+  const triggerIndices = actions.map((a, idx) => a.type === 'CREATE_TRIGGER' ? idx : -1).filter(i => i >= 0);
+  const tagIndices = actions.map((a, idx) => a.type === 'CREATE_TAG' ? idx : -1).filter(i => i >= 0);
+
+  const maxVarIndex = Math.max(...varIndices);
+  const minTriggerIndex = Math.min(...triggerIndices);
+  const maxTriggerIndex = Math.max(...triggerIndices);
+  const minTagIndex = Math.min(...tagIndices);
+
+  assert.ok(maxVarIndex < minTriggerIndex, 'Todas as Variáveis devem ser criadas antes de qualquer Trigger');
+  assert.ok(maxTriggerIndex < minTagIndex, 'Todos os Triggers devem ser criados antes de qualquer Tag');
+});
+
+test('GTM Sincronizador: detecta duplicatas de nome sob outro ID e agenda DELETE', () => {
+  const tag47 = manifest.containerVersion.tag.find(t => t.tagId === '47');
+  const duplicateTag = JSON.parse(JSON.stringify(tag47));
+  duplicateTag.tagId = '999';
+
+  const actions = computeSyncActions(manifest, {
+    tags: [...manifest.containerVersion.tag, duplicateTag],
+    triggers: manifest.containerVersion.trigger,
+    variables: manifest.containerVersion.variable
+  });
+
+  const deleteAction = actions.find(a => a.type === 'DELETE_TAG' && a.id === '999');
+  assert.ok(deleteAction, 'Deve agendar DELETE_TAG para a tag duplicada ID 999');
+  assert.ok(deleteAction.description.includes('duplicada'));
+});
+
+test('GTM Sincronizador: detecta tag pausada no workspace e agenda atualização', () => {
+  const tagsWithPaused = JSON.parse(JSON.stringify(manifest.containerVersion.tag));
+  tagsWithPaused.find(t => t.tagId === '47').paused = true;
+
+  const actions = computeSyncActions(manifest, {
+    tags: tagsWithPaused,
+    triggers: manifest.containerVersion.trigger,
+    variables: manifest.containerVersion.variable
+  });
+
+  const updateAction = actions.find(a => a.type === 'UPDATE_TAG' && a.id === '47');
+  assert.ok(updateAction, 'Deve agendar UPDATE_TAG para despausar a Tag 47');
+  assert.ok(updateAction.differences.some(d => d.includes('pausada')));
+});
+
+test('Setup Newsletter: chamada de validação real rejeita tag incompleta', () => {
+  const incompleteTag = {
+    tagId: '47',
+    type: 'awct',
+    name: 'Google Ads - Conversão Assinatura Newsletter',
+    parameter: [
+      { type: 'template', key: 'conversionId', value: '{{Constante - Google Ads ID}}' },
+      { type: 'template', key: 'conversionLabel', value: '{{Constante - Label Assinatura Newsletter}}' }
+      // falta orderId
+    ],
+    tagFiringOption: 'oncePerEvent',
+    consentSettings: {
+      consentStatus: 'needed',
+      consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] }
+    },
+    firingTriggerId: ['46']
+  };
+
+  const expectedData = {
+    name: 'Google Ads - Conversão Assinatura Newsletter',
+    type: 'awct',
+    parameter: [
+      { type: 'template', key: 'conversionId', value: '{{Constante - Google Ads ID}}' },
+      { type: 'template', key: 'conversionLabel', value: '{{Constante - Label Assinatura Newsletter}}' },
+      { type: 'template', key: 'orderId', value: '{{DLV - transaction_id}}' }
+    ],
+    firingTriggerId: ['46'],
+    tagFiringOption: 'oncePerEvent',
+    consentSettings: {
+      consentStatus: 'needed',
+      consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] }
+    }
+  };
+
+  const res = gtmClient.validateAwctTagContract(incompleteTag, expectedData);
+  assert.strictEqual(res.isAdherent, false, 'Validação real no setup deve acusar falta de orderId');
+  assert.ok(res.differences.some(d => d.includes('orderId')));
+});
+
+test('Mock GTM Dangling Trigger Probe: execução sequencial em workspace vazio não deixa triggers pendentes', () => {
+  const mockWorkspaceTriggers = new Set(['2147479553']); // Trigger nativo 'All Pages' do GTM
+  const mockCreateTrigger = (t) => {
+    mockWorkspaceTriggers.add(String(t.triggerId || t.name));
+  };
+  const mockCreateTag = (t) => {
+    for (const tid of t.firingTriggerId || []) {
+      if (!mockWorkspaceTriggers.has(String(tid))) {
+        throw new Error(`MOCK_GTM_REJECT_DANGLING_TRIGGER:${tid}`);
+      }
+    }
+  };
+
+  const actions = computeSyncActions(manifest, { tags: [], triggers: [], variables: [] });
+  for (const act of actions) {
+    if (act.type === 'CREATE_TRIGGER') {
+      mockCreateTrigger(act.expected);
+    } else if (act.type === 'CREATE_TAG') {
+      mockCreateTag(act.expected);
+    }
+  }
+});
+
 console.log('\n------------------------------------------------------------------------');
 console.log(`Resultado da suíte comportamental: ${passedTests}/${totalTests} testes aprovados.`);
 if (passedTests !== totalTests) {

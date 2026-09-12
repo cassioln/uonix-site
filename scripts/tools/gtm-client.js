@@ -164,6 +164,9 @@ function validateAwctTagContract(tag, expected, canonicalVariablesMap) {
   if (tag.type !== 'awct') {
     diffs.push(`Tipo divergente: esperado "awct", encontrado "${tag.type}"`);
   }
+  if (tag.paused === true) {
+    diffs.push(`Tag está pausada (paused: true) quando deveria estar ativa`);
+  }
   const expectedFiringOption = expected.tagFiringOption || 'oncePerEvent';
   if ((tag.tagFiringOption || 'oncePerEvent') !== expectedFiringOption) {
     diffs.push(`tagFiringOption divergente: esperado "${expectedFiringOption}", encontrado "${tag.tagFiringOption}"`);
@@ -270,49 +273,63 @@ function validateCustomEventTriggerContract(trigger, expectedEvent) {
     diffs.push(`Tipo de trigger divergente: esperado "customEvent", encontrado "${trigger.type}"`);
   }
 
-  // 1. Verificação de customEventFilter
+  // 1. Verificação estrita de customEventFilter (exatamente 1 filtro com arg0 {{_event}} e arg1 esperado)
   const cef = trigger.customEventFilter || [];
-  if (cef.length === 0) {
-    diffs.push('customEventFilter ausente');
+  if (cef.length !== 1) {
+    diffs.push(`customEventFilter deve conter exatamente 1 filtro, encontrado ${cef.length}`);
   } else {
-    for (const f of cef) {
-      if (f.type !== 'equals') {
-        diffs.push(`Tipo do customEventFilter divergente: esperado "equals", encontrado "${f.type}"`);
-      }
-      if (f.negate !== false) {
-        diffs.push(`customEventFilter sem negate:false explícito (encontrado: ${f.negate})`);
-      }
-      const arg0 = f.parameter?.find(p => p.key === 'arg0');
-      if (!arg0 || arg0.type !== 'template' || arg0.value !== '{{_event}}') {
-        diffs.push(`arg0 do customEventFilter divergente: esperado template "{{_event}}", encontrado ${JSON.stringify(arg0)}`);
-      }
-      const arg1 = f.parameter?.find(p => p.key === 'arg1');
-      if (!arg1 || arg1.type !== 'template' || arg1.value !== expectedEvent) {
-        diffs.push(`arg1 do customEventFilter divergente: esperado template "${expectedEvent}", encontrado ${JSON.stringify(arg1)}`);
-      }
+    const f = cef[0];
+    if (f.type !== 'equals') {
+      diffs.push(`Tipo do customEventFilter divergente: esperado "equals", encontrado "${f.type}"`);
+    }
+    if (f.negate !== false) {
+      diffs.push(`customEventFilter sem negate:false explícito (encontrado: ${f.negate})`);
+    }
+    const params = f.parameter || [];
+    const paramKeys = params.map(p => p.key);
+    if (new Set(paramKeys).size !== paramKeys.length) {
+      diffs.push(`Parâmetros duplicados no customEventFilter: ${paramKeys.join(', ')}`);
+    }
+    if (params.length !== 2) {
+      diffs.push(`customEventFilter deve conter exatamente 2 parâmetros (arg0, arg1), encontrado ${params.length}`);
+    }
+    const arg0 = params.find(p => p.key === 'arg0');
+    if (!arg0 || arg0.type !== 'template' || arg0.value !== '{{_event}}') {
+      diffs.push(`arg0 do customEventFilter divergente: esperado template "{{_event}}", encontrado ${JSON.stringify(arg0)}`);
+    }
+    const arg1 = params.find(p => p.key === 'arg1');
+    if (!arg1 || arg1.type !== 'template' || arg1.value !== expectedEvent) {
+      diffs.push(`arg1 do customEventFilter divergente: esperado template "${expectedEvent}", encontrado ${JSON.stringify(arg1)}`);
     }
   }
 
-  // 2. Verificação de filter (filtro de consentimento AdOpt)
+  // 2. Verificação estrita de filter (exatamente 1 filtro de consentimento AdOpt)
   const filters = trigger.filter || [];
-  if (filters.length === 0) {
-    diffs.push('Filtro de consentimento AdOpt ausente em trigger.filter');
+  if (filters.length !== 1) {
+    diffs.push(`Trigger filter deve conter exatamente 1 filtro AdOpt, encontrado ${filters.length}`);
   } else {
-    for (const f of filters) {
-      if (f.type !== 'contains') {
-        diffs.push(`Tipo do filtro AdOpt divergente: esperado "contains", encontrado "${f.type}"`);
-      }
-      if (f.negate !== false) {
-        diffs.push(`filter sem negate:false explícito (encontrado: ${f.negate})`);
-      }
-      const arg0 = f.parameter?.find(p => p.key === 'arg0');
-      if (!arg0 || arg0.type !== 'template' || !arg0.value?.includes('Tags_Aceitas_AdOpt')) {
-        diffs.push(`arg0 do filtro AdOpt divergente: esperado template com "Tags_Aceitas_AdOpt", encontrado ${JSON.stringify(arg0)}`);
-      }
-      const arg1 = f.parameter?.find(p => p.key === 'arg1');
-      if (!arg1 || arg1.type !== 'template' || arg1.value !== 'marketing') {
-        diffs.push(`arg1 do filtro AdOpt divergente: esperado template "marketing", encontrado ${JSON.stringify(arg1)}`);
-      }
+    const f = filters[0];
+    if (f.type !== 'contains') {
+      diffs.push(`Tipo do filtro AdOpt divergente: esperado "contains", encontrado "${f.type}"`);
+    }
+    if (f.negate !== false) {
+      diffs.push(`filter sem negate:false explícito (encontrado: ${f.negate})`);
+    }
+    const params = f.parameter || [];
+    const paramKeys = params.map(p => p.key);
+    if (new Set(paramKeys).size !== paramKeys.length) {
+      diffs.push(`Parâmetros duplicados no filtro AdOpt: ${paramKeys.join(', ')}`);
+    }
+    if (params.length !== 2) {
+      diffs.push(`filter AdOpt deve conter exatamente 2 parâmetros (arg0, arg1), encontrado ${params.length}`);
+    }
+    const arg0 = params.find(p => p.key === 'arg0');
+    if (!arg0 || arg0.type !== 'template' || arg0.value !== '{{Tags_Aceitas_AdOpt}}') {
+      diffs.push(`arg0 do filtro AdOpt divergente: esperado template exato "{{Tags_Aceitas_AdOpt}}", encontrado ${JSON.stringify(arg0)}`);
+    }
+    const arg1 = params.find(p => p.key === 'arg1');
+    if (!arg1 || arg1.type !== 'template' || arg1.value !== 'marketing') {
+      diffs.push(`arg1 do filtro AdOpt divergente: esperado template "marketing", encontrado ${JSON.stringify(arg1)}`);
     }
   }
 
