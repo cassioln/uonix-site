@@ -24,9 +24,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @return string URL pública da imagem JPEG composta sobre branco, ou fallback.
  */
 function uonix_get_email_product_image_url( $product, $size = 300 ) {
-	$size = absint( $size );
-	if ( $size <= 0 ) {
+	if ( ! is_numeric( $size ) || (int) $size < 16 || (int) $size > 2048 ) {
 		$size = 300;
+	} else {
+		$size = (int) $size;
 	}
 
 	if ( is_numeric( $product ) ) {
@@ -41,9 +42,12 @@ function uonix_get_email_product_image_url( $product, $size = 300 ) {
 
 	// Se for variação sem imagem própria, herda a imagem do produto pai
 	if ( ! $thumb_id && $product->is_type( 'variation' ) ) {
-		$parent = wc_get_product( $product->get_parent_id() );
-		if ( $parent ) {
-			$thumb_id = $parent->get_image_id();
+		$parent_id = method_exists( $product, 'get_parent_id' ) ? $product->get_parent_id() : 0;
+		if ( $parent_id ) {
+			$parent = wc_get_product( $parent_id );
+			if ( $parent && is_a( $parent, 'WC_Product' ) ) {
+				$thumb_id = $parent->get_image_id();
+			}
 		}
 	}
 
@@ -64,8 +68,8 @@ function uonix_get_email_product_image_url( $product, $size = 300 ) {
 	$dest_path = $cache_dir . '/' . $filename;
 	$dest_url  = $cache_url . '/' . $filename;
 
-	// Se o arquivo em cache já existe e é mais novo que a imagem fonte, retorna imediatamente
-	if ( file_exists( $dest_path ) && filemtime( $dest_path ) >= filemtime( $source_path ) ) {
+	// Se o arquivo em cache já existe, tem tamanho válido (>0) e é mais recente que a imagem fonte, retorna imediatamente
+	if ( file_exists( $dest_path ) && filesize( $dest_path ) > 0 && filemtime( $dest_path ) >= filemtime( $source_path ) ) {
 		return $dest_url;
 	}
 
@@ -74,52 +78,75 @@ function uonix_get_email_product_image_url( $product, $size = 300 ) {
 		wp_mkdir_p( $cache_dir );
 	}
 
-	// Processamento com GD do PHP
+	// Processamento com GD do PHP protegido contra exceções, erros de valor e falhas de I/O
 	if ( function_exists( 'imagecreatetruecolor' ) ) {
-		$raw_data = file_get_contents( $source_path );
-		if ( false !== $raw_data ) {
-			$im = @imagecreatefromstring( $raw_data );
+		$canvas    = null;
+		$im        = null;
+		$temp_path = null;
 
-			if ( $im ) {
-				$sw = imagesx( $im );
-				$sh = imagesy( $im );
+		try {
+			$raw_data = @file_get_contents( $source_path );
+			if ( false !== $raw_data && strlen( $raw_data ) > 0 ) {
+				$im = @imagecreatefromstring( $raw_data );
 
-				if ( $sw > 0 && $sh > 0 ) {
-					// Padding de 15px de cada lado para respiro visual do produto
-					$padding = 15;
-					$max_box = max( 1, $size - ( $padding * 2 ) );
+				if ( $im ) {
+					$sw = imagesx( $im );
+					$sh = imagesy( $im );
 
-					$ratio = min( $max_box / $sw, $max_box / $sh );
-					$dw    = max( 1, (int) round( $sw * $ratio ) );
-					$dh    = max( 1, (int) round( $sh * $ratio ) );
-					$dx    = (int) round( ( $size - $dw ) / 2 );
-					$dy    = (int) round( ( $size - $dh ) / 2 );
+					if ( $sw > 0 && $sh > 0 ) {
+						// Padding de 15px de cada lado para respiro visual do produto
+						$padding = 15;
+						$max_box = max( 1, $size - ( $padding * 2 ) );
 
-					$canvas = imagecreatetruecolor( $size, $size );
-					$white  = imagecolorallocate( $canvas, 255, 255, 255 );
-					imagefilledrectangle( $canvas, 0, 0, $size, $size, $white );
+						$ratio = min( $max_box / $sw, $max_box / $sh );
+						$dw    = max( 1, (int) round( $sw * $ratio ) );
+						$dh    = max( 1, (int) round( $sh * $ratio ) );
+						$dx    = (int) round( ( $size - $dw ) / 2 );
+						$dy    = (int) round( ( $size - $dh ) / 2 );
 
-					imagealphablending( $canvas, true );
-					imagecopyresampled( $canvas, $im, $dx, $dy, 0, 0, $dw, $dh, $sw, $sh );
+						$canvas = @imagecreatetruecolor( $size, $size );
+						if ( $canvas ) {
+							$white = imagecolorallocate( $canvas, 255, 255, 255 );
+							imagefilledrectangle( $canvas, 0, 0, $size, $size, $white );
 
-					imagejpeg( $canvas, $dest_path, 90 );
+							imagealphablending( $canvas, true );
+							imagecopyresampled( $canvas, $im, $dx, $dy, 0, 0, $dw, $dh, $sw, $sh );
 
-					if ( PHP_VERSION_ID < 80500 ) {
-						imagedestroy( $canvas );
-						imagedestroy( $im );
+							// Gravação atômica em arquivo temporário único no mesmo diretório
+							$temp_path = $dest_path . '.' . uniqid( 'tmp_', true ) . '.tmp';
+							$written   = @imagejpeg( $canvas, $temp_path, 90 );
+
+							if ( true === $written && file_exists( $temp_path ) && filesize( $temp_path ) > 0 ) {
+								if ( @rename( $temp_path, $dest_path ) && file_exists( $dest_path ) && filesize( $dest_path ) > 0 ) {
+									if ( PHP_VERSION_ID < 80500 ) {
+										imagedestroy( $canvas );
+										imagedestroy( $im );
+									}
+									return $dest_url;
+								}
+							}
+						}
 					}
-
-					if ( file_exists( $dest_path ) ) {
-						return $dest_url;
-					}
-				} elseif ( PHP_VERSION_ID < 80500 ) {
-					imagedestroy( $im );
+				}
+			}
+		} catch ( Throwable $e ) {
+			// Silencioso em produção: erros de I/O ou decodificação degradam suavemente para fallback
+		} finally {
+			if ( $temp_path && file_exists( $temp_path ) ) {
+				@unlink( $temp_path );
+			}
+			if ( PHP_VERSION_ID < 80500 ) {
+				if ( is_resource( $canvas ) || ( is_object( $canvas ) && $canvas instanceof GdImage ) ) {
+					@imagedestroy( $canvas );
+				}
+				if ( is_resource( $im ) || ( is_object( $im ) && $im instanceof GdImage ) ) {
+					@imagedestroy( $im );
 				}
 			}
 		}
 	}
 
-	// Fallback padrão caso a geração falhe
+	// Fallback padrão caso a geração falhe ou GD indisponível
 	return wp_get_attachment_image_url( $thumb_id, 'woocommerce_thumbnail' ) ?: wp_get_attachment_image_url( $thumb_id, 'full' );
 }
 

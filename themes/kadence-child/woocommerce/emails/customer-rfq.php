@@ -54,7 +54,7 @@ do_action('woocommerce_email_header', $email_heading, $email);
 
     <div style="padding: 20px 0; border-bottom: 1px solid #eee; margin-bottom: 30px;">
         <p style="font-size: 16px; color: #555;">
-            Olá, <strong><?php echo esc_html($responsavel ?: 'Cliente'); ?></strong>. Confirmamos o recebimento dos seus dados. 
+            Olá, <strong><?php echo esc_html($responsavel ?: 'Cliente'); ?></strong>. Confirmamos o recebimento dos seus dados.
             Nossa equipe técnica já está analisando sua solicitação para gerar a proposta comercial.
         </p>
     </div>
@@ -78,16 +78,16 @@ do_action('woocommerce_email_header', $email_heading, $email);
             </tr>
         </thead>
         <tbody>
-        <?php foreach ( $order->get_items() as $item_id => $item ) : 
+        <?php foreach ( $order->get_items() as $item_id => $item ) :
             $product = $item->get_product();
             $qty     = $item->get_quantity();
             $img_url = ( $product && function_exists( 'uonix_get_email_product_image_url' ) )
                 ? uonix_get_email_product_image_url( $product, 300 )
                 : ( $product ? ( wp_get_attachment_image_url( $product->get_image_id(), 'woocommerce_thumbnail' ) ?: wp_get_attachment_image_url( $product->get_image_id(), 'thumbnail' ) ) : '' );
-            
+
             // --- LIMPEZA DO NOME: TROCA <br> POR ' - ' ---
             $name    = str_ireplace(['<br>', '<br/>', '<br />'], ' - ', $item->get_name());
-            
+
             $meta    = wc_display_item_meta($item, ['echo' => false]);
             $sku     = ($product && $product->get_sku()) ? $product->get_sku() : '';
         ?>
@@ -121,7 +121,7 @@ do_action('woocommerce_email_header', $email_heading, $email);
     </table>
 
     <div style="background-color: #ffffff; border: 1px solid #eee; border-radius: 8px; padding: 25px; margin-bottom: 30px;" bgcolor="#ffffff">
-        
+
         <h4 style="margin: 0 0 10px; color: #1a2b3c; font-size: 15px; text-transform: uppercase; letter-spacing: 0.5px;">Dados registrados:</h4>
         <p style="margin: 0 0 20px; font-size: 14px; color: #555; line-height: 1.6;">
             <strong>Solicitante:</strong> <?php echo esc_html($responsavel); ?><br>
@@ -160,5 +160,5 @@ do_action('woocommerce_email_header', $email_heading, $email);
 
 </div>
 
-<?php 
+<?php
 do_action('woocommerce_email_footer', $email);
