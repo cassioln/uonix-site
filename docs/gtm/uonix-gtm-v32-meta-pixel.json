@@ -1,0 +1,1728 @@
+{
+  "exportFormatVersion": 2,
+  "exportTime": "2026-09-12T14:06:36.671Z",
+  "containerVersion": {
+    "path": "accounts/6348960683/containers/248910884/versions/31",
+    "accountId": "6348960683",
+    "containerId": "248910884",
+    "containerVersionId": "32",
+    "name": "v32 - Implantação Completa Microconversões Meta Pixel",
+    "description": "Container integrado com microconversões Google Ads e Meta Pixel sob governança AdOpt LGPD.",
+    "container": {
+      "path": "accounts/6348960683/containers/248910884",
+      "accountId": "6348960683",
+      "containerId": "248910884",
+      "name": "www.uonix.com.br",
+      "publicId": "GTM-P8TR5CCH",
+      "usageContext": [
+        "web"
+      ],
+      "fingerprint": "1775864340161",
+      "tagManagerUrl": "https://tagmanager.google.com/#/container/accounts/6348960683/containers/248910884/workspaces?apiLink=container",
+      "features": {
+        "supportUserPermissions": true,
+        "supportEnvironments": true,
+        "supportWorkspaces": true,
+        "supportGtagConfigs": false,
+        "supportBuiltInVariables": true,
+        "supportClients": false,
+        "supportFolders": true,
+        "supportTags": true,
+        "supportTemplates": true,
+        "supportTriggers": true,
+        "supportVariables": true,
+        "supportVersions": true,
+        "supportZones": true,
+        "supportTransformations": false
+      },
+      "tagIds": [
+        "GTM-P8TR5CCH"
+      ]
+    },
+    "tag": [
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "4",
+        "name": "Tag AdOpt",
+        "type": "html",
+        "priority": {
+          "type": "integer",
+          "value": "100"
+        },
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<meta name=\"adopt-website-id\" content=\"4e6a8df6-4bee-43c7-86d9-7b91ccc9df56\" />\n<script src=\"//tag.goadopt.io/injector.js?website_code=4e6a8df6-4bee-43c7-86d9-7b91ccc9df56\" \nclass=\"adopt-injector\"></script>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "fingerprint": "1789038890246",
+        "firingTriggerId": [
+          "2147479553"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "monitoringMetadata": {
+          "type": "map"
+        },
+        "consentSettings": {
+          "consentStatus": "notSet"
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "5",
+        "name": "GA4 - Configuração",
+        "type": "googtag",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "tagId",
+            "value": "G-RFY1BB1RM4"
+          }
+        ],
+        "fingerprint": "1789076009583",
+        "firingTriggerId": [
+          "25"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "monitoringMetadata": {
+          "type": "map"
+        },
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "analytics_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "6",
+        "name": "Facebook Pixel - PageView",
+        "type": "html",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<script>\n!function(f,b,e,v,n,t,s)\n{if(f.fbq)return;n=f.fbq=function(){n.callMethod?\nn.callMethod.apply(n,arguments):n.queue.push(arguments)};\nif(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';\nn.queue=[];t=b.createElement(e);t.async=!0;\nt.src=v;s=b.getElementsByTagName(e)[0];\ns.parentNode.insertBefore(t,s)}(window, document,'script',\n'https://connect.facebook.net/en_US/fbevents.js');\n\nfbq('init', '461430774437593');\nfbq('track', 'PageView');\n</script>\n<noscript><img height=\"1\" width=\"1\" style=\"display:none\"\nsrc=\"https://www.facebook.com/tr?id=461430774437593&ev=PageView&noscript=1\"\n/></noscript>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "fingerprint": "1789040263164",
+        "firingTriggerId": [
+          "24"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "monitoringMetadata": {
+          "type": "map"
+        },
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "12",
+        "name": "Google Ads - Vinculador de Conversões",
+        "type": "gclidw",
+        "fingerprint": "1788966758120",
+        "firingTriggerId": [
+          "2147479553"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "notSet"
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "13",
+        "name": "Google Ads - Tag do Google",
+        "type": "googtag",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "tagId",
+            "value": "AW-{{Constante - Google Ads ID}}"
+          }
+        ],
+        "fingerprint": "1788995761357",
+        "firingTriggerId": [
+          "2147479553"
+        ],
+        "consentSettings": {
+          "consentStatus": "notSet"
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "14",
+        "name": "Google Ads - Remarketing Geral",
+        "type": "sp",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "conversionId",
+            "value": "{{Constante - Google Ads ID}}"
+          }
+        ],
+        "fingerprint": "1789040265806",
+        "firingTriggerId": [
+          "24"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "29",
+        "name": "Google Ads - Conversão - Solicitar Cotação",
+        "type": "awct",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "orderId",
+            "value": "{{DLV - transaction_id}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionId",
+            "value": "{{Constante - Google Ads ID}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionLabel",
+            "value": "{{Constante - Label Solicitar Cotacao}}"
+          }
+        ],
+        "fingerprint": "1789193347968",
+        "firingTriggerId": [
+          "21"
+        ],
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "31",
+        "name": "Google Ads - Conversão - Contato WhatsApp",
+        "type": "awct",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "conversionId",
+            "value": "{{Constante - Google Ads ID}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionLabel",
+            "value": "{{Constante - Label WhatsApp}}"
+          }
+        ],
+        "fingerprint": "1789141701340",
+        "firingTriggerId": [
+          "10"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "40",
+        "name": "Google Ads - Conversão - Adicionar ao Carrinho",
+        "type": "awct",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "conversionId",
+            "value": "{{Constante - Google Ads ID}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionLabel",
+            "value": "{{Constante - Label Adicionar Carrinho}}"
+          }
+        ],
+        "fingerprint": "1789193434382",
+        "firingTriggerId": [
+          "55"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "41",
+        "name": "Google Ads - Conversão - Iniciar Finalização",
+        "type": "awct",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "conversionId",
+            "value": "{{Constante - Google Ads ID}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionLabel",
+            "value": "{{Constante - Label Iniciar Finalizacao}}"
+          }
+        ],
+        "fingerprint": "1789193436965",
+        "firingTriggerId": [
+          "56",
+          "38"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "42",
+        "name": "Google Ads - Conversão - Contato Telefone",
+        "type": "awct",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "conversionId",
+            "value": "{{Constante - Google Ads ID}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionLabel",
+            "value": "{{Constante - Label Telefone}}"
+          }
+        ],
+        "fingerprint": "1789150338054",
+        "firingTriggerId": [
+          "36"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "43",
+        "name": "Google Ads - Conversão - Contato Email",
+        "type": "awct",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "conversionId",
+            "value": "{{Constante - Google Ads ID}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionLabel",
+            "value": "{{Constante - Label Email}}"
+          }
+        ],
+        "fingerprint": "1789150339465",
+        "firingTriggerId": [
+          "37"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "47",
+        "name": "Google Ads - Conversão - Assinatura Newsletter",
+        "type": "awct",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "orderId",
+            "value": "{{DLV - transaction_id}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionId",
+            "value": "{{Constante - Google Ads ID}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionLabel",
+            "value": "{{Constante - Label Assinatura Newsletter}}"
+          }
+        ],
+        "fingerprint": "1789221798455",
+        "firingTriggerId": [
+          "46"
+        ],
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "51",
+        "name": "Google Ads - Conversão - Download Checklist Técnico",
+        "type": "awct",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "conversionId",
+            "value": "{{Constante - Google Ads ID}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionLabel",
+            "value": "{{Constante - Label Download Checklist}}"
+          }
+        ],
+        "fingerprint": "1789193345122",
+        "firingTriggerId": [
+          "50"
+        ],
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "tagId": "54",
+        "name": "Google Ads - Conversão - Contato Formulário",
+        "type": "awct",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "conversionId",
+            "value": "{{Constante - Google Ads ID}}"
+          },
+          {
+            "type": "template",
+            "key": "conversionLabel",
+            "value": "{{Constante - Label Contato Formulario}}"
+          }
+        ],
+        "fingerprint": "1789193343799",
+        "firingTriggerId": [
+          "53"
+        ],
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "name": "Meta Pixel - Conversão - Solicitar Orçamento",
+        "type": "html",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  var txId = {{DLV - transaction_id}} || undefined;\n  var orderId = {{DLV - order_id}} || undefined;\n  fbq('track', 'Lead', {\n    content_name: 'Solicitação de Orçamento Ancoragem Predial',\n    content_category: 'Orçamento B2B',\n    currency: 'BRL',\n    value: {{DLV - value}} || 0\n  }, {\n    eventID: txId || (orderId ? 'uonix-rfq-' + orderId : undefined)\n  });\n})();\n</script>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "firingTriggerId": [
+          "52"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "name": "Meta Pixel - Conversão - Contato Formulário",
+        "type": "html",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  fbq('track', 'Contact', {\n    content_name: 'Contato via Formulário Institucional',\n    content_category: 'Contato'\n  });\n})();\n</script>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "firingTriggerId": [
+          "53"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "name": "Meta Pixel - Conversão - Download Checklist Técnico",
+        "type": "html",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  fbq('track', 'CompleteRegistration', {\n    content_name: 'Checklist Técnico de Ancoragem Predial',\n    status: true\n  });\n})();\n</script>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "firingTriggerId": [
+          "50"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "name": "Meta Pixel - Conversão - Assinatura Newsletter",
+        "type": "html",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  var txId = {{DLV - transaction_id}} || undefined;\n  fbq('track', 'Subscribe', {\n    content_name: 'Newsletter Uônix',\n    currency: 'BRL',\n    value: 0\n  }, {\n    eventID: txId\n  });\n})();\n</script>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "firingTriggerId": [
+          "46"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "name": "Meta Pixel - Conversão - Adicionar ao Carrinho",
+        "type": "html",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  fbq('track', 'AddToCart', {\n    content_ids: [{{DLV - item_id}} || ''],\n    content_name: {{DLV - item_name}} || 'Produto Uônix',\n    content_type: 'product'\n  });\n})();\n</script>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "firingTriggerId": [
+          "55"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "name": "Meta Pixel - Conversão - Iniciar Finalização",
+        "type": "html",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  fbq('track', 'InitiateCheckout', {\n    content_category: 'Orçamento de Ancoragem Predial'\n  });\n})();\n</script>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "firingTriggerId": [
+          "56"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "name": "Meta Pixel - Conversão - WhatsApp",
+        "type": "html",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  fbq('trackCustom', 'Clique_WhatsApp_Uonix', { channel: 'whatsapp' });\n  fbq('track', 'Contact', {\n    content_name: 'Contato WhatsApp',\n    content_category: 'WhatsApp'\n  });\n})();\n</script>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "firingTriggerId": [
+          "10"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "name": "Meta Pixel - Conversão - Telefone",
+        "type": "html",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  fbq('track', 'Contact', {\n    content_name: 'Contato Telefone',\n    content_category: 'Telefone'\n  });\n})();\n</script>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "firingTriggerId": [
+          "36"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "name": "Meta Pixel - Conversão - Email",
+        "type": "html",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "html",
+            "value": "<script>\n(function() {\n  if (typeof fbq !== 'function') return;\n  fbq('track', 'Contact', {\n    content_name: 'Contato Email',\n    content_category: 'Email'\n  });\n})();\n</script>"
+          },
+          {
+            "type": "boolean",
+            "key": "supportDocumentWrite",
+            "value": "false"
+          }
+        ],
+        "firingTriggerId": [
+          "37"
+        ],
+        "tagFiringOption": "oncePerEvent",
+        "consentSettings": {
+          "consentStatus": "needed",
+          "consentType": {
+            "type": "list",
+            "list": [
+              {
+                "type": "template",
+                "value": "ad_storage"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "trigger": [
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "10",
+        "name": "Clique - WhatsApp Links",
+        "type": "linkClick",
+        "filter": [
+          {
+            "type": "matchRegex",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Click URL}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "(whatsapp|wa\\.me)"
+              },
+              {
+                "type": "boolean",
+                "key": "ignore_case",
+                "value": "true"
+              }
+            ],
+            "negate": false
+          },
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "waitForTags": {
+          "type": "boolean",
+          "value": "false"
+        },
+        "checkValidation": {
+          "type": "boolean",
+          "value": "false"
+        },
+        "waitForTagsTimeout": {
+          "type": "template"
+        },
+        "uniqueTriggerId": {
+          "type": "template"
+        },
+        "fingerprint": "1789141699816"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "21",
+        "name": "Evento - Solicitar Orçamento Uônix",
+        "type": "customEvent",
+        "customEventFilter": [
+          {
+            "type": "equals",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{_event}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "uonix_solicitar_orcamento"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "filter": [
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "fingerprint": "1789040237281"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "24",
+        "name": "Trigger LGPD - AdOpt Marketing",
+        "type": "customEvent",
+        "customEventFilter": [
+          {
+            "type": "matchRegex",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{_event}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "^(adopt-accept-marketing|adopt-visitor-consent-ready|adopt_consent_updated)$"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "filter": [
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "fingerprint": "1789042455340"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "25",
+        "name": "Trigger LGPD - AdOpt Estatísticas",
+        "type": "customEvent",
+        "customEventFilter": [
+          {
+            "type": "matchRegex",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{_event}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "^(adopt-accept-statistics|adopt-visitor-consent-ready|adopt_consent_updated)$"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "filter": [
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "statistics"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "fingerprint": "1789042457874"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "36",
+        "name": "Clique - Telefone tel",
+        "type": "linkClick",
+        "filter": [
+          {
+            "type": "matchRegex",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Click URL}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "^tel:"
+              },
+              {
+                "type": "boolean",
+                "key": "ignore_case",
+                "value": "true"
+              }
+            ],
+            "negate": false
+          },
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "waitForTags": {
+          "type": "boolean",
+          "value": "false"
+        },
+        "checkValidation": {
+          "type": "boolean",
+          "value": "false"
+        },
+        "waitForTagsTimeout": {
+          "type": "template"
+        },
+        "uniqueTriggerId": {
+          "type": "template"
+        },
+        "fingerprint": "1789150327659"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "37",
+        "name": "Clique - Email mailto",
+        "type": "linkClick",
+        "filter": [
+          {
+            "type": "matchRegex",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Click URL}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "^mailto:"
+              },
+              {
+                "type": "boolean",
+                "key": "ignore_case",
+                "value": "true"
+              }
+            ],
+            "negate": false
+          },
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "waitForTags": {
+          "type": "boolean",
+          "value": "false"
+        },
+        "checkValidation": {
+          "type": "boolean",
+          "value": "false"
+        },
+        "waitForTagsTimeout": {
+          "type": "template"
+        },
+        "uniqueTriggerId": {
+          "type": "template"
+        },
+        "fingerprint": "1789150329208"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "38",
+        "name": "Página - Iniciar Finalização Checkout AdOpt",
+        "type": "customEvent",
+        "customEventFilter": [
+          {
+            "type": "equals",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{_event}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "adopt-accept-marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "filter": [
+          {
+            "type": "matchRegex",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Page Path}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "^/finalizar-orcamento/?$"
+              }
+            ],
+            "negate": false
+          },
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "fingerprint": "1789152575875"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "46",
+        "name": "Evento - Assinatura Newsletter Uônix",
+        "type": "customEvent",
+        "customEventFilter": [
+          {
+            "type": "equals",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{_event}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "uonix_assinatura_newsletter"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "filter": [
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "fingerprint": "1789157865595"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "50",
+        "name": "Evento - Download Checklist Técnico",
+        "type": "customEvent",
+        "customEventFilter": [
+          {
+            "type": "equals",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{_event}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "uonix_download_checklist"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "filter": [
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "fingerprint": "1789163232344"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "53",
+        "name": "Evento - Contato via Formulário",
+        "type": "customEvent",
+        "customEventFilter": [
+          {
+            "type": "equals",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{_event}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "uonix_contato_formulario"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "filter": [
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "fingerprint": "1789164169321"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "55",
+        "name": "Evento - Adicionar ao Carrinho Uônix",
+        "type": "customEvent",
+        "customEventFilter": [
+          {
+            "type": "equals",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{_event}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "uonix_adicionar_ao_carrinho"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "filter": [
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "fingerprint": "1789193430334"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "triggerId": "56",
+        "name": "Evento - Iniciar Finalização Uônix",
+        "type": "customEvent",
+        "customEventFilter": [
+          {
+            "type": "equals",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{_event}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "uonix_iniciar_finalizacao"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "filter": [
+          {
+            "type": "contains",
+            "parameter": [
+              {
+                "type": "template",
+                "key": "arg0",
+                "value": "{{Tags_Aceitas_AdOpt}}"
+              },
+              {
+                "type": "template",
+                "key": "arg1",
+                "value": "marketing"
+              }
+            ],
+            "negate": false
+          }
+        ],
+        "fingerprint": "1789193431792"
+      }
+    ],
+    "variable": [
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "7",
+        "name": "Constante - Google Ads ID",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "18443390936"
+          }
+        ],
+        "fingerprint": "1789137163995"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "23",
+        "name": "Tags_Aceitas_AdOpt",
+        "type": "j",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "name",
+            "value": "window.acceptedTags"
+          }
+        ],
+        "fingerprint": "1789038850547"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "27",
+        "name": "DLV - transaction_id",
+        "type": "v",
+        "parameter": [
+          {
+            "type": "integer",
+            "key": "dataLayerVersion",
+            "value": "2"
+          },
+          {
+            "type": "boolean",
+            "key": "setDefaultValue",
+            "value": "false"
+          },
+          {
+            "type": "template",
+            "key": "name",
+            "value": "transaction_id"
+          }
+        ],
+        "fingerprint": "1789065773139"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "28",
+        "name": "Constante - Label Solicitar Cotacao",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "1md1CJq4mPQcENifv9pE"
+          }
+        ],
+        "fingerprint": "1789137011539"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "30",
+        "name": "Constante - Label WhatsApp",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "OQEjCKDcpvQcENifv9pE"
+          }
+        ],
+        "fingerprint": "1789141697189"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "32",
+        "name": "Constante - Label Adicionar Carrinho",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "Wsw-CMnruPQcENifv9pE"
+          }
+        ],
+        "fingerprint": "1789150286624"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "33",
+        "name": "Constante - Label Iniciar Finalizacao",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "q9A-CMzruPQcENifv9pE"
+          }
+        ],
+        "fingerprint": "1789150287988"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "34",
+        "name": "Constante - Label Telefone",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "tcD8CM_ruPQcENifv9pE"
+          }
+        ],
+        "fingerprint": "1789150289349"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "35",
+        "name": "Constante - Label Email",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "3nxjCNLruPQcENifv9pE"
+          }
+        ],
+        "fingerprint": "1789150290828"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "45",
+        "name": "Constante - Label Assinatura Newsletter",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "PFrxCKf1w_QcENifv9pE"
+          }
+        ],
+        "fingerprint": "1789157864158"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "49",
+        "name": "Constante - Label Download Checklist",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "nXYDCKKayPQcENifv9pE"
+          }
+        ],
+        "fingerprint": "1789163230842"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "variableId": "52",
+        "name": "Constante - Label Contato Formulario",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "RVZmCKznyfQcENifv9pE"
+          }
+        ],
+        "fingerprint": "1789164167787"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "name": "Constante - Meta Pixel ID",
+        "type": "c",
+        "parameter": [
+          {
+            "type": "template",
+            "key": "value",
+            "value": "461430774437593"
+          }
+        ]
+      }
+    ],
+    "builtInVariable": [
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "pageUrl",
+        "name": "Page URL"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "pageHostname",
+        "name": "Page Hostname"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "pagePath",
+        "name": "Page Path"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "referrer",
+        "name": "Referrer"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "event",
+        "name": "Event"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "clickElement",
+        "name": "Click Element"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "clickClasses",
+        "name": "Click Classes"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "clickUrl",
+        "name": "Click URL"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "formElement",
+        "name": "Form Element"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "formClasses",
+        "name": "Form Classes"
+      },
+      {
+        "accountId": "6348960683",
+        "containerId": "248910884",
+        "type": "formId",
+        "name": "Form ID"
+      }
+    ],
+    "fingerprint": "1789221981119",
+    "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6348960683/containers/248910884/versions/31?apiLink=version"
+  }
+}

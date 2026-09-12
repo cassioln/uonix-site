@@ -395,7 +395,9 @@ function computeSyncActions(manifest, currentState) {
         if (cp.type !== ep.type) {
           diffs.push(`Tipo do parâmetro "${ep.key}" divergente: esperado "${ep.type}", atual "${cp.type}"`);
         }
-        if (cp.value !== ep.value) {
+        const isHtmlParam = ep.key === 'html';
+        const normVal = (v) => isHtmlParam ? String(v || '').replace(/\r\n/g, '\n').trim() : v;
+        if (normVal(cp.value) !== normVal(ep.value)) {
           diffs.push(`Valor do parâmetro "${ep.key}" divergente: esperado "${ep.value}", atual "${cp.value}"`);
         }
       }
