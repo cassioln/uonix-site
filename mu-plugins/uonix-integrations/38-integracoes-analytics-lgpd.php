@@ -1244,6 +1244,19 @@ function uonix_render_analytics_rfq_conversion( $order_id ) {
     if ( ! $uonix_order_key_is_valid || 'gplsquote-req' !== $uonix_order_status ) {
         return;
     }
+    $news_optin = '';
+    if ( method_exists( $uonix_order, 'get_meta' ) ) {
+        $news_optin = $uonix_order->get_meta( 'billing_newsletters' );
+        if ( ! $news_optin ) {
+            $news_optin = $uonix_order->get_meta( '_billing_newsletters' );
+        }
+    } elseif ( function_exists( 'get_post_meta' ) ) {
+        $news_optin = get_post_meta( $uonix_order_id, 'billing_newsletters', true );
+        if ( ! $news_optin ) {
+            $news_optin = get_post_meta( $uonix_order_id, '_billing_newsletters', true );
+        }
+    }
+    $assina_news = in_array( strtolower( (string) $news_optin ), array( '1', 'sim', 'yes', 'true' ), true );
     ?>
     <script id="uonix-conversao-carrinho-datalayer">
     (function() {
@@ -1257,7 +1270,300 @@ function uonix_render_analytics_rfq_conversion( $order_id ) {
         });
     })();
     </script>
+    <?php if ( $assina_news ) : ?>
+    <script id="uonix-conversao-carrinho-newsletter-datalayer">
+    (function() {
+        var orderId = <?php echo (int) $uonix_order_id; ?>;
+        var newsDedupeKey = 'uonix_news_rfq_' + orderId;
+
+        function hasMarketingConsent() {
+            // 1. Precedência absoluta de rejeição explícita na janela ou ponte AdOpt
+            if (window._adoptExplicitlyRejected === true) {
+                return false;
+            }
+            if (window._adoptMarketingGranted === false) {
+                return false;
+            }
+
+            // 2. Rejeição explícita em storage (_adoptReject=1) invalida qualquer consentimento residual
+            var storage = null;
+            try {
+                storage = window.localStorage || (typeof localStorage !== 'undefined' ? localStorage : null);
+            } catch(e) {}
+
+            if (storage) {
+                try {
+                    if (storage.getItem('_adoptReject') === '1') {
+                        return false;
+                    }
+                } catch(e) {}
+            }
+
+            // 3. Ponte AdOpt ativa e confirmada
+            if (window._adoptMarketingGranted === true) {
+                return true;
+            }
+            if (Array.isArray(window.acceptedTags) && window.acceptedTags.length > 0) {
+                return window.acceptedTags.indexOf('marketing') !== -1;
+            }
+
+            // 4. Fallback de storage persistido (somente se não houver rejeição explícita)
+            if (storage) {
+                try {
+                    var raw = storage.getItem('adoptConsentMode');
+                    if (raw) {
+                        var parsed = JSON.parse(raw);
+                        if (parsed && (parsed.marketing === true || parsed.ad_storage === 'granted')) {
+                            return true;
+                        }
+                    }
+                } catch(e) {}
+            }
+
+            return false;
+        }
+
+        function emitirConversaoNewsletter() {
+            try {
+                if (window.sessionStorage && window.sessionStorage.getItem(newsDedupeKey)) {
+                    return;
+                }
+            } catch(e) {}
+
+            // Nao grava no sessionStorage nem consome a conversao antes do consentimento efetivo de marketing
+            if (!hasMarketingConsent()) {
+                return;
+            }
+
+            try {
+                if (window.sessionStorage) {
+                    window.sessionStorage.setItem(newsDedupeKey, '1');
+                }
+            } catch(e) {}
+
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+                'event': 'uonix_assinatura_newsletter',
+                'origem_conversao': 'woocommerce_order_received',
+                'order_id': orderId,
+                'transaction_id': 'uonix-rfq-news-' + orderId
+            });
+        }
+
+        // 1. Emissao imediata se consentimento ja estiver ativo
+        emitirConversaoNewsletter();
+
+        // 2. Reemissao na concessao tardia de consentimento
+        function onConsentGranted() {
+            emitirConversaoNewsletter();
+        }
+
+        window.addEventListener('adopt-accept-marketing', onConsentGranted, { passive: true });
+
+        // Escuta atualizacoes de consentimento no dataLayer
+        window.dataLayer = window.dataLayer || [];
+        var origPush = window.dataLayer.push;
+        window.dataLayer.push = function() {
+            var res = origPush.apply(this, arguments);
+            for (var i = 0; i < arguments.length; i++) {
+                var item = arguments[i];
+                if (item && (item.event === 'adopt_consent_updated' || item.event === 'adopt-accept-marketing')) {
+                    if (item.adopt_marketing === true || (item.accepted_tags && item.accepted_tags.indexOf('marketing') !== -1)) {
+                        emitirConversaoNewsletter();
+                    }
+                }
+            }
+            return res;
+        };
+    })();
+    </script>
+    <?php endif; ?>
     <?php
 }
 }
 add_action( 'woocommerce_thankyou', 'uonix_render_analytics_rfq_conversion', 10, 1 );
+
+/**
+ * UONIX: Captura adicoes confirmadas ao carrinho via fluxo padrao (nao-AJAX) do WooCommerce.
+ */
+if ( ! function_exists( 'uonix_record_standard_add_to_cart' ) ) {
+function uonix_record_standard_add_to_cart( $cart_item_key, $product_id, $quantity ) {
+    if ( ( defined( 'DOING_AJAX' ) && DOING_AJAX ) || ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() ) ) {
+        return;
+    }
+    if ( function_exists( 'WC' ) && WC()->session ) {
+        $pending = WC()->session->get( 'uonix_pending_standard_add_to_cart', array() );
+        if ( ! is_array( $pending ) ) {
+            $pending = array();
+        }
+        $pending[] = array(
+            'product_id' => absint( $product_id ),
+            'quantity'   => max( 1, absint( $quantity ) ),
+            'timestamp'  => time(),
+        );
+        WC()->session->set( 'uonix_pending_standard_add_to_cart', $pending );
+    }
+}
+}
+add_action( 'woocommerce_add_to_cart', 'uonix_record_standard_add_to_cart', 10, 3 );
+
+/**
+ * UONIX: Emissao e listeners das micro-conversoes do funil.
+ * - Iniciar finalizacao de compra no checkout WooCommerce (/finalizar-orcamento/).
+ * - Adicionar ao carrinho / orcamento via evento confirmado added_to_cart (AJAX) ou flag confirmada server-side (nao-AJAX).
+ * - Contato via formulario institucional/suporte (assunto != orcamento).
+ * - Assinatura de newsletter em formularios Fluent Forms.
+ */
+if ( ! function_exists( 'uonix_render_analytics_microconversions_footer' ) ) {
+function uonix_render_analytics_microconversions_footer() {
+    $is_checkout = function_exists( 'is_checkout' ) && is_checkout();
+    $is_order_received = function_exists( 'is_wc_endpoint_url' ) && is_wc_endpoint_url( 'order-received' );
+
+    // Se estiver no checkout ativo (antes de submeter)
+    if ( $is_checkout && ! $is_order_received ) : ?>
+        <script id="uonix-conversao-iniciar-finalizacao-datalayer">
+        (function() {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+                'event': 'uonix_iniciar_finalizacao',
+                'origem_conversao': 'woocommerce_checkout'
+            });
+        })();
+        </script>
+    <?php endif; ?>
+
+    <?php
+    // Adicao ao carrinho nao-AJAX confirmada via hook server-side
+    $has_standard_add = false;
+    if ( function_exists( 'WC' ) && WC()->session ) {
+        $pending_adds = WC()->session->get( 'uonix_pending_standard_add_to_cart', array() );
+        if ( ! empty( $pending_adds ) && is_array( $pending_adds ) ) {
+            WC()->session->__unset( 'uonix_pending_standard_add_to_cart' );
+            $has_standard_add = true;
+        }
+    }
+    if ( $has_standard_add ) : ?>
+        <script id="uonix-conversao-adicionar-carrinho-server-datalayer">
+        (function() {
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+                'event': 'uonix_adicionar_ao_carrinho',
+                'origem_conversao': 'woocommerce_add_to_cart_standard'
+            });
+        })();
+        </script>
+    <?php endif; ?>
+
+    <script id="uonix-conversao-adicionar-carrinho-listener">
+    (function() {
+        var adicionadoPendente = false;
+
+        function dispararAdicionarCarrinho(origem) {
+            if (adicionadoPendente) return;
+            adicionadoPendente = true;
+            setTimeout(function() {
+                adicionadoPendente = false;
+            }, 1000);
+
+            window.dataLayer = window.dataLayer || [];
+            window.dataLayer.push({
+                'event': 'uonix_adicionar_ao_carrinho',
+                'origem_conversao': origem || 'woocommerce_add_to_cart'
+            });
+        }
+
+        // Listener nativo do WooCommerce: dispara exclusivamente apos confirmacao AJAX da adicao ao carrinho
+        if (window.jQuery) {
+            window.jQuery(document.body).on('added_to_cart', function(event, fragments, cart_hash, button, extra) {
+                // Se algum argumento explicito trouxer tipo diferente de 'add' (ex: decrement ou remove), ignorar
+                var options = (extra && typeof extra === 'object') ? extra : ((button && typeof button === 'object' && button.actionType) ? button : null);
+                if (options && options.actionType && options.actionType !== 'add') {
+                    return;
+                }
+                // Se trouxer quantidades confirmadas vs atual, validar que houve aumento real
+                if (options && typeof options.confirmedQty === 'number' && typeof options.currentQty === 'number') {
+                    if (options.confirmedQty <= options.currentQty) {
+                        return;
+                    }
+                }
+                dispararAdicionarCarrinho('ajax_added_to_cart');
+            });
+        }
+    })();
+    </script>
+
+    <script id="uonix-conversao-contato-newsletter-listener">
+    (function() {
+        var pendentes = {};
+
+        function dispararContato(formId, assunto) {
+            var val = assunto && String(assunto).trim() ? String(assunto).trim() : '';
+            if (formId && val && val !== 'orcamento') {
+                var chave = 'contato|' + String(formId || '') + '|' + val;
+                if (pendentes[chave]) return;
+                pendentes[chave] = true;
+                setTimeout(function() { delete pendentes[chave]; }, 1000);
+                window.dataLayer = window.dataLayer || [];
+                window.dataLayer.push({
+                    'event': 'uonix_contato_formulario',
+                    'origem_conversao': 'fluentform_contato',
+                    'form_id': formId,
+                    'assunto': val
+                });
+            }
+        }
+
+        function dispararNewsletter(formId, form) {
+            var fIdStr = String(formId || '');
+            var assinou = (fIdStr === '2');
+            if (!assinou && form) {
+                var newsChecked = form.querySelector('input[name="form_newsletters"]:checked') ||
+                                   form.querySelector('input[name*="newsletter"]:checked') ||
+                                   form.querySelector('input[name="form_newsletters"][value="sim"]:checked');
+                if (newsChecked) assinou = true;
+            }
+            if (assinou) {
+                var chave = 'news|' + fIdStr;
+                if (pendentes[chave]) return;
+                pendentes[chave] = true;
+                setTimeout(function() { delete pendentes[chave]; }, 1000);
+                window.dataLayer = window.dataLayer || [];
+                window.dataLayer.push({
+                    'event': 'uonix_assinatura_newsletter',
+                    'origem_conversao': fIdStr === '2' ? 'fluentform_id_2' : 'fluentform_checkbox',
+                    'form_id': fIdStr || null
+                });
+            }
+        }
+
+        function processar(form, formId) {
+            if (!form) return;
+            var assuntoEl = form.querySelector('select[name="form_assunto"]');
+            var val = (assuntoEl && assuntoEl.value) ? assuntoEl.value : '';
+            dispararContato(formId, val);
+            dispararNewsletter(formId, form);
+        }
+
+        if (window.jQuery) {
+            window.jQuery(document).on('fluentform_submission_success.uonixContato', function(e, data) {
+                try {
+                    var form = (data && data.form && data.form[0]) ? data.form[0] : (e.target || null);
+                    var formId = (data && (data.formId || data.form_id)) ? (data.formId || data.form_id) : (form ? (form.getAttribute('data-form_id') || form.getAttribute('data-form-id') || (form.id ? form.id.replace('fluentform_', '') : '')) : '');
+                    processar(form, formId);
+                } catch(err) {}
+            });
+        }
+
+        document.addEventListener('fluentform_submission_success', function(e) {
+            try {
+                var form = (e && e.detail && e.detail.form) ? e.detail.form : (e.target || null);
+                var formId = (e && e.detail && (e.detail.formId || e.detail.form_id)) ? (e.detail.formId || e.detail.form_id) : (form ? (form.getAttribute('data-form_id') || form.getAttribute('data-form-id') || (form.id ? form.id.replace('fluentform_', '') : '')) : '');
+                processar(form, formId);
+            } catch(err) {}
+        });
+    })();
+    </script>
+    <?php
+}
+}
+add_action( 'wp_footer', 'uonix_render_analytics_microconversions_footer', 98, 0 );

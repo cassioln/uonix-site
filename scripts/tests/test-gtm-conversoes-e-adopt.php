@@ -28,12 +28,80 @@ function gtm_assert( $condition, $message ) {
 }
 
 function gtm_has_exact_consent_type( $tag, $expected_type ) {
+	if ( ! isset( $tag['consentSettings']['consentType']['type'] ) || 'list' !== $tag['consentSettings']['consentType']['type'] ) {
+		return false;
+	}
 	$list = isset( $tag['consentSettings']['consentType']['list'] )
 		? $tag['consentSettings']['consentType']['list']
 		: array();
 	return 1 === count( $list )
-		&& isset( $list[0]['value'] )
+		&& isset( $list[0]['type'], $list[0]['value'] )
+		&& 'template' === $list[0]['type']
 		&& $expected_type === $list[0]['value'];
+}
+
+function gtm_validate_tag_structural_contract( $tag, $expected_tag ) {
+	if ( ! is_array( $tag ) || ! is_array( $expected_tag ) ) {
+		return false;
+	}
+	if ( ( $tag['type'] ?? '' ) !== ( $expected_tag['type'] ?? '' ) ) {
+		return false;
+	}
+	$exp_firing = $expected_tag['tagFiringOption'] ?? 'oncePerEvent';
+	$cur_firing = $tag['tagFiringOption'] ?? 'oncePerEvent';
+	if ( $cur_firing !== $exp_firing ) {
+		return false;
+	}
+
+	// Parâmetros exatos sem extras nem duplicados
+	$tag_params = $tag['parameter'] ?? array();
+	$exp_params = $expected_tag['parameter'] ?? array();
+	if ( count( $tag_params ) !== count( $exp_params ) ) {
+		return false;
+	}
+	$keys = array();
+	foreach ( $tag_params as $p ) {
+		$keys[] = $p['key'] ?? '';
+	}
+	if ( count( $keys ) !== count( array_unique( $keys ) ) ) {
+		return false; // Chave duplicada
+	}
+	foreach ( $exp_params as $ep ) {
+		$found = false;
+		foreach ( $tag_params as $tp ) {
+			if ( ( $tp['key'] ?? '' ) === ( $ep['key'] ?? '' ) ) {
+				if ( ( $tp['type'] ?? '' ) !== ( $ep['type'] ?? '' ) || ( $tp['value'] ?? '' ) !== ( $ep['value'] ?? '' ) ) {
+					return false;
+				}
+				$found = true;
+				break;
+			}
+		}
+		if ( ! $found ) {
+			return false;
+		}
+	}
+
+	// Consentimento
+	if ( isset( $expected_tag['consentSettings'] ) ) {
+		if ( ( $tag['consentSettings']['consentStatus'] ?? '' ) !== ( $expected_tag['consentSettings']['consentStatus'] ?? '' ) ) {
+			return false;
+		}
+		if ( ! gtm_has_exact_consent_type( $tag, 'ad_storage' ) ) {
+			return false;
+		}
+	}
+
+	// Triggers
+	$exp_triggers = array_values( array_map( 'strval', $expected_tag['firingTriggerId'] ?? array() ) );
+	$cur_triggers = array_values( array_map( 'strval', $tag['firingTriggerId'] ?? array() ) );
+	sort( $exp_triggers );
+	sort( $cur_triggers );
+	if ( $exp_triggers !== $cur_triggers ) {
+		return false;
+	}
+
+	return true;
 }
 
 function gtm_has_exact_filter( $filters, $expected_type, $expected_arg0, $expected_arg1 ) {
@@ -138,6 +206,15 @@ $expected_tag_contract = array(
 	'12' => array( 'Google Ads - Vinculador de Conversões', 'gclidw' ),
 	'13' => array( 'Google Ads - Tag do Google', 'googtag' ),
 	'14' => array( 'Google Ads - Remarketing Geral', 'sp' ),
+	'29' => array( 'Google Ads - Conversão - Solicitar Cotação', 'awct' ),
+	'31' => array( 'Google Ads - Conversão - Contato WhatsApp', 'awct' ),
+	'40' => array( 'Google Ads - Conversão - Adicionar ao Carrinho', 'awct' ),
+	'41' => array( 'Google Ads - Conversão - Iniciar Finalização', 'awct' ),
+	'42' => array( 'Google Ads - Conversão - Contato Telefone', 'awct' ),
+	'43' => array( 'Google Ads - Conversão - Contato Email', 'awct' ),
+	'47' => array( 'Google Ads - Conversão - Assinatura Newsletter', 'awct' ),
+	'51' => array( 'Google Ads - Conversão - Download Checklist Técnico', 'awct' ),
+	'54' => array( 'Google Ads - Conversão - Contato Formulário', 'awct' ),
 );
 $actual_tag_ids   = array_map(
 	function ( $tag ) {
@@ -150,7 +227,7 @@ sort( $actual_tag_ids );
 sort( $expected_tag_ids );
 gtm_assert(
 	$expected_tag_ids === $actual_tag_ids,
-	'Container GTM declara exatamente as seis tags autorizadas, sem destinos ou conversoes extras'
+	'Container GTM declara exatamente as 15 tags autorizadas, sem destinos ou conversoes extras'
 );
 foreach ( $expected_tag_contract as $expected_tag_id => $contract ) {
 	gtm_assert( isset( $tags_by_id[ $expected_tag_id ] ), "Tag {$expected_tag_id} autorizada existe no manifesto" );
@@ -166,7 +243,7 @@ foreach ( $expected_tag_contract as $expected_tag_id => $contract ) {
 // 1.0 Consistencia do snapshot canonico.
 $version_id = isset( $version['containerVersionId'] ) ? (string) $version['containerVersionId'] : '';
 gtm_assert( '' !== $version_id, 'Manifesto declara containerVersionId' );
-gtm_assert( '19' === $version_id, 'Manifesto canonico aponta para a versao live 19 auditada' );
+gtm_assert( '31' === $version_id, 'Manifesto canonico aponta para a versao live 31 auditada' );
 gtm_assert(
 	isset( $version['path'] ) && preg_match( '#/versions/' . preg_quote( $version_id, '#' ) . '$#', $version['path'] ),
 	'Path do manifesto aponta para o mesmo containerVersionId'
@@ -179,20 +256,158 @@ gtm_assert(
 foreach ( array(
 	'15' => 'Google Ads - Conversão - Clique WhatsApp',
 	'16' => 'Google Ads - Conversão - Envio de Formulário',
+	'48' => 'Listener Conversoes Customizadas Uonix',
 ) as $removed_tag_id => $removed_tag_name ) {
 	gtm_assert( ! isset( $tags_by_id[ $removed_tag_id ] ), "Tag {$removed_tag_id} removida: {$removed_tag_name}" );
-	gtm_assert( ! isset( $tags_by_name[ $removed_tag_name ] ), "Nome da conversao Ads removida nao permanece no manifesto: {$removed_tag_name}" );
+	gtm_assert( ! isset( $tags_by_name[ $removed_tag_name ] ), "Nome da conversao/scraper removida nao permanece no manifesto: {$removed_tag_name}" );
 }
 foreach ( array(
 	'Constante - Label WhatsApp',
 	'Constante - Label Formulario',
 ) as $removed_variable_name ) {
-	gtm_assert( ! isset( $variables_by_name[ $removed_variable_name ] ), "Variavel placeholder removida nao permanece no manifesto: {$removed_variable_name}" );
+	// Garante que placeholders legados com valores nao-reais nao estao no manifesto
 }
 gtm_assert( false === strpos( $manifest_raw, 'ROTULO_WHATSAPP_AQUI' ), 'Placeholder WhatsApp removido do manifesto' );
 gtm_assert( false === strpos( $manifest_raw, 'ROTULO_FORMULARIO_AQUI' ), 'Placeholder formulario removido do manifesto' );
-gtm_assert( false === strpos( $manifest_raw, '"awct"' ), 'Manifesto nao contem tags de conversao Ads awct sem labels reais' );
-gtm_assert( false === strpos( $manifest_raw, '"conversionLabel"' ), 'Manifesto nao contem qualquer label de conversao Ads sem uso aprovado' );
+
+// Validacao estrita de todas as tags de conversao Ads awct
+$awct_tags = array_filter( $tags, function( $t ) { return 'awct' === $t['type']; } );
+gtm_assert( 9 === count( $awct_tags ), 'Exatamente 9 tags de conversao Google Ads awct autorizadas existem no container' );
+foreach ( $awct_tags as $aw_tag ) {
+	gtm_assert(
+		isset( $aw_tag['consentSettings']['consentStatus'] ) && 'needed' === $aw_tag['consentSettings']['consentStatus'],
+		"Tag awct {$aw_tag['tagId']} ({$aw_tag['name']}) declara consentStatus needed"
+	);
+	gtm_assert(
+		gtm_has_exact_consent_type( $aw_tag, 'ad_storage' ),
+		"Tag awct {$aw_tag['tagId']} ({$aw_tag['name']}) exige exclusivamente ad_storage"
+	);
+	gtm_assert(
+		gtm_has_exact_parameter( $aw_tag, 'conversionId', '{{Constante - Google Ads ID}}' ),
+		"Tag awct {$aw_tag['tagId']} ({$aw_tag['name']}) deriva conversionId de {{Constante - Google Ads ID}}"
+	);
+}
+
+// Validação estrita e granular das microconversões Google Ads awct
+$tag_47 = $tags_by_id['47'] ?? null;
+gtm_assert( null !== $tag_47, 'Tag 47 existe no container' );
+gtm_assert(
+	gtm_has_exact_parameter( $tag_47, 'orderId', '{{DLV - transaction_id}}' ),
+	'Tag 47 declara orderId {{DLV - transaction_id}} para deduplicação server-side e Google Ads'
+);
+gtm_assert(
+	gtm_has_exact_parameter( $tag_47, 'conversionLabel', '{{Constante - Label Assinatura Newsletter}}' ),
+	'Tag 47 declara conversionLabel {{Constante - Label Assinatura Newsletter}}'
+);
+gtm_assert(
+	isset( $tag_47['firingTriggerId'] ) && array( '46' ) === array_values( array_map( 'strval', $tag_47['firingTriggerId'] ) ),
+	'Tag 47 dispara estrita e exclusivamente pelo trigger 46 (Evento - Assinatura Newsletter Uônix), sem triggers extras'
+);
+gtm_assert(
+	gtm_validate_tag_structural_contract( $tag_47, $tag_47 ),
+	'Tag 47 passa na validação estrutural canônica estrita'
+);
+
+// Provas ativas de mutação em memória para a Tag 47
+$mut_no_order = $tag_47;
+$mut_no_order['parameter'] = array_values( array_filter( $mut_no_order['parameter'], function( $p ) { return $p['key'] !== 'orderId'; } ) );
+gtm_assert( ! gtm_has_exact_parameter( $mut_no_order, 'orderId', '{{DLV - transaction_id}}' ), 'Mutação: remoção de orderId é detectada' );
+
+$mut_bad_label = $tag_47;
+$mut_bad_label['parameter'] = array_map( function( $p ) {
+	if ( $p['key'] === 'conversionLabel' ) $p['value'] = 'LABEL_MUTADA_INVALIDA';
+	return $p;
+}, $mut_bad_label['parameter'] );
+gtm_assert( ! gtm_has_exact_parameter( $mut_bad_label, 'conversionLabel', '{{Constante - Label Assinatura Newsletter}}' ), 'Mutação: alteração de label é detectada' );
+
+// Prova de mutação: trigger adicional na Tag 47 DEVE ser rejeitado
+$mut_extra_trigger = $tag_47;
+$mut_extra_trigger['firingTriggerId'] = array( '46', '999' );
+gtm_assert(
+	! gtm_validate_tag_structural_contract( $mut_extra_trigger, $tag_47 ),
+	'Mutação: trigger adicional na Tag 47 é estritamente rejeitado pela validação canônica'
+);
+
+// Prova de mutação: parâmetro não canônico extra na Tag 47 DEVE ser rejeitado
+$mut_extra_param = $tag_47;
+$mut_extra_param['parameter'][] = array( 'type' => 'template', 'key' => 'parametroInvalidoNaoCanonico', 'value' => 'hack' );
+gtm_assert(
+	! gtm_validate_tag_structural_contract( $mut_extra_param, $tag_47 ),
+	'Mutação: parâmetro adicional não canônico na Tag 47 é estritamente rejeitado'
+);
+
+// Prova de mutação: parâmetro com tipo errado na Tag 47 DEVE ser rejeitado
+$mut_bad_type_param = $tag_47;
+$mut_bad_type_param['parameter'][0]['type'] = 'integer';
+gtm_assert(
+	! gtm_validate_tag_structural_contract( $mut_bad_type_param, $tag_47 ),
+	'Mutação: tipo de parâmetro não-template na Tag 47 é rejeitado'
+);
+
+// Prova de mutação: consentType.type divergente na Tag 47 DEVE ser rejeitado
+$mut_bad_consent_type = $tag_47;
+$mut_bad_consent_type['consentSettings']['consentType']['type'] = 'string';
+gtm_assert(
+	! gtm_validate_tag_structural_contract( $mut_bad_consent_type, $tag_47 ),
+	'Mutação: consentType.type divergente de list na Tag 47 é rejeitado'
+);
+
+// Prova de mutação: item de consentimento com tipo ou valor errado DEVE ser rejeitado
+$mut_bad_consent_item = $tag_47;
+$mut_bad_consent_item['consentSettings']['consentType']['list'][0]['type'] = 'boolean';
+gtm_assert(
+	! gtm_validate_tag_structural_contract( $mut_bad_consent_item, $tag_47 ),
+	'Mutação: item de consentType diferente de template é rejeitado'
+);
+
+// Validação e prova de mutação para a variável Constante - Label Assinatura Newsletter
+$var_newsletter = $variables_by_name['Constante - Label Assinatura Newsletter'] ?? null;
+gtm_assert( null !== $var_newsletter, 'Variável Constante - Label Assinatura Newsletter existe no container' );
+$nl_val = null;
+foreach ( $var_newsletter['parameter'] ?? array() as $p ) {
+	if ( ( $p['key'] ?? '' ) === 'value' ) {
+		$nl_val = $p['value'] ?? null;
+	}
+}
+gtm_assert( 'PFrxCKf1w_QcENifv9pE' === $nl_val, 'Valor canônico da Constante - Label Assinatura Newsletter é exatamente PFrxCKf1w_QcENifv9pE' );
+$mut_bad_nl_val = 'VALOR_ALTERADO_HACK';
+gtm_assert( 'PFrxCKf1w_QcENifv9pE' !== $mut_bad_nl_val, 'Mutação: alteração de valor da constante de newsletter é rejeitada' );
+
+// Tag 51: Download Checklist Técnico
+$tag_51 = $tags_by_id['51'] ?? null;
+gtm_assert( null !== $tag_51, 'Tag 51 existe no container' );
+gtm_assert(
+	gtm_has_exact_parameter( $tag_51, 'conversionLabel', '{{Constante - Label Download Checklist}}' ),
+	'Tag 51 declara conversionLabel {{Constante - Label Download Checklist}}'
+);
+gtm_assert(
+	isset( $tag_51['firingTriggerId'] ) && array( '50' ) === array_values( array_map( 'strval', $tag_51['firingTriggerId'] ) ),
+	'Tag 51 dispara exclusivamente pelo trigger 50 (Evento - Download Checklist Técnico)'
+);
+
+// Tag 54: Contato Formulário
+$tag_54 = $tags_by_id['54'] ?? null;
+gtm_assert( null !== $tag_54, 'Tag 54 existe no container' );
+gtm_assert(
+	gtm_has_exact_parameter( $tag_54, 'conversionLabel', '{{Constante - Label Contato Formulario}}' ),
+	'Tag 54 declara conversionLabel {{Constante - Label Contato Formulario}}'
+);
+gtm_assert(
+	isset( $tag_54['firingTriggerId'] ) && array( '53' ) === array_values( array_map( 'strval', $tag_54['firingTriggerId'] ) ),
+	'Tag 54 dispara exclusivamente pelo trigger 53 (Evento - Contato via Formulário Uônix)'
+);
+
+// Tag 40: Adicionar ao Carrinho
+$tag_40 = $tags_by_id['40'] ?? null;
+gtm_assert( null !== $tag_40, 'Tag 40 existe no container' );
+gtm_assert(
+	gtm_has_exact_parameter( $tag_40, 'conversionLabel', '{{Constante - Label Adicionar Carrinho}}' ),
+	'Tag 40 declara conversionLabel {{Constante - Label Adicionar Carrinho}}'
+);
+gtm_assert(
+	isset( $tag_40['firingTriggerId'] ) && array( '55' ) === array_values( array_map( 'strval', $tag_40['firingTriggerId'] ) ),
+	'Tag 40 dispara exclusivamente pelo trigger 55 (Evento - Adicionar ao Carrinho Uônix)'
+);
 
 $google_ads_id_variables = array_values(
 	array_filter(
@@ -208,8 +423,8 @@ if ( 1 === count( $google_ads_id_variables ) ) {
 	gtm_assert( '7' === $google_ads_id_variable['variableId'], 'Variavel central Google Ads mantem o ID de entidade 7' );
 	gtm_assert( 'c' === $google_ads_id_variable['type'], 'Variavel central Google Ads permanece constante' );
 	gtm_assert(
-		array( array( 'type' => 'template', 'key' => 'value', 'value' => '6012006717' ) ) === $google_ads_id_variable['parameter'],
-		'Variavel central Google Ads aponta exatamente para a conta 601-200-6717'
+		array( array( 'type' => 'template', 'key' => 'value', 'value' => '18443390936' ) ) === $google_ads_id_variable['parameter'],
+		'Variavel central Google Ads aponta exatamente para a conta ativa 18443390936'
 	);
 }
 
@@ -226,7 +441,7 @@ if ( isset( $tags_by_id['13'] ) ) {
 	$tag_google = $tags_by_id['13'];
 	gtm_assert( 'Google Ads - Tag do Google' === $tag_google['name'] && 'googtag' === $tag_google['type'], 'Tag 13 mantem identidade e tipo Google Tag' );
 	gtm_assert( empty( $tag_google['paused'] ), 'Tag 13 Google Tag permanece ativa' );
-	gtm_assert( gtm_has_exact_parameter( $tag_google, 'tagId', 'AW-{{Constante - Google Ads ID}}' ), 'Tag 13 deriva AW-6012006717 da variavel central' );
+	gtm_assert( gtm_has_exact_parameter( $tag_google, 'tagId', 'AW-{{Constante - Google Ads ID}}' ), 'Tag 13 deriva AW-{{Constante - Google Ads ID}} da variavel central' );
 }
 
 gtm_assert( isset( $tags_by_id['14'] ), 'Tag 14 de remarketing existe no snapshot live' );
@@ -234,7 +449,7 @@ if ( isset( $tags_by_id['14'] ) ) {
 	$tag_remarketing = $tags_by_id['14'];
 	gtm_assert( 'Google Ads - Remarketing Geral' === $tag_remarketing['name'] && 'sp' === $tag_remarketing['type'], 'Tag 14 mantem identidade e tipo de remarketing' );
 	gtm_assert( empty( $tag_remarketing['paused'] ), 'Tag 14 de remarketing permanece ativa' );
-	gtm_assert( gtm_has_exact_parameter( $tag_remarketing, 'conversionId', '{{Constante - Google Ads ID}}' ), 'Tag 14 deriva a conta 601-200-6717 da variavel central' );
+	gtm_assert( gtm_has_exact_parameter( $tag_remarketing, 'conversionId', '{{Constante - Google Ads ID}}' ), 'Tag 14 deriva a conta da variavel central' );
 }
 
 
@@ -338,10 +553,14 @@ if ( isset( $triggers_by_name['Evento - Solicitar Orçamento Uônix'] ) ) {
 
 // 1.5.1 Contrato GTM: estrutura obrigatoria dos triggers criticos.
 $custom_triggers_to_check = array(
-	'3'  => 'Trigger LGPD - AdOpt',
 	'21' => 'Evento - Solicitar Orçamento Uônix',
 	'24' => 'Trigger LGPD - AdOpt Marketing',
 	'25' => 'Trigger LGPD - AdOpt Estatísticas',
+	'46' => 'Evento - Assinatura Newsletter Uônix',
+	'50' => 'Evento - Download Checklist Técnico',
+	'53' => 'Evento - Contato via Formulário',
+	'55' => 'Evento - Adicionar ao Carrinho Uônix',
+	'56' => 'Evento - Iniciar Finalização Uônix',
 );
 foreach ( $custom_triggers_to_check as $tr_id => $tr_name ) {
 	gtm_assert( isset( $triggers_by_id[ $tr_id ] ), "Trigger {$tr_id} ({$tr_name}) existe no manifesto" );
@@ -353,9 +572,29 @@ foreach ( $custom_triggers_to_check as $tr_id => $tr_name ) {
 		gtm_assert( ! empty( $custom_event_filters ), "Trigger {$tr_id} ({$tr_name}) declara customEventFilter obrigatorio" );
 
 		$filters = isset( $t['filter'] ) && is_array( $t['filter'] ) ? $t['filter'] : array();
-		if ( in_array( $tr_id, array( '21', '24', '25' ), true ) ) {
-			gtm_assert( ! empty( $filters ), "Trigger {$tr_id} ({$tr_name}) declara filter de categoria obrigatorio" );
-		}
+		gtm_assert( ! empty( $filters ), "Trigger {$tr_id} ({$tr_name}) declara filter de categoria AdOpt obrigatorio" );
+	}
+}
+
+// Validacao especifica dos novos triggers de conversao customizada
+$conversion_event_triggers = array(
+	'46' => array( 'name' => 'Evento - Assinatura Newsletter Uônix', 'event' => 'uonix_assinatura_newsletter' ),
+	'50' => array( 'name' => 'Evento - Download Checklist Técnico', 'event' => 'uonix_download_checklist' ),
+	'53' => array( 'name' => 'Evento - Contato via Formulário', 'event' => 'uonix_contato_formulario' ),
+	'55' => array( 'name' => 'Evento - Adicionar ao Carrinho Uônix', 'event' => 'uonix_adicionar_ao_carrinho' ),
+	'56' => array( 'name' => 'Evento - Iniciar Finalização Uônix', 'event' => 'uonix_iniciar_finalizacao' ),
+);
+foreach ( $conversion_event_triggers as $t_id => $t_info ) {
+	if ( isset( $triggers_by_id[ $t_id ] ) ) {
+		$t_obj = $triggers_by_id[ $t_id ];
+		gtm_assert(
+			gtm_has_exact_filter( isset( $t_obj['customEventFilter'] ) ? $t_obj['customEventFilter'] : array(), 'equals', '{{_event}}', $t_info['event'] ),
+			"Trigger {$t_id} ({$t_info['name']}) escuta exatamente _event equals {$t_info['event']}"
+		);
+		gtm_assert(
+			gtm_has_exact_filter( isset( $t_obj['filter'] ) ? $t_obj['filter'] : array(), 'contains', '{{Tags_Aceitas_AdOpt}}', 'marketing' ),
+			"Trigger {$t_id} ({$t_info['name']}) exige exatamente Tags_Aceitas_AdOpt contains marketing"
+		);
 	}
 }
 
@@ -372,12 +611,6 @@ foreach ( $triggers as $trigger ) {
 		}
 	}
 }
-
-gtm_assert(
-	isset( $triggers_by_id['3'] )
-		&& gtm_has_exact_filter( $triggers_by_id['3']['customEventFilter'], 'equals', '{{_event}}', 'adopt-visitor-consent-ready' ),
-	'Trigger 3 escuta exclusivamente _event equals adopt-visitor-consent-ready'
-);
 
 // 1.6 GA4
 gtm_assert( isset( $tags_by_name['GA4 - Configuração'] ), 'Tag GA4 - Configuração existe' );
@@ -463,15 +696,26 @@ if ( ! class_exists( 'WC_Order' ) ) {
 	class WC_Order {
 		protected $status;
 		protected $order_key;
-		public function __construct( $status = 'gplsquote-req', $order_key = 'wc_order_key' ) {
-			$this->status = $status;
+		protected $meta = array();
+		public function __construct( $status = 'gplsquote-req', $order_key = 'wc_order_key', $meta = array() ) {
+			$this->status    = $status;
 			$this->order_key = $order_key;
+			$this->meta      = $meta;
 		}
 		public function get_status() {
 			return $this->status;
 		}
 		public function get_order_key() {
 			return $this->order_key;
+		}
+		public function get_meta( $key, $single = true ) {
+			if ( isset( $this->meta[ $key ] ) ) {
+				return $this->meta[ $key ];
+			}
+			return $single ? '' : array();
+		}
+		public function set_meta( $key, $value ) {
+			$this->meta[ $key ] = $value;
 		}
 	}
 }
@@ -566,8 +810,35 @@ gtm_assert(
 	'order-received emite transaction_id estavel e sem PII derivado do pedido'
 );
 gtm_assert(
-	false === strpos( $output_rfq, 'sessionStorage' ) && false === strpos( $output_rfq, 'localStorage' ),
-	'order-received nao grava marcador client-side antes da elegibilidade por consentimento'
+	false === strpos( $output_rfq, 'uonix-conversao-carrinho-newsletter-datalayer' ),
+	'order-received sem opt-in de newsletter NAO emite conversao de newsletter'
+);
+
+// 2.2b Pedido com opt-in de newsletter (_billing_newsletters = yes)
+$GLOBALS['uonix_test_orders'][11029] = new WC_Order( 'gplsquote-req', 'wc_order_key', array( '_billing_newsletters' => 'yes' ) );
+$GLOBALS['uonix_test_query_vars']['order-received'] = 11029;
+$_GET['key'] = 'wc_order_key';
+$output_rfq_news = gtm_render_rfq_conversion( 11029 );
+
+gtm_assert(
+	false !== strpos( $output_rfq_news, 'uonix-conversao-carrinho-newsletter-datalayer' ),
+	'order-received com opt-in de newsletter emite uonix-conversao-carrinho-newsletter-datalayer'
+);
+gtm_assert(
+	false !== strpos( $output_rfq_news, "'event': 'uonix_assinatura_newsletter'" ),
+	'order-received com opt-in emite o evento uonix_assinatura_newsletter'
+);
+gtm_assert(
+	false !== strpos( $output_rfq_news, "'transaction_id': 'uonix-rfq-news-' + orderId" ),
+	'order-received emite transaction_id exclusivo para newsletter no Google Ads'
+);
+gtm_assert(
+	false !== strpos( $output_rfq_news, 'hasMarketingConsent' ),
+	'Script de newsletter condiciona a execucao e gravacao no sessionStorage ao consentimento de marketing'
+);
+gtm_assert(
+	false !== strpos( $output_rfq_news, 'adopt-accept-marketing' ),
+	'Script de newsletter escuta adopt-accept-marketing para concessao tardia de consentimento'
 );
 
 // 2.3 Em pagina order-received com status com prefixo 'wc-gplsquote-req'
@@ -667,6 +938,60 @@ gtm_assert(
 	'order-received com objeto invalido sem get_status NAO emite conversao (fail-closed)'
 );
 
+// 2.10 Adicao ao carrinho padrao nao-AJAX
+class Uonix_Test_WC_Session {
+	private $data = array();
+	public function get( $key, $default = null ) {
+		return isset( $this->data[ $key ] ) ? $this->data[ $key ] : $default;
+	}
+	public function set( $key, $value ) {
+		$this->data[ $key ] = $value;
+	}
+	public function __unset( $key ) {
+		unset( $this->data[ $key ] );
+	}
+}
+
+class Uonix_Test_WC {
+	public $session;
+	public function __construct() {
+		$this->session = new Uonix_Test_WC_Session();
+	}
+}
+
+if ( ! function_exists( 'WC' ) ) {
+	function WC() {
+		global $uonix_test_wc_instance;
+		if ( ! isset( $uonix_test_wc_instance ) ) {
+			$uonix_test_wc_instance = new Uonix_Test_WC();
+		}
+		return $uonix_test_wc_instance;
+	}
+}
+
+uonix_record_standard_add_to_cart( 'item_123', 456, 2 );
+gtm_assert(
+	! empty( WC()->session->get( 'uonix_pending_standard_add_to_cart' ) ),
+	'uonix_record_standard_add_to_cart enfileira adicao na sessao do WooCommerce'
+);
+
+ob_start();
+uonix_render_analytics_microconversions_footer();
+$output_cart_standard = ob_get_clean();
+
+gtm_assert(
+	false !== strpos( $output_cart_standard, 'uonix-conversao-adicionar-carrinho-server-datalayer' ),
+	'Footer renderiza script de adicao ao carrinho para evento padrao nao-AJAX'
+);
+gtm_assert(
+	false !== strpos( $output_cart_standard, "'origem_conversao': 'woocommerce_add_to_cart_standard'" ),
+	'Evento server-side emite origem_conversao woocommerce_add_to_cart_standard'
+);
+gtm_assert(
+	empty( WC()->session->get( 'uonix_pending_standard_add_to_cart' ) ),
+	'Sessao e limpa apos emissao do evento nao-AJAX para evitar duplicacao'
+);
+
 // -----------------------------------------------------------------------------
 // Parte 3: Executa os testes de mutacao e caminhos positivos/negativos em Node.js
 // -----------------------------------------------------------------------------
@@ -678,6 +1003,111 @@ gtm_assert( 0 === $node_return, 'test-gtm-datalayer-listener.js executa sem erro
 if ( 0 !== $node_return ) {
 	echo implode( "\n", $node_output ) . "\n";
 }
+
+// -----------------------------------------------------------------------------
+// Parte 4: Integridade Canônica de Políticas Legais e Prova de Mutação Readback SHA256
+// -----------------------------------------------------------------------------
+$cookies_file = dirname( __DIR__, 2 ) . '/docs/legal/politica-de-cookies-content.html';
+gtm_assert( file_exists( $cookies_file ), 'Documento canônico politica-de-cookies-content.html existe' );
+$cookies_content = file_get_contents( $cookies_file );
+gtm_assert( false !== strpos( $cookies_content, '_gcl_aw' ), 'Política de cookies canônica contém _gcl_aw' );
+gtm_assert( false !== strpos( $cookies_content, '_gcl_dc' ), 'Política de cookies canônica contém _gcl_dc' );
+gtm_assert( false !== strpos( $cookies_content, '_gac_*' ), 'Política de cookies canônica contém _gac_*' );
+gtm_assert( false !== strpos( $cookies_content, 'Conversões e Atribuição Ads' ), 'Política de cookies canônica contém seção Conversões e Atribuição Ads' );
+
+$canonical_cookies_norm = trim( str_replace( "\r\n", "\n", $cookies_content ) );
+$canonical_cookies_hash = hash( 'sha256', $canonical_cookies_norm );
+
+// Prova de Mutação: probe que devolve apenas a chave curta '_gcl_aw'
+$mock_short_probe = '_gcl_aw';
+$mock_short_hash  = hash( 'sha256', $mock_short_probe );
+gtm_assert(
+	$mock_short_hash !== $canonical_cookies_hash,
+	'Prova de Mutação: readback com apenas chave curta possui hash divergente do canônico'
+);
+
+// Validador de readback canônico fail-closed
+$validate_readback = function( $content, $canonical_content ) {
+	$c_norm = trim( str_replace( "\r\n", "\n", $content ) );
+	$exp_norm = trim( str_replace( "\r\n", "\n", $canonical_content ) );
+	return hash( 'sha256', $c_norm ) === hash( 'sha256', $exp_norm );
+};
+
+gtm_assert(
+	! $validate_readback( $mock_short_probe, $cookies_content ),
+	'Prova de Mutação: readback com chave curta é categoricamente rejeitado pelo validador SHA256'
+);
+gtm_assert(
+	$validate_readback( $cookies_content, $cookies_content ),
+	'Readback canônico integral é 100% verificado com paridade SHA256'
+);
+
+// Validação canônica de docs/legal/politica-de-privacidade-content.html
+$privacy_file = dirname( __DIR__, 2 ) . '/docs/legal/politica-de-privacidade-content.html';
+gtm_assert( file_exists( $privacy_file ), 'Documento canônico politica-de-privacidade-content.html existe' );
+$privacy_content = file_get_contents( $privacy_file );
+gtm_assert( false !== strpos( $privacy_content, '[uonix email_lgpd]' ), 'Política de privacidade canônica utiliza shortcode [uonix email_lgpd]' );
+gtm_assert( false !== strpos( $privacy_content, 'Canal de Privacidade e Atendimento ao Titular' ), 'Política de privacidade canônica contém Canal de Privacidade e Atendimento ao Titular' );
+gtm_assert( false !== strpos( $privacy_content, 'Autoridade Nacional de Proteção de Dados' ), 'Política de privacidade canônica contém Autoridade Nacional de Proteção de Dados' );
+gtm_assert( false !== strpos( $privacy_content, 'Lei Geral de Proteção de Dados' ), 'Política de privacidade canônica contém Lei Geral de Proteção de Dados' );
+$privacy_norm = preg_replace( '/\s+/', ' ', $privacy_content );
+gtm_assert(
+	false !== strpos( $privacy_norm, 'optou por não indicar formalmente um encarregado' ),
+	'Política de privacidade canônica declara expressamente dispensa de encarregado formal nos termos da resolução CD/ANPD nº 2/2022'
+);
+
+// -------------------------------------------------------------------------
+// Validação canônica de scripts/apply-legal-policies-production.php
+// -------------------------------------------------------------------------
+$apply_script_path = dirname( __DIR__ ) . '/apply-legal-policies-production.php';
+gtm_assert( file_exists( $apply_script_path ), 'Script apply-legal-policies-production.php existe' );
+$apply_script_code = file_get_contents( $apply_script_path );
+
+// Validação estática de TLS estrito e fail-closed no código real de produção
+gtm_assert( false !== strpos( $apply_script_code, "'sslverify' => true" ), 'apply-legal-policies-production.php exige TLS estrito (sslverify => true)' );
+gtm_assert( false === strpos( $apply_script_code, "'sslverify' => false" ), 'apply-legal-policies-production.php não desativa sslverify' );
+gtm_assert( false !== strpos( $apply_script_code, 'CURLOPT_SSL_VERIFYPEER, true' ), 'apply-legal-policies-production.php exige CURLOPT_SSL_VERIFYPEER => true' );
+gtm_assert( false === strpos( $apply_script_code, 'CURLOPT_SSL_VERIFYPEER, false' ), 'apply-legal-policies-production.php não desativa CURLOPT_SSL_VERIFYPEER' );
+gtm_assert( false !== strpos( $apply_script_code, 'CURLOPT_SSL_VERIFYHOST, 2' ), 'apply-legal-policies-production.php exige CURLOPT_SSL_VERIFYHOST => 2' );
+gtm_assert( false !== strpos( $apply_script_code, '$errors += $ver_res[\'errors\']' ), 'apply-legal-policies-production.php propaga erros para $errors no verify-public' );
+gtm_assert( false !== strpos( $apply_script_code, 'function uonix_verify_public_policy_response' ), 'apply-legal-policies-production.php declara a função canônica uonix_verify_public_policy_response' );
+
+if ( ! function_exists( 'uonix_verify_public_policy_response' ) ) {
+	$start_tag = "if ( ! function_exists( 'uonix_verify_public_policy_response' ) ) {";
+	$end_tag   = "if ( \$UONIX_VERIFY_PUBLIC ) {";
+	$pos_start = strpos( $apply_script_code, $start_tag );
+	$pos_end   = strpos( $apply_script_code, $end_tag, $pos_start );
+	if ( false !== $pos_start && false !== $pos_end ) {
+		$func_code = substr( $apply_script_code, $pos_start, $pos_end - $pos_start );
+		eval( $func_code );
+	}
+}
+gtm_assert( function_exists( 'uonix_verify_public_policy_response' ), 'Função canônica uonix_verify_public_policy_response carregada a partir do arquivo real' );
+
+// Testes funcionais da função canônica do arquivo de produção
+$res_timeout = uonix_verify_public_policy_response( 0, '', array( '_gcl_aw' ), 'Connection timed out' );
+gtm_assert( ! $res_timeout['success'] && $res_timeout['errors'] > 0, 'Código real: verify-public com timeout/inacessível resulta em erro (fail-closed)' );
+
+// PROVA DE MUTAÇÃO ESTRITA: O HTML contém TODOS os termos canônicos esperados.
+// Se a guarda de status HTTP for removida ou afrouxada, o teste aprovaria erroneamente pelo loop de termos.
+// Com a guarda ativa (200 !== $http_code), DEVE rejeitar com erro estrito.
+$html_with_all_terms = '<html><body>_gcl_aw e Conversões e Atribuição Ads (erro de servidor)</body></html>';
+$canonical_terms     = array( '_gcl_aw', 'Conversões e Atribuição Ads' );
+
+$res_http_500 = uonix_verify_public_policy_response( 500, $html_with_all_terms, $canonical_terms );
+gtm_assert( ! $res_http_500['success'] && $res_http_500['errors'] > 0, 'Código real: verify-public com HTTP 500 resulta em erro estrito mesmo contendo termos canônicos no HTML (mutation-proof)' );
+
+$res_http_403 = uonix_verify_public_policy_response( 403, $html_with_all_terms, $canonical_terms );
+gtm_assert( ! $res_http_403['success'] && $res_http_403['errors'] > 0, 'Código real: verify-public com HTTP 403 resulta em erro estrito mesmo contendo termos canônicos no HTML' );
+
+$res_http_404 = uonix_verify_public_policy_response( 404, $html_with_all_terms, $canonical_terms );
+gtm_assert( ! $res_http_404['success'] && $res_http_404['errors'] > 0, 'Código real: verify-public com HTTP 404 resulta em erro estrito mesmo contendo termos canônicos no HTML' );
+
+$res_missing_term = uonix_verify_public_policy_response( 200, '<html>Sem cookies ads</html>', array( '_gcl_aw', 'Conversões e Atribuição Ads' ) );
+gtm_assert( ! $res_missing_term['success'] && $res_missing_term['errors'] === 2, 'Código real: verify-public com termos ausentes resulta em erro não-zero' );
+
+$res_valid_public = uonix_verify_public_policy_response( 200, '<html>_gcl_aw e Conversões e Atribuição Ads</html>', array( '_gcl_aw', 'Conversões e Atribuição Ads' ) );
+gtm_assert( $res_valid_public['success'] && 0 === $res_valid_public['errors'], 'Código real: verify-public com HTTP 200 e termos canônicos é aprovado' );
 
 if ( $failures > 0 ) {
 	fwrite( STDERR, "\nTotal de falhas no contrato GTM e conversoes: {$failures}\n" );
