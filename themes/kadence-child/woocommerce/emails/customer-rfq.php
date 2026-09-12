@@ -45,6 +45,8 @@ $endereco_linhas = function_exists( 'uonix_shared_get_order_billing_address_line
     ? uonix_shared_get_order_billing_address_lines( $order )
     : array( 'Não informado' );
 
+$email_heading = $email_heading ?? 'Recebemos seu Pedido de Orçamento';
+
 do_action('woocommerce_email_header', $email_heading, $email);
 ?>
 
@@ -79,7 +81,9 @@ do_action('woocommerce_email_header', $email_heading, $email);
         <?php foreach ( $order->get_items() as $item_id => $item ) : 
             $product = $item->get_product();
             $qty     = $item->get_quantity();
-            $img_url = $product ? wp_get_attachment_image_url($product->get_image_id(), 'thumbnail') : '';
+            $img_url = ( $product && function_exists( 'uonix_get_email_product_image_url' ) )
+                ? uonix_get_email_product_image_url( $product, 300 )
+                : ( $product ? ( wp_get_attachment_image_url( $product->get_image_id(), 'woocommerce_thumbnail' ) ?: wp_get_attachment_image_url( $product->get_image_id(), 'thumbnail' ) ) : '' );
             
             // --- LIMPEZA DO NOME: TROCA <br> POR ' - ' ---
             $name    = str_ireplace(['<br>', '<br/>', '<br />'], ' - ', $item->get_name());
@@ -93,7 +97,7 @@ do_action('woocommerce_email_header', $email_heading, $email);
                         <tr>
                             <?php if ($img_url) : ?>
                             <td width="80" valign="middle" style="padding-right: 15px;">
-                                <img src="<?php echo esc_url($img_url); ?>" width="70" height="70" style="border-radius: 4px; display: block; border: 1px solid #f2f2f2;">
+                                <img src="<?php echo esc_url($img_url); ?>" width="70" height="70" alt="<?php echo esc_attr($name); ?>" style="border-radius: 4px; display: block; border: 1px solid #eeeeee; background-color: #ffffff;">
                             </td>
                             <?php endif; ?>
                             <td valign="middle">
