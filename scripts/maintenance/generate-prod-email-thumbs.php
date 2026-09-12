@@ -16,8 +16,9 @@ if ( ! isset( $_SERVER['SCRIPT_FILENAME'] ) || realpath( $_SERVER['SCRIPT_FILENA
 	return;
 }
 
-// 2. Bloqueia execução fora de CLI
-if ( php_sapi_name() !== 'cli' ) {
+// 2. Bloqueia execução fora de CLI (suporta env UONIX_MOCK_SAPI para teste comportamental do guard)
+$current_sapi = getenv( 'UONIX_MOCK_SAPI' ) ? getenv( 'UONIX_MOCK_SAPI' ) : php_sapi_name();
+if ( 'cli' !== $current_sapi ) {
 	if ( function_exists( 'http_response_code' ) ) {
 		http_response_code( 403 );
 	}
@@ -59,12 +60,17 @@ if ( $is_help ) {
 }
 
 // 4. Carregamento do ambiente WordPress/WooCommerce
-$wp_load_candidates = array(
+$custom_wp_load     = getenv( 'UONIX_WP_LOAD' );
+$wp_load_candidates = array();
+if ( $custom_wp_load && file_exists( $custom_wp_load ) ) {
+	$wp_load_candidates[] = $custom_wp_load;
+}
+$wp_load_candidates = array_merge( $wp_load_candidates, array(
 	__DIR__ . '/../../public_html/wp-load.php',
 	__DIR__ . '/../../wp-load.php',
 	dirname( __DIR__, 2 ) . '/public_html/wp-load.php',
 	dirname( __DIR__, 2 ) . '/wp-load.php',
-);
+) );
 
 $wp_loaded = false;
 foreach ( $wp_load_candidates as $candidate ) {
