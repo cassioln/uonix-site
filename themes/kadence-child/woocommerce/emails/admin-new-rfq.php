@@ -49,6 +49,8 @@ $endereco_linhas = function_exists( 'uonix_shared_get_order_billing_address_line
     ? uonix_shared_get_order_billing_address_lines( $order )
     : array( 'Não informado' );
 
+$email_heading = $email_heading ?? 'Novo Pedido de Orçamento';
+
 do_action('woocommerce_email_header', $email_heading, $email);
 ?>
 
@@ -57,7 +59,7 @@ do_action('woocommerce_email_header', $email_heading, $email);
     <div style="padding: 20px 0; border-bottom: 1px solid #eee; margin-bottom: 30px;">
         <h2 style="color: #1a2b3c; margin-top: 0; font-size: 24px;">Pedido #<?php echo $order->get_order_number(); ?></h2>
         <p style="font-size: 16px; color: #555;">
-            Olá, equipe <strong>Uônix</strong>. Uma nova solicitação de orçamento foi registrada no site. 
+            Olá, equipe <strong>Uônix</strong>. Uma nova solicitação de orçamento foi registrada no site.
             Confira os detalhes abaixo para gerar a proposta comercial:
         </p>
     </div>
@@ -70,7 +72,7 @@ do_action('woocommerce_email_header', $email_heading, $email);
                     <h3 style="margin: 5px 0 0; color: #1a2b3c; font-size: 20px;">Orçamento #<?php echo $order->get_order_number(); ?></h3>
                 </td>
                 <td align="right">
-                    <a href="<?php echo esc_url( admin_url( 'post.php?post=' . $order_id . '&action=edit' ) ); ?>" 
+                    <a href="<?php echo esc_url( admin_url( 'post.php?post=' . $order_id . '&action=edit' ) ); ?>"
                        style="background-color: #1a2b3c; color: #ffffff; padding: 12px 20px; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: bold; display: inline-block;">
                        ABRIR NO PAINEL
                     </a>
@@ -87,14 +89,16 @@ do_action('woocommerce_email_header', $email_heading, $email);
             </tr>
         </thead>
         <tbody>
-        <?php foreach ( $order->get_items() as $item_id => $item ) : 
+        <?php foreach ( $order->get_items() as $item_id => $item ) :
             $product = $item->get_product();
             $qty     = $item->get_quantity();
-            $img_url = $product ? wp_get_attachment_image_url($product->get_image_id(), 'thumbnail') : '';
-            
+            $img_url = ( $product && function_exists( 'uonix_get_email_product_image_url' ) )
+                ? uonix_get_email_product_image_url( $product, 300 )
+                : ( $product ? ( wp_get_attachment_image_url( $product->get_image_id(), 'woocommerce_thumbnail' ) ?: wp_get_attachment_image_url( $product->get_image_id(), 'thumbnail' ) ) : '' );
+
             // --- LIMPEZA DO NOME: TROCA <br> POR ' - ' ---
             $name    = str_ireplace(['<br>', '<br/>', '<br />'], ' - ', $item->get_name());
-            
+
             $meta    = wc_display_item_meta($item, ['echo' => false]);
             $sku     = ($product && $product->get_sku()) ? $product->get_sku() : '';
         ?>
@@ -104,7 +108,7 @@ do_action('woocommerce_email_header', $email_heading, $email);
                         <tr>
                             <?php if ($img_url) : ?>
                             <td width="90" valign="middle" style="padding-right: 15px;">
-                                <img src="<?php echo esc_url($img_url); ?>" width="80" height="80" style="border-radius: 4px; display: block; object-fit: cover;">
+                                <img src="<?php echo esc_url($img_url); ?>" width="80" height="80" alt="<?php echo esc_attr($name); ?>" style="border-radius: 4px; display: block; border: 1px solid #eeeeee; background-color: #ffffff;">
                             </td>
                             <?php endif; ?>
                             <td valign="middle">
@@ -128,7 +132,7 @@ do_action('woocommerce_email_header', $email_heading, $email);
     </table>
 
     <div style="background-color: #ffffff; border: 1px solid #eee; border-radius: 8px; padding: 25px; margin-bottom: 30px;" bgcolor="#ffffff">
-        
+
         <h4 style="margin: 0 0 10px; color: #1a2b3c; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Dados do Solicitante:</h4>
         <p style="margin: 0 0 20px; font-size: 14px; color: #555; line-height: 1.5;">
             <strong>Responsável:</strong> <?php echo esc_html($responsavel); ?><br>
@@ -159,7 +163,7 @@ do_action('woocommerce_email_header', $email_heading, $email);
         <?php endif; ?>
     </div>
 
-    <?php if ($additional_content) : ?>
+    <?php if (!empty($additional_content)) : ?>
         <div style="text-align: center; padding: 20px 0; font-size: 14px; color: #888; border-top: 1px solid #eee;">
             <?php echo wpautop(wptexturize($additional_content)); ?>
         </div>
@@ -174,5 +178,5 @@ do_action('woocommerce_email_header', $email_heading, $email);
 
 </div>
 
-<?php 
+<?php
 do_action('woocommerce_email_footer', $email);

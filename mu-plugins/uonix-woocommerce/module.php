@@ -27,6 +27,7 @@ uonix_mu_require_files(
 		'25-admin-resumo-fixo.php',
 		'26-turnstile-store-api-checkout.php',
 		'28-catalogo-ajax-carrinho.php',
+		'29-rfq-email-imagens-produtos.php',
 	),
 	'uonix-woocommerce'
 );

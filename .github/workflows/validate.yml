@@ -90,6 +90,9 @@ jobs:
       - name: Test RFQ product default
         run: php scripts/tests/test-rfq-product-default.php
 
+      - name: Test RFQ email product images and logo
+        run: php scripts/tests/test-rfq-email-product-images.php
+
       - name: Test Product details button hover
         run: php scripts/tests/test-product-button-details-hover.php
 
