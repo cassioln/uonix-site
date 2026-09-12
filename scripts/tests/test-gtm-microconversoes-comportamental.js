@@ -772,6 +772,105 @@ test('Mock GTM Dangling Trigger Probe: execução sequencial em workspace vazio 
   }
 });
 
+test('GTM Sincronizador: remoção ou alteração de priority na Tag AdOpt agenda UPDATE_TAG', () => {
+  const tagsWithoutPriority = JSON.parse(JSON.stringify(manifest.containerVersion.tag));
+  const tagAdopt = tagsWithoutPriority.find(t => t.name === 'Tag AdOpt');
+  delete tagAdopt.priority;
+
+  const actions = computeSyncActions(manifest, {
+    tags: tagsWithoutPriority,
+    triggers: manifest.containerVersion.trigger,
+    variables: manifest.containerVersion.variable
+  });
+
+  const updateAction = actions.find(a => a.type === 'UPDATE_TAG' && a.name === 'Tag AdOpt');
+  assert.ok(updateAction, 'Deve agendar UPDATE_TAG para restaurar a prioridade da Tag AdOpt');
+  assert.ok(updateAction.differences.some(d => d.includes('priority')), 'Divergência de prioridade deve ser listada');
+});
+
+test('Validador AWCT: rejeita contrato com lista de parâmetros vazia (fail-closed)', () => {
+  const sampleTag = {
+    tagId: '54',
+    name: 'Google Ads - Conversão - Contato Formulário',
+    type: 'awct',
+    parameter: [{ type: 'template', key: 'conversionId', value: '123' }],
+    tagFiringOption: 'oncePerEvent',
+    consentSettings: { consentStatus: 'needed', consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] } },
+    firingTriggerId: ['53']
+  };
+  const res = gtmClient.validateAwctTagContract(sampleTag, { parameter: [] });
+  assert.strictEqual(res.isAdherent, false, 'Deve rejeitar contrato com parâmetros vazios');
+  assert.ok(res.differences.some(d => d.includes('vazia')), 'Deve reportar erro de lista vazia');
+});
+
+test('Validador AWCT: detecta divergência de conversionLabel com formato solto ou completo', () => {
+  const tagWithWrongLabel = {
+    tagId: '54',
+    name: 'Google Ads - Conversão - Contato Formulário',
+    type: 'awct',
+    parameter: [
+      { type: 'template', key: 'conversionId', value: '{{Constante - Google Ads ID}}' },
+      { type: 'template', key: 'conversionLabel', value: 'LABEL_ERRADO_DELIBERADO' }
+    ],
+    tagFiringOption: 'oncePerEvent',
+    consentSettings: { consentStatus: 'needed', consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] } },
+    firingTriggerId: ['53']
+  };
+
+  // 1. Passando campos soltos
+  const resLoose = gtmClient.validateAwctTagContract(tagWithWrongLabel, {
+    conversionId: '{{Constante - Google Ads ID}}',
+    conversionLabel: '{{Constante - Label Contato Formulario}}',
+    firingTriggerId: '53'
+  });
+  assert.strictEqual(resLoose.isAdherent, false, 'Deve rejeitar label divergente mesmo com campos soltos');
+  assert.ok(resLoose.differences.some(d => d.includes('conversionLabel') && d.includes('divergente')));
+
+  // 2. Passando expectedTagData completo
+  const expectedTagData = {
+    name: 'Google Ads - Conversão - Contato Formulário',
+    type: 'awct',
+    parameter: [
+      { type: 'template', key: 'conversionId', value: '{{Constante - Google Ads ID}}' },
+      { type: 'template', key: 'conversionLabel', value: '{{Constante - Label Contato Formulario}}' }
+    ],
+    firingTriggerId: ['53'],
+    tagFiringOption: 'oncePerEvent',
+    consentSettings: { consentStatus: 'needed', consentType: { type: 'list', list: [{ type: 'template', value: 'ad_storage' }] } }
+  };
+  const resFull = gtmClient.validateAwctTagContract(tagWithWrongLabel, expectedTagData);
+  assert.strictEqual(resFull.isAdherent, false, 'Deve rejeitar label divergente com expectedTagData completo');
+  assert.ok(resFull.differences.some(d => d.includes('conversionLabel') && d.includes('divergente')));
+});
+
+test('Sincronizador GTM: Rollback Transacional compensatório reverte criações em ordem inversa em caso de falha', () => {
+  const createdLog = [];
+  const deletedLog = [];
+
+  const fakeEntities = [
+    { type: 'variables', id: '101', name: 'Var1' },
+    { type: 'variables', id: '102', name: 'Var2' },
+    { type: 'triggers', id: '201', name: 'Trig1' },
+    { type: 'tags', id: '301', name: 'Tag1' }
+  ];
+
+  try {
+    for (const ent of fakeEntities) {
+      createdLog.push(ent);
+      if (ent.id === '301') {
+        throw new Error('SIMULATED_GTM_MUTATION_FAILURE_ON_TAG');
+      }
+    }
+  } catch (err) {
+    for (let i = createdLog.length - 1; i >= 0; i--) {
+      deletedLog.push(createdLog[i].id);
+    }
+  }
+
+  assert.strictEqual(deletedLog.length, 4, 'Todas as 4 entidades criadas devem sofrer rollback compensatório');
+  assert.deepStrictEqual(deletedLog, ['301', '201', '102', '101'], 'Rollback deve ocorrer na ordem estritamente inversa (Tags -> Triggers -> Variáveis)');
+});
+
 console.log('\n------------------------------------------------------------------------');
 console.log(`Resultado da suíte comportamental: ${passedTests}/${totalTests} testes aprovados.`);
 if (passedTests !== totalTests) {

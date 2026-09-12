@@ -292,6 +292,42 @@ if ( $UONIX_APPLY && $changes > 0 ) {
 // -------------------------------------------------------------------------
 // 3. Verificação de Integridade Pública (Opcional ou sob demanda com fail-closed)
 // -------------------------------------------------------------------------
+if ( ! function_exists( 'uonix_verify_public_policy_response' ) ) {
+	function uonix_verify_public_policy_response( $http_code, $public_html, $expected_terms, $error_detail = '' ) {
+		if ( empty( $public_html ) || 200 !== (int) $http_code ) {
+			return array(
+				'success' => false,
+				'errors'  => 1,
+				'missing' => $expected_terms,
+				'reason'  => "Não foi possível consultar a página pública (HTTP {$http_code}; erro: {$error_detail})"
+			);
+		}
+
+		$missing_public = array();
+		foreach ( $expected_terms as $chk ) {
+			if ( false === strpos( $public_html, $chk ) ) {
+				$missing_public[] = $chk;
+			}
+		}
+
+		if ( ! empty( $missing_public ) ) {
+			return array(
+				'success' => false,
+				'errors'  => count( $missing_public ),
+				'missing' => $missing_public,
+				'reason'  => 'Página pública ainda não reflete termos obrigatórios: ' . implode( ', ', $missing_public ) . ' (necessário expirar cache de CDN/Nginx da Locaweb)'
+			);
+		}
+
+		return array(
+			'success' => true,
+			'errors'  => 0,
+			'missing' => array(),
+			'reason'  => 'Conteúdo público reflete todos os termos canônicos (HTTP 200)'
+		);
+	}
+}
+
 if ( $UONIX_VERIFY_PUBLIC ) {
 	echo "\n🌐 Verificando páginas públicas para conformidade contra cache de borda...\n";
 	foreach ( $policies as $slug => $config ) {
@@ -303,7 +339,7 @@ if ( $UONIX_VERIFY_PUBLIC ) {
 		$error_detail = '';
 
 		if ( function_exists( 'wp_remote_get' ) ) {
-			$response = wp_remote_get( $page_url, array( 'timeout' => 15, 'sslverify' => false ) );
+			$response = wp_remote_get( $page_url, array( 'timeout' => 15, 'sslverify' => true ) );
 			if ( is_wp_error( $response ) ) {
 				$error_detail = $response->get_error_message();
 			} else {
@@ -317,7 +353,8 @@ if ( $UONIX_VERIFY_PUBLIC ) {
 			curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
 			curl_setopt( $ch, CURLOPT_FOLLOWLOCATION, true );
 			curl_setopt( $ch, CURLOPT_TIMEOUT, 15 );
-			curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, false );
+			curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, true );
+			curl_setopt( $ch, CURLOPT_SSL_VERIFYHOST, 2 );
 			$public_html = curl_exec( $ch );
 			$http_code   = (int) curl_getinfo( $ch, CURLINFO_HTTP_CODE );
 			if ( curl_errno( $ch ) ) {
@@ -326,24 +363,12 @@ if ( $UONIX_VERIFY_PUBLIC ) {
 			curl_close( $ch );
 		}
 
-		if ( empty( $public_html ) || 200 !== $http_code ) {
-			echo "[ERRO CRÍTICO PÚBLICO] Não foi possível consultar a página pública (HTTP {$http_code}; erro: {$error_detail}).\n";
-			$errors++;
-			continue;
-		}
-
-		$missing_public = array();
-		foreach ( $config['checks_public'] as $chk ) {
-			if ( false === strpos( $public_html, $chk ) ) {
-				$missing_public[] = $chk;
-			}
-		}
-
-		if ( empty( $missing_public ) ) {
-			echo "[OK PÚBLICO] Conteúdo público reflete todos os termos canônicos (HTTP 200).\n";
+		$ver_res = uonix_verify_public_policy_response( $http_code, $public_html, $config['checks_public'], $error_detail );
+		if ( ! $ver_res['success'] ) {
+			echo "[ERRO PÚBLICO] {$ver_res['reason']}\n";
+			$errors += $ver_res['errors'];
 		} else {
-			echo "[ERRO DESCOMPASSO PÚBLICO] Página pública ainda não reflete termos obrigatórios: " . implode( ', ', $missing_public ) . " (necessário expirar cache de CDN/Nginx da Locaweb)\n";
-			$errors++;
+			echo "[OK PÚBLICO] {$ver_res['reason']}.\n";
 		}
 	}
 }

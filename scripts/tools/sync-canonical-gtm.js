@@ -432,6 +432,17 @@ function computeSyncActions(manifest, currentState) {
       }
     }
 
+    // Prioridade de disparo (priority)
+    if (expected.priority) {
+      if (!current.priority ||
+          current.priority.type !== expected.priority.type ||
+          String(current.priority.value) !== String(expected.priority.value)) {
+        diffs.push(`priority divergente: esperado ${JSON.stringify(expected.priority)}, atual ${JSON.stringify(current.priority || null)}`);
+      }
+    } else if (current.priority) {
+      diffs.push(`priority não canônica presente na Tag: ${JSON.stringify(current.priority)}`);
+    }
+
     if (diffs.length > 0) {
       actionsUpdateTags.push({
         type: 'UPDATE_TAG',
@@ -445,26 +456,26 @@ function computeSyncActions(manifest, currentState) {
     }
   }
 
-  // ORDEM ESTRITA DE DEPENDÊNCIAS:
-  // 1. DELETE Tags não autorizadas / duplicadas
-  // 2. DELETE Triggers não autorizados / duplicados
-  // 3. DELETE Variáveis não autorizadas / duplicadas
-  // 4. CREATE Variáveis
-  // 5. UPDATE Variáveis
-  // 6. CREATE Triggers
-  // 7. UPDATE Triggers
-  // 8. CREATE Tags
-  // 9. UPDATE Tags
+  // ORDEM ESTRITA DE DEPENDÊNCIAS (CRIAÇÕES/ATUALIZAÇÕES PRIMEIRO, DELEÇÕES DEPOIS):
+  // 1. CREATE Variáveis canônicas
+  // 2. UPDATE Variáveis canônicas
+  // 3. CREATE Triggers canônicos
+  // 4. UPDATE Triggers canônicos
+  // 5. CREATE Tags canônicas
+  // 6. UPDATE Tags canônicas
+  // 7. DELETE Tags não autorizadas / duplicadas (libera triggers)
+  // 8. DELETE Triggers não autorizados / duplicados (libera variáveis)
+  // 9. DELETE Variáveis não autorizadas / duplicadas
   return [
-    ...actionsDeleteTags,
-    ...actionsDeleteTriggers,
-    ...actionsDeleteVariables,
     ...actionsCreateVariables,
     ...actionsUpdateVariables,
     ...actionsCreateTriggers,
     ...actionsUpdateTriggers,
     ...actionsCreateTags,
-    ...actionsUpdateTags
+    ...actionsUpdateTags,
+    ...actionsDeleteTags,
+    ...actionsDeleteTriggers,
+    ...actionsDeleteVariables
   ];
 }
 
@@ -540,6 +551,11 @@ async function syncGtmGovernance() {
   // 6. Execução no modo --apply em ordem estrita de dependências
   console.log('🚀 Executando mutações planejadas no Workspace...');
 
+  function isBuiltInTrigger(triggerId) {
+    const idStr = String(triggerId);
+    return idStr === '2147479553' || (Number(idStr) >= 2147479550 && Number(idStr) <= 2147483647);
+  }
+
   // Mapeamento dinâmico de Trigger IDs: canonicalTriggerId -> actualWorkspaceTriggerId
   const runtimeTriggerIdMap = new Map();
   for (const tr of currentTriggers) {
@@ -550,97 +566,145 @@ async function syncGtmGovernance() {
   }
 
   const existingTriggerIds = new Set(currentTriggers.map(tr => String(tr.triggerId)));
+  // Trigger nativo global "All Pages" (2147479553) e triggers de sistema são pré-existentes
+  existingTriggerIds.add('2147479553');
 
-  for (const act of plannedActions) {
-    if (act.type === 'DELETE_TAG') {
-      console.log(`- Deletando Tag ${act.id} ("${act.name}")...`);
-      await gtmRequest('DELETE', ws + '/tags/' + act.id);
-    } else if (act.type === 'DELETE_TRIGGER') {
-      console.log(`- Deletando Trigger ${act.id} ("${act.name}")...`);
-      await gtmRequest('DELETE', ws + '/triggers/' + act.id);
-      existingTriggerIds.delete(String(act.id));
-    } else if (act.type === 'DELETE_VARIABLE') {
-      console.log(`- Deletando Variável ${act.id} ("${act.name}")...`);
-      await gtmRequest('DELETE', ws + '/variables/' + act.id);
-    } else if (act.type === 'CREATE_VARIABLE') {
-      console.log(`- Criando Variável canônica "${act.name}"...`);
-      const payload = {
-        name: act.expected.name,
-        type: act.expected.type,
-        parameter: act.expected.parameter
-      };
-      await gtmRequest('POST', ws + '/variables', payload);
-    } else if (act.type === 'UPDATE_VARIABLE') {
-      console.log(`- Sincronizando Variável ${act.id} com contrato canônico...`);
-      const payload = {
-        ...act.target,
-        type: act.expected.type,
-        parameter: act.expected.parameter
-      };
-      await gtmRequest('PUT', ws + '/variables/' + act.id, payload);
-    } else if (act.type === 'CREATE_TRIGGER') {
-      console.log(`- Criando Trigger canônico "${act.name}"...`);
-      const payload = {
-        name: act.expected.name,
-        type: act.expected.type,
-        customEventFilter: act.expected.customEventFilter,
-        filter: act.expected.filter
-      };
-      const created = await gtmRequest('POST', ws + '/triggers', payload);
-      const newTriggerId = String(created?.triggerId || act.expected.triggerId);
-      runtimeTriggerIdMap.set(String(act.expected.triggerId), newTriggerId);
-      existingTriggerIds.add(newTriggerId);
-    } else if (act.type === 'UPDATE_TRIGGER') {
-      console.log(`- Sincronizando Trigger ${act.id} com contrato canônico...`);
-      const payload = {
-        ...act.target,
-        type: act.expected.type,
-        customEventFilter: act.expected.customEventFilter || act.target.customEventFilter,
-        filter: act.expected.filter || act.target.filter
-      };
-      await gtmRequest('PUT', ws + '/triggers/' + act.id, payload);
-      runtimeTriggerIdMap.set(String(act.expected.triggerId), String(act.id));
-      existingTriggerIds.add(String(act.id));
-    } else if (act.type === 'CREATE_TAG') {
-      console.log(`- Criando Tag canônica "${act.name}"...`);
-      const resolvedTriggers = (act.expected.firingTriggerId || []).map(id => runtimeTriggerIdMap.get(String(id)) || String(id));
-      for (const tid of resolvedTriggers) {
-        if (!existingTriggerIds.has(String(tid))) {
-          throw new Error(`[FAIL-CLOSED] Trigger ID ${tid} referenciado pela tag "${act.name}" não existe no workspace! Abortando mutação.`);
-        }
-      }
-      const payload = {
-        name: act.expected.name,
-        type: act.expected.type,
-        parameter: act.expected.parameter,
-        tagFiringOption: act.expected.tagFiringOption || 'oncePerEvent',
-        paused: false,
-        consentSettings: act.expected.consentSettings,
-        firingTriggerId: resolvedTriggers
-      };
-      await gtmRequest('POST', ws + '/tags', payload);
-    } else if (act.type === 'UPDATE_TAG') {
-      console.log(`- Sincronizando Tag ${act.id} com contrato canônico...`);
-      const expTriggers = act.expected.firingTriggerId || act.target.firingTriggerId;
-      const resolvedTriggers = expTriggers ? expTriggers.map(id => runtimeTriggerIdMap.get(String(id)) || String(id)) : undefined;
-      if (resolvedTriggers) {
+  const createdEntities = [];
+  const updatedSnapshots = [];
+
+  try {
+    for (const act of plannedActions) {
+      if (act.type === 'CREATE_VARIABLE') {
+        console.log(`- Criando Variável canônica "${act.name}"...`);
+        const payload = {
+          name: act.expected.name,
+          type: act.expected.type,
+          parameter: act.expected.parameter
+        };
+        const created = await gtmRequest('POST', ws + '/variables', payload);
+        const createdId = String(created?.variableId || act.expected.variableId);
+        createdEntities.push({ type: 'variables', id: createdId, name: act.name });
+      } else if (act.type === 'UPDATE_VARIABLE') {
+        console.log(`- Sincronizando Variável ${act.id} com contrato canônico...`);
+        updatedSnapshots.push({ type: 'variables', id: String(act.id), name: act.name, previousPayload: act.target });
+        const payload = {
+          ...act.target,
+          type: act.expected.type,
+          parameter: act.expected.parameter
+        };
+        await gtmRequest('PUT', ws + '/variables/' + act.id, payload);
+      } else if (act.type === 'CREATE_TRIGGER') {
+        console.log(`- Criando Trigger canônico "${act.name}"...`);
+        const payload = {
+          name: act.expected.name,
+          type: act.expected.type,
+          customEventFilter: act.expected.customEventFilter,
+          filter: act.expected.filter
+        };
+        const created = await gtmRequest('POST', ws + '/triggers', payload);
+        const newTriggerId = String(created?.triggerId || act.expected.triggerId);
+        createdEntities.push({ type: 'triggers', id: newTriggerId, name: act.name });
+        runtimeTriggerIdMap.set(String(act.expected.triggerId), newTriggerId);
+        existingTriggerIds.add(newTriggerId);
+      } else if (act.type === 'UPDATE_TRIGGER') {
+        console.log(`- Sincronizando Trigger ${act.id} com contrato canônico...`);
+        updatedSnapshots.push({ type: 'triggers', id: String(act.id), name: act.name, previousPayload: act.target });
+        const payload = {
+          ...act.target,
+          type: act.expected.type,
+          customEventFilter: act.expected.customEventFilter || act.target.customEventFilter,
+          filter: act.expected.filter || act.target.filter
+        };
+        await gtmRequest('PUT', ws + '/triggers/' + act.id, payload);
+        runtimeTriggerIdMap.set(String(act.expected.triggerId), String(act.id));
+        existingTriggerIds.add(String(act.id));
+      } else if (act.type === 'CREATE_TAG') {
+        console.log(`- Criando Tag canônica "${act.name}"...`);
+        const resolvedTriggers = (act.expected.firingTriggerId || []).map(id => runtimeTriggerIdMap.get(String(id)) || String(id));
         for (const tid of resolvedTriggers) {
-          if (!existingTriggerIds.has(String(tid))) {
+          if (!existingTriggerIds.has(String(tid)) && !isBuiltInTrigger(tid)) {
             throw new Error(`[FAIL-CLOSED] Trigger ID ${tid} referenciado pela tag "${act.name}" não existe no workspace! Abortando mutação.`);
           }
         }
+        const payload = {
+          name: act.expected.name,
+          type: act.expected.type,
+          parameter: act.expected.parameter,
+          tagFiringOption: act.expected.tagFiringOption || 'oncePerEvent',
+          priority: act.expected.priority || undefined,
+          paused: false,
+          consentSettings: act.expected.consentSettings,
+          firingTriggerId: resolvedTriggers
+        };
+        const created = await gtmRequest('POST', ws + '/tags', payload);
+        const createdId = String(created?.tagId || act.expected.tagId);
+        createdEntities.push({ type: 'tags', id: createdId, name: act.name });
+      } else if (act.type === 'UPDATE_TAG') {
+        console.log(`- Sincronizando Tag ${act.id} com contrato canônico...`);
+        updatedSnapshots.push({ type: 'tags', id: String(act.id), name: act.name, previousPayload: act.target });
+        const expTriggers = act.expected.firingTriggerId || act.target.firingTriggerId;
+        const resolvedTriggers = expTriggers ? expTriggers.map(id => runtimeTriggerIdMap.get(String(id)) || String(id)) : undefined;
+        if (resolvedTriggers) {
+          for (const tid of resolvedTriggers) {
+            if (!existingTriggerIds.has(String(tid)) && !isBuiltInTrigger(tid)) {
+              throw new Error(`[FAIL-CLOSED] Trigger ID ${tid} referenciado pela tag "${act.name}" não existe no workspace! Abortando mutação.`);
+            }
+          }
+        }
+        const payload = {
+          ...act.target,
+          type: act.expected.type,
+          parameter: act.expected.parameter,
+          tagFiringOption: act.expected.tagFiringOption || act.target.tagFiringOption || 'oncePerEvent',
+          priority: act.expected.priority !== undefined ? act.expected.priority : undefined,
+          paused: false,
+          consentSettings: act.expected.consentSettings || act.target.consentSettings,
+          firingTriggerId: resolvedTriggers
+        };
+        if (!act.expected.priority) {
+          delete payload.priority;
+        }
+        await gtmRequest('PUT', ws + '/tags/' + act.id, payload);
+      } else if (act.type === 'DELETE_TAG') {
+        console.log(`- Deletando Tag ${act.id} ("${act.name}")...`);
+        await gtmRequest('DELETE', ws + '/tags/' + act.id);
+      } else if (act.type === 'DELETE_TRIGGER') {
+        console.log(`- Deletando Trigger ${act.id} ("${act.name}")...`);
+        await gtmRequest('DELETE', ws + '/triggers/' + act.id);
+        existingTriggerIds.delete(String(act.id));
+      } else if (act.type === 'DELETE_VARIABLE') {
+        console.log(`- Deletando Variável ${act.id} ("${act.name}")...`);
+        await gtmRequest('DELETE', ws + '/variables/' + act.id);
       }
-      const payload = {
-        ...act.target,
-        type: act.expected.type,
-        parameter: act.expected.parameter,
-        tagFiringOption: act.expected.tagFiringOption || act.target.tagFiringOption || 'oncePerEvent',
-        paused: false,
-        consentSettings: act.expected.consentSettings || act.target.consentSettings,
-        firingTriggerId: resolvedTriggers
-      };
-      await gtmRequest('PUT', ws + '/tags/' + act.id, payload);
     }
+  } catch (execErr) {
+    console.error(`\n🚨 [FAIL-CLOSED] Erro durante mutação no workspace: ${execErr.message}`);
+    console.error('🔄 Iniciando ROLLBACK TRANSACIONAL compensatório para preservar integridade do Workspace...');
+
+    // 1. Reverter entidades criadas na ordem inversa (tags -> triggers -> variables)
+    for (let i = createdEntities.length - 1; i >= 0; i--) {
+      const ent = createdEntities[i];
+      try {
+        console.warn(`  [ROLLBACK] Removendo entidade recém-criada ${ent.type}/${ent.id} ("${ent.name}")...`);
+        await gtmRequest('DELETE', `${ws}/${ent.type}/${ent.id}`);
+      } catch (rbErr) {
+        console.error(`  [ERRO NO ROLLBACK] Falha ao deletar ${ent.type}/${ent.id}: ${rbErr.message}`);
+      }
+    }
+
+    // 2. Reverter updates com o snapshot anterior
+    for (let i = updatedSnapshots.length - 1; i >= 0; i--) {
+      const snap = updatedSnapshots[i];
+      try {
+        console.warn(`  [ROLLBACK] Restaurando snapshot anterior de ${snap.type}/${snap.id} ("${snap.name}")...`);
+        await gtmRequest('PUT', `${ws}/${snap.type}/${snap.id}`, snap.previousPayload);
+      } catch (rbErr) {
+        console.error(`  [ERRO NO ROLLBACK] Falha ao restaurar ${snap.type}/${snap.id}: ${rbErr.message}`);
+      }
+    }
+
+    console.error('🛡️  Rollback transacional concluído.');
+    throw execErr;
   }
 
   console.log('\n✅ Mutações enviadas. Iniciando READBACK pós-aplicação no Workspace ' + wsId + '...');

@@ -1056,32 +1056,46 @@ gtm_assert(
 	'Política de privacidade canônica declara expressamente dispensa de encarregado formal nos termos da resolução CD/ANPD nº 2/2022'
 );
 
-// Prova de Mutação: validador público fail-closed para endpoint vazio ou HTTP !== 200
-$simulate_verify_public = function( $http_code, $body, $expected_terms ) {
-	$errors = 0;
-	if ( empty( $body ) || 200 !== (int) $http_code ) {
-		$errors++;
-		return array( 'success' => false, 'errors' => $errors );
+// -------------------------------------------------------------------------
+// Validação canônica de scripts/apply-legal-policies-production.php
+// -------------------------------------------------------------------------
+$apply_script_path = dirname( __DIR__ ) . '/apply-legal-policies-production.php';
+gtm_assert( file_exists( $apply_script_path ), 'Script apply-legal-policies-production.php existe' );
+$apply_script_code = file_get_contents( $apply_script_path );
+
+// Validação estática de TLS estrito e fail-closed no código real de produção
+gtm_assert( false !== strpos( $apply_script_code, "'sslverify' => true" ), 'apply-legal-policies-production.php exige TLS estrito (sslverify => true)' );
+gtm_assert( false === strpos( $apply_script_code, "'sslverify' => false" ), 'apply-legal-policies-production.php não desativa sslverify' );
+gtm_assert( false !== strpos( $apply_script_code, 'CURLOPT_SSL_VERIFYPEER, true' ), 'apply-legal-policies-production.php exige CURLOPT_SSL_VERIFYPEER => true' );
+gtm_assert( false === strpos( $apply_script_code, 'CURLOPT_SSL_VERIFYPEER, false' ), 'apply-legal-policies-production.php não desativa CURLOPT_SSL_VERIFYPEER' );
+gtm_assert( false !== strpos( $apply_script_code, 'CURLOPT_SSL_VERIFYHOST, 2' ), 'apply-legal-policies-production.php exige CURLOPT_SSL_VERIFYHOST => 2' );
+gtm_assert( false !== strpos( $apply_script_code, '$errors += $ver_res[\'errors\']' ), 'apply-legal-policies-production.php propaga erros para $errors no verify-public' );
+gtm_assert( false !== strpos( $apply_script_code, 'function uonix_verify_public_policy_response' ), 'apply-legal-policies-production.php declara a função canônica uonix_verify_public_policy_response' );
+
+if ( ! function_exists( 'uonix_verify_public_policy_response' ) ) {
+	$start_tag = "if ( ! function_exists( 'uonix_verify_public_policy_response' ) ) {";
+	$end_tag   = "if ( \$UONIX_VERIFY_PUBLIC ) {";
+	$pos_start = strpos( $apply_script_code, $start_tag );
+	$pos_end   = strpos( $apply_script_code, $end_tag, $pos_start );
+	if ( false !== $pos_start && false !== $pos_end ) {
+		$func_code = substr( $apply_script_code, $pos_start, $pos_end - $pos_start );
+		eval( $func_code );
 	}
-	foreach ( $expected_terms as $term ) {
-		if ( false === strpos( $body, $term ) ) {
-			$errors++;
-		}
-	}
-	return array( 'success' => 0 === $errors, 'errors' => $errors );
-};
+}
+gtm_assert( function_exists( 'uonix_verify_public_policy_response' ), 'Função canônica uonix_verify_public_policy_response carregada a partir do arquivo real' );
 
-$res_timeout = $simulate_verify_public( 0, '', array( '_gcl_aw' ) );
-gtm_assert( ! $res_timeout['success'] && $res_timeout['errors'] > 0, 'Prova de Mutação: verify-public com timeout/inacessível resulta em erro (fail-closed)' );
+// Testes funcionais da função canônica do arquivo de produção
+$res_timeout = uonix_verify_public_policy_response( 0, '', array( '_gcl_aw' ), 'Connection timed out' );
+gtm_assert( ! $res_timeout['success'] && $res_timeout['errors'] > 0, 'Código real: verify-public com timeout/inacessível resulta em erro (fail-closed)' );
 
-$res_http_500 = $simulate_verify_public( 500, 'Internal Server Error', array( '_gcl_aw' ) );
-gtm_assert( ! $res_http_500['success'] && $res_http_500['errors'] > 0, 'Prova de Mutação: verify-public com HTTP 500 resulta em erro (fail-closed)' );
+$res_http_500 = uonix_verify_public_policy_response( 500, 'Internal Server Error', array( '_gcl_aw' ) );
+gtm_assert( ! $res_http_500['success'] && $res_http_500['errors'] > 0, 'Código real: verify-public com HTTP 500 resulta em erro (fail-closed)' );
 
-$res_missing_term = $simulate_verify_public( 200, '<html>Sem cookies ads</html>', array( '_gcl_aw', 'Conversões e Atribuição Ads' ) );
-gtm_assert( ! $res_missing_term['success'] && $res_missing_term['errors'] === 2, 'Prova de Mutação: verify-public com termos ausentes resulta em erro não-zero' );
+$res_missing_term = uonix_verify_public_policy_response( 200, '<html>Sem cookies ads</html>', array( '_gcl_aw', 'Conversões e Atribuição Ads' ) );
+gtm_assert( ! $res_missing_term['success'] && $res_missing_term['errors'] === 2, 'Código real: verify-public com termos ausentes resulta em erro não-zero' );
 
-$res_valid_public = $simulate_verify_public( 200, '<html>_gcl_aw e Conversões e Atribuição Ads</html>', array( '_gcl_aw', 'Conversões e Atribuição Ads' ) );
-gtm_assert( $res_valid_public['success'] && 0 === $res_valid_public['errors'], 'verify-public com HTTP 200 e termos canônicos é aprovado' );
+$res_valid_public = uonix_verify_public_policy_response( 200, '<html>_gcl_aw e Conversões e Atribuição Ads</html>', array( '_gcl_aw', 'Conversões e Atribuição Ads' ) );
+gtm_assert( $res_valid_public['success'] && 0 === $res_valid_public['errors'], 'Código real: verify-public com HTTP 200 e termos canônicos é aprovado' );
 
 if ( $failures > 0 ) {
 	fwrite( STDERR, "\nTotal de falhas no contrato GTM e conversoes: {$failures}\n" );

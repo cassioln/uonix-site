@@ -150,12 +150,7 @@ async function main() {
       console.log('  Tag criada com ID:', existingTag.tagId);
     }
   } else {
-    const tagValidation = validateAwctTagContract(existingTag, {
-      conversionId: '{{Constante - Google Ads ID}}',
-      conversionLabel: '{{Constante - Label Contato Formulario}}',
-      firingTriggerId: firingId,
-      tagFiringOption: 'oncePerEvent'
-    });
+    const tagValidation = validateAwctTagContract(existingTag, expectedTagData);
 
     if (!tagValidation.isAdherent) {
       console.log(`  [DIVERGÊNCIA] Tag ID ${existingTag.tagId} diverge do contrato canônico:`);
@@ -174,7 +169,7 @@ async function main() {
     }
   }
 
-  // 4. Publicação sob demanda com dupla confirmação e exigência estrita de --apply
+  // 4. Publicação sob demanda com dupla confirmação e exigência estrita de --apply e integridade
   if (isPublishRequested()) {
     if (!apply) {
       console.warn(
@@ -187,6 +182,13 @@ async function main() {
         'Publicação bloqueada fail-closed.'
       );
     } else {
+      const finalValidation = validateAwctTagContract(existingTag, expectedTagData);
+      if (!finalValidation.isAdherent) {
+        console.error('\n[FAIL-CLOSED] Publicação bloqueada: a Tag continua divergente do contrato canônico:');
+        finalValidation.differences.forEach(d => console.error(`  - ${d}`));
+        process.exit(1);
+      }
+
       console.log('\nCriando e publicando versão no GTM...');
       const resVer = await gtmRequest('POST', ws + ':create_version', {
         name: 'v31 - Conversao Contato via Formulario',

@@ -174,7 +174,52 @@ function validateAwctTagContract(tag, expected, canonicalVariablesMap) {
 
   // 1. Verificação estrutural estrita de parâmetros (sem parâmetros extras, sem duplicados, tipo e valor exatos)
   const tagParams = tag.parameter || [];
-  const expectedParams = expected.parameter || [];
+  let expectedParams = expected.parameter;
+
+  // Normalização fail-safe caso expected contenha propriedades soltas de conversão
+  if (!expectedParams && (expected.conversionId || expected.conversionLabel)) {
+    expectedParams = [];
+    if (expected.conversionId) {
+      expectedParams.push({
+        type: 'template',
+        key: 'conversionId',
+        value: expected.conversionId
+      });
+    }
+    if (expected.conversionLabel) {
+      expectedParams.push({
+        type: 'template',
+        key: 'conversionLabel',
+        value: expected.conversionLabel
+      });
+    }
+    if (expected.orderId) {
+      expectedParams.push({
+        type: 'template',
+        key: 'orderId',
+        value: expected.orderId
+      });
+    }
+    if (expected.value) {
+      expectedParams.push({
+        type: 'template',
+        key: 'value',
+        value: expected.value
+      });
+    }
+    if (expected.currencyCode) {
+      expectedParams.push({
+        type: 'template',
+        key: 'currencyCode',
+        value: expected.currencyCode
+      });
+    }
+  }
+  expectedParams = expectedParams || [];
+
+  if (expectedParams.length === 0) {
+    diffs.push('[FAIL-CLOSED] Contrato esperado inválido: lista de parâmetros esperados está vazia');
+  }
 
   // Rejeita parâmetros com chave duplicada
   const tagKeys = tagParams.map(p => p.key);
