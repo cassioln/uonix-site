@@ -1088,14 +1088,29 @@ gtm_assert( function_exists( 'uonix_verify_public_policy_response' ), 'Função 
 gtm_assert( function_exists( 'uonix_resolve_public_policy_terms' ), 'Função canônica uonix_resolve_public_policy_terms carregada a partir do arquivo real' );
 
 if ( ! function_exists( 'do_shortcode' ) ) {
+	$GLOBALS['uonix_test_shortcode_result'] = 'administrativo@uonix.com.br';
 	function do_shortcode( $shortcode ) {
-		return '[uonix email_lgpd]' === $shortcode ? 'administrativo@uonix.com.br' : '';
+		return '[uonix email_lgpd]' === $shortcode ? $GLOBALS['uonix_test_shortcode_result'] : '';
 	}
 }
 
 $resolved_lgpd_terms = uonix_resolve_public_policy_terms( array( '[uonix email_lgpd]', 'Canal de Privacidade e Atendimento ao Titular' ) );
 gtm_assert( $resolved_lgpd_terms['success'], 'Código real: shortcode de e-mail LGPD configurado é resolvido antes do verify-public' );
 gtm_assert( 'administrativo@uonix.com.br' === $resolved_lgpd_terms['terms'][0], 'Código real: verify-public usa o e-mail LGPD efetivamente configurado no Painel Uônix' );
+
+$GLOBALS['uonix_test_shortcode_result'] = '';
+$resolved_empty_lgpd = uonix_resolve_public_policy_terms( array( '[uonix email_lgpd]' ) );
+gtm_assert( ! $resolved_empty_lgpd['success'], 'Código real: shortcode LGPD vazio é rejeitado (fail-closed)' );
+
+$GLOBALS['uonix_test_shortcode_result'] = '[uonix email_lgpd]';
+$resolved_literal_lgpd = uonix_resolve_public_policy_terms( array( '[uonix email_lgpd]' ) );
+gtm_assert( ! $resolved_literal_lgpd['success'], 'Código real: shortcode LGPD não resolvido literalmente é rejeitado (fail-closed)' );
+
+$GLOBALS['uonix_test_shortcode_result'] = 'canal-lgpd-invalido';
+$resolved_invalid_lgpd = uonix_resolve_public_policy_terms( array( '[uonix email_lgpd]' ) );
+gtm_assert( ! $resolved_invalid_lgpd['success'], 'Código real: canal LGPD que não é e-mail é rejeitado (fail-closed)' );
+
+$GLOBALS['uonix_test_shortcode_result'] = 'administrativo@uonix.com.br';
 
 // Testes funcionais da função canônica do arquivo de produção
 $res_timeout = uonix_verify_public_policy_response( 0, '', array( '_gcl_aw' ), 'Connection timed out' );

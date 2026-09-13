@@ -338,11 +338,14 @@ if ( ! function_exists( 'uonix_resolve_public_policy_terms' ) ) {
 			}
 
 			$rendered_email = function_exists( 'do_shortcode' ) ? trim( do_shortcode( $expected_term ) ) : '';
-			if ( '' === $rendered_email ) {
+			$is_valid_email = function_exists( 'is_email' )
+				? false !== is_email( $rendered_email )
+				: false !== filter_var( $rendered_email, FILTER_VALIDATE_EMAIL );
+			if ( '' === $rendered_email || '[uonix email_lgpd]' === $rendered_email || ! $is_valid_email ) {
 				return array(
 					'success' => false,
 					'terms'   => array(),
-					'reason'  => 'Shortcode [uonix email_lgpd] não foi resolvido para um e-mail público verificável.',
+					'reason'  => 'Shortcode [uonix email_lgpd] não foi resolvido para um e-mail válido e público verificável.',
 				);
 			}
 
