@@ -326,7 +326,12 @@ if ( ! function_exists( 'uonix_analytics_metrics_decode_ga4_report' ) ) {
 if ( ! function_exists( 'uonix_analytics_metrics_decode_search_console_report' ) ) {
 	function uonix_analytics_metrics_decode_search_console_report( $raw_body, $requires_dimension = false ) {
 		$report = json_decode( $raw_body );
-		if ( ! $report instanceof stdClass || ! isset( $report->responseAggregationType ) || ! is_string( $report->responseAggregationType ) || '' === $report->responseAggregationType || ! property_exists( $report, 'rows' ) || ! is_array( $report->rows ) ) return uonix_analytics_metrics_error( 'search_console_report_invalid' );
+		if ( ! $report instanceof stdClass || ! isset( $report->responseAggregationType ) || ! is_string( $report->responseAggregationType ) || '' === $report->responseAggregationType ) return uonix_analytics_metrics_error( 'search_console_report_invalid' );
+		// A Search Console API omite `rows` em respostas 2xx sem dados, inclusive em
+		// consultas dimensionadas. Ausência é vazio legítimo; uma coleção presente com
+		// tipo diferente de array continua sendo uma resposta inválida.
+		if ( ! property_exists( $report, 'rows' ) ) return array( 'responseAggregationType' => $report->responseAggregationType, 'rows' => array() );
+		if ( ! is_array( $report->rows ) ) return uonix_analytics_metrics_error( 'search_console_report_invalid' );
 		$rows = array();
 		foreach ( $report->rows as $row ) {
 			if ( ! $row instanceof stdClass || ! isset( $row->clicks, $row->impressions, $row->ctr, $row->position ) || ! is_numeric( $row->clicks ) || ! is_numeric( $row->impressions ) || ! is_numeric( $row->ctr ) || ! is_numeric( $row->position ) || null === uonix_analytics_metrics_finite_number( $row->clicks ) || null === uonix_analytics_metrics_finite_number( $row->impressions ) || null === uonix_analytics_metrics_finite_number( $row->ctr ) || null === uonix_analytics_metrics_finite_number( $row->position ) ) return uonix_analytics_metrics_error( 'search_console_row_invalid' );
