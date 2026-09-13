@@ -110,8 +110,14 @@ function uonix_analytics_configuration() {
 }
 
 function uonix_analytics_metrics_sanitize_period_days( $value ) {
-	$value = is_numeric( $value ) ? (int) $value : 30;
-	return in_array( $value, array( 7, 30, 90, 365 ), true ) ? $value : 30;
+	if ( is_int( $value ) ) {
+		$days = $value;
+	} elseif ( is_string( $value ) && preg_match( '/^(?:0|[1-9][0-9]*)$/D', $value ) ) {
+		$days = (int) $value;
+	} else {
+		return 30;
+	}
+	return in_array( $days, array( 7, 30, 90, 365 ), true ) ? $days : 30;
 }
 
 function uonix_analytics_metrics_snapshot_is_fresh( $snapshot ) {
@@ -134,7 +140,10 @@ function uonix_analytics_metrics_get_snapshot( $days = 30 ) {
 				'active_users' => array( 'current' => 42, 'previous' => 35, 'delta_percent' => 20, 'state' => 'comparable' ),
 				'sessions'     => array( 'current' => 60, 'previous' => 0, 'delta_percent' => null, 'state' => 'new' ),
 			),
-			'landing_pages' => array( array( 'path' => '/servicos/', 'sessions' => 18 ) ),
+			'landing_pages' => array(
+				array( 'path' => '/', 'sessions' => 18 ),
+				array( 'path' => '/servicos/', 'sessions' => 6 ),
+			),
 			'page_views' => array(
 				'/produtos/ancoragem-uonix-modelo-210-inox/' => 17,
 				'/fator-de-queda-o-risco-comeca-no-projeto-nao-na-queda/' => 11,
@@ -244,12 +253,17 @@ require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/52-admin-analytics
 
 uonix_dashboard_assert( function_exists( 'uonix_analytics_dashboard_page_view_value' ), 'Resolvedor de visualizações por permalink existe' );
 uonix_dashboard_assert( function_exists( 'uonix_analytics_dashboard_chart_rows' ), 'Normalizador de barras dos rankings existe' );
+uonix_dashboard_assert( function_exists( 'uonix_analytics_dashboard_page_label' ), 'Formatador de rótulos de páginas existe' );
 if ( function_exists( 'uonix_analytics_dashboard_page_view_value' ) ) {
 	$page_view_snapshot = uonix_analytics_metrics_get_snapshot( 30 );
 	uonix_dashboard_assert( 17.0 === uonix_analytics_dashboard_page_view_value( $page_view_snapshot, 'https://uonix.com.br/produtos/ancoragem-uonix-modelo-210-inox/?utm_source=teste' ), 'Resolvedor encontra visualizações pelo caminho sem query string' );
 	uonix_dashboard_assert( 0.0 === uonix_analytics_dashboard_page_view_value( $page_view_snapshot, 'https://uonix.com.br/pagina-sem-visitas/' ), 'Cobertura completa distingue zero visita' );
 	$page_view_snapshot['ga4']['page_views_complete'] = false;
 	uonix_dashboard_assert( null === uonix_analytics_dashboard_page_view_value( $page_view_snapshot, 'https://uonix.com.br/pagina-desconhecida/' ), 'Cobertura incompleta mantém valor desconhecido' );
+}
+if ( function_exists( 'uonix_analytics_dashboard_page_label' ) ) {
+	uonix_dashboard_assert( 'Home' === uonix_analytics_dashboard_page_label( '/' ), 'Raiz do site é exibida como Home' );
+	uonix_dashboard_assert( '/servicos/' === uonix_analytics_dashboard_page_label( '/servicos/' ), 'Demais caminhos preservam o rótulo técnico' );
 }
 if ( function_exists( 'uonix_analytics_dashboard_chart_rows' ) ) {
 	$chart_rows = uonix_analytics_dashboard_chart_rows(
@@ -349,6 +363,7 @@ $adopt_links = array(
 foreach ( $adopt_links as $label => $url ) {
 	uonix_dashboard_assert( strpos( $output, 'href="' . $url . '"' ) !== false && strpos( $output, '>' . $label . '</a>' ) !== false, 'Card AdOpt contém o link exato: ' . $label );
 }
+uonix_dashboard_assert( strpos( $output, '<a href="https://dash.goadopt.io/org/uonix/disclaimers" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir AdOpt</a>' ) !== false, 'Card AdOpt oferece Abrir AdOpt como botão' );
 uonix_dashboard_assert( strpos( $output, 'uonix-shortcuts-grid' ) === false, 'Grade antiga de atalhos não permanece no painel' );
 
 // A central de marketing mostra somente fatos técnicos verificáveis localmente.
@@ -371,7 +386,8 @@ uonix_dashboard_assert( strpos( $output, 'linha de vida' ) !== false && strpos( 
 uonix_dashboard_assert( 2 === substr_count( $output, 'class="uonix-ranking-chart"' ), 'Dashboard renderiza dois gráficos de ranking' );
 uonix_dashboard_assert( strpos( $output, 'class="uonix-ranking-bar-track"' ) !== false && strpos( $output, 'class="uonix-ranking-bar-fill"' ) !== false, 'Gráficos possuem trilha e barra proporcional' );
 uonix_dashboard_assert( strpos( $output, '.uonix-ranking-grid {' ) !== false && strpos( $output, '.uonix-ranking-bar-fill {' ) !== false, 'Gráficos possuem layout visual nativo no próprio módulo' );
-uonix_dashboard_assert( strpos( $output, 'aria-label="/servicos/: 18 sessões"' ) !== false, 'Gráfico de páginas mantém rótulo numérico acessível' );
+uonix_dashboard_assert( strpos( $output, 'aria-label="Home: 18 sessões"' ) !== false, 'Gráfico de páginas exibe a raiz como Home com rótulo numérico acessível' );
+uonix_dashboard_assert( 1 === substr_count( $output, '<code>Home</code>' ), 'Gráfico não repete a página Home no snapshot normalizado' );
 uonix_dashboard_assert( strpos( $output, 'aria-label="linha de vida: 5 cliques"' ) !== false, 'Gráfico de consultas mantém rótulo numérico acessível' );
 uonix_dashboard_assert( 3 === substr_count( $output, '<th>Visualizações — 30 dias</th>' ), 'As três tabelas identificam o período da coluna de visualizações' );
 uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">17</td>' ) !== false, 'Produto mostra visualizações da sua URL' );

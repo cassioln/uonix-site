@@ -59,6 +59,14 @@ function uonix_analytics_dashboard_page_view_value( $snapshot, $permalink )
 }
 
 /**
+ * Apresenta a rota inicial com um rótulo compreensível no ranking.
+ */
+function uonix_analytics_dashboard_page_label( $path )
+{
+	return '/' === $path ? 'Home' : $path;
+}
+
+/**
  * Prepara até dez linhas de ranking com escala percentual relativa.
  */
 function uonix_analytics_dashboard_chart_rows( $rows, $label_key, $value_key )
@@ -283,6 +291,7 @@ function uonix_render_analytics_dashboard_page()
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-shield uonix-sc-icon-adopt"></span><h3>AdOpt e Consent Mode</h3></div>
 					<dl><dt>Configuração local</dt><dd><?php echo esc_html($adopt_status); ?></dd><dt>Finalidade</dt><dd>Controlar categorias estatísticas e de marketing.</dd><dt>Validar em</dt><dd>Banner e preferências na produção.</dd></dl>
 					<ul class="uonix-card-links"><li><a href="<?php echo esc_url( $adopt_tags_url ); ?>" target="_blank" rel="noopener">Escanear tags</a></li><li><a href="<?php echo esc_url( $adopt_documents_url ); ?>" target="_blank" rel="noopener">Documentos</a></li><li><a href="<?php echo esc_url( $adopt_settings_url ); ?>" target="_blank" rel="noopener">Configurações</a></li><li><a href="<?php echo esc_url( $adopt_url ); ?>" target="_blank" rel="noopener">Abrir AdOpt</a></li></ul>
+					<a href="<?php echo esc_url( $adopt_url ); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir AdOpt</a>
 				</div>
 				<div class="uonix-marketing-card">
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-facebook-alt uonix-sc-icon-meta"></span><h3>Meta Pixel</h3></div>
@@ -363,6 +372,10 @@ function uonix_render_analytics_dashboard_page()
 				$clicks_comparison = uonix_analytics_dashboard_metric_comparison( $gsc_summary['clicks'] );
 				$impressions_comparison = uonix_analytics_dashboard_metric_comparison( $gsc_summary['impressions'] );
 				$landing_page_chart = uonix_analytics_dashboard_chart_rows( $metrics_snapshot['ga4']['landing_pages'] ?? array(), 'path', 'sessions' );
+				foreach ( $landing_page_chart as &$row ) {
+					$row['label'] = uonix_analytics_dashboard_page_label( $row['label'] );
+				}
+				unset( $row );
 				$query_chart = uonix_analytics_dashboard_chart_rows( $metrics_snapshot['search_console']['queries'] ?? array(), 'query', 'clicks' );
 			?>
 			<div class="uonix-kpi-grid">
