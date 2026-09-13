@@ -94,7 +94,7 @@ $policies = array(
 			'Lei Geral de Proteção de Dados',
 		),
 		'checks_public' => array(
-			'privacidade@uonix.com.br',
+			'[uonix email_lgpd]',
 			'Canal de Privacidade e Atendimento ao Titular',
 			'Autoridade Nacional de Proteção de Dados',
 			'Lei Geral de Proteção de Dados',
@@ -328,6 +328,35 @@ if ( ! function_exists( 'uonix_verify_public_policy_response' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_resolve_public_policy_terms' ) ) {
+	function uonix_resolve_public_policy_terms( $expected_terms ) {
+		$resolved_terms = array();
+		foreach ( $expected_terms as $expected_term ) {
+			if ( '[uonix email_lgpd]' !== $expected_term ) {
+				$resolved_terms[] = $expected_term;
+				continue;
+			}
+
+			$rendered_email = function_exists( 'do_shortcode' ) ? trim( do_shortcode( $expected_term ) ) : '';
+			if ( '' === $rendered_email ) {
+				return array(
+					'success' => false,
+					'terms'   => array(),
+					'reason'  => 'Shortcode [uonix email_lgpd] não foi resolvido para um e-mail público verificável.',
+				);
+			}
+
+			$resolved_terms[] = $rendered_email;
+		}
+
+		return array(
+			'success' => true,
+			'terms'   => $resolved_terms,
+			'reason'  => '',
+		);
+	}
+}
+
 if ( $UONIX_VERIFY_PUBLIC ) {
 	echo "\n🌐 Verificando páginas públicas para conformidade contra cache de borda...\n";
 	foreach ( $policies as $slug => $config ) {
@@ -363,7 +392,14 @@ if ( $UONIX_VERIFY_PUBLIC ) {
 			curl_close( $ch );
 		}
 
-		$ver_res = uonix_verify_public_policy_response( $http_code, $public_html, $config['checks_public'], $error_detail );
+		$resolved_checks = uonix_resolve_public_policy_terms( $config['checks_public'] );
+		if ( ! $resolved_checks['success'] ) {
+			echo "[ERRO PÚBLICO] {$resolved_checks['reason']}\n";
+			$errors++;
+			continue;
+		}
+
+		$ver_res = uonix_verify_public_policy_response( $http_code, $public_html, $resolved_checks['terms'], $error_detail );
 		if ( ! $ver_res['success'] ) {
 			echo "[ERRO PÚBLICO] {$ver_res['reason']}\n";
 			$errors += $ver_res['errors'];

@@ -1071,6 +1071,8 @@ gtm_assert( false === strpos( $apply_script_code, 'CURLOPT_SSL_VERIFYPEER, false
 gtm_assert( false !== strpos( $apply_script_code, 'CURLOPT_SSL_VERIFYHOST, 2' ), 'apply-legal-policies-production.php exige CURLOPT_SSL_VERIFYHOST => 2' );
 gtm_assert( false !== strpos( $apply_script_code, '$errors += $ver_res[\'errors\']' ), 'apply-legal-policies-production.php propaga erros para $errors no verify-public' );
 gtm_assert( false !== strpos( $apply_script_code, 'function uonix_verify_public_policy_response' ), 'apply-legal-policies-production.php declara a função canônica uonix_verify_public_policy_response' );
+gtm_assert( false !== strpos( $apply_script_code, 'function uonix_resolve_public_policy_terms' ), 'apply-legal-policies-production.php resolve shortcodes antes da verificação pública' );
+gtm_assert( false === strpos( $apply_script_code, "'privacidade@uonix.com.br'" ), 'apply-legal-policies-production.php não fixa e-mail LGPD divergente do Painel Uônix' );
 
 if ( ! function_exists( 'uonix_verify_public_policy_response' ) ) {
 	$start_tag = "if ( ! function_exists( 'uonix_verify_public_policy_response' ) ) {";
@@ -1083,6 +1085,17 @@ if ( ! function_exists( 'uonix_verify_public_policy_response' ) ) {
 	}
 }
 gtm_assert( function_exists( 'uonix_verify_public_policy_response' ), 'Função canônica uonix_verify_public_policy_response carregada a partir do arquivo real' );
+gtm_assert( function_exists( 'uonix_resolve_public_policy_terms' ), 'Função canônica uonix_resolve_public_policy_terms carregada a partir do arquivo real' );
+
+if ( ! function_exists( 'do_shortcode' ) ) {
+	function do_shortcode( $shortcode ) {
+		return '[uonix email_lgpd]' === $shortcode ? 'administrativo@uonix.com.br' : '';
+	}
+}
+
+$resolved_lgpd_terms = uonix_resolve_public_policy_terms( array( '[uonix email_lgpd]', 'Canal de Privacidade e Atendimento ao Titular' ) );
+gtm_assert( $resolved_lgpd_terms['success'], 'Código real: shortcode de e-mail LGPD configurado é resolvido antes do verify-public' );
+gtm_assert( 'administrativo@uonix.com.br' === $resolved_lgpd_terms['terms'][0], 'Código real: verify-public usa o e-mail LGPD efetivamente configurado no Painel Uônix' );
 
 // Testes funcionais da função canônica do arquivo de produção
 $res_timeout = uonix_verify_public_policy_response( 0, '', array( '_gcl_aw' ), 'Connection timed out' );
