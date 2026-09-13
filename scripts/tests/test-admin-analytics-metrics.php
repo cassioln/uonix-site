@@ -8,10 +8,12 @@ declare( strict_types=1 );
 define( 'ABSPATH', __DIR__ );
 define( 'WP_CONTENT_DIR', __DIR__ . '/wp-content' );
 define( 'HOUR_IN_SECONDS', 3600 );
+define( 'DAY_IN_SECONDS', 86400 );
 
 $failures = 0;
 $GLOBALS['uonix_metrics_options'] = array();
 $GLOBALS['uonix_metrics_transients'] = array();
+$GLOBALS['uonix_metrics_http_capture'] = null;
 function uonix_metrics_assert( $condition, $message ) {
 	global $failures;
 	if ( ! $condition ) {
@@ -43,6 +45,7 @@ function is_wp_error( $value ) {
 }
 
 function wp_json_encode( $value ) { return json_encode( $value ); }
+function wp_unslash( $value ) { return $value; }
 function sanitize_key( $value ) { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $value ) ); }
 function get_option( $key, $default = false ) { return array_key_exists( $key, $GLOBALS['uonix_metrics_options'] ) ? $GLOBALS['uonix_metrics_options'][ $key ] : $default; }
 function update_option( $key, $value ) { $GLOBALS['uonix_metrics_options'][ $key ] = $value; return true; }
@@ -53,6 +56,13 @@ function set_transient( $key, $value ) { $GLOBALS['uonix_metrics_transients'][ $
 function delete_transient( $key ) { unset( $GLOBALS['uonix_metrics_transients'][ $key ] ); return true; }
 function wp_remote_retrieve_response_code( $response ) { return $response['response']['code'] ?? 0; }
 function wp_remote_retrieve_body( $response ) { return $response['body'] ?? ''; }
+function wp_remote_post( $url, $args ) {
+	if ( null !== $GLOBALS['uonix_metrics_http_capture'] && str_contains( $url, 'analyticsdata.googleapis.com' ) ) {
+		$GLOBALS['uonix_metrics_http_capture'] = array( 'url' => $url, 'args' => $args );
+		return array( 'response' => array( 'code' => 200 ), 'body' => '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"0"}' );
+	}
+	throw new RuntimeException( 'Unexpected network request' );
+}
 function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) { $GLOBALS['uonix_metrics_actions'][] = array( $hook, $callback, $priority, $accepted_args ); }
 function wp_next_scheduled( $hook ) { return $GLOBALS['uonix_metrics_cron'][ $hook ] ?? false; }
 function wp_schedule_event( $timestamp, $recurrence, $hook ) { $GLOBALS['uonix_metrics_cron'][ $hook ] = $timestamp; return true; }
@@ -73,6 +83,84 @@ uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_decode_ga4_repor
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_decode_search_console_report' ), 'Decoder bruto Search Console existe' );
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_assemble_google_data' ), 'Montador de dados brutos Google existe' );
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_finite_number' ), 'Validador numérico finito existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_allowed_period_days' ), 'Allowlist de períodos existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_sanitize_period_days' ), 'Sanitizador de período existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ), 'Validador de frescor do snapshot existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_decode_ga4_page_views_report' ), 'Decoder GA4 de visualizações por página existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_ga4_page_views_report' ), 'Construtor da requisição GA4 de visualizações existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_fetch_ga4_page_views' ), 'Paginador GA4 de visualizações por página existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_normalize_page_views' ), 'Agregador de visualizações por caminho existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_requested_period' ), 'Leitor seguro do período solicitado existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_refresh_redirect_url' ), 'Construtor do retorno ao período atualizado existe' );
+
+if ( function_exists( 'uonix_analytics_metrics_allowed_period_days' ) && function_exists( 'uonix_analytics_metrics_sanitize_period_days' ) ) {
+	uonix_metrics_assert( array( 7, 30, 90, 365 ) === uonix_analytics_metrics_allowed_period_days(), 'Períodos permitidos permanecem fechados em 7, 30, 90 e 365 dias' );
+	uonix_metrics_assert( 90 === uonix_analytics_metrics_sanitize_period_days( '90' ), 'Período permitido é aceito' );
+	uonix_metrics_assert( 30 === uonix_analytics_metrics_sanitize_period_days( '13' ), 'Período arbitrário volta ao padrão' );
+	uonix_metrics_assert( 30 === uonix_analytics_metrics_sanitize_period_days( '7.5' ), 'Período fracionário não é truncado para um valor permitido' );
+	uonix_metrics_assert( 30 === uonix_analytics_metrics_sanitize_period_days( '7e0' ), 'Notação numérica alternativa não contorna a allowlist literal' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_periods' ) ) {
+	$seven_day_periods = uonix_analytics_metrics_periods( '2026-09-13', 7 );
+	uonix_metrics_assert(
+		array( 'start' => '2026-09-06', 'end' => '2026-09-12' ) === $seven_day_periods['current']
+		&& array( 'start' => '2026-08-30', 'end' => '2026-09-05' ) === $seven_day_periods['previous'],
+		'Período de sete dias termina ontem e compara sete dias anteriores'
+	);
+}
+
+if ( function_exists( 'uonix_analytics_metrics_get_snapshot' ) ) {
+	$GLOBALS['uonix_metrics_options'] = array(
+		'uonix_analytics_metrics_snapshot_v2_7' => array(
+			'version' => 2,
+			'period_days' => 7,
+			'status' => 'updated',
+			'updated_at' => '2026-09-13T00:00:00+00:00',
+		),
+		'uonix_analytics_metrics_snapshot_v1' => array(
+			'version' => 1,
+			'status' => 'updated',
+			'updated_at' => '2026-09-12T00:00:00+00:00',
+		),
+	);
+	$seven_day_snapshot = uonix_analytics_metrics_get_snapshot( 7 );
+	$legacy_snapshot = uonix_analytics_metrics_get_snapshot( 30 );
+	uonix_metrics_assert( is_array( $seven_day_snapshot ) && isset( $seven_day_snapshot['period_days'] ) && 7 === $seven_day_snapshot['period_days'], 'Snapshot de 7 dias usa chave própria' );
+	uonix_metrics_assert( is_array( $legacy_snapshot ) && 1 === $legacy_snapshot['version'], 'Snapshot legado é fallback somente de 30 dias' );
+	uonix_metrics_assert( false === uonix_analytics_metrics_get_snapshot( 90 ), 'Período sem cache não herda snapshot de 30 dias' );
+	$GLOBALS['uonix_metrics_options'] = array();
+}
+
+if ( function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ) ) {
+	uonix_metrics_assert(
+		uonix_analytics_metrics_snapshot_is_fresh(
+			array( 'status' => 'updated', 'updated_at' => '2026-09-13T00:00:00+00:00' ),
+			strtotime( '2026-09-13T23:59:59+00:00' )
+		),
+		'Snapshot updated com menos de 24 horas é fresco'
+	);
+	uonix_metrics_assert(
+		! uonix_analytics_metrics_snapshot_is_fresh(
+			array( 'status' => 'updated', 'updated_at' => '2026-09-13T00:00:00+00:00' ),
+			strtotime( '2026-09-14T00:00:01+00:00' )
+		),
+		'Snapshot updated com mais de 24 horas é vencido'
+	);
+	uonix_metrics_assert(
+		! uonix_analytics_metrics_snapshot_is_fresh(
+			array( 'status' => 'stale', 'updated_at' => '2026-09-13T23:00:00+00:00' ),
+			strtotime( '2026-09-13T23:30:00+00:00' )
+		),
+		'Snapshot stale nunca é classificado como fresco'
+	);
+}
+
+if ( function_exists( 'uonix_analytics_metrics_requested_period' ) && function_exists( 'uonix_analytics_metrics_refresh_redirect_url' ) ) {
+	uonix_metrics_assert( 90 === uonix_analytics_metrics_requested_period( array( 'uonix_period' => '90' ) ), 'POST preserva o período permitido escolhido' );
+	uonix_metrics_assert( 30 === uonix_analytics_metrics_requested_period( array( 'uonix_period' => '13' ) ), 'POST inválido volta ao período seguro de 30 dias' );
+	uonix_metrics_assert( 'https://uonix.com.br/wp-admin/admin.php?page=uonix-analytics&uonix_period=365&uonix_metrics_refresh=1' === uonix_analytics_metrics_refresh_redirect_url( 365 ), 'Redirect retorna ao período efetivamente sincronizado' );
+}
 
 if ( function_exists( 'uonix_analytics_metrics_finite_number' ) ) {
 	uonix_metrics_assert( null !== uonix_analytics_metrics_finite_number( '1.25' ), 'Número decimal finito é aceito' );
@@ -103,11 +191,101 @@ if ( function_exists( 'uonix_analytics_metrics_decode_ga4_report' ) && function_
 	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_search_console_report( '{"responseAggregationType":"byProperty","rows":[{"clicks":"1e309","impressions":2,"ctr":0.5,"position":3}]}' , false ) ), 'Decoder Search Console rejeita métrica infinita' );
 }
 
+if ( function_exists( 'uonix_analytics_metrics_decode_ga4_page_views_report' ) ) {
+	$page_views_raw = '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"2","rows":[{"dimensionValues":[{"value":"/produto-a/"}],"metricValues":[{"value":"12"}]},{"dimensionValues":[{"value":"/produto-b/"}],"metricValues":[{"value":"3"}]}]}';
+	$page_views_report = uonix_analytics_metrics_decode_ga4_page_views_report( $page_views_raw );
+	uonix_metrics_assert( is_array( $page_views_report ) && 2 === $page_views_report['row_count'] && 12.0 === $page_views_report['rows'][0]['views'], 'Decoder aceita pagePath e screenPageViews finitos' );
+
+	$page_views_empty = uonix_analytics_metrics_decode_ga4_page_views_report( '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"0"}' );
+	uonix_metrics_assert( is_array( $page_views_empty ) && 0 === $page_views_empty['row_count'] && array() === $page_views_empty['rows'], 'Decoder aceita relatório de visualizações vazio explícito' );
+	uonix_metrics_assert(
+		is_wp_error( uonix_analytics_metrics_decode_ga4_page_views_report( '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"inválido"}' ) ),
+		'Decoder rejeita rowCount inválido quando rows está ausente'
+	);
+	uonix_metrics_assert(
+		is_wp_error( uonix_analytics_metrics_decode_ga4_page_views_report( '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"9223372036854775808"}' ) ),
+		'Decoder rejeita rowCount fora da faixa quando rows está ausente'
+	);
+
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_page_views_report( '{"kind":"analyticsData#runReport","metadata":{},"rows":{}}' ) ), 'Decoder de visualizações rejeita objeto JSON em rows' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_page_views_report( '{"kind":"analyticsData#runReport","metadata":{},"rows":[{"dimensionValues":[],"metricValues":[{"value":"1"}]}]}' ) ), 'Decoder de visualizações rejeita pagePath ausente' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_page_views_report( '{"kind":"analyticsData#runReport","metadata":{},"rows":[{"dimensionValues":[{"value":"/a/"}],"metricValues":[{"value":"1e309"}]}]}' ) ), 'Decoder de visualizações rejeita screenPageViews não finito' );
+	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_page_views_report( '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"0","rows":[{"dimensionValues":[{"value":"/a/"}],"metricValues":[{"value":"1"}]}]}' ) ), 'Decoder de visualizações rejeita rowCount menor que as linhas retornadas' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_fetch_ga4_page_views' ) ) {
+	$page_view_requests = array();
+	$page_view_requester = static function ( $property_id, $token, $period, $limit, $offset ) use ( &$page_view_requests ) {
+		$page_view_requests[] = array( 'property_id' => $property_id, 'period' => $period, 'limit' => $limit, 'offset' => $offset );
+		if ( 0 === $offset ) {
+			return '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"3","rows":[{"dimensionValues":[{"value":"/a/?x=1"}],"metricValues":[{"value":"5"}]},{"dimensionValues":[{"value":"/a/?x=2"}],"metricValues":[{"value":"3"}]}]}';
+		}
+		return '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"3","rows":[{"dimensionValues":[{"value":"/b/"}],"metricValues":[{"value":"2"}]}]}';
+	};
+	$page_view_pages = uonix_analytics_metrics_fetch_ga4_page_views( '445033830', 'token-fixture', array( 'start' => '2026-09-01', 'end' => '2026-09-07' ), $page_view_requester, 2, 3 );
+	uonix_metrics_assert( is_array( $page_view_pages ) && true === $page_view_pages['complete'] && 3 === count( $page_view_pages['rows'] ), 'Paginador reúne todas as linhas e confirma cobertura' );
+	uonix_metrics_assert( array( 0, 2 ) === array_column( $page_view_requests, 'offset' ), 'Paginador avança pelo número real de linhas' );
+	uonix_metrics_assert( array( 2, 2 ) === array_column( $page_view_requests, 'limit' ), 'Paginador preserva o limite validado' );
+
+	$incomplete_requester = static function ( $property_id, $token, $period, $limit, $offset ) {
+		if ( 0 === $offset ) return '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"3","rows":[{"dimensionValues":[{"value":"/a/"}],"metricValues":[{"value":"1"}]}]}';
+		return '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"3","rows":[]}';
+	};
+	$incomplete_page_views = uonix_analytics_metrics_fetch_ga4_page_views( '445033830', 'token-fixture', array( 'start' => '2026-09-01', 'end' => '2026-09-07' ), $incomplete_requester, 2, 3 );
+	uonix_metrics_assert( is_array( $incomplete_page_views ) && false === $incomplete_page_views['complete'] && 1 === count( $incomplete_page_views['rows'] ), 'Paginador não inventa cobertura ao receber página vazia antes de rowCount' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_ga4_page_views_report' ) ) {
+	$GLOBALS['uonix_metrics_http_capture'] = array();
+	$page_views_raw_response = uonix_analytics_metrics_ga4_page_views_report(
+		'445033830',
+		'token-fixture',
+		array( 'start' => '2026-09-01', 'end' => '2026-09-07' ),
+		250,
+		500
+	);
+	$page_views_request = json_decode( $GLOBALS['uonix_metrics_http_capture']['args']['body'], true );
+	uonix_metrics_assert( is_string( $page_views_raw_response ) && 'pagePath' === $page_views_request['dimensions'][0]['name'], 'Requisição de visualizações usa a dimensão pagePath' );
+	uonix_metrics_assert( 'screenPageViews' === $page_views_request['metrics'][0]['name'], 'Requisição de visualizações usa a métrica screenPageViews' );
+	uonix_metrics_assert( '250' === $page_views_request['limit'] && '500' === $page_views_request['offset'], 'Requisição de visualizações envia paginação decimal' );
+	uonix_metrics_assert(
+		isset( $page_views_request['orderBys'][0]['dimension']['dimensionName'] )
+		&& 'pagePath' === $page_views_request['orderBys'][0]['dimension']['dimensionName'],
+		'Requisição paginada ordena deterministicamente por pagePath'
+	);
+	$GLOBALS['uonix_metrics_http_capture'] = null;
+}
+
+if ( function_exists( 'uonix_analytics_metrics_normalize_page_views' ) ) {
+	$normalized_page_views = uonix_analytics_metrics_normalize_page_views(
+		array(
+			array( 'path' => '/a/?x=1', 'views' => 5 ),
+			array( 'path' => '/a/?x=2', 'views' => 3 ),
+			array( 'path' => '/b/', 'views' => 2 ),
+			array( 'path' => 'https://externo.example/pagina/', 'views' => 99 ),
+		)
+	);
+	uonix_metrics_assert( array( '/a/' => 8.0, '/b/' => 2.0 ) === $normalized_page_views, 'Agregador soma caminhos normalizados e rejeita domínio externo' );
+}
+
 if ( function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
 	$ga4_empty_raw = '{"kind":"analyticsData#runReport","metadata":{}}';
 	$gsc_empty_raw = '{"responseAggregationType":"byProperty","rows":[]}';
 	$assembled = uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw );
 	uonix_metrics_assert( is_array( $assembled ) && isset( $assembled['ga4'], $assembled['search_console'] ), 'Bundle JSON bruto vazio monta dados agregados para sincronização' );
+	$page_views_fixture = array(
+		'complete' => true,
+		'rows' => array(
+			array( 'path' => '/produto-a/?utm_source=teste', 'views' => 9 ),
+			array( 'path' => '/produto-a/', 'views' => 3 ),
+			array( 'path' => '/produto-b/', 'views' => 4 ),
+		),
+	);
+	$assembled_with_page_views = uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $page_views_fixture );
+	uonix_metrics_assert( isset( $assembled_with_page_views['ga4']['page_views'], $assembled_with_page_views['ga4']['page_views_complete'] ), 'Montador preserva visualizações e cobertura para normalização' );
+	$page_views_sync = uonix_analytics_metrics_sync( static function () use ( $assembled_with_page_views ) { return $assembled_with_page_views; }, array( 'ga4_property_id' => '445033830', 'search_console_site_url' => 'sc-domain:uonix.com.br', 'credentials' => array() ), 365 );
+	uonix_metrics_assert( 12.0 === ( $page_views_sync['ga4']['page_views']['/produto-a/'] ?? null ), 'Sincronização agrega visualizações do mesmo caminho sem query string' );
+	uonix_metrics_assert( true === ( $page_views_sync['ga4']['page_views_complete'] ?? null ), 'Snapshot registra cobertura completa das visualizações' );
 	$raw_fixture_fetcher = static function () use ( $ga4_empty_raw, $gsc_empty_raw ) {
 		return uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw );
 	};
@@ -234,7 +412,7 @@ if ( function_exists( 'uonix_analytics_metrics_sync' ) ) {
 		);
 	};
 	$sync = uonix_analytics_metrics_sync( $fixture_fetcher, $test_config );
-	uonix_metrics_assert( is_array( $sync ) && 'updated' === $sync['status'] && 3.0 === $sync['ga4']['summary']['active_users']['current'], 'Sincronização armazena snapshot agregado com transport injetado' );
+	uonix_metrics_assert( is_array( $sync ) && 2 === $sync['version'] && 30 === $sync['period_days'] && 'updated' === $sync['status'] && 3.0 === $sync['ga4']['summary']['active_users']['current'], 'Sincronização armazena snapshot agregado de 30 dias com transport injetado' );
 	$stale = uonix_analytics_metrics_sync( static function () { throw new RuntimeException( 'transport failure' ); }, $test_config );
 	uonix_metrics_assert( is_array( $stale ) && 'stale' === $stale['status'] && 3.0 === $stale['ga4']['summary']['active_users']['current'], 'Falha posterior preserva último snapshot como desatualizado' );
 	$secret_error = uonix_analytics_metrics_sync( static function () { throw new RuntimeException( 'token email@example.test secret-marker' ); }, $test_config );
@@ -249,10 +427,27 @@ if ( function_exists( 'uonix_analytics_metrics_sync' ) ) {
 		$test_config
 	);
 	uonix_metrics_assert( is_array( $invalid_snapshot ) && 'stale' === $invalid_snapshot['status'] && 3.0 === $invalid_snapshot['ga4']['summary']['active_users']['current'], 'Métrica ausente não persiste snapshot updated inválido e preserva o anterior' );
-	$GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_sync_lock'] = time();
+	$GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_sync_lock_30'] = time();
 	$locked = uonix_analytics_metrics_sync( $fixture_fetcher, $test_config );
 	uonix_metrics_assert( is_wp_error( $locked ) && 'sync_locked' === $locked->get_error_code(), 'Trava impede sincronização concorrente' );
-	unset( $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_sync_lock'] );
+	unset( $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_sync_lock_30'] );
+
+	$seven_sync = uonix_analytics_metrics_sync( $fixture_fetcher, $test_config, 7 );
+	$ninety_sync = uonix_analytics_metrics_sync( $fixture_fetcher, $test_config, 90 );
+	uonix_metrics_assert( 7 === $seven_sync['period_days'] && 90 === $ninety_sync['period_days'], 'Sincronização persiste o período selecionado' );
+	uonix_metrics_assert( $seven_sync['periods'] !== $ninety_sync['periods'], 'Snapshots usam intervalos diferentes por período' );
+	uonix_metrics_assert( isset( $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_snapshot_v2_7'], $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_snapshot_v2_90'] ), 'Snapshots de 7 e 90 dias usam opções distintas' );
+
+	$seven_stale = uonix_analytics_metrics_sync( static function () { throw new RuntimeException( 'transport failure' ); }, $test_config, 7 );
+	uonix_metrics_assert( 'stale' === $seven_stale['status'], 'Falha marca somente o período solicitado como stale' );
+	uonix_metrics_assert( 'updated' === uonix_analytics_metrics_get_snapshot( 90 )['status'], 'Falha de 7 dias não marca snapshot de 90 dias como stale' );
+
+	$GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_sync_lock_7'] = time();
+	$seven_locked = uonix_analytics_metrics_sync( $fixture_fetcher, $test_config, 7 );
+	$ninety_unlocked = uonix_analytics_metrics_sync( $fixture_fetcher, $test_config, 90 );
+	uonix_metrics_assert( is_wp_error( $seven_locked ) && 'sync_locked' === $seven_locked->get_error_code(), 'Trava de 7 dias bloqueia o mesmo período' );
+	uonix_metrics_assert( is_array( $ninety_unlocked ) && 'updated' === $ninety_unlocked['status'], 'Trava de 7 dias não bloqueia 90 dias' );
+	unset( $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_sync_lock_7'] );
 }
 
 if ( 0 !== $failures ) {

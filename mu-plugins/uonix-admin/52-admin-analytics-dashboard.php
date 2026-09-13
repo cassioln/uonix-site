@@ -33,6 +33,94 @@ function uonix_register_analytics_dashboard_menu()
 }
 
 /**
+ * Resolve visualizações de uma URL no snapshot selecionado.
+ *
+ * Retorna zero apenas quando o relatório GA4 tem cobertura completa. Em um
+ * relatório parcial, a ausência do caminho permanece desconhecida (`null`).
+ */
+function uonix_analytics_dashboard_page_view_value( $snapshot, $permalink )
+{
+	if ( ! is_array( $snapshot ) || ! is_string( $permalink ) || ! isset( $snapshot['ga4'] ) || ! is_array( $snapshot['ga4'] ) ) {
+		return null;
+	}
+	$path = wp_parse_url( $permalink, PHP_URL_PATH );
+	if ( ! is_string( $path ) || '' === $path || '/' !== $path[0] ) {
+		return null;
+	}
+	if ( '/' !== $path ) {
+		$path = rtrim( $path, '/' ) . '/';
+	}
+	$page_views = isset( $snapshot['ga4']['page_views'] ) && is_array( $snapshot['ga4']['page_views'] ) ? $snapshot['ga4']['page_views'] : array();
+	if ( array_key_exists( $path, $page_views ) ) {
+		$value = is_numeric( $page_views[ $path ] ) ? (float) $page_views[ $path ] : null;
+		return null !== $value && is_finite( $value ) && $value >= 0 ? $value : null;
+	}
+	return true === ( $snapshot['ga4']['page_views_complete'] ?? false ) ? 0.0 : null;
+}
+
+/**
+ * Prepara até dez linhas de ranking com escala percentual relativa.
+ */
+function uonix_analytics_dashboard_chart_rows( $rows, $label_key, $value_key )
+{
+	$chart_rows = array();
+	foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+		if ( ! is_array( $row ) || ! isset( $row[ $label_key ], $row[ $value_key ] ) || ! is_scalar( $row[ $label_key ] ) || ! is_numeric( $row[ $value_key ] ) ) {
+			continue;
+		}
+		$label = trim( (string) $row[ $label_key ] );
+		$value = (float) $row[ $value_key ];
+		if ( '' === $label || ! is_finite( $value ) || $value < 0 ) {
+			continue;
+		}
+		$chart_rows[] = array( 'label' => $label, 'value' => $value );
+		if ( 10 === count( $chart_rows ) ) break;
+	}
+	$maximum = empty( $chart_rows ) ? 0.0 : max( array_column( $chart_rows, 'value' ) );
+	foreach ( $chart_rows as &$row ) {
+		$row['percent'] = $maximum > 0 ? round( ( $row['value'] / $maximum ) * 100, 1 ) : 0.0;
+	}
+	unset( $row );
+	return $chart_rows;
+}
+
+/**
+ * Formata a comparação de um KPI sem classificar a variação como melhora ou piora.
+ */
+function uonix_analytics_dashboard_metric_comparison( $metric )
+{
+	$fallback = array(
+		'label' => 'Comparação indisponível',
+		'class' => 'uonix-trend-empty',
+	);
+	if ( ! is_array( $metric ) || ! isset( $metric['state'] ) || ! is_string( $metric['state'] ) ) {
+		return $fallback;
+	}
+
+	if ( 'new' === $metric['state'] ) {
+		return array( 'label' => 'Novo no período', 'class' => 'uonix-trend-new' );
+	}
+	if ( 'empty' === $metric['state'] ) {
+		return array( 'label' => 'Sem dados nos dois períodos', 'class' => 'uonix-trend-empty' );
+	}
+	if ( 'comparable' !== $metric['state'] || ! isset( $metric['delta_percent'] ) || ! is_numeric( $metric['delta_percent'] ) ) {
+		return $fallback;
+	}
+
+	$delta_percent = (float) $metric['delta_percent'];
+	if ( ! is_finite( $delta_percent ) ) {
+		return $fallback;
+	}
+
+	$prefix = $delta_percent > 0 ? '+' : '';
+	$class = $delta_percent > 0 ? 'uonix-trend-up' : ( $delta_percent < 0 ? 'uonix-trend-down' : 'uonix-trend-flat' );
+	return array(
+		'label' => $prefix . number_format_i18n( $delta_percent, 1 ) . '% vs. período anterior',
+		'class' => $class,
+	);
+}
+
+/**
  * Renderiza a página do Dashboard de Analytics e Desempenho.
  */
 function uonix_render_analytics_dashboard_page()
@@ -96,10 +184,31 @@ function uonix_render_analytics_dashboard_page()
 	$google_ads_url = 'https://ads.google.com/aw/overview';
 	$gtm_url = 'https://tagmanager.google.com/#/container/accounts/6348960683/containers/248910884/workspaces';
 	$looker_url = 'https://lookerstudio.google.com/';
+	$looker_gallery_url = 'https://lookerstudio.google.com/gallery';
 	$meta_events_url = 'https://business.facebook.com/events_manager2';
+	$meta_diagnostics_url = 'https://business.facebook.com/events_manager2/diagnostics';
+	$meta_test_events_url = 'https://business.facebook.com/events_manager2/test_events';
 	$meta_suite_url = 'https://business.facebook.com/latest/home';
-	$metrics_snapshot = function_exists( 'uonix_analytics_metrics_get_snapshot' ) ? uonix_analytics_metrics_get_snapshot() : false;
+	$gsc_performance_url = 'https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain:uonix.com.br';
+	$gsc_index_url = 'https://search.google.com/search-console/index?resource_id=sc-domain:uonix.com.br';
+	$gsc_sitemaps_url = 'https://search.google.com/search-console/sitemaps?resource_id=sc-domain:uonix.com.br';
+	$adopt_tags_url = 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags';
+	$adopt_documents_url = 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/documents';
+	$adopt_settings_url = 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix';
+	$adopt_url = 'https://dash.goadopt.io/org/uonix/disclaimers';
+	$requested_period = isset( $_GET['uonix_period'] ) ? wp_unslash( $_GET['uonix_period'] ) : 30;
+	$metrics_period_days = function_exists( 'uonix_analytics_metrics_sanitize_period_days' ) ? uonix_analytics_metrics_sanitize_period_days( $requested_period ) : 30;
+	$metrics_snapshot = function_exists( 'uonix_analytics_metrics_get_snapshot' ) ? uonix_analytics_metrics_get_snapshot( $metrics_period_days ) : false;
 	$metrics_status = is_array( $metrics_snapshot ) ? ( $metrics_snapshot['status'] ?? 'updated' ) : 'unavailable';
+	$metrics_is_fresh = function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ) && uonix_analytics_metrics_snapshot_is_fresh( $metrics_snapshot );
+	$metrics_refresh_attempted = isset( $_GET['uonix_metrics_refresh'] ) && '1' === (string) wp_unslash( $_GET['uonix_metrics_refresh'] );
+	$metrics_auto_refresh = current_user_can( 'manage_options' ) && ! $metrics_is_fresh && ! $metrics_refresh_attempted;
+	$metrics_updated_at = is_array( $metrics_snapshot ) && isset( $metrics_snapshot['updated_at'] ) && is_string( $metrics_snapshot['updated_at'] ) ? $metrics_snapshot['updated_at'] : '';
+	$metrics_updated_timestamp = '' !== $metrics_updated_at ? strtotime( $metrics_updated_at ) : false;
+	$metrics_updated_datetime = false !== $metrics_updated_timestamp ? gmdate( 'c', $metrics_updated_timestamp ) : '';
+	$metrics_updated_label = false !== $metrics_updated_timestamp ? wp_date( 'd/m/Y H:i', $metrics_updated_timestamp ) : '';
+	$metrics_cache_class = $metrics_is_fresh ? 'uonix-cache-fresh' : ( is_array( $metrics_snapshot ) ? 'uonix-cache-stale' : 'uonix-cache-empty' );
+	$metrics_cache_label = $metrics_is_fresh ? 'Cache atualizado' : ( is_array( $metrics_snapshot ) ? 'Cache vencido' : 'Sem snapshot' );
 	?>
 	<div class="wrap uonix-analytics-wrap">
 		<!-- Header Principal -->
@@ -109,24 +218,6 @@ function uonix_render_analytics_dashboard_page()
 				<h1>Central de Desempenho, Catálogo & Analytics</h1>
 				<p>Consulte o catálogo e os artigos técnicos, e acesse as plataformas externas para verificar tráfego, tags
 					e indexação.</p>
-			</div>
-			<div class="uonix-header-actions">
-				<a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener"
-					class="uonix-btn uonix-btn-primary">
-					<span class="dashicons dashicons-chart-line"></span> Abrir Google Analytics
-				</a>
-				<a href="<?php echo esc_url($gsc_domain_url); ?>" target="_blank" rel="noopener"
-					class="uonix-btn uonix-btn-secondary">
-					<span class="dashicons dashicons-search"></span> Abrir Search Console
-				</a>
-				<a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener"
-					class="uonix-btn uonix-btn-ads">
-					<span class="dashicons dashicons-megaphone"></span> Abrir Google Ads
-				</a>
-				<a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener"
-					class="uonix-btn uonix-btn-meta">
-					<span class="dashicons dashicons-facebook-alt"></span> Meta Events Manager
-				</a>
 			</div>
 		</div>
 
@@ -179,57 +270,143 @@ function uonix_render_analytics_dashboard_page()
 				<div class="uonix-marketing-card">
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-chart-line uonix-sc-icon-ga"></span><h3>Google Analytics 4</h3></div>
 					<dl><dt>Configuração local</dt><dd><?php echo esc_html($analytics_is_configured ? 'G-RFY1BB1RM4 via GTM' : 'Não configurado'); ?></dd><dt>Finalidade</dt><dd>Mensuração estatística conforme consentimento.</dd><dt>Validar em</dt><dd>Relatórios, Eventos e DebugView no GA4.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">Visão geral e tempo real</a></li><li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">Páginas e telas</a></li><li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">Aquisição de tráfego</a></li></ul>
 					<a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Google Analytics</a>
 				</div>
 				<div class="uonix-marketing-card">
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-megaphone uonix-sc-icon-ads"></span><h3>Google Ads via GTM</h3></div>
 					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gtm_is_audited ? $google_ads_id . ' — Google Tag, vinculador de conversões e remarketing' : $google_ads_status); ?></dd><dt>Finalidade</dt><dd>Mensuração de mídia e remarketing conforme consentimento de marketing.</dd><dt>Validar em</dt><dd>Validar campanhas, públicos e resultados no Google Ads.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Campanhas e grupos de anúncios</a></li><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Diagnóstico de mensuração</a></li><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Públicos de remarketing</a></li></ul>
 					<a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline uonix-btn-outline-ads">Abrir Google Ads</a>
 				</div>
 				<div class="uonix-marketing-card">
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-shield uonix-sc-icon-adopt"></span><h3>AdOpt e Consent Mode</h3></div>
 					<dl><dt>Configuração local</dt><dd><?php echo esc_html($adopt_status); ?></dd><dt>Finalidade</dt><dd>Controlar categorias estatísticas e de marketing.</dd><dt>Validar em</dt><dd>Banner e preferências na produção.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url( $adopt_tags_url ); ?>" target="_blank" rel="noopener">Escanear tags</a></li><li><a href="<?php echo esc_url( $adopt_documents_url ); ?>" target="_blank" rel="noopener">Documentos</a></li><li><a href="<?php echo esc_url( $adopt_settings_url ); ?>" target="_blank" rel="noopener">Configurações</a></li><li><a href="<?php echo esc_url( $adopt_url ); ?>" target="_blank" rel="noopener">Abrir AdOpt</a></li></ul>
 				</div>
 				<div class="uonix-marketing-card">
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-facebook-alt uonix-sc-icon-meta"></span><h3>Meta Pixel</h3></div>
-					<dl><dt>Configuração local</dt><dd><?php echo esc_html($meta_status); ?></dd><dt>Finalidade</dt><dd>PageView sujeito ao consentimento de marketing.</dd><dt>Validar em</dt><dd>Events Manager e diagnóstico da Meta.</dd></dl>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($meta_status); ?></dd><dt>Finalidade</dt><dd>PageView sujeito ao consentimento de marketing.</dd><dt>Validar em</dt><dd>Abra a plataforma para verificar o recebimento, diagnósticos e qualidade do Pixel.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener">Gerenciador de Eventos</a></li><li><a href="<?php echo esc_url( $meta_diagnostics_url ); ?>" target="_blank" rel="noopener">Diagnóstico e qualidade</a></li><li><a href="<?php echo esc_url( $meta_test_events_url ); ?>" target="_blank" rel="noopener">Testar eventos</a></li><li><a href="<?php echo esc_url($meta_suite_url); ?>" target="_blank" rel="noopener">Meta Business Suite</a></li></ul>
 					<a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline uonix-btn-outline-meta">Abrir Events Manager</a>
 				</div>
 				<div class="uonix-marketing-card">
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-search uonix-sc-icon-gsc"></span><h3>Google Search Console</h3></div>
 					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gsc_status); ?></dd><dt>Finalidade</dt><dd>Pesquisar desempenho orgânico e indexação.</dd><dt>Validar em</dt><dd>Desempenho, páginas e sitemaps no Search Console.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url( $gsc_performance_url ); ?>" target="_blank" rel="noopener">Consultas de pesquisa</a></li><li><a href="<?php echo esc_url( $gsc_index_url ); ?>" target="_blank" rel="noopener">Cobertura e indexação</a></li><li><a href="<?php echo esc_url( $gsc_sitemaps_url ); ?>" target="_blank" rel="noopener">Sitemaps XML</a></li></ul>
 					<a href="<?php echo esc_url($gsc_domain_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Search Console</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-analytics uonix-sc-icon-looker"></span><h3>Google Looker Studio</h3></div>
+					<dl><dt>Configuração local</dt><dd>Plataforma externa</dd><dt>Finalidade</dt><dd>Criar painéis e relatórios personalizados.</dd><dt>Validar em</dt><dd>Fontes de dados e permissões no Looker Studio.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener">Abrir painéis</a></li><li><a href="<?php echo esc_url( $looker_gallery_url ); ?>" target="_blank" rel="noopener">Galeria de modelos</a></li></ul>
+					<a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Looker Studio</a>
 				</div>
 			</div>
 		</section>
 
 		<section class="uonix-marketing-section" aria-labelledby="uonix-metrics-title">
-			<div class="uonix-panel-header">
-				<h2 id="uonix-metrics-title">Métricas agregadas dos últimos 30 dias</h2>
-				<p><?php echo esc_html( 'updated' === $metrics_status ? 'Fonte: GA4 Data API e Search Console API. Comparação com os 30 dias anteriores.' : ( 'stale' === $metrics_status ? 'Último snapshot disponível; atualização pendente.' : 'Conexão não configurada ou sem snapshot. Nenhuma métrica é exibida.' ) ); ?></p>
+			<div class="uonix-panel-header uonix-metrics-panel-header">
+				<div class="uonix-metrics-copy">
+					<h2 id="uonix-metrics-title">Métricas agregadas dos últimos <?php echo esc_html( $metrics_period_days ); ?> dias</h2>
+					<p><?php echo esc_html( 'updated' === $metrics_status ? 'Fonte: GA4 Data API e Search Console API. Comparação com os ' . $metrics_period_days . ' dias anteriores.' : ( 'stale' === $metrics_status ? 'Último snapshot disponível; atualização pendente.' : 'Conexão não configurada ou sem snapshot. Nenhuma métrica é exibida.' ) ); ?></p>
+					<div class="uonix-metrics-cache-meta">
+						<span class="uonix-metrics-cache-status <?php echo esc_attr( $metrics_cache_class ); ?>"><?php echo esc_html( $metrics_cache_label ); ?></span>
+						<?php if ( '' !== $metrics_updated_label ) : ?>
+							<time datetime="<?php echo esc_attr( $metrics_updated_datetime ); ?>">Atualizado em <?php echo esc_html( $metrics_updated_label ); ?></time>
+						<?php endif; ?>
+					</div>
+				</div>
+				<div class="uonix-metrics-toolbar">
+				<form method="get" action="<?php echo esc_url( admin_url( 'admin.php' ) ); ?>" class="uonix-metrics-period-form">
+					<input type="hidden" name="page" value="uonix-analytics" />
+					<label for="uonix-metrics-period">Período</label>
+					<select id="uonix-metrics-period" name="uonix_period" onchange="this.form.requestSubmit()">
+						<?php foreach ( array( 7, 30, 90, 365 ) as $period_option ) : ?>
+							<option value="<?php echo esc_attr( $period_option ); ?>"<?php echo $period_option === $metrics_period_days ? ' selected="selected"' : ''; ?>>Últimos <?php echo esc_html( $period_option ); ?> dias</option>
+						<?php endforeach; ?>
+					</select>
+					<noscript><button type="submit" class="button">Aplicar período</button></noscript>
+				</form>
 				<?php if ( current_user_can( 'manage_options' ) ) : ?>
-					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="uonix-metrics-refresh-form">
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="uonix-metrics-refresh-form"<?php echo $metrics_auto_refresh ? ' data-uonix-auto-refresh="1"' : ''; ?>>
 						<input type="hidden" name="action" value="uonix_analytics_metrics_refresh" />
+						<input type="hidden" name="uonix_period" value="<?php echo esc_attr( $metrics_period_days ); ?>" />
 						<?php wp_nonce_field( 'uonix_analytics_metrics_refresh' ); ?>
 						<button type="submit" class="button button-secondary">Atualizar métricas agora</button>
 						<span>Consulta somente leitura.</span>
 					</form>
+					<?php if ( $metrics_auto_refresh ) : ?>
+						<script>
+							document.addEventListener('DOMContentLoaded', function () {
+								var form = document.querySelector('.uonix-metrics-refresh-form[data-uonix-auto-refresh="1"]');
+								if (!form) return;
+								var button = form.querySelector('button[type="submit"]');
+								if (button) {
+									button.disabled = true;
+									button.textContent = 'Atualizando métricas…';
+								}
+								if (typeof form.requestSubmit === 'function') form.requestSubmit();
+								else form.submit();
+							});
+						</script>
+					<?php endif; ?>
 				<?php endif; ?>
+				</div>
 			</div>
 			<?php if ( is_array( $metrics_snapshot ) && isset( $metrics_snapshot['ga4'], $metrics_snapshot['search_console'] ) ) :
 				$ga4_summary = $metrics_snapshot['ga4']['summary'];
 				$gsc_summary = $metrics_snapshot['search_console']['summary'];
 				$metric_value = static function ( $metric, $percent = false ) { return $percent ? number_format_i18n( (float) $metric['current'] * 100, 1 ) . '%' : number_format_i18n( (float) $metric['current'] ); };
+				$active_users_comparison = uonix_analytics_dashboard_metric_comparison( $ga4_summary['active_users'] );
+				$sessions_comparison = uonix_analytics_dashboard_metric_comparison( $ga4_summary['sessions'] );
+				$clicks_comparison = uonix_analytics_dashboard_metric_comparison( $gsc_summary['clicks'] );
+				$impressions_comparison = uonix_analytics_dashboard_metric_comparison( $gsc_summary['impressions'] );
+				$landing_page_chart = uonix_analytics_dashboard_chart_rows( $metrics_snapshot['ga4']['landing_pages'] ?? array(), 'path', 'sessions' );
+				$query_chart = uonix_analytics_dashboard_chart_rows( $metrics_snapshot['search_console']['queries'] ?? array(), 'query', 'clicks' );
 			?>
 			<div class="uonix-kpi-grid">
-				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $ga4_summary['active_users'] ) ); ?></span><span class="uonix-kpi-title">Usuários ativos</span></div></div>
-				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $ga4_summary['sessions'] ) ); ?></span><span class="uonix-kpi-title">Sessões</span></div></div>
-				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['clicks'] ) ); ?></span><span class="uonix-kpi-title">Cliques orgânicos</span></div></div>
-				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['impressions'] ) ); ?></span><span class="uonix-kpi-title">Impressões orgânicas</span></div></div>
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $ga4_summary['active_users'] ) ); ?></span><span class="uonix-kpi-title">Usuários ativos</span><span class="uonix-kpi-comparison <?php echo esc_attr( $active_users_comparison['class'] ); ?>"><?php echo esc_html( $active_users_comparison['label'] ); ?></span></div></div>
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $ga4_summary['sessions'] ) ); ?></span><span class="uonix-kpi-title">Sessões</span><span class="uonix-kpi-comparison <?php echo esc_attr( $sessions_comparison['class'] ); ?>"><?php echo esc_html( $sessions_comparison['label'] ); ?></span></div></div>
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['clicks'] ) ); ?></span><span class="uonix-kpi-title">Cliques orgânicos</span><span class="uonix-kpi-comparison <?php echo esc_attr( $clicks_comparison['class'] ); ?>"><?php echo esc_html( $clicks_comparison['label'] ); ?></span></div></div>
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['impressions'] ) ); ?></span><span class="uonix-kpi-title">Impressões orgânicas</span><span class="uonix-kpi-comparison <?php echo esc_attr( $impressions_comparison['class'] ); ?>"><?php echo esc_html( $impressions_comparison['label'] ); ?></span></div></div>
 			</div>
-			<div class="uonix-shortcuts-grid">
-				<div class="uonix-shortcut-card"><h3>Principais páginas de entrada</h3><ul class="uonix-shortcut-links"><?php foreach ( array_slice( $metrics_snapshot['ga4']['landing_pages'], 0, 10 ) as $row ) : ?><li><code><?php echo esc_html( $row['path'] ); ?></code> — <?php echo esc_html( number_format_i18n( (float) $row['sessions'] ) ); ?> sessões</li><?php endforeach; ?></ul></div>
-				<div class="uonix-shortcut-card"><h3>Principais consultas orgânicas</h3><ul class="uonix-shortcut-links"><?php foreach ( array_slice( $metrics_snapshot['search_console']['queries'], 0, 10 ) as $row ) : ?><li><?php echo esc_html( $row['query'] ); ?> — <?php echo esc_html( number_format_i18n( (float) $row['clicks'] ) ); ?> cliques</li><?php endforeach; ?></ul><p>O Search Console pode omitir linhas de baixo volume.</p></div>
+			<div class="uonix-ranking-grid">
+				<section class="uonix-ranking-chart" aria-labelledby="uonix-landing-pages-chart-title">
+					<h3 id="uonix-landing-pages-chart-title">Principais páginas de entrada</h3>
+					<?php if ( ! empty( $landing_page_chart ) ) : ?>
+						<ol class="uonix-ranking-list">
+							<?php foreach ( $landing_page_chart as $row ) :
+								$formatted_value = number_format_i18n( $row['value'] );
+							?>
+								<li aria-label="<?php echo esc_attr( $row['label'] . ': ' . $formatted_value . ' sessões' ); ?>">
+									<div class="uonix-ranking-label"><code><?php echo esc_html( $row['label'] ); ?></code><strong><?php echo esc_html( $formatted_value ); ?> sessões</strong></div>
+									<div class="uonix-ranking-bar-track" aria-hidden="true"><span class="uonix-ranking-bar-fill" style="width:<?php echo esc_attr( number_format( $row['percent'], 1, '.', '' ) ); ?>%"></span></div>
+								</li>
+							<?php endforeach; ?>
+						</ol>
+					<?php else : ?>
+						<p class="uonix-ranking-empty">Nenhuma página de entrada no período.</p>
+					<?php endif; ?>
+				</section>
+				<section class="uonix-ranking-chart" aria-labelledby="uonix-queries-chart-title">
+					<h3 id="uonix-queries-chart-title">Principais consultas orgânicas</h3>
+					<?php if ( ! empty( $query_chart ) ) : ?>
+						<ol class="uonix-ranking-list">
+							<?php foreach ( $query_chart as $row ) :
+								$formatted_value = number_format_i18n( $row['value'] );
+							?>
+								<li aria-label="<?php echo esc_attr( $row['label'] . ': ' . $formatted_value . ' cliques' ); ?>">
+									<div class="uonix-ranking-label"><span><?php echo esc_html( $row['label'] ); ?></span><strong><?php echo esc_html( $formatted_value ); ?> cliques</strong></div>
+									<div class="uonix-ranking-bar-track" aria-hidden="true"><span class="uonix-ranking-bar-fill uonix-ranking-bar-fill-search" style="width:<?php echo esc_attr( number_format( $row['percent'], 1, '.', '' ) ); ?>%"></span></div>
+								</li>
+							<?php endforeach; ?>
+						</ol>
+						<p class="uonix-ranking-note">O Search Console pode omitir linhas de baixo volume.</p>
+					<?php else : ?>
+						<p class="uonix-ranking-empty">Nenhuma consulta orgânica disponível no período.</p>
+					<?php endif; ?>
+				</section>
 			</div>
 			<?php endif; ?>
 		</section>
@@ -284,9 +461,6 @@ function uonix_render_analytics_dashboard_page()
 				<span class="dashicons dashicons-hammer"></span> Serviços de Engenharia
 				(<?php echo esc_html($total_services); ?>)
 			</button>
-			<button class="uonix-tab-btn" data-tab="tab-google-hub">
-				<span class="dashicons dashicons-dashboard"></span> Ferramentas & Tráfego (Google + Meta)
-			</button>
 		</div>
 
 		<!-- Conteúdo das Abas -->
@@ -307,6 +481,7 @@ function uonix_render_analytics_dashboard_page()
 								<th>Categoria</th>
 								<th>Palavra-Chave Principal</th>
 								<th>Título SEO (Google)</th>
+								<th>Visualizações — <?php echo esc_html( $metrics_period_days ); ?> dias</th>
 								<th style="text-align:right;">Ações Rápidas</th>
 							</tr>
 						</thead>
@@ -314,6 +489,7 @@ function uonix_render_analytics_dashboard_page()
 							<?php foreach ($products_query as $product_post):
 								$pid = $product_post->ID;
 								$permalink = get_permalink($pid);
+								$page_view_value = uonix_analytics_dashboard_page_view_value( $metrics_snapshot, $permalink );
 								$edit_link = get_edit_post_link($pid);
 								$kw = get_post_meta($pid, 'rank_math_focus_keyword', true);
 								$seo_title = get_post_meta($pid, 'rank_math_title', true);
@@ -332,6 +508,7 @@ function uonix_render_analytics_dashboard_page()
 									<td class="uonix-desc-col">
 										<?php echo esc_html($seo_title ? $seo_title : $product_post->post_title); ?>
 									</td>
+									<td class="uonix-page-views-col"><?php echo esc_html( null === $page_view_value ? '—' : number_format_i18n( $page_view_value ) ); ?></td>
 									<td style="text-align:right; white-space:nowrap;">
 										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
 											title="Ver no site">
@@ -369,6 +546,7 @@ function uonix_render_analytics_dashboard_page()
 								<th>Data</th>
 								<th>Palavra-Chave Principal</th>
 								<th>Título SEO</th>
+								<th>Visualizações — <?php echo esc_html( $metrics_period_days ); ?> dias</th>
 								<th style="text-align:right;">Ações Rápidas</th>
 							</tr>
 						</thead>
@@ -376,6 +554,7 @@ function uonix_render_analytics_dashboard_page()
 							<?php foreach ($posts_query as $blog_post):
 								$bid = $blog_post->ID;
 								$permalink = get_permalink($bid);
+								$page_view_value = uonix_analytics_dashboard_page_view_value( $metrics_snapshot, $permalink );
 								$edit_link = get_edit_post_link($bid);
 								$kw = get_post_meta($bid, 'rank_math_focus_keyword', true);
 								$seo_title = get_post_meta($bid, 'rank_math_title', true);
@@ -392,6 +571,7 @@ function uonix_render_analytics_dashboard_page()
 									<td class="uonix-desc-col">
 										<?php echo esc_html($seo_title ? $seo_title : $blog_post->post_title); ?>
 									</td>
+									<td class="uonix-page-views-col"><?php echo esc_html( null === $page_view_value ? '—' : number_format_i18n( $page_view_value ) ); ?></td>
 									<td style="text-align:right; white-space:nowrap;">
 										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
 											title="Ver no site">
@@ -430,6 +610,7 @@ function uonix_render_analytics_dashboard_page()
 								<th>Palavra-Chave Principal</th>
 								<th>Dados Estruturados</th>
 								<th>Título SEO</th>
+								<th>Visualizações — <?php echo esc_html( $metrics_period_days ); ?> dias</th>
 								<th style="text-align:right;">Ações Rápidas</th>
 							</tr>
 						</thead>
@@ -437,6 +618,7 @@ function uonix_render_analytics_dashboard_page()
 							<?php foreach ($services_query as $service_post):
 								$sid = $service_post->ID;
 								$permalink = get_permalink($sid);
+								$page_view_value = uonix_analytics_dashboard_page_view_value( $metrics_snapshot, $permalink );
 								$edit_link = get_edit_post_link($sid);
 								$kw = get_post_meta($sid, 'rank_math_focus_keyword', true);
 								$seo_title = get_post_meta($sid, 'rank_math_title', true);
@@ -453,6 +635,7 @@ function uonix_render_analytics_dashboard_page()
 									<td class="uonix-desc-col">
 										<?php echo esc_html($seo_title ? $seo_title : $service_post->post_title); ?>
 									</td>
+									<td class="uonix-page-views-col"><?php echo esc_html( null === $page_view_value ? '—' : number_format_i18n( $page_view_value ) ); ?></td>
 									<td style="text-align:right; white-space:nowrap;">
 										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
 											title="Ver no site">
@@ -475,113 +658,15 @@ function uonix_render_analytics_dashboard_page()
 				</div>
 			</div>
 
-			<!-- ABA 4: ATALHOS GOOGLE & META -->
-			<div id="tab-google-hub" class="uonix-tab-panel">
-				<div class="uonix-panel-header">
-					<h2>Hub de Acesso Direto às Ferramentas de Tráfego & Monitoramento</h2>
-					<p>Clique nos cards abaixo para abrir os relatórios específicos diretamente nas plataformas Google e
-						Meta.</p>
-				</div>
-				<div class="uonix-shortcuts-grid">
-
-					<div class="uonix-shortcut-card">
-						<div class="uonix-shortcut-header">
-							<span class="dashicons dashicons-chart-line uonix-sc-icon-ga"></span>
-							<h3>Google Analytics 4 (GA4)</h3>
-						</div>
-						<p>Consulte relatórios de audiência, páginas, aquisição e eventos na propriedade configurada.</p>
-						<ul class="uonix-shortcut-links">
-							<li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">➔ Visão Geral do
-									Tráfego em Tempo Real</a></li>
-							<li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">➔ Relatório de
-									Páginas e Telas Mais Acessadas</a></li>
-							<li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">➔ Origem e
-									Canais de Aquisição de Visitantes</a></li>
-						</ul>
-						<a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener"
-							class="uonix-btn uonix-btn-outline">Abrir GA4 Dashboard</a>
-					</div>
-
-					<div class="uonix-shortcut-card">
-						<div class="uonix-shortcut-header">
-							<span class="dashicons dashicons-search uonix-sc-icon-gsc"></span>
-							<h3>Google Search Console</h3>
-						</div>
-						<p>Consulte consultas, páginas, impressões, cliques, posição média e indexação na propriedade do domínio.</p>
-						<ul class="uonix-shortcut-links">
-							<li><a href="<?php echo esc_url('https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain:uonix.com.br'); ?>"
-									target="_blank" rel="noopener">➔ Consultas de Pesquisa & Palavras-Chave</a></li>
-							<li><a href="<?php echo esc_url('https://search.google.com/search-console/index?resource_id=sc-domain:uonix.com.br'); ?>"
-									target="_blank" rel="noopener">➔ Status de Cobertura e Indexação de Páginas</a></li>
-							<li><a href="<?php echo esc_url('https://search.google.com/search-console/sitemaps?resource_id=sc-domain:uonix.com.br'); ?>"
-									target="_blank" rel="noopener">➔ Sitemaps XML Enviados</a></li>
-						</ul>
-						<a href="<?php echo esc_url($gsc_domain_url); ?>" target="_blank" rel="noopener"
-							class="uonix-btn uonix-btn-outline">Abrir Search Console</a>
-					</div>
-
-					<div class="uonix-shortcut-card">
-						<div class="uonix-shortcut-header">
-							<span class="dashicons dashicons-megaphone uonix-sc-icon-ads"></span>
-							<h3>Google Ads</h3>
-						</div>
-						<p><?php echo esc_html($gtm_is_audited ? 'A conta técnica ' . $google_ads_id . ' usa Google Tag, vinculador e remarketing pelo GTM.' : 'A configuração do Google Ads requer validação do container GTM auditado.'); ?> Resultados devem ser confirmados no Google Ads.</p>
-						<ul class="uonix-shortcut-links">
-							<li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">➔ Campanhas e grupos de anúncios</a></li>
-							<li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">➔ Objetivos e diagnóstico de mensuração</a></li>
-							<li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">➔ Públicos de remarketing</a></li>
-						</ul>
-						<a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener"
-							class="uonix-btn uonix-btn-outline uonix-btn-outline-ads">Abrir Google Ads</a>
-					</div>
-
-					<div class="uonix-shortcut-card">
-						<div class="uonix-shortcut-header">
-							<span class="dashicons dashicons-facebook-alt uonix-sc-icon-meta"></span>
-							<h3>Meta Pixel (Facebook & Instagram)</h3>
-						</div>
-						<p>Abra a plataforma para verificar o recebimento, diagnósticos e qualidade do Pixel.</p>
-						<ul class="uonix-shortcut-links">
-							<li><a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener">➔
-									Gerenciador de Eventos (Events Manager)</a></li>
-							<li><a href="<?php echo esc_url('https://business.facebook.com/events_manager2/diagnostics'); ?>"
-									target="_blank" rel="noopener">➔ Diagnóstico & Qualidade dos Eventos</a></li>
-							<li><a href="<?php echo esc_url('https://business.facebook.com/events_manager2/test_events'); ?>"
-									target="_blank" rel="noopener">➔ Testar Eventos do Pixel em Tempo Real</a></li>
-							<li><a href="<?php echo esc_url($meta_suite_url); ?>" target="_blank" rel="noopener">➔ Meta
-									Business Suite Principal</a></li>
-						</ul>
-						<a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener"
-							class="uonix-btn uonix-btn-outline uonix-btn-outline-meta">Abrir Meta Events Manager</a>
-					</div>
-
-					<div class="uonix-shortcut-card">
-						<div class="uonix-shortcut-header">
-							<span class="dashicons dashicons-analytics uonix-sc-icon-looker"></span>
-							<h3>Google Looker Studio</h3>
-						</div>
-						<p>Crie e visualize painéis executivos visuais e relatórios automatizados por e-mail com gráficos
-							customizados.</p>
-						<ul class="uonix-shortcut-links">
-							<li><a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener">➔ Acessar
-									Looker Studio</a></li>
-							<li><a href="https://lookerstudio.google.com/gallery" target="_blank" rel="noopener">➔ Galeria
-									de modelos de relatórios</a></li>
-						</ul>
-						<a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener"
-							class="uonix-btn uonix-btn-outline">Abrir Looker Studio</a>
-					</div>
-
-				</div>
-			</div>
-
 		</div>
 	</div>
 
 	<!-- Estilos CSS do Dashboard -->
 	<style>
 		.uonix-analytics-wrap {
-			max-width: 1350px;
+			max-width: none;
+			width: auto;
+			box-sizing: border-box;
 			margin: 20px 20px 40px 0;
 			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
 			color: #1e293b;
@@ -625,12 +710,6 @@ function uonix_render_analytics_dashboard_page()
 			max-width: 680px;
 		}
 
-		.uonix-header-actions {
-			display: flex;
-			gap: 10px;
-			flex-shrink: 0;
-		}
-
 		.uonix-btn {
 			display: inline-flex;
 			align-items: center;
@@ -647,50 +726,6 @@ function uonix_render_analytics_dashboard_page()
 			font-size: 16px;
 			width: 16px;
 			height: 16px;
-		}
-
-		.uonix-btn-primary {
-			background: #2563eb;
-			color: #ffffff;
-		}
-
-		.uonix-btn-primary:hover {
-			background: #1d4ed8;
-			color: #ffffff;
-		}
-
-		.uonix-btn-secondary {
-			background: rgba(255, 255, 255, 0.15);
-			color: #ffffff;
-			border: 1px solid rgba(255, 255, 255, 0.2);
-		}
-
-		.uonix-btn-secondary:hover {
-			background: rgba(255, 255, 255, 0.25);
-			color: #ffffff;
-		}
-
-		.uonix-btn-meta {
-			background: #1877f2;
-			color: #ffffff;
-			border: 1px solid #1877f2;
-		}
-
-		.uonix-btn-meta:hover {
-			background: #166fe5;
-			color: #ffffff;
-		}
-
-		.uonix-btn-ads {
-			background: #f59e0b;
-			color: #1f2937;
-			border: 1px solid #f59e0b;
-		}
-
-		.uonix-btn-ads:hover {
-			background: #d97706;
-			border-color: #d97706;
-			color: #ffffff;
 		}
 
 		.uonix-btn-outline {
@@ -804,6 +839,31 @@ function uonix_render_analytics_dashboard_page()
 			color: #334155;
 		}
 
+		.uonix-card-links {
+			list-style: none;
+			margin: 16px 0;
+			padding: 14px 0 0;
+			border-top: 1px solid #e2e8f0;
+			display: grid;
+			gap: 8px;
+		}
+
+		.uonix-card-links li {
+			margin: 0;
+		}
+
+		.uonix-card-links a {
+			color: #2563eb;
+			font-size: 13px;
+			font-weight: 600;
+			text-decoration: none;
+		}
+
+		.uonix-card-links a:hover,
+		.uonix-card-links a:focus {
+			text-decoration: underline;
+		}
+
 		.uonix-marketing-card .uonix-btn-outline {
 			margin-top: auto;
 		}
@@ -885,6 +945,27 @@ function uonix_render_analytics_dashboard_page()
 			margin-top: 1px;
 		}
 
+		.uonix-kpi-comparison {
+			display: block;
+			font-size: 11px;
+			font-weight: 700;
+			margin-top: 5px;
+		}
+
+		.uonix-trend-up {
+			color: #047857;
+		}
+
+		.uonix-trend-down {
+			color: #b45309;
+		}
+
+		.uonix-trend-new,
+		.uonix-trend-flat,
+		.uonix-trend-empty {
+			color: #64748b;
+		}
+
 		.uonix-tabs-nav {
 			display: flex;
 			gap: 6px;
@@ -948,16 +1029,99 @@ function uonix_render_analytics_dashboard_page()
 			color: #64748b;
 		}
 
+		.uonix-metrics-panel-header {
+			display: flex;
+			align-items: flex-end;
+			justify-content: space-between;
+			gap: 24px;
+		}
+
+		.uonix-metrics-copy {
+			min-width: 0;
+			flex: 1;
+		}
+
+		.uonix-metrics-cache-meta {
+			display: flex;
+			align-items: center;
+			flex-wrap: wrap;
+			gap: 8px 12px;
+			margin-top: 10px;
+			font-size: 12px;
+			color: #64748b;
+		}
+
+		.uonix-metrics-cache-status {
+			display: inline-flex;
+			align-items: center;
+			padding: 3px 9px;
+			border-radius: 999px;
+			font-weight: 700;
+		}
+
+		.uonix-cache-fresh {
+			background: #dcfce7;
+			color: #166534;
+		}
+
+		.uonix-cache-stale {
+			background: #fef3c7;
+			color: #92400e;
+		}
+
+		.uonix-cache-empty {
+			background: #e2e8f0;
+			color: #475569;
+		}
+
+		.uonix-metrics-toolbar,
+		.uonix-metrics-period-form,
+		.uonix-metrics-refresh-form {
+			display: flex;
+			align-items: center;
+		}
+
+		.uonix-metrics-toolbar {
+			flex-wrap: wrap;
+			justify-content: flex-end;
+			gap: 10px;
+		}
+
+		.uonix-metrics-period-form {
+			gap: 7px;
+		}
+
+		.uonix-metrics-period-form label {
+			font-size: 12px;
+			font-weight: 700;
+			color: #475569;
+		}
+
+		.uonix-metrics-period-form select {
+			min-width: 150px;
+		}
+
+		.uonix-metrics-refresh-form {
+			gap: 8px;
+		}
+
+		.uonix-metrics-refresh-form span {
+			font-size: 11px;
+			color: #64748b;
+		}
+
 		.uonix-table-responsive {
 			background: #ffffff;
 			border: 1px solid #e2e8f0;
 			border-radius: 8px;
-			overflow: hidden;
+			overflow-x: auto;
+			overflow-y: hidden;
 			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 		}
 
 		.uonix-table {
 			width: 100%;
+			min-width: 900px;
 			border-collapse: collapse;
 			text-align: left;
 			font-size: 13px;
@@ -1021,62 +1185,89 @@ function uonix_render_analytics_dashboard_page()
 			max-width: 320px;
 		}
 
-		.uonix-shortcuts-grid {
-			display: grid;
-			grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-			gap: 20px;
+		.uonix-page-views-col {
+			text-align: right;
+			font-variant-numeric: tabular-nums;
+			white-space: nowrap;
 		}
 
-		.uonix-shortcut-card {
+		.uonix-ranking-grid {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 20px;
+			margin-top: 20px;
+		}
+
+		.uonix-ranking-chart {
 			background: #ffffff;
 			border: 1px solid #e2e8f0;
 			border-radius: 10px;
 			padding: 22px;
-			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-			display: flex;
-			flex-direction: column;
-			justify-content: space-between;
 		}
 
-		.uonix-shortcut-header {
-			display: flex;
-			align-items: center;
-			gap: 12px;
-			margin-bottom: 10px;
-		}
-
-		.uonix-shortcut-header h3 {
-			margin: 0;
+		.uonix-ranking-chart h3 {
+			margin: 0 0 18px;
 			font-size: 16px;
-			font-weight: 700;
 			color: #0f172a;
 		}
 
-		.uonix-shortcut-card p {
-			font-size: 13px;
-			color: #64748b;
-			margin: 0 0 14px 0;
-		}
-
-		.uonix-shortcut-links {
+		.uonix-ranking-list {
 			list-style: none;
+			margin: 0;
 			padding: 0;
-			margin: 0 0 16px 0;
+			display: grid;
+			gap: 14px;
+		}
+
+		.uonix-ranking-list li {
+			margin: 0;
+		}
+
+		.uonix-ranking-label {
+			display: flex;
+			align-items: baseline;
+			justify-content: space-between;
+			gap: 16px;
+			margin-bottom: 6px;
 			font-size: 13px;
 		}
 
-		.uonix-shortcut-links li {
-			margin-bottom: 8px;
+		.uonix-ranking-label code,
+		.uonix-ranking-label span {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
 		}
 
-		.uonix-shortcut-links a {
-			color: #2563eb;
-			text-decoration: none;
-			font-weight: 500;
+		.uonix-ranking-label strong {
+			color: #334155;
+			font-size: 12px;
+			white-space: nowrap;
 		}
 
-		.uonix-shortcut-links a:hover {
-			text-decoration: underline;
+		.uonix-ranking-bar-track {
+			height: 9px;
+			background: #e2e8f0;
+			border-radius: 999px;
+			overflow: hidden;
+		}
+
+		.uonix-ranking-bar-fill {
+			display: block;
+			height: 100%;
+			background: linear-gradient(90deg, #2563eb, #38bdf8);
+			border-radius: inherit;
+		}
+
+		.uonix-ranking-bar-fill-search {
+			background: linear-gradient(90deg, #047857, #34d399);
+		}
+
+		.uonix-ranking-note,
+		.uonix-ranking-empty {
+			margin: 16px 0 0;
+			font-size: 12px;
+			color: #64748b;
 		}
 
 		.uonix-sc-icon-ga {
@@ -1145,6 +1336,29 @@ function uonix_render_analytics_dashboard_page()
 			background: #d97706;
 			color: #ffffff;
 			border-color: #d97706;
+		}
+
+		@media (max-width: 960px) {
+			.uonix-metrics-panel-header {
+				align-items: stretch;
+				flex-direction: column;
+			}
+
+			.uonix-metrics-toolbar {
+				justify-content: flex-start;
+			}
+
+			.uonix-ranking-grid {
+				grid-template-columns: 1fr;
+			}
+
+			.uonix-analytics-header {
+				padding: 22px;
+			}
+
+			.uonix-status-strip {
+				gap: 12px 20px;
+			}
 		}
 	</style>
 

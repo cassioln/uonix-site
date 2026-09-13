@@ -165,9 +165,13 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_ga4' ) ) {
 			'sessions' => uonix_analytics_metrics_compare( $current['sessions'], $previous['sessions'] ),
 		);
 		foreach ( $summary as $comparison ) if ( is_wp_error( $comparison ) ) return $comparison;
+		$page_views = uonix_analytics_metrics_normalize_page_views( $data['page_views'] ?? array() );
+		if ( is_wp_error( $page_views ) ) return $page_views;
 		return array(
 			'summary' => $summary,
 			'landing_pages' => $pages,
+			'page_views' => $page_views,
+			'page_views_complete' => true === ( $data['page_views_complete'] ?? false ),
 		);
 	}
 }
@@ -221,28 +225,63 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_analytics_metrics_allowed_period_days' ) ) {
+	function uonix_analytics_metrics_allowed_period_days() {
+		return array( 7, 30, 90, 365 );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_sanitize_period_days' ) ) {
+	function uonix_analytics_metrics_sanitize_period_days( $value ) {
+		if ( is_int( $value ) ) {
+			$days = $value;
+		} elseif ( is_string( $value ) && preg_match( '/^(?:0|[1-9][0-9]*)$/D', $value ) ) {
+			$days = (int) $value;
+		} else {
+			return 30;
+		}
+		return in_array( $days, uonix_analytics_metrics_allowed_period_days(), true ) ? $days : 30;
+	}
+}
+
 if ( ! function_exists( 'uonix_analytics_metrics_periods' ) ) {
-	function uonix_analytics_metrics_periods( $today = null ) {
+	function uonix_analytics_metrics_periods( $today = null, $days = 30 ) {
+		$days = uonix_analytics_metrics_sanitize_period_days( $days );
 		$timezone = new DateTimeZone( 'America/Sao_Paulo' );
 		$today = $today ? new DateTimeImmutable( $today, $timezone ) : new DateTimeImmutable( 'today', $timezone );
 		$current_end = $today->modify( '-1 day' );
-		$current_start = $current_end->modify( '-29 days' );
+		$current_start = $current_end->modify( '-' . ( $days - 1 ) . ' days' );
 		$previous_end = $current_start->modify( '-1 day' );
 		return array(
 			'current' => array( 'start' => $current_start->format( 'Y-m-d' ), 'end' => $current_end->format( 'Y-m-d' ) ),
-			'previous' => array( 'start' => $previous_end->modify( '-29 days' )->format( 'Y-m-d' ), 'end' => $previous_end->format( 'Y-m-d' ) ),
+			'previous' => array( 'start' => $previous_end->modify( '-' . ( $days - 1 ) . ' days' )->format( 'Y-m-d' ), 'end' => $previous_end->format( 'Y-m-d' ) ),
 		);
 	}
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_snapshot_option' ) ) {
-	function uonix_analytics_metrics_snapshot_option() { return 'uonix_analytics_metrics_snapshot_v1'; }
+	function uonix_analytics_metrics_snapshot_option( $days = 30 ) {
+		return 'uonix_analytics_metrics_snapshot_v2_' . uonix_analytics_metrics_sanitize_period_days( $days );
+	}
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_get_snapshot' ) ) {
-	function uonix_analytics_metrics_get_snapshot() {
-		$snapshot = function_exists( 'get_option' ) ? get_option( uonix_analytics_metrics_snapshot_option(), false ) : false;
+	function uonix_analytics_metrics_get_snapshot( $days = 30 ) {
+		$days = uonix_analytics_metrics_sanitize_period_days( $days );
+		$snapshot = function_exists( 'get_option' ) ? get_option( uonix_analytics_metrics_snapshot_option( $days ), false ) : false;
+		if ( ! is_array( $snapshot ) && 30 === $days && function_exists( 'get_option' ) ) {
+			$snapshot = get_option( 'uonix_analytics_metrics_snapshot_v1', false );
+		}
 		return is_array( $snapshot ) ? $snapshot : false;
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ) ) {
+	function uonix_analytics_metrics_snapshot_is_fresh( $snapshot, $now = null ) {
+		if ( ! is_array( $snapshot ) || 'updated' !== ( $snapshot['status'] ?? '' ) ) return false;
+		$updated_at = isset( $snapshot['updated_at'] ) ? strtotime( (string) $snapshot['updated_at'] ) : false;
+		$now = null === $now ? time() : (int) $now;
+		return false !== $updated_at && $updated_at <= $now && $updated_at > ( $now - DAY_IN_SECONDS );
 	}
 }
 
@@ -323,6 +362,47 @@ if ( ! function_exists( 'uonix_analytics_metrics_decode_ga4_report' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_analytics_metrics_decode_ga4_page_views_report' ) ) {
+	function uonix_analytics_metrics_decode_ga4_page_views_report( $raw_body ) {
+		$report = json_decode( $raw_body );
+		if ( ! $report instanceof stdClass || ( $report->kind ?? null ) !== 'analyticsData#runReport' || ! isset( $report->metadata ) || ! $report->metadata instanceof stdClass ) {
+			return uonix_analytics_metrics_error( 'ga4_page_views_report_invalid' );
+		}
+
+		$has_row_count = property_exists( $report, 'rowCount' );
+		$row_count = $has_row_count ? uonix_analytics_metrics_integer( $report->rowCount ) : null;
+		if ( ! property_exists( $report, 'rows' ) ) {
+			if ( $has_row_count && ( null === $row_count || 0 !== $row_count ) ) return uonix_analytics_metrics_error( 'ga4_page_views_row_count_invalid' );
+			return array( 'row_count' => 0, 'rows' => array() );
+		}
+		if ( ! is_array( $report->rows ) || null === $row_count ) return uonix_analytics_metrics_error( 'ga4_page_views_report_invalid' );
+
+		$rows = array();
+		foreach ( $report->rows as $row ) {
+			if ( ! $row instanceof stdClass
+				|| ! isset( $row->dimensionValues, $row->metricValues )
+				|| ! is_array( $row->dimensionValues )
+				|| ! is_array( $row->metricValues )
+				|| 1 !== count( $row->dimensionValues )
+				|| 1 !== count( $row->metricValues )
+				|| ! $row->dimensionValues[0] instanceof stdClass
+				|| ! $row->metricValues[0] instanceof stdClass
+				|| ! isset( $row->dimensionValues[0]->value, $row->metricValues[0]->value )
+				|| ! is_string( $row->dimensionValues[0]->value )
+				|| '' === trim( $row->dimensionValues[0]->value ) ) {
+				return uonix_analytics_metrics_error( 'ga4_page_views_row_invalid' );
+			}
+
+			$views = uonix_analytics_metrics_finite_number( $row->metricValues[0]->value );
+			if ( null === $views || $views < 0 ) return uonix_analytics_metrics_error( 'ga4_page_views_row_invalid' );
+			$rows[] = array( 'path' => $row->dimensionValues[0]->value, 'views' => $views );
+		}
+
+		if ( $row_count < count( $rows ) ) return uonix_analytics_metrics_error( 'ga4_page_views_row_count_invalid' );
+		return array( 'row_count' => $row_count, 'rows' => $rows );
+	}
+}
+
 if ( ! function_exists( 'uonix_analytics_metrics_decode_search_console_report' ) ) {
 	function uonix_analytics_metrics_decode_search_console_report( $raw_body, $requires_dimension = false ) {
 		$report = json_decode( $raw_body );
@@ -362,6 +442,71 @@ if ( ! function_exists( 'uonix_analytics_metrics_integer' ) ) {
 		$maximum = (string) PHP_INT_MAX;
 		if ( strlen( $value ) > strlen( $maximum ) || ( strlen( $value ) === strlen( $maximum ) && strcmp( $value, $maximum ) > 0 ) ) return null;
 		return (int) $value;
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_ga4_page_views_report' ) ) {
+	function uonix_analytics_metrics_ga4_page_views_report( $property_id, $access_token, $period, $limit = 10000, $offset = 0 ) {
+		$body = array(
+			'dateRanges' => array( array( 'startDate' => $period['start'], 'endDate' => $period['end'] ) ),
+			'dimensions' => array( array( 'name' => 'pagePath' ) ),
+			'metrics' => array( array( 'name' => 'screenPageViews' ) ),
+			'orderBys' => array( array( 'dimension' => array( 'dimensionName' => 'pagePath' ), 'desc' => false ) ),
+			'limit' => (string) $limit,
+			'offset' => (string) $offset,
+		);
+		return uonix_analytics_metrics_google_json( 'https://analyticsdata.googleapis.com/v1beta/properties/' . rawurlencode( $property_id ) . ':runReport', $access_token, $body );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_fetch_ga4_page_views' ) ) {
+	function uonix_analytics_metrics_fetch_ga4_page_views( $property_id, $access_token, $period, $requester = null, $page_size = 10000, $max_pages = 25 ) {
+		$page_size = max( 1, min( 100000, (int) $page_size ) );
+		$max_pages = max( 1, min( 25, (int) $max_pages ) );
+		$requester = is_callable( $requester ) ? $requester : 'uonix_analytics_metrics_ga4_page_views_report';
+		$rows = array();
+		$offset = 0;
+		$row_count = null;
+
+		for ( $page = 0; $page < $max_pages; ++$page ) {
+			$raw_report = call_user_func( $requester, $property_id, $access_token, $period, $page_size, $offset );
+			if ( is_wp_error( $raw_report ) ) return $raw_report;
+			$report = uonix_analytics_metrics_decode_ga4_page_views_report( $raw_report );
+			if ( is_wp_error( $report ) ) return $report;
+
+			if ( null === $row_count ) {
+				$row_count = $report['row_count'];
+			} elseif ( $row_count !== $report['row_count'] ) {
+				return uonix_analytics_metrics_error( 'ga4_page_views_row_count_changed' );
+			}
+
+			$page_rows = $report['rows'];
+			$rows = array_merge( $rows, $page_rows );
+			if ( count( $rows ) > $row_count ) return uonix_analytics_metrics_error( 'ga4_page_views_row_count_invalid' );
+			if ( count( $rows ) >= $row_count ) return array( 'rows' => $rows, 'complete' => true );
+			if ( empty( $page_rows ) ) return array( 'rows' => $rows, 'complete' => false );
+			$offset += count( $page_rows );
+		}
+
+		return array( 'rows' => $rows, 'complete' => null !== $row_count && count( $rows ) >= $row_count );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_normalize_page_views' ) ) {
+	function uonix_analytics_metrics_normalize_page_views( $rows ) {
+		$page_views = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			if ( ! is_array( $row ) ) return uonix_analytics_metrics_error( 'ga4_page_views_row_invalid' );
+			$path = uonix_analytics_metrics_normalize_path( $row['path'] ?? '' );
+			$views = uonix_analytics_metrics_finite_number( $row['views'] ?? null );
+			if ( null === $views || $views < 0 ) return uonix_analytics_metrics_error( 'ga4_page_views_row_invalid' );
+			if ( '' === $path ) continue;
+			$total = ( $page_views[ $path ] ?? 0.0 ) + $views;
+			if ( ! is_finite( $total ) ) return uonix_analytics_metrics_error( 'ga4_page_views_row_invalid' );
+			$page_views[ $path ] = $total;
+		}
+		ksort( $page_views, SORT_STRING );
+		return $page_views;
 	}
 }
 
@@ -405,7 +550,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
-	function uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages ) {
+	function uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views = null ) {
 		$ga_current = uonix_analytics_metrics_decode_ga4_report( $ga_current );
 		$ga_previous = uonix_analytics_metrics_decode_ga4_report( $ga_previous );
 		$ga_pages = uonix_analytics_metrics_decode_ga4_report( $ga_pages, true );
@@ -413,11 +558,13 @@ if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
 		$gsc_previous = uonix_analytics_metrics_decode_search_console_report( $gsc_previous );
 		$gsc_queries = uonix_analytics_metrics_decode_search_console_report( $gsc_queries, true );
 		$gsc_pages = uonix_analytics_metrics_decode_search_console_report( $gsc_pages, true );
-		foreach ( array( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages ) as $report ) if ( is_wp_error( $report ) ) return $report;
+		foreach ( array( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views ) as $report ) if ( is_wp_error( $report ) ) return $report;
+		if ( null === $ga_page_views ) $ga_page_views = array( 'rows' => array(), 'complete' => false );
+		if ( ! is_array( $ga_page_views ) || ! isset( $ga_page_views['rows'], $ga_page_views['complete'] ) || ! is_array( $ga_page_views['rows'] ) || ! is_bool( $ga_page_views['complete'] ) ) return uonix_analytics_metrics_error( 'ga4_page_views_bundle_invalid' );
 		$ga_current_rows = uonix_analytics_metrics_ga4_rows( $ga_current );
 		$ga_previous_rows = uonix_analytics_metrics_ga4_rows( $ga_previous );
 		return array(
-			'ga4' => array( 'summary_current' => isset( $ga_current_rows[0] ) ? $ga_current_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'summary_previous' => isset( $ga_previous_rows[0] ) ? $ga_previous_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'landing_pages' => array_map( function( $row ) { return array( 'path' => $row['path'], 'sessions' => $row['sessions'] ); }, uonix_analytics_metrics_ga4_rows( $ga_pages, 'path' ) ) ),
+			'ga4' => array( 'summary_current' => isset( $ga_current_rows[0] ) ? $ga_current_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'summary_previous' => isset( $ga_previous_rows[0] ) ? $ga_previous_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'landing_pages' => array_map( function( $row ) { return array( 'path' => $row['path'], 'sessions' => $row['sessions'] ); }, uonix_analytics_metrics_ga4_rows( $ga_pages, 'path' ) ), 'page_views' => $ga_page_views['rows'], 'page_views_complete' => $ga_page_views['complete'] ),
 			'search_console' => array( 'summary_current' => isset( $gsc_current['rows'][0] ) ? $gsc_current['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'summary_previous' => isset( $gsc_previous['rows'][0] ) ? $gsc_previous['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'queries' => array_map( function( $row ) { $row['query'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_queries['rows'] ), 'pages' => array_map( function( $row ) { $row['page'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_pages['rows'] ) ),
 		);
 	}
@@ -430,33 +577,36 @@ if ( ! function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
 		$ga_current = uonix_analytics_metrics_ga4_report( $config['ga4_property_id'], $token, $periods['current'] );
 		$ga_previous = uonix_analytics_metrics_ga4_report( $config['ga4_property_id'], $token, $periods['previous'] );
 		$ga_pages = uonix_analytics_metrics_ga4_report( $config['ga4_property_id'], $token, $periods['current'], array( array( 'name' => 'landingPagePlusQueryString' ) ), 10 );
+		$ga_page_views = uonix_analytics_metrics_fetch_ga4_page_views( $config['ga4_property_id'], $token, $periods['current'] );
 		$gsc_current = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'] );
 		$gsc_previous = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['previous'] );
 		$gsc_queries = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'query' );
 		$gsc_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'page' );
-		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages );
+		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views );
 	}
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_mark_stale' ) ) {
-	function uonix_analytics_metrics_mark_stale() {
-		$previous = uonix_analytics_metrics_get_snapshot();
+	function uonix_analytics_metrics_mark_stale( $days = 30 ) {
+		$days = uonix_analytics_metrics_sanitize_period_days( $days );
+		$previous = uonix_analytics_metrics_get_snapshot( $days );
 		if ( ! $previous ) return false;
 		$previous['status'] = 'stale';
 		$previous['error'] = 'sync_failed';
-		if ( function_exists( 'update_option' ) ) update_option( uonix_analytics_metrics_snapshot_option(), $previous, false );
+		if ( function_exists( 'update_option' ) ) update_option( uonix_analytics_metrics_snapshot_option( $days ), $previous, false );
 		return $previous;
 	}
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_sync' ) ) {
-	function uonix_analytics_metrics_sync( $fetcher = null, $config = null ) {
+	function uonix_analytics_metrics_sync( $fetcher = null, $config = null, $days = 30 ) {
+		$days = uonix_analytics_metrics_sanitize_period_days( $days );
 		$config = is_array( $config ) ? $config : uonix_analytics_metrics_get_config();
 		if ( is_wp_error( $config ) ) {
-			$stale = uonix_analytics_metrics_mark_stale();
+			$stale = uonix_analytics_metrics_mark_stale( $days );
 			return $stale ? $stale : $config;
 		}
-		$lock_name = 'uonix_analytics_metrics_sync_lock';
+		$lock_name = 'uonix_analytics_metrics_sync_lock_' . $days;
 		$now = time();
 		if ( ! add_option( $lock_name, $now, '', 'no' ) ) {
 			$locked_at = (int) get_option( $lock_name, 0 );
@@ -469,7 +619,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_sync' ) ) {
 		}
 		try {
 			$fetcher = is_callable( $fetcher ) ? $fetcher : 'uonix_analytics_metrics_fetch_google_data';
-			$periods = uonix_analytics_metrics_periods();
+			$periods = uonix_analytics_metrics_periods( null, $days );
 			$data = call_user_func( $fetcher, $config, $periods );
 			if ( ! is_array( $data ) || ! isset( $data['ga4'], $data['search_console'] ) ) throw new RuntimeException( 'google_response_invalid' );
 			$ga4 = uonix_analytics_metrics_normalize_ga4( $data['ga4'] );
@@ -477,13 +627,13 @@ if ( ! function_exists( 'uonix_analytics_metrics_sync' ) ) {
 			if ( is_wp_error( $ga4 ) ) throw new RuntimeException( $ga4->get_error_code() );
 			if ( is_wp_error( $search_console ) ) throw new RuntimeException( $search_console->get_error_code() );
 			$snapshot = array(
-				'version' => 1, 'status' => 'updated', 'updated_at' => gmdate( 'c' ), 'periods' => $periods,
+				'version' => 2, 'period_days' => $days, 'status' => 'updated', 'updated_at' => gmdate( 'c' ), 'periods' => $periods,
 				'ga4' => $ga4, 'search_console' => $search_console,
 			);
-			if ( function_exists( 'update_option' ) ) update_option( uonix_analytics_metrics_snapshot_option(), $snapshot, false );
+			if ( function_exists( 'update_option' ) ) update_option( uonix_analytics_metrics_snapshot_option( $days ), $snapshot, false );
 			return $snapshot;
 		} catch ( Throwable $error ) {
-			$previous = uonix_analytics_metrics_mark_stale();
+			$previous = uonix_analytics_metrics_mark_stale( $days );
 			if ( $previous ) return $previous;
 			return uonix_analytics_metrics_error( 'sync_failed' );
 		} finally {
@@ -502,13 +652,29 @@ if ( ! function_exists( 'uonix_analytics_metrics_schedule' ) ) {
 add_action( 'init', 'uonix_analytics_metrics_schedule', 10, 0 );
 add_action( 'uonix_analytics_metrics_daily_sync', 'uonix_analytics_metrics_sync', 10, 0 );
 
+if ( ! function_exists( 'uonix_analytics_metrics_requested_period' ) ) {
+	function uonix_analytics_metrics_requested_period( $request = null ) {
+		$request = is_array( $request ) ? $request : $_POST;
+		$value = isset( $request['uonix_period'] ) ? wp_unslash( $request['uonix_period'] ) : 30;
+		return uonix_analytics_metrics_sanitize_period_days( $value );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_refresh_redirect_url' ) ) {
+	function uonix_analytics_metrics_refresh_redirect_url( $days ) {
+		$days = uonix_analytics_metrics_sanitize_period_days( $days );
+		return admin_url( 'admin.php?page=uonix-analytics&uonix_period=' . $days . '&uonix_metrics_refresh=1' );
+	}
+}
+
 if ( ! function_exists( 'uonix_analytics_metrics_manual_refresh' ) ) {
 	function uonix_analytics_metrics_manual_refresh() {
 		if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'uonix_analytics_metrics_refresh' ) ) {
 			wp_die( esc_html__( 'Você não tem permissão para atualizar métricas.', 'uonix' ) );
 		}
-		uonix_analytics_metrics_sync();
-		wp_safe_redirect( admin_url( 'admin.php?page=uonix-analytics&uonix_metrics_refresh=1' ) );
+		$days = uonix_analytics_metrics_requested_period();
+		uonix_analytics_metrics_sync( null, null, $days );
+		wp_safe_redirect( uonix_analytics_metrics_refresh_redirect_url( $days ) );
 		exit;
 	}
 }
