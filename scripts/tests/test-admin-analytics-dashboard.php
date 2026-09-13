@@ -16,6 +16,9 @@ define( 'ABSPATH', __DIR__ );
 $GLOBALS['uonix_test_menu_actions'] = array();
 $GLOBALS['uonix_test_menus']        = array();
 $GLOBALS['uonix_test_can_edit']     = true;
+$GLOBALS['uonix_test_can_manage']   = true;
+$GLOBALS['uonix_test_snapshot_fresh'] = true;
+$GLOBALS['uonix_test_snapshot_periods'] = array();
 $GLOBALS['uonix_test_analytics_configuration'] = array(
 	'gtm_container_id' => 'GTM-P8TR5CCH',
 	'adopt_website_id' => 'adopt-test-id',
@@ -53,12 +56,28 @@ function esc_html( $text ) {
 	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
 }
 
+function esc_attr( $text ) {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+
 function esc_url( $url ) {
 	return filter_var( $url, FILTER_SANITIZE_URL ) ?: '';
 }
 
+function wp_unslash( $value ) {
+	return $value;
+}
+
+function wp_parse_url( $url, $component = -1 ) {
+	return parse_url( $url, $component );
+}
+
 function number_format_i18n( $number, $decimals = 0 ) {
 	return number_format( (float) $number, $decimals, ',', '.' );
+}
+
+function wp_date( $format, $timestamp ) {
+	return gmdate( $format, $timestamp );
 }
 
 function admin_url( $path = '' ) {
@@ -70,9 +89,8 @@ function wp_nonce_field( $action ) {
 }
 
 function current_user_can( $capability ) {
-	if ( 'edit_posts' === $capability || 'manage_options' === $capability ) {
-		return $GLOBALS['uonix_test_can_edit'];
-	}
+	if ( 'edit_posts' === $capability ) return $GLOBALS['uonix_test_can_edit'];
+	if ( 'manage_options' === $capability ) return $GLOBALS['uonix_test_can_manage'];
 	return false;
 }
 
@@ -91,8 +109,20 @@ function uonix_analytics_configuration() {
 	return $GLOBALS['uonix_test_analytics_configuration'];
 }
 
-function uonix_analytics_metrics_get_snapshot() {
+function uonix_analytics_metrics_sanitize_period_days( $value ) {
+	$value = is_numeric( $value ) ? (int) $value : 30;
+	return in_array( $value, array( 7, 30, 90, 365 ), true ) ? $value : 30;
+}
+
+function uonix_analytics_metrics_snapshot_is_fresh( $snapshot ) {
+	return $GLOBALS['uonix_test_snapshot_fresh'] && is_array( $snapshot ) && 'updated' === ( $snapshot['status'] ?? '' );
+}
+
+function uonix_analytics_metrics_get_snapshot( $days = 30 ) {
+	$days = uonix_analytics_metrics_sanitize_period_days( $days );
+	$GLOBALS['uonix_test_snapshot_periods'][] = $days;
 	return array(
+		'period_days' => $days,
 		'status'     => 'updated',
 		'updated_at' => '2026-09-11T12:00:00+00:00',
 		'periods'    => array(
@@ -105,6 +135,12 @@ function uonix_analytics_metrics_get_snapshot() {
 				'sessions'     => array( 'current' => 60, 'previous' => 0, 'delta_percent' => null, 'state' => 'new' ),
 			),
 			'landing_pages' => array( array( 'path' => '/servicos/', 'sessions' => 18 ) ),
+			'page_views' => array(
+				'/produtos/ancoragem-uonix-modelo-210-inox/' => 17,
+				'/fator-de-queda-o-risco-comeca-no-projeto-nao-na-queda/' => 11,
+				'/servicos/ensaios-de-arrancamento/' => 5,
+			),
+			'page_views_complete' => true,
 		),
 		'search_console' => array(
 			'summary' => array(
@@ -141,7 +177,13 @@ function get_posts( $args = array() ) {
 }
 
 function get_permalink( $id ) {
-	return 'https://uonix.com.br/?p=' . $id;
+	$paths = array(
+		2420 => '/produtos/ancoragem-uonix-modelo-210-inox/',
+		5614 => '/produtos/arruela-funileiroinox-304/',
+		10849 => '/fator-de-queda-o-risco-comeca-no-projeto-nao-na-queda/',
+		2636 => '/servicos/ensaios-de-arrancamento/',
+	);
+	return 'https://uonix.com.br' . ( $paths[ $id ] ?? '/?p=' . $id );
 }
 
 function get_edit_post_link( $id ) {
@@ -200,6 +242,44 @@ function uonix_dashboard_span_texts( $html, $class_name ) {
 // Carrega o arquivo a ser testado
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/52-admin-analytics-dashboard.php';
 
+uonix_dashboard_assert( function_exists( 'uonix_analytics_dashboard_page_view_value' ), 'Resolvedor de visualizações por permalink existe' );
+uonix_dashboard_assert( function_exists( 'uonix_analytics_dashboard_chart_rows' ), 'Normalizador de barras dos rankings existe' );
+if ( function_exists( 'uonix_analytics_dashboard_page_view_value' ) ) {
+	$page_view_snapshot = uonix_analytics_metrics_get_snapshot( 30 );
+	uonix_dashboard_assert( 17.0 === uonix_analytics_dashboard_page_view_value( $page_view_snapshot, 'https://uonix.com.br/produtos/ancoragem-uonix-modelo-210-inox/?utm_source=teste' ), 'Resolvedor encontra visualizações pelo caminho sem query string' );
+	uonix_dashboard_assert( 0.0 === uonix_analytics_dashboard_page_view_value( $page_view_snapshot, 'https://uonix.com.br/pagina-sem-visitas/' ), 'Cobertura completa distingue zero visita' );
+	$page_view_snapshot['ga4']['page_views_complete'] = false;
+	uonix_dashboard_assert( null === uonix_analytics_dashboard_page_view_value( $page_view_snapshot, 'https://uonix.com.br/pagina-desconhecida/' ), 'Cobertura incompleta mantém valor desconhecido' );
+}
+if ( function_exists( 'uonix_analytics_dashboard_chart_rows' ) ) {
+	$chart_rows = uonix_analytics_dashboard_chart_rows(
+		array(
+			array( 'label' => 'Maior', 'value' => 20 ),
+			array( 'label' => 'Menor', 'value' => 5 ),
+			array( 'label' => 'Zero', 'value' => 0 ),
+		),
+		'label',
+		'value'
+	);
+	uonix_dashboard_assert( array( 100.0, 25.0, 0.0 ) === array_column( $chart_rows, 'percent' ), 'Barras usam escala relativa segura' );
+	$zero_chart_rows = uonix_analytics_dashboard_chart_rows( array( array( 'label' => 'Sem dados', 'value' => 0 ) ), 'label', 'value' );
+	uonix_dashboard_assert( 0.0 === $zero_chart_rows[0]['percent'], 'Ranking zerado não divide por zero' );
+}
+
+uonix_dashboard_assert( function_exists( 'uonix_analytics_dashboard_metric_comparison' ), 'Formatador de comparação dos KPIs existe' );
+if ( function_exists( 'uonix_analytics_dashboard_metric_comparison' ) ) {
+	$comparison_up = uonix_analytics_dashboard_metric_comparison( array( 'delta_percent' => 20, 'state' => 'comparable' ) );
+	$comparison_down = uonix_analytics_dashboard_metric_comparison( array( 'delta_percent' => -12.5, 'state' => 'comparable' ) );
+	$comparison_new = uonix_analytics_dashboard_metric_comparison( array( 'delta_percent' => null, 'state' => 'new' ) );
+	$comparison_empty = uonix_analytics_dashboard_metric_comparison( array( 'delta_percent' => null, 'state' => 'empty' ) );
+	$comparison_invalid = uonix_analytics_dashboard_metric_comparison( array( 'delta_percent' => INF, 'state' => 'comparable' ) );
+	uonix_dashboard_assert( array( 'label' => '+20,0% vs. período anterior', 'class' => 'uonix-trend-up' ) === $comparison_up, 'Variação positiva é formatada sem alegar melhoria' );
+	uonix_dashboard_assert( array( 'label' => '-12,5% vs. período anterior', 'class' => 'uonix-trend-down' ) === $comparison_down, 'Variação negativa é formatada sem alegar piora' );
+	uonix_dashboard_assert( array( 'label' => 'Novo no período', 'class' => 'uonix-trend-new' ) === $comparison_new, 'Base anterior zero usa estado novo' );
+	uonix_dashboard_assert( array( 'label' => 'Sem dados nos dois períodos', 'class' => 'uonix-trend-empty' ) === $comparison_empty, 'Dois períodos zerados usam estado vazio' );
+	uonix_dashboard_assert( array( 'label' => 'Comparação indisponível', 'class' => 'uonix-trend-empty' ) === $comparison_invalid, 'Variação inválida falha fechado' );
+}
+
 // Asserção 1: Registra action admin_menu
 uonix_dashboard_assert( ! empty( $GLOBALS['uonix_test_menu_actions'] ), 'Não registrou nenhuma action' );
 $admin_menu_registered = false;
@@ -243,6 +323,33 @@ uonix_dashboard_assert( strpos( $output, 'Fator de queda' ) !== false, 'Post de 
 uonix_dashboard_assert( strpos( $output, 'Ensaios de Arrancamento' ) !== false, 'Serviço de teste não foi listado na tabela' );
 uonix_dashboard_assert( strpos( $output, 'Meta Pixel' ) !== false, 'Meta Pixel não está presente no dashboard' );
 uonix_dashboard_assert( strpos( $output, 'events_manager2' ) !== false, 'Link do Events Manager da Meta não está presente' );
+uonix_dashboard_assert( strpos( $output, 'class="uonix-header-actions"' ) === false && strpos( $output, '.uonix-header-actions {' ) === false, 'Cabeçalho remove atalhos duplicados' );
+uonix_dashboard_assert( strpos( $output, 'tab-google-hub' ) === false && strpos( $output, 'Ferramentas &amp; Tráfego (Google + Meta)' ) === false && strpos( $output, 'Ferramentas & Tráfego (Google + Meta)' ) === false, 'Aba separada de ferramentas foi removida' );
+uonix_dashboard_assert( strpos( $output, 'max-width: 1350px' ) === false && strpos( $output, 'max-width: none;' ) !== false, 'Painel ocupa toda a largura útil do wpbody' );
+uonix_dashboard_assert( 7 === substr_count( $output, 'class="uonix-marketing-card"' ), 'Hub foi consolidado em sete cards de marketing' );
+uonix_dashboard_assert( strpos( $output, 'class="uonix-metrics-toolbar"' ) !== false, 'Seletor, cache e atualização compartilham uma barra de ferramentas' );
+uonix_dashboard_assert( strpos( $output, 'class="uonix-metrics-cache-status uonix-cache-fresh">Cache atualizado</span>' ) !== false, 'Cache fresco é identificado sem esconder o timestamp' );
+uonix_dashboard_assert( strpos( $output, '<time datetime="2026-09-11T12:00:00+00:00">Atualizado em 11/09/2026 12:00</time>' ) !== false, 'Timestamp válido aparece semanticamente no período selecionado' );
+uonix_dashboard_assert( strpos( $output, '.uonix-metrics-toolbar {' ) !== false, 'Barra de período e cache possui layout próprio' );
+uonix_dashboard_assert( strpos( $output, '.uonix-metrics-period-form {' ) !== false, 'Seletor de período possui layout próprio' );
+uonix_dashboard_assert( strpos( $output, '.uonix-page-views-col {' ) !== false, 'Coluna de visualizações recebe alinhamento numérico' );
+uonix_dashboard_assert( strpos( $output, 'overflow-x: auto;' ) !== false, 'Tabelas continuam acessíveis por rolagem horizontal em telas estreitas' );
+uonix_dashboard_assert( strpos( $output, 'Visão geral e tempo real' ) !== false && strpos( $output, 'Páginas e telas' ) !== false && strpos( $output, 'Aquisição de tráfego' ) !== false, 'Card GA4 incorpora seus atalhos' );
+uonix_dashboard_assert( strpos( $output, 'Consultas de pesquisa' ) !== false && strpos( $output, 'Cobertura e indexação' ) !== false && strpos( $output, 'Sitemaps XML' ) !== false, 'Card Search Console incorpora seus atalhos' );
+uonix_dashboard_assert( strpos( $output, 'Campanhas e grupos de anúncios' ) !== false && strpos( $output, 'Públicos de remarketing' ) !== false, 'Card Google Ads incorpora seus atalhos' );
+uonix_dashboard_assert( strpos( $output, 'Diagnóstico e qualidade' ) !== false && strpos( $output, 'Testar eventos' ) !== false && strpos( $output, 'Meta Business Suite' ) !== false, 'Card Meta incorpora seus atalhos' );
+uonix_dashboard_assert( strpos( $output, 'Google Looker Studio' ) !== false && strpos( $output, 'Galeria de modelos' ) !== false, 'Looker Studio passa a integrar a grade principal' );
+
+$adopt_links = array(
+	'Escanear tags' => 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags',
+	'Documentos' => 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/documents',
+	'Configurações' => 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix',
+	'Abrir AdOpt' => 'https://dash.goadopt.io/org/uonix/disclaimers',
+);
+foreach ( $adopt_links as $label => $url ) {
+	uonix_dashboard_assert( strpos( $output, 'href="' . $url . '"' ) !== false && strpos( $output, '>' . $label . '</a>' ) !== false, 'Card AdOpt contém o link exato: ' . $label );
+}
+uonix_dashboard_assert( strpos( $output, 'uonix-shortcuts-grid' ) === false, 'Grade antiga de atalhos não permanece no painel' );
 
 // A central de marketing mostra somente fatos técnicos verificáveis localmente.
 uonix_dashboard_assert( strpos( $output, 'Destinos de marketing configurados' ) !== false, 'Dashboard apresenta a central de destinos de marketing' );
@@ -256,7 +363,46 @@ uonix_dashboard_assert( strpos( $output, 'Validar em' ) !== false, 'Cards distin
 uonix_dashboard_assert( strpos( $output, 'Métricas agregadas dos últimos 30 dias' ) !== false, 'Dashboard apresenta métricas agregadas cacheadas' );
 uonix_dashboard_assert( strpos( $output, 'Usuários ativos' ) !== false && strpos( $output, 'Sessões' ) !== false, 'Dashboard apresenta resumo GA4' );
 uonix_dashboard_assert( strpos( $output, 'Cliques orgânicos' ) !== false && strpos( $output, 'Impressões orgânicas' ) !== false, 'Dashboard apresenta resumo Search Console' );
+uonix_dashboard_assert( 4 === substr_count( $output, 'class="uonix-kpi-comparison ' ), 'Os quatro KPIs mostram comparação com o período anterior' );
+uonix_dashboard_assert( strpos( $output, '>+20,0% vs. período anterior</span>' ) !== false, 'Usuários ativos mostram variação comparável' );
+uonix_dashboard_assert( strpos( $output, '>Novo no período</span>' ) !== false, 'Sessões mostram o estado novo quando a base anterior é zero' );
+uonix_dashboard_assert( strpos( $output, '>+100,0% vs. período anterior</span>' ) !== false && strpos( $output, '>+25,0% vs. período anterior</span>' ) !== false, 'KPIs orgânicos mostram suas comparações' );
 uonix_dashboard_assert( strpos( $output, 'linha de vida' ) !== false && strpos( $output, '/servicos/' ) !== false, 'Dashboard apresenta rankings agregados sem query string' );
+uonix_dashboard_assert( 2 === substr_count( $output, 'class="uonix-ranking-chart"' ), 'Dashboard renderiza dois gráficos de ranking' );
+uonix_dashboard_assert( strpos( $output, 'class="uonix-ranking-bar-track"' ) !== false && strpos( $output, 'class="uonix-ranking-bar-fill"' ) !== false, 'Gráficos possuem trilha e barra proporcional' );
+uonix_dashboard_assert( strpos( $output, '.uonix-ranking-grid {' ) !== false && strpos( $output, '.uonix-ranking-bar-fill {' ) !== false, 'Gráficos possuem layout visual nativo no próprio módulo' );
+uonix_dashboard_assert( strpos( $output, 'aria-label="/servicos/: 18 sessões"' ) !== false, 'Gráfico de páginas mantém rótulo numérico acessível' );
+uonix_dashboard_assert( strpos( $output, 'aria-label="linha de vida: 5 cliques"' ) !== false, 'Gráfico de consultas mantém rótulo numérico acessível' );
+uonix_dashboard_assert( 3 === substr_count( $output, '<th>Visualizações — 30 dias</th>' ), 'As três tabelas identificam o período da coluna de visualizações' );
+uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">17</td>' ) !== false, 'Produto mostra visualizações da sua URL' );
+uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">11</td>' ) !== false, 'Artigo mostra visualizações da sua URL' );
+uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">5</td>' ) !== false, 'Serviço mostra visualizações da sua URL' );
+uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">0</td>' ) !== false, 'Conteúdo ausente de relatório completo mostra zero' );
+
+$_GET['uonix_period'] = '90';
+$GLOBALS['uonix_test_snapshot_fresh'] = false;
+ob_start();
+uonix_render_analytics_dashboard_page();
+$output_90_stale = ob_get_clean();
+uonix_dashboard_assert( 90 === end( $GLOBALS['uonix_test_snapshot_periods'] ), 'Dashboard solicita o snapshot do período selecionado' );
+uonix_dashboard_assert( strpos( $output_90_stale, 'Métricas agregadas dos últimos 90 dias' ) !== false, 'Título acompanha o período de 90 dias' );
+uonix_dashboard_assert( preg_match( '/<option value="90" selected(?:="selected")?>Últimos 90 dias<\/option>/', $output_90_stale ) === 1, 'Seletor marca 90 dias como opção ativa' );
+uonix_dashboard_assert( strpos( $output_90_stale, 'name="uonix_period" value="90"' ) !== false, 'Formulário de refresh preserva o período selecionado' );
+uonix_dashboard_assert( strpos( $output_90_stale, 'data-uonix-auto-refresh="1"' ) !== false && strpos( $output_90_stale, 'requestSubmit' ) !== false, 'Cache vencido inicia atualização administrativa separada' );
+
+$GLOBALS['uonix_test_snapshot_fresh'] = true;
+ob_start();
+uonix_render_analytics_dashboard_page();
+$output_90_fresh = ob_get_clean();
+uonix_dashboard_assert( strpos( $output_90_fresh, 'data-uonix-auto-refresh="1"' ) === false, 'Cache fresco não inicia nova consulta' );
+
+$_GET['uonix_period'] = '13';
+ob_start();
+uonix_render_analytics_dashboard_page();
+$output_invalid_period = ob_get_clean();
+uonix_dashboard_assert( 30 === end( $GLOBALS['uonix_test_snapshot_periods'] ), 'Período inválido volta para 30 dias' );
+uonix_dashboard_assert( strpos( $output_invalid_period, 'Métricas agregadas dos últimos 30 dias' ) !== false, 'Título não reflete período inválido' );
+$_GET = array();
 
 $visible_output = uonix_dashboard_visible_text( $output );
 $marketing_claim_patterns = array(
