@@ -141,7 +141,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_ga4' ) ) {
 	function uonix_analytics_metrics_normalize_ga4( $data ) {
 		$current  = isset( $data['summary_current'] ) && is_array( $data['summary_current'] ) ? $data['summary_current'] : array();
 		$previous = isset( $data['summary_previous'] ) && is_array( $data['summary_previous'] ) ? $data['summary_previous'] : array();
-		$pages    = array();
+		$page_totals = array();
 
 		foreach ( isset( $data['landing_pages'] ) && is_array( $data['landing_pages'] ) ? $data['landing_pages'] : array() as $row ) {
 			$path = uonix_analytics_metrics_normalize_path( isset( $row['path'] ) ? $row['path'] : '' );
@@ -149,11 +149,21 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_ga4' ) ) {
 			if ( '' === $path || null === $sessions ) {
 				continue;
 			}
-			$pages[] = array( 'path' => $path, 'sessions' => $sessions );
-			if ( 10 === count( $pages ) ) {
-				break;
+			$total = ( $page_totals[ $path ] ?? 0.0 ) + $sessions;
+			if ( ! is_finite( $total ) ) {
+				return uonix_analytics_metrics_error( 'ga4_landing_page_invalid' );
 			}
+			$page_totals[ $path ] = $total;
 		}
+		$pages = array();
+		foreach ( $page_totals as $path => $sessions ) {
+			$pages[] = array( 'path' => $path, 'sessions' => $sessions );
+		}
+		usort( $pages, static function ( $left, $right ) {
+			$by_sessions = $right['sessions'] <=> $left['sessions'];
+			return 0 !== $by_sessions ? $by_sessions : strcmp( $left['path'], $right['path'] );
+		} );
+		$pages = array_slice( $pages, 0, 10 );
 		foreach ( array( 'activeUsers', 'sessions' ) as $metric ) {
 			if ( null === uonix_analytics_metrics_number( $current[ $metric ] ?? null ) || null === uonix_analytics_metrics_number( $previous[ $metric ] ?? null ) ) {
 				return uonix_analytics_metrics_error( 'ga4_metric_missing' );
@@ -347,7 +357,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_decode_ga4_report' ) ) {
 			if ( isset( $row->dimensionValues ) && ! is_array( $row->dimensionValues ) ) return uonix_analytics_metrics_error( 'ga4_dimension_invalid' );
 			$dimension_values = array();
 			foreach ( isset( $row->dimensionValues ) ? $row->dimensionValues : array() as $dimension ) {
-				if ( ! $dimension instanceof stdClass || ! isset( $dimension->value ) || ! is_string( $dimension->value ) || '' === $dimension->value ) return uonix_analytics_metrics_error( 'ga4_dimension_invalid' );
+				if ( ! $dimension instanceof stdClass || ! isset( $dimension->value ) || ! is_string( $dimension->value ) ) return uonix_analytics_metrics_error( 'ga4_dimension_invalid' );
 				$dimension_values[] = array( 'value' => $dimension->value );
 			}
 			$rows[] = array( 'metricValues' => array( array( 'value' => $row->metricValues[0]->value ), array( 'value' => $row->metricValues[1]->value ) ), 'dimensionValues' => $dimension_values );
@@ -576,7 +586,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
 		if ( is_wp_error( $token ) ) return $token;
 		$ga_current = uonix_analytics_metrics_ga4_report( $config['ga4_property_id'], $token, $periods['current'] );
 		$ga_previous = uonix_analytics_metrics_ga4_report( $config['ga4_property_id'], $token, $periods['previous'] );
-		$ga_pages = uonix_analytics_metrics_ga4_report( $config['ga4_property_id'], $token, $periods['current'], array( array( 'name' => 'landingPagePlusQueryString' ) ), 10 );
+		$ga_pages = uonix_analytics_metrics_ga4_report( $config['ga4_property_id'], $token, $periods['current'], array( array( 'name' => 'landingPagePlusQueryString' ) ), 10000 );
 		$ga_page_views = uonix_analytics_metrics_fetch_ga4_page_views( $config['ga4_property_id'], $token, $periods['current'] );
 		$gsc_current = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'] );
 		$gsc_previous = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['previous'] );

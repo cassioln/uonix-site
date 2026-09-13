@@ -75,6 +75,9 @@ function admin_url( $path ) { return 'https://uonix.com.br/wp-admin/' . $path; }
 
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 
+$metrics_module_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php' );
+uonix_metrics_assert( false !== strpos( $metrics_module_source, "array( array( 'name' => 'landingPagePlusQueryString' ) ), 10000" ), 'Coleta de landing pages lê até 10.000 variantes antes de agregá-las por caminho' );
+
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_compare' ), 'Helper de comparação existe' );
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_sanitize_query' ), 'Helper de sanitização de consulta existe' );
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_normalize_path' ), 'Helper de normalização de URL existe' );
@@ -181,6 +184,8 @@ if ( function_exists( 'uonix_analytics_metrics_decode_ga4_report' ) && function_
 	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_report( '{"kind":"analyticsData#runReport","metadata":{},"rows":{"0":{"metricValues":[{"value":"1"},{"value":"1"}]}}}' ) ), 'Decoder GA4 rejeita objeto JSON com chaves numéricas em rows' );
 	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_report( '{"kind":"analyticsData#runReport","metadata":{},"rows":[{"metricValues":{"0":{"value":"1"},"1":{"value":"1"}}}]}' ) ), 'Decoder GA4 rejeita objeto JSON com chaves numéricas em metricValues' );
 	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_decode_ga4_report( '{"kind":"analyticsData#runReport","metadata":{},"rows":[{"metricValues":[{"value":"1"},{"value":"1"}],"dimensionValues":[]}]}' , true ) ), 'Decoder GA4 dimensional rejeita dimensionValues vazio' );
+	$blank_landing_page = uonix_analytics_metrics_decode_ga4_report( '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"1","rows":[{"metricValues":[{"value":"1"},{"value":"2"}],"dimensionValues":[{"value":""}]}]}' , true );
+	uonix_metrics_assert( is_array( $blank_landing_page ) && '' === $blank_landing_page['rows'][0]['dimensionValues'][0]['value'], 'Decoder preserva bucket GA4 de landing page sem nome para filtragem posterior' );
 	$gsc_empty_raw = '{"responseAggregationType":"byProperty","rows":[]}';
 	uonix_metrics_assert( is_array( uonix_analytics_metrics_decode_search_console_report( $gsc_empty_raw, false ) ), 'Decoder Search Console aceita resposta vazia real em JSON bruto' );
 	$gsc_empty_without_rows_raw = '{"responseAggregationType":"byProperty"}';
@@ -273,6 +278,10 @@ if ( function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
 	$gsc_empty_raw = '{"responseAggregationType":"byProperty","rows":[]}';
 	$assembled = uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw );
 	uonix_metrics_assert( is_array( $assembled ) && isset( $assembled['ga4'], $assembled['search_console'] ), 'Bundle JSON bruto vazio monta dados agregados para sincronização' );
+	$ga4_landing_pages_with_blank_bucket = '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"2","rows":[{"metricValues":[{"value":"1"},{"value":"2"}],"dimensionValues":[{"value":""}]},{"metricValues":[{"value":"3"},{"value":"4"}],"dimensionValues":[{"value":"/entrada/"}]}]}';
+	$assembled_with_blank_landing_bucket = uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_landing_pages_with_blank_bucket, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw );
+	$normalized_with_blank_landing_bucket = is_array( $assembled_with_blank_landing_bucket ) ? uonix_analytics_metrics_normalize_ga4( $assembled_with_blank_landing_bucket['ga4'] ) : null;
+	uonix_metrics_assert( is_array( $normalized_with_blank_landing_bucket ) && array( array( 'path' => '/entrada/', 'sessions' => 4.0 ) ) === $normalized_with_blank_landing_bucket['landing_pages'], 'Bucket GA4 de landing page sem nome não impede snapshot e não vira ranking' );
 	$page_views_fixture = array(
 		'complete' => true,
 		'rows' => array(
@@ -367,14 +376,15 @@ if ( function_exists( 'uonix_analytics_metrics_normalize_ga4' ) ) {
 			'summary_current'  => array( 'activeUsers' => '12', 'sessions' => '20' ),
 			'summary_previous' => array( 'activeUsers' => '10', 'sessions' => '0' ),
 			'landing_pages'    => array(
-				array( 'path' => '/a/?x=1', 'sessions' => '5' ),
+				array( 'path' => '/?x=1', 'sessions' => '5' ),
+				array( 'path' => '/?x=2', 'sessions' => '3' ),
 				array( 'path' => '/b/', 'sessions' => '3' ),
 			),
 		)
 	);
 	uonix_metrics_assert( 12.0 === $ga4['summary']['active_users']['current'] && 20.0 === $ga4['summary']['sessions']['current'], 'Normalizador GA4 mantém métricas agregadas' );
 	uonix_metrics_assert( 'new' === $ga4['summary']['sessions']['state'], 'Normalizador GA4 aplica comparação segura para base zero' );
-	uonix_metrics_assert( '/a/' === $ga4['landing_pages'][0]['path'] && 2 === count( $ga4['landing_pages'] ), 'Normalizador GA4 remove query e preserva top páginas' );
+	uonix_metrics_assert( array( array( 'path' => '/', 'sessions' => 8.0 ), array( 'path' => '/b/', 'sessions' => 3.0 ) ) === $ga4['landing_pages'], 'Normalizador GA4 soma landing pages normalizadas e remove repetição da raiz' );
 	$valid_after_invalid = array();
 	for ( $i = 0; $i < 10; ++$i ) { $valid_after_invalid[] = array( 'path' => 'https://externo.example/' . $i, 'sessions' => 1 ); }
 	$valid_after_invalid[] = array( 'path' => '/valida/', 'sessions' => 9 );
