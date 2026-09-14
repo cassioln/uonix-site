@@ -124,6 +124,12 @@ curl() {
   esac
 }
 
+# O contrato do backoff (6 esperas, total de 195s) pertence a
+# test-clone-smoke-resilience.sh. Este teste valida propagação de falhas e não
+# deve aguardar o tempo real em cada um de seus três cenários negativos.
+# shellcheck disable=SC2329
+sleep() { :; }
+
 rollback_log="$TMP_DIR/core-validation-rollback.log"
 backup_dir() { printf '%s\n' "$TMP_DIR/target-backup"; }
 prepare_target_backup() { :; }
