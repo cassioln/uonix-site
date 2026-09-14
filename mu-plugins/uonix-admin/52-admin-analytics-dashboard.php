@@ -263,57 +263,6 @@ function uonix_render_analytics_dashboard_page()
 			</div>
 		</div>
 
-		<!-- Destinos de marketing: fatos técnicos locais, sem métricas externas não consultadas. -->
-		<section class="uonix-marketing-section" aria-labelledby="uonix-marketing-title">
-			<div class="uonix-panel-header">
-				<h2 id="uonix-marketing-title">Destinos de marketing configurados</h2>
-				<p>Este painel confirma apenas a configuração local. Dados de audiência, campanhas e resultados devem ser conferidos na plataforma indicada.</p>
-			</div>
-			<div class="uonix-marketing-grid">
-				<div class="uonix-marketing-card">
-					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-admin-generic uonix-sc-icon-gtm"></span><h3>Google Tag Manager</h3></div>
-					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gtm_status); ?></dd><dt>Finalidade</dt><dd>Centralizar tags e consentimento.</dd><dt>Validar em</dt><dd>Container, versão e Preview no GTM.</dd></dl>
-					<a href="<?php echo esc_url($gtm_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Google Tag Manager</a>
-				</div>
-				<div class="uonix-marketing-card">
-					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-chart-line uonix-sc-icon-ga"></span><h3>Google Analytics 4</h3></div>
-					<dl><dt>Configuração local</dt><dd><?php echo esc_html($analytics_is_configured ? 'G-RFY1BB1RM4 via GTM' : 'Não configurado'); ?></dd><dt>Finalidade</dt><dd>Mensuração estatística conforme consentimento.</dd><dt>Validar em</dt><dd>Relatórios, Eventos e DebugView no GA4.</dd></dl>
-					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">Visão geral e tempo real</a></li><li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">Páginas e telas</a></li><li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">Aquisição de tráfego</a></li></ul>
-					<a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Google Analytics</a>
-				</div>
-				<div class="uonix-marketing-card">
-					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-megaphone uonix-sc-icon-ads"></span><h3>Google Ads via GTM</h3></div>
-					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gtm_is_audited ? $google_ads_id . ' — Google Tag, vinculador de conversões e remarketing' : $google_ads_status); ?></dd><dt>Finalidade</dt><dd>Mensuração de mídia e remarketing conforme consentimento de marketing.</dd><dt>Validar em</dt><dd>Validar campanhas, públicos e resultados no Google Ads.</dd></dl>
-					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Campanhas e grupos de anúncios</a></li><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Diagnóstico de mensuração</a></li><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Públicos de remarketing</a></li></ul>
-					<a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline uonix-btn-outline-ads">Abrir Google Ads</a>
-				</div>
-				<div class="uonix-marketing-card">
-					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-shield uonix-sc-icon-adopt"></span><h3>AdOpt e Consent Mode</h3></div>
-					<dl><dt>Configuração local</dt><dd><?php echo esc_html($adopt_status); ?></dd><dt>Finalidade</dt><dd>Controlar categorias estatísticas e de marketing.</dd><dt>Validar em</dt><dd>Banner e preferências na produção.</dd></dl>
-					<ul class="uonix-card-links"><li><a href="<?php echo esc_url( $adopt_tags_url ); ?>" target="_blank" rel="noopener">Escanear tags</a></li><li><a href="<?php echo esc_url( $adopt_documents_url ); ?>" target="_blank" rel="noopener">Documentos</a></li><li><a href="<?php echo esc_url( $adopt_settings_url ); ?>" target="_blank" rel="noopener">Configurações</a></li><li><a href="<?php echo esc_url( $adopt_url ); ?>" target="_blank" rel="noopener">Abrir AdOpt</a></li></ul>
-					<a href="<?php echo esc_url( $adopt_url ); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir AdOpt</a>
-				</div>
-				<div class="uonix-marketing-card">
-					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-facebook-alt uonix-sc-icon-meta"></span><h3>Meta Pixel</h3></div>
-					<dl><dt>Configuração local</dt><dd><?php echo esc_html($meta_status); ?></dd><dt>Finalidade</dt><dd>PageView sujeito ao consentimento de marketing.</dd><dt>Validar em</dt><dd>Abra a plataforma para verificar o recebimento, diagnósticos e qualidade do Pixel.</dd></dl>
-					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener">Gerenciador de Eventos</a></li><li><a href="<?php echo esc_url( $meta_diagnostics_url ); ?>" target="_blank" rel="noopener">Diagnóstico e qualidade</a></li><li><a href="<?php echo esc_url( $meta_test_events_url ); ?>" target="_blank" rel="noopener">Testar eventos</a></li><li><a href="<?php echo esc_url($meta_suite_url); ?>" target="_blank" rel="noopener">Meta Business Suite</a></li></ul>
-					<a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline uonix-btn-outline-meta">Abrir Events Manager</a>
-				</div>
-				<div class="uonix-marketing-card">
-					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-search uonix-sc-icon-gsc"></span><h3>Google Search Console</h3></div>
-					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gsc_status); ?></dd><dt>Finalidade</dt><dd>Pesquisar desempenho orgânico e indexação.</dd><dt>Validar em</dt><dd>Desempenho, páginas e sitemaps no Search Console.</dd></dl>
-					<ul class="uonix-card-links"><li><a href="<?php echo esc_url( $gsc_performance_url ); ?>" target="_blank" rel="noopener">Consultas de pesquisa</a></li><li><a href="<?php echo esc_url( $gsc_index_url ); ?>" target="_blank" rel="noopener">Cobertura e indexação</a></li><li><a href="<?php echo esc_url( $gsc_sitemaps_url ); ?>" target="_blank" rel="noopener">Sitemaps XML</a></li></ul>
-					<a href="<?php echo esc_url($gsc_domain_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Search Console</a>
-				</div>
-				<div class="uonix-marketing-card">
-					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-analytics uonix-sc-icon-looker"></span><h3>Google Looker Studio</h3></div>
-					<dl><dt>Configuração local</dt><dd>Plataforma externa</dd><dt>Finalidade</dt><dd>Criar painéis e relatórios personalizados.</dd><dt>Validar em</dt><dd>Fontes de dados e permissões no Looker Studio.</dd></dl>
-					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener">Abrir painéis</a></li><li><a href="<?php echo esc_url( $looker_gallery_url ); ?>" target="_blank" rel="noopener">Galeria de modelos</a></li></ul>
-					<a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Looker Studio</a>
-				</div>
-			</div>
-		</section>
-
 		<section class="uonix-marketing-section" aria-labelledby="uonix-metrics-title">
 			<div class="uonix-panel-header uonix-metrics-panel-header">
 				<div class="uonix-metrics-copy">
@@ -471,7 +420,7 @@ function uonix_render_analytics_dashboard_page()
 				(<?php echo esc_html($total_posts); ?>)
 			</button>
 			<button class="uonix-tab-btn" data-tab="tab-services">
-				<span class="dashicons dashicons-hammer"></span> Serviços de Engenharia
+				<span class="dashicons dashicons-hammer"></span> Serviços
 				(<?php echo esc_html($total_services); ?>)
 			</button>
 		</div>
@@ -672,6 +621,57 @@ function uonix_render_analytics_dashboard_page()
 			</div>
 
 		</div>
+
+		<!-- Destinos de marketing: fatos técnicos locais, sem métricas externas não consultadas. -->
+		<section class="uonix-marketing-section" aria-labelledby="uonix-marketing-title">
+			<div class="uonix-panel-header">
+				<h2 id="uonix-marketing-title">Destinos de marketing configurados</h2>
+				<p>Este painel confirma apenas a configuração local. Dados de audiência, campanhas e resultados devem ser conferidos na plataforma indicada.</p>
+			</div>
+			<div class="uonix-marketing-grid">
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-admin-generic uonix-sc-icon-gtm"></span><h3>Google Tag Manager</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gtm_status); ?></dd><dt>Finalidade</dt><dd>Centralizar tags e consentimento.</dd><dt>Validar em</dt><dd>Container, versão e Preview no GTM.</dd></dl>
+					<a href="<?php echo esc_url($gtm_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Google Tag Manager</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-chart-line uonix-sc-icon-ga"></span><h3>Google Analytics 4</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($analytics_is_configured ? 'G-RFY1BB1RM4 via GTM' : 'Não configurado'); ?></dd><dt>Finalidade</dt><dd>Mensuração estatística conforme consentimento.</dd><dt>Validar em</dt><dd>Relatórios, Eventos e DebugView no GA4.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">Visão geral e tempo real</a></li><li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">Páginas e telas</a></li><li><a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener">Aquisição de tráfego</a></li></ul>
+					<a href="<?php echo esc_url($ga4_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Google Analytics</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-megaphone uonix-sc-icon-ads"></span><h3>Google Ads via GTM</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gtm_is_audited ? $google_ads_id . ' — Google Tag, vinculador de conversões e remarketing' : $google_ads_status); ?></dd><dt>Finalidade</dt><dd>Mensuração de mídia e remarketing conforme consentimento de marketing.</dd><dt>Validar em</dt><dd>Validar campanhas, públicos e resultados no Google Ads.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Campanhas e grupos de anúncios</a></li><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Diagnóstico de mensuração</a></li><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Públicos de remarketing</a></li></ul>
+					<a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline uonix-btn-outline-ads">Abrir Google Ads</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-shield uonix-sc-icon-adopt"></span><h3>AdOpt e Consent Mode</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($adopt_status); ?></dd><dt>Finalidade</dt><dd>Controlar categorias estatísticas e de marketing.</dd><dt>Validar em</dt><dd>Banner e preferências na produção.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url( $adopt_tags_url ); ?>" target="_blank" rel="noopener">Escanear tags</a></li><li><a href="<?php echo esc_url( $adopt_documents_url ); ?>" target="_blank" rel="noopener">Documentos</a></li><li><a href="<?php echo esc_url( $adopt_settings_url ); ?>" target="_blank" rel="noopener">Configurações</a></li></ul>
+					<a href="<?php echo esc_url( $adopt_url ); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir AdOpt</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-facebook-alt uonix-sc-icon-meta"></span><h3>Meta Pixel</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($meta_status); ?></dd><dt>Finalidade</dt><dd>PageView sujeito ao consentimento de marketing.</dd><dt>Validar em</dt><dd>Abra a plataforma para verificar o recebimento, diagnósticos e qualidade do Pixel.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener">Gerenciador de Eventos</a></li><li><a href="<?php echo esc_url( $meta_diagnostics_url ); ?>" target="_blank" rel="noopener">Diagnóstico e qualidade</a></li><li><a href="<?php echo esc_url( $meta_test_events_url ); ?>" target="_blank" rel="noopener">Testar eventos</a></li><li><a href="<?php echo esc_url($meta_suite_url); ?>" target="_blank" rel="noopener">Meta Business Suite</a></li></ul>
+					<a href="<?php echo esc_url($meta_events_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline uonix-btn-outline-meta">Abrir Events Manager</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-search uonix-sc-icon-gsc"></span><h3>Google Search Console</h3></div>
+					<dl><dt>Configuração local</dt><dd><?php echo esc_html($gsc_status); ?></dd><dt>Finalidade</dt><dd>Pesquisar desempenho orgânico e indexação.</dd><dt>Validar em</dt><dd>Desempenho, páginas e sitemaps no Search Console.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url( $gsc_performance_url ); ?>" target="_blank" rel="noopener">Consultas de pesquisa</a></li><li><a href="<?php echo esc_url( $gsc_index_url ); ?>" target="_blank" rel="noopener">Cobertura e indexação</a></li><li><a href="<?php echo esc_url( $gsc_sitemaps_url ); ?>" target="_blank" rel="noopener">Sitemaps XML</a></li></ul>
+					<a href="<?php echo esc_url($gsc_domain_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Search Console</a>
+				</div>
+				<div class="uonix-marketing-card">
+					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-analytics uonix-sc-icon-looker"></span><h3>Google Looker Studio</h3></div>
+					<dl><dt>Configuração local</dt><dd>Plataforma externa</dd><dt>Finalidade</dt><dd>Criar painéis e relatórios personalizados.</dd><dt>Validar em</dt><dd>Fontes de dados e permissões no Looker Studio.</dd></dl>
+					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener">Abrir painéis</a></li><li><a href="<?php echo esc_url( $looker_gallery_url ); ?>" target="_blank" rel="noopener">Galeria de modelos</a></li></ul>
+					<a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Looker Studio</a>
+				</div>
+			</div>
+		</section>
 	</div>
 
 	<!-- Estilos CSS do Dashboard -->
