@@ -152,6 +152,9 @@ jobs:
       - name: Test admin analytics dashboard
         run: php scripts/tests/test-admin-analytics-dashboard.php
 
+      - name: Test admin cache security
+        run: php scripts/tests/test-admin-cache-security.php
+
   shell-and-config:
     name: Shell, workflows, Node and Compose
     runs-on: ubuntu-latest
