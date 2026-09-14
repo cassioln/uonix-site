@@ -248,6 +248,29 @@ function uonix_dashboard_span_texts( $html, $class_name ) {
 	);
 }
 
+function uonix_dashboard_div_end_offset( $html, $opening_offset ) {
+	if ( ! is_int( $opening_offset ) || $opening_offset < 0 ) {
+		return null;
+	}
+	$fragment = substr( $html, $opening_offset );
+	if ( ! is_string( $fragment ) || preg_match_all( '#</?div\b[^>]*>#i', $fragment, $matches, PREG_OFFSET_CAPTURE ) < 1 ) {
+		return null;
+	}
+	$depth = 0;
+	foreach ( $matches[0] as $match ) {
+		$tag = $match[0];
+		if ( 0 === stripos( $tag, '</div' ) ) {
+			--$depth;
+			if ( 0 === $depth ) {
+				return $opening_offset + $match[1] + strlen( $tag );
+			}
+			continue;
+		}
+		++$depth;
+	}
+	return null;
+}
+
 // Carrega o arquivo a ser testado
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/52-admin-analytics-dashboard.php';
 
@@ -358,16 +381,20 @@ $adopt_links = array(
 	'Escanear tags' => 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags',
 	'Documentos' => 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/documents',
 	'Configurações' => 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix',
-	'Abrir AdOpt' => 'https://dash.goadopt.io/org/uonix/disclaimers',
 );
 foreach ( $adopt_links as $label => $url ) {
 	uonix_dashboard_assert( strpos( $output, 'href="' . $url . '"' ) !== false && strpos( $output, '>' . $label . '</a>' ) !== false, 'Card AdOpt contém o link exato: ' . $label );
 }
 uonix_dashboard_assert( strpos( $output, '<a href="https://dash.goadopt.io/org/uonix/disclaimers" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir AdOpt</a>' ) !== false, 'Card AdOpt oferece Abrir AdOpt como botão' );
+uonix_dashboard_assert( 1 === substr_count( $output, '>Abrir AdOpt</a>' ), 'Card AdOpt exibe Abrir AdOpt somente como botão' );
 uonix_dashboard_assert( strpos( $output, 'uonix-shortcuts-grid' ) === false, 'Grade antiga de atalhos não permanece no painel' );
 
 // A central de marketing mostra somente fatos técnicos verificáveis localmente.
 uonix_dashboard_assert( strpos( $output, 'Destinos de marketing configurados' ) !== false, 'Dashboard apresenta a central de destinos de marketing' );
+$catalog_content_start = strpos( $output, '<div class="uonix-tab-content-wrapper">' );
+$catalog_content_end = uonix_dashboard_div_end_offset( $output, $catalog_content_start );
+$marketing_section_start = strpos( $output, '<section class="uonix-marketing-section" aria-labelledby="uonix-marketing-title">' );
+uonix_dashboard_assert( is_int( $catalog_content_end ) && is_int( $marketing_section_start ) && $marketing_section_start > $catalog_content_end, 'Central de destinos de marketing é a última seção de conteúdo do dashboard' );
 uonix_dashboard_assert( strpos( $output, 'Google Ads via GTM' ) !== false, 'Dashboard apresenta card dedicado ao Google Ads via GTM' );
 uonix_dashboard_assert( strpos( $output, 'AW-6012006717' ) !== false, 'Dashboard mostra a conta técnica Google Ads auditada' );
 uonix_dashboard_assert( strpos( $output, 'Google Tag, vinculador de conversões e remarketing' ) !== false, 'Dashboard descreve somente a infraestrutura Ads ainda configurada' );
@@ -394,6 +421,7 @@ uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">17</t
 uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">11</td>' ) !== false, 'Artigo mostra visualizações da sua URL' );
 uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">5</td>' ) !== false, 'Serviço mostra visualizações da sua URL' );
 uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">0</td>' ) !== false, 'Conteúdo ausente de relatório completo mostra zero' );
+uonix_dashboard_assert( 1 === preg_match( '#<button class="uonix-tab-btn" data-tab="tab-services">\s*<span class="dashicons dashicons-hammer"></span>\s*Serviços\s*\([0-9]+\)\s*</button>#u', $output ), 'Aba de serviços usa exatamente o rótulo curto solicitado' );
 
 $_GET['uonix_period'] = '90';
 $GLOBALS['uonix_test_snapshot_fresh'] = false;
