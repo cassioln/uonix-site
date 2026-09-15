@@ -57,6 +57,9 @@ jobs:
       - name: Test analytics policy
         run: php scripts/tests/test-analytics-policy.php
 
+      - name: Test comments nosnippet and replytocom SEO
+        run: php scripts/tests/test-comments-nosnippet-seo.php
+
       - name: Test Uônix Insights GA4 and Search Console metrics
         run: php scripts/tests/test-admin-analytics-metrics.php
 
