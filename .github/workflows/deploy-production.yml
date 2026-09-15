@@ -774,7 +774,10 @@ jobs:
           ( set -o noclobber; umask 077; printf '%s\n' "$run_id" > "$marker" )
           chmod 600 "$marker"
 
-          "$wpsc_backup/install-wp-super-cache-simple.sh" \
+          # Backups privados podem estar em filesystem montado com noexec. O
+          # interpretador explícito preserva a verificação do conteúdo e evita
+          # depender do bit executável do diretório de checkpoint.
+          bash "$wpsc_backup/install-wp-super-cache-simple.sh" \
             --wp-root="$document_root" \
             --php-bin="$php_bin" \
             --wp-bin="$wp_bin" \
