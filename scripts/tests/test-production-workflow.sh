@@ -75,6 +75,8 @@ require(production, r'inputs\.migrate_variation_technical_sheet', 'migração da
 require(production, r'inputs\.install_page_cache', 'instalação de cache precisa depender do input explícito')
 require(production, r'- name: Install WP Super Cache Simple safely', 'etapa versionada de cache ausente')
 require(production, r'- name: Install WP Super Cache Simple safely\s*\n\s+if:\s*\$\{\{\s*inputs\.install_page_cache\s*\}\}', 'cache precisa ficar desligado sem input explícito')
+require(production, r'bash "\$wpsc_backup/install-wp-super-cache-simple\.sh"', 'instalador do cache precisa usar bash explícito para checkpoint noexec')
+forbid(production, r'^\s+"\$wpsc_backup/install-wp-super-cache-simple\.sh"\s+\\', 'instalador do cache não pode depender de execução direta no checkpoint')
 require(production, r'- name: Migrate legacy variation technical sheets', 'etapa versionada de migração da ficha ausente')
 require(production, r'--dry-run.*?--execute', 'produção precisa executar dry-run antes da migração efetiva')
 require(production, r'migration_args=\(.*?--execute', 'migração de produção precisa usar argumentos protegidos reutilizáveis')
