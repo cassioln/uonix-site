@@ -61,7 +61,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$url" = 'https://downloads.wordpress.org/plugin/wp-super-cache.3.1.3.zip' ]
 [ -n "$output" ]
-cp /tmp/wp-super-cache.3.1.3.zip "$output"
+cp "$WPSC_TEST_ARCHIVE" "$output"
 SH
   chmod 700 "$TMP_DIR/curl"
 }
@@ -70,8 +70,15 @@ make_fake_cli
 state="$TMP_DIR/state"
 mkdir -p "$state/root/wp-content"
 : > "$TMP_DIR/configure.php"
+source_archive="$TMP_DIR/wp-super-cache.3.1.3.zip"
+curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+  'https://downloads.wordpress.org/plugin/wp-super-cache.3.1.3.zip' \
+  --output "$source_archive"
+archive_checksum="$(sha256sum "$source_archive" | cut -d ' ' -f 1)"
+[ "$archive_checksum" = 'e2773f2146be15c088d5fa4e6280d433b6c08c4d155257be5580b0d69dfcf270' ] || fail 'fixture oficial diverge do SHA-256 fixo'
 export WPSC_TEST_LOG="$TMP_DIR/commands.log"
 export WPSC_TEST_STATE="$state"
+export WPSC_TEST_ARCHIVE="$source_archive"
 export PATH="$TMP_DIR:$PATH"
 
 bash "$SCRIPT" \
