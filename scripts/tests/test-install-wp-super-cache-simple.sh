@@ -16,7 +16,7 @@ make_fake_cli() {
 #!/usr/bin/env bash
 set -euo pipefail
 args=("$@")
-# A inserção das constantes usa PHP de verdade (`php -r`), não WP-CLI. As
+# O preflight de âncora e a canonicalização usam PHP direto (`php -r`); as
 # chamadas de WP-CLI continuam passando por `-d disable_functions=`.
 if [ "${args[0]}" = '-r' ]; then
   exec php "$@"
@@ -57,6 +57,11 @@ case "$command" in
     ;;
   *'plugin get wp-super-cache --field=version'*) printf '3.1.3\n' ;;
   *'config path'*) printf '%s\n' "$state/root/wp-config.php" ;;
+  *'config set WP_CACHE true --raw'*) printf "define( 'WP_CACHE', true );\n" >> "$state/root/wp-config.php" ;;
+  *'config set WPCACHEHOME '*'--type=constant'*)
+    value="$(printf '%s\n' "$command" | sed -n 's/.*config set WPCACHEHOME \(.*\) --type=constant.*/\1/p')"
+    printf "define( 'WPCACHEHOME', '%s' );\n" "$value" >> "$state/root/wp-config.php"
+    ;;
   # `wp config get` lê a configuração PHP efetiva, não texto: é o que o
   # instalador precisa usar para provar persistência sem falso positivo.
   *'config get WP_CACHE --type=constant'*)
@@ -96,14 +101,16 @@ SH
 make_fake_cli
 state="$TMP_DIR/state"
 mkdir -p "$state/root/wp-content"
-# Reproduz o wp-config.php REAL da Locaweb: sem o comentário-âncora
-# "stop editing" e com o define de ABSPATH aninhado num if. Nesse formato
-# `wp config set` falha com "Unable to locate placement anchor", que foi a causa
-# da quinta tentativa de deploy.
+# O wp-config precisa conter o âncora que `wp config set` exige. O de produção
+# na Locaweb não tinha, e o deploy falhou com "Unable to locate placement
+# anchor" — por isso o instalador passou a verificar isso no preflight.
 cat > "$state/root/wp-config.php" <<'CONFIG'
 <?php
 define( 'DB_NAME', 'exemplo' );
 $table_prefix = 'wpis_';
+
+/* That's all, stop editing! Happy publishing. */
+
 if ( ! defined( 'ABSPATH' ) ) {
     define( 'ABSPATH', __DIR__ . '/' );
 }
@@ -133,38 +140,14 @@ bash "$SCRIPT" \
 grep -qx 'WPSC_SIMPLE_INSTALL=PASS version=3.1.3 mode=PHP' "$TMP_DIR/output" || fail 'instalação não confirmou perfil Simple'
 grep -F -- '--activate --force' "$TMP_DIR/commands.log" >/dev/null || fail 'plugin não foi ativado'
 grep -F -- 'eval-file' "$TMP_DIR/commands.log" >/dev/null || fail 'configurador não foi executado'
+grep -F -- 'config set WP_CACHE true --raw' "$TMP_DIR/commands.log" >/dev/null || fail 'instalador não declarou WP_CACHE=true antes de configurar o WPSC'
+grep -F -- 'config set WPCACHEHOME ' "$TMP_DIR/commands.log" >/dev/null || fail 'instalador não declarou WPCACHEHOME antes de ativar o WPSC'
 grep -F -- 'plugin is-active wp-super-cache' "$TMP_DIR/commands.log" >/dev/null || fail 'instalador não confirmou ativação pelo comando suportado'
+wp_cache_line="$(grep -nF 'config set WP_CACHE true --raw' "$TMP_DIR/commands.log" | cut -d: -f1)"
+wpcachehome_line="$(grep -nF 'config set WPCACHEHOME ' "$TMP_DIR/commands.log" | cut -d: -f1)"
 plugin_install_line="$(grep -nF 'plugin install ' "$TMP_DIR/commands.log" | cut -d: -f1)"
-
-# `wp config set` exige um âncora que o wp-config da Locaweb não tem. O
-# instalador precisa gravar as constantes por conta própria.
-if grep -F -- 'config set WP_CACHE' "$TMP_DIR/commands.log" >/dev/null; then
-  fail 'instalador ainda depende de wp config set, que falha sem âncora de posicionamento'
-fi
-if grep -F -- 'config set WPCACHEHOME' "$TMP_DIR/commands.log" >/dev/null; then
-  fail 'instalador ainda depende de wp config set para WPCACHEHOME'
-fi
-
-# As constantes precisam ficar ANTES do require_once que carrega o WordPress:
-# depois dele o WP_CACHE não tem efeito no drop-in.
-config_body="$state/root/wp-config.php"
-wp_cache_at="$(grep -nF "define( 'WP_CACHE', true );" "$config_body" | head -n 1 | cut -d: -f1)"
-wpcachehome_at="$(grep -nF "define( 'WPCACHEHOME'," "$config_body" | head -n 1 | cut -d: -f1)"
-require_at="$(grep -nF "require_once ABSPATH . 'wp-settings.php';" "$config_body" | head -n 1 | cut -d: -f1)"
-[ -n "$wp_cache_at" ] || fail 'WP_CACHE não foi inserido no wp-config'
-[ -n "$wpcachehome_at" ] || fail 'WPCACHEHOME não foi inserido no wp-config'
-[ "$wp_cache_at" -lt "$require_at" ] || fail 'WP_CACHE precisa preceder o require_once do wp-settings'
-[ "$wpcachehome_at" -lt "$require_at" ] || fail 'WPCACHEHOME precisa preceder o require_once do wp-settings'
-
-# O arquivo tem de continuar sintaticamente válido e preservar o conteúdo original.
-php -l "$config_body" >/dev/null || fail 'wp-config ficou com PHP inválido após a inserção'
-grep -Fq "define( 'DB_NAME', 'exemplo' );" "$config_body" || fail 'inserção destruiu conteúdo preexistente do wp-config'
-grep -Fq "require_once ABSPATH . 'wp-settings.php';" "$config_body" || fail 'inserção removeu o require_once do wp-settings'
-[ "$(grep -cF "define( 'WP_CACHE', true );" "$config_body")" -eq 1 ] || fail 'WP_CACHE foi inserido em duplicidade'
-
-# Backup do wp-config precisa existir para permitir rollback.
-backup_count="$(find "$state/root" -maxdepth 1 -name 'wp-config.php.uonix-wpsc-*' | wc -l | tr -d ' ')"
-[ "$backup_count" -ge 1 ] || fail 'instalador não criou backup do wp-config antes de alterar'
+[ "$wp_cache_line" -lt "$plugin_install_line" ] || fail 'WP_CACHE=true precisa ser declarado antes da ativação do plugin'
+[ "$wpcachehome_line" -lt "$plugin_install_line" ] || fail 'WPCACHEHOME precisa ser declarado antes da ativação do plugin'
 
 # A persistência precisa ser lida pela configuração PHP efetiva, não por grep de
 # texto: um define comentado ou um valor divergente passariam no teste textual.
@@ -185,7 +168,13 @@ fi
 foreign_state="$TMP_DIR/foreign-state"
 mkdir -p "$foreign_state/root/wp-content" "$foreign_state/other"
 printf "<?php\n" > "$foreign_state/root/wp-config.php"
-printf "<?php\n" > "$foreign_state/other/wp-config.php"
+# O arquivo estrangeiro tem âncora válido: assim o teste isola a guarda de
+# localização, em vez de reprovar antes no preflight de âncora.
+cat > "$foreign_state/other/wp-config.php" <<'CONFIG'
+<?php
+/* That's all, stop editing! Happy publishing. */
+require_once ABSPATH . 'wp-settings.php';
+CONFIG
 cat > "$TMP_DIR/wp-cli-foreign.php" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
@@ -214,10 +203,7 @@ if bash "$SCRIPT" \
 fi
 # A guarda precisa agir ANTES de qualquer escrita: o arquivo estrangeiro não
 # pode ter recebido nenhuma constante.
-if grep -Fq 'TOUCHED' "$foreign_state/other/wp-config.php" \
-  || grep -Fq "define( 'WP_CACHE'" "$foreign_state/other/wp-config.php" \
-  || grep -Fq "define( 'WPCACHEHOME'" "$foreign_state/other/wp-config.php" \
-  || find "$foreign_state/other" -maxdepth 1 -name 'wp-config.php.uonix-wpsc-*' | grep -q .; then
+if grep -Fq 'TOUCHED' "$foreign_state/other/wp-config.php"; then
   fail 'instalador escreveu em wp-config fora da instalação operada'
 fi
 
@@ -252,9 +238,7 @@ if bash "$SCRIPT" \
   >/dev/null 2>&1; then
   fail 'wp-config symlinkado foi aceito'
 fi
-if grep -Fq 'TOUCHED' "$symlink_state/elsewhere/wp-config.php" \
-  || grep -Fq "define( 'WP_CACHE'" "$symlink_state/elsewhere/wp-config.php" \
-  || grep -Fq "define( 'WPCACHEHOME'" "$symlink_state/elsewhere/wp-config.php"; then
+if grep -Fq 'TOUCHED' "$symlink_state/elsewhere/wp-config.php"; then
   fail 'instalador escreveu através de wp-config symlinkado'
 fi
 
@@ -264,9 +248,7 @@ divergent_state="$TMP_DIR/divergent-state"
 mkdir -p "$divergent_state/root/wp-content"
 cat > "$divergent_state/root/wp-config.php" <<'CONFIG'
 <?php
-if ( ! defined( 'ABSPATH' ) ) {
-    define( 'ABSPATH', __DIR__ . '/' );
-}
+/* That's all, stop editing! Happy publishing. */
 require_once ABSPATH . 'wp-settings.php';
 CONFIG
 cat > "$TMP_DIR/wp-cli-divergent.php" <<SH
@@ -306,47 +288,53 @@ if bash "$SCRIPT" \
 fi
 grep -Fq 'wpcachehome_divergente' "$divergent_output" || fail 'WPCACHEHOME divergente reprovou por outro motivo'
 
-# Um wp-config já sintaticamente inválido não pode ser substituído: sem o lint,
-# o instalador publicaria um arquivo quebrado e derrubaria o site inteiro.
-broken_state="$TMP_DIR/broken-state"
-mkdir -p "$broken_state/root/wp-content"
-cat > "$broken_state/root/wp-config.php" <<'CONFIG'
+# Sem o âncora, `wp config set` falha DEPOIS de o deploy já ter publicado
+# código. O preflight precisa recusar antes de qualquer escrita remota.
+anchorless_state="$TMP_DIR/anchorless-state"
+mkdir -p "$anchorless_state/root/wp-content"
+cat > "$anchorless_state/root/wp-config.php" <<'CONFIG'
 <?php
+define( 'DB_NAME', 'exemplo' );
 if ( ! defined( 'ABSPATH' ) ) {
     define( 'ABSPATH', __DIR__ . '/' );
 }
 require_once ABSPATH . 'wp-settings.php';
-function uonix_broken( {
 CONFIG
-broken_before="$(shasum -a 256 < "$broken_state/root/wp-config.php" | cut -d' ' -f1)"
-cat > "$TMP_DIR/wp-cli-broken.php" <<SH
+anchorless_before="$(shasum -a 256 < "$anchorless_state/root/wp-config.php" | cut -d' ' -f1)"
+cat > "$TMP_DIR/wp-cli-anchorless.php" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
 case "\$*" in
   *'plugin is-installed wp-super-cache'*) exit 1 ;;
-  *'config path'*) printf '%s\n' "$broken_state/root/wp-config.php" ;;
-  *'config get '*) printf '1\n' ;;
-  *'plugin install '*) : ;;
-  *'plugin is-active wp-super-cache'*) : ;;
-  *'plugin get wp-super-cache --field=version'*) printf '3.1.3\n' ;;
-  *'eval-file '*) printf 'WPSC_SIMPLE_CONFIGURATION=PASS\n' ;;
-  *) printf 'unexpected broken CLI command: %s\n' "\$*" >&2; exit 91 ;;
+  *'config path'*) printf '%s\n' "$anchorless_state/root/wp-config.php" ;;
+  *'config set '*) printf "Error: Unable to locate placement anchor.\n" >&2; exit 1 ;;
+  *) printf 'unexpected anchorless CLI command: %s\n' "\$*" >&2; exit 91 ;;
 esac
 SH
-chmod 700 "$TMP_DIR/wp-cli-broken.php"
+chmod 700 "$TMP_DIR/wp-cli-anchorless.php"
+anchorless_output="$TMP_DIR/anchorless.out"
 if bash "$SCRIPT" \
-  --wp-root="$broken_state/root" \
+  --wp-root="$anchorless_state/root" \
   --php-bin="$TMP_DIR/php-bin" \
-  --wp-bin="$TMP_DIR/wp-cli-broken.php" \
+  --wp-bin="$TMP_DIR/wp-cli-anchorless.php" \
   --config-script="$TMP_DIR/configure.php" \
   --archive="$source_archive" \
   --source-sha256='e2773f2146be15c088d5fa4e6280d433b6c08c4d155257be5580b0d69dfcf270' \
-  >/dev/null 2>&1; then
-  fail 'wp-config com PHP inválido foi aceito para substituição'
+  >"$anchorless_output" 2>&1; then
+  fail 'wp-config sem âncora de posicionamento foi aceito'
 fi
-broken_after="$(shasum -a 256 < "$broken_state/root/wp-config.php" | cut -d' ' -f1)"
-[ "$broken_before" = "$broken_after" ] || fail 'instalador substituiu wp-config sem validar sintaxe PHP'
-[ ! -e "$broken_state/root/wp-config.php.uonix-wpsc-pending" ] || fail 'arquivo temporário de inserção não foi removido'
+grep -Fq 'wp_config_sem_ancora' "$anchorless_output" || fail 'ausência de âncora precisa reprovar com diagnóstico próprio, não com erro genérico do wp config set'
+anchorless_after="$(shasum -a 256 < "$anchorless_state/root/wp-config.php" | cut -d' ' -f1)"
+[ "$anchorless_before" = "$anchorless_after" ] || fail 'instalador alterou wp-config sem âncora'
+
+# O instalador NÃO deve reescrever o wp-config: essa abordagem foi reprovada por
+# risco de corromper o arquivo, expor cópias e trocar proprietário do inode.
+if grep -Fq 'insert_wpsc_constants' "$SCRIPT"; then
+  fail 'instalador voltou a reescrever o wp-config diretamente'
+fi
+if grep -Eq 'file_put_contents|rename\(' "$SCRIPT"; then
+  fail 'instalador manipula o wp-config por escrita direta'
+fi
 
 # Falha fechada: plugin já presente não pode ser atualizado silenciosamente.
 : > "$state/installed"
