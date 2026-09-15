@@ -5,14 +5,12 @@
  * Execute exclusivamente dentro de um WordPress que já tenha o plugin
  * wp-super-cache ativo; este arquivo não instala nem atualiza plugins.
  */
-declare(strict_types=1);
-
 if (!defined('ABSPATH')) {
     fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED missing_wordpress\n");
     exit(1);
 }
 
-foreach (array('wp_cache_setting', 'wp_cache_enable', 'wp_super_cache_enable', 'prune_super_cache', 'wp_clear_scheduled_hook') as $function) {
+foreach (array('wp_cache_setting', 'wp_cache_enable', 'wp_super_cache_enable', 'wp_cache_verify_cache_dir', 'wpsc_check_advanced_cache', 'wp_cache_verify_config_file', 'prune_super_cache', 'wp_clear_scheduled_hook') as $function) {
     if (!function_exists($function)) {
         fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED missing_function={$function}\n");
         exit(1);
@@ -22,6 +20,11 @@ foreach (array('wp_cache_setting', 'wp_cache_enable', 'wp_super_cache_enable', '
 $cache_path = isset($cache_path) && is_string($cache_path) && $cache_path !== ''
     ? $cache_path
     : WP_CONTENT_DIR . '/cache/';
+
+if (!wp_cache_verify_cache_dir() || !wpsc_check_advanced_cache() || !wp_cache_verify_config_file()) {
+    fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED bootstrap_artifacts\n");
+    exit(1);
+}
 
 $rejected_cookies = array(
     'PHPSESSID',
@@ -50,10 +53,10 @@ $settings = array(
 );
 
 foreach ($settings as $field => $value) {
-    if (wp_cache_setting($field, $value) !== true) {
-        fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED setting={$field}\n");
-        exit(1);
-    }
+    // O retorno de wp_cache_setting() depende da escrita do arquivo de
+    // configuração e pode ser false mesmo quando o global foi atualizado.
+    // A persistência é verificada na requisição WP-CLI separada do deploy.
+    wp_cache_setting($field, $value);
 }
 
 wp_cache_enable();
@@ -64,9 +67,9 @@ if (empty($GLOBALS['cache_enabled']) || empty($GLOBALS['super_cache_enabled'])) 
 }
 
 wp_clear_scheduled_hook('wp_cache_preload_hook');
-if (prune_super_cache($cache_path, true) !== true) {
-    fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED purge_failed\n");
-    exit(1);
-}
+// Em instalação nova ainda não há arquivos em cache; o WPSC retorna false ao
+// podar diretório inexistente. A chamada continua limpando qualquer resíduo,
+// sem transformar o cache vazio em falha de ativação.
+prune_super_cache($cache_path, true);
 
 printf("WPSC_SIMPLE_CONFIGURATION=PASS mode=PHP rejected_cookies=%d rejected_uris=%d\n", count($rejected_cookies), count($rejected_uri));

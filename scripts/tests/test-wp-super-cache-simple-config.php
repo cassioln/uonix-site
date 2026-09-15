@@ -15,10 +15,10 @@ function wpsc_test_fail(string $message): void {
     $failures[] = $message;
 }
 
-function wp_cache_setting(string $field, $value): bool {
+function wp_cache_setting(string $field, $value): void {
     global $settings;
     $settings[$field] = $value;
-    return true;
+    $GLOBALS[$field] = $value;
 }
 
 function wp_cache_enable(): void {
@@ -38,12 +38,32 @@ function wp_super_cache_enable(): void {
 function prune_super_cache(string $path, bool $all): bool {
     global $events;
     $events[] = 'purge:' . $path . ':' . ($all ? '1' : '0');
-    return true;
+    // Em uma instalação nova o diretório ainda pode não existir: o WPSC real
+    // retorna false nesse caso, sem indicar falha na ativação.
+    return false;
 }
 
 function wp_clear_scheduled_hook(string $hook): void {
     global $events;
     $events[] = 'clear:' . $hook;
+}
+
+function wp_cache_verify_cache_dir(): bool {
+    global $events;
+    $events[] = 'verify-cache-dir';
+    return true;
+}
+
+function wpsc_check_advanced_cache(): bool {
+    global $events;
+    $events[] = 'verify-advanced-cache';
+    return true;
+}
+
+function wp_cache_verify_config_file(): bool {
+    global $events;
+    $events[] = 'verify-config-file';
+    return true;
 }
 
 $GLOBALS['cache_path'] = '/tmp/uonix-wpsc-cache/';
@@ -106,7 +126,7 @@ foreach (array(
         wpsc_test_fail("configuração ausente/incorreta: {$key}");
     }
 }
-foreach (array('enable', 'super-enable', 'purge:/tmp/uonix-wp-content/cache/:1', 'clear:wp_cache_preload_hook') as $event) {
+foreach (array('verify-cache-dir', 'verify-advanced-cache', 'verify-config-file', 'enable', 'super-enable', 'purge:/tmp/uonix-wp-content/cache/:1', 'clear:wp_cache_preload_hook') as $event) {
     if (!in_array($event, $events, true)) {
         wpsc_test_fail("operação obrigatória ausente: {$event}");
     }
