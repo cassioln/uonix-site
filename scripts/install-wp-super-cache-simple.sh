@@ -54,12 +54,15 @@ cli() {
 
 canonical_path() {
   local candidate="$1"
-  local directory
-  local base
 
-  directory="$(dirname "$candidate")"
-  base="$(basename "$candidate")"
-  ( cd "$directory" >/dev/null 2>&1 && printf '%s/%s\n' "$(pwd -P)" "$base" )
+  # Resolve o ARQUIVO, não apenas o diretório: um symlink apontando para fora da
+  # instalação precisa revelar o destino real, senão a comparação de localização
+  # avaliaria o link em vez do arquivo que o WP-CLI vai realmente alterar.
+  UONIX_WPSC_PATH="$candidate" "$PHP_BIN" -r '
+$real = realpath(getenv("UONIX_WPSC_PATH"));
+if (false === $real) { exit(1); }
+echo $real, PHP_EOL;
+'
 }
 
 # `wp config path` é entrada de confiança limitada: se apontar para fora da
@@ -81,7 +84,7 @@ require_managed_config_path() {
   [ ! -L "$candidate" ] || fail "$reason"
 
   resolved="$(canonical_path "$candidate")" || fail "$reason"
-  resolved_root="$(cd "$WP_ROOT" >/dev/null 2>&1 && pwd -P)" || fail "$reason"
+  resolved_root="$(canonical_path "$WP_ROOT")" || fail "$reason"
   [ -n "$resolved" ] && [ -n "$resolved_root" ] || fail "$reason"
 
   # O WordPress aceita wp-config.php na raiz ou um nível acima; qualquer outro
@@ -109,6 +112,54 @@ assert_wpsc_constants_persisted() {
 
   wpcachehome="$(cli config get WPCACHEHOME --type=constant 2>/dev/null)" || fail "wpcachehome_nao_persistido_${stage}"
   [ "$wpcachehome" = "$expected_home" ] || fail "wpcachehome_divergente_${stage}"
+}
+
+# `wp config set` só insere constantes quando encontra um âncora de
+# posicionamento: o comentário "stop editing" ou um define( 'ABSPATH', ... ) em
+# nível superior. O wp-config.php de produção da Locaweb não tinha nenhum dos
+# dois — o define está aninhado num if — e o deploy falhou com "Unable to locate
+# placement anchor" DEPOIS de publicar código e criar backups.
+#
+# Reescrever o wp-config aqui foi avaliado e recusado: exigiria parser PHP,
+# cópias fora do document root e preservação de proprietário/ACL; um erro
+# derrubaria o site inteiro. O instalador exige o âncora e falha cedo, com
+# diagnóstico próprio, para que a correção seja feita uma única vez no arquivo.
+require_wp_config_anchor() {
+  local config_file="$1"
+
+  UONIX_WPSC_CONFIG_FILE="$config_file" "$PHP_BIN" -r '
+$path = getenv("UONIX_WPSC_CONFIG_FILE");
+$contents = file_get_contents($path);
+if (false === $contents || "" === $contents) { exit(1); }
+
+// A busca é por TOKENS, não por texto: um "stop editing" dentro de string ou um
+// define de ABSPATH comentado não são âncoras reais para o WP-CLI.
+$tokens = token_get_all($contents);
+$depth = 0;
+foreach ($tokens as $index => $token) {
+    if (!is_array($token)) {
+        if ("{" === $token) { ++$depth; }
+        if ("}" === $token) { --$depth; }
+        continue;
+    }
+    if (T_COMMENT === $token[0] && false !== stripos($token[1], "stop editing")) {
+        echo "anchor=comment", PHP_EOL;
+        exit(0);
+    }
+    // define( "ABSPATH", ... ) precisa estar em nível superior para servir de âncora.
+    if (0 === $depth && T_STRING === $token[0] && 0 === strcasecmp($token[1], "define")) {
+        for ($ahead = $index + 1, $limit = min($index + 6, count($tokens)); $ahead < $limit; ++$ahead) {
+            $next = $tokens[$ahead];
+            if (is_array($next) && T_CONSTANT_ENCAPSED_STRING === $next[0]
+                && "ABSPATH" === trim($next[1], "\x27\"")) {
+                echo "anchor=abspath", PHP_EOL;
+                exit(0);
+            }
+        }
+    }
+}
+exit(1);
+' || fail 'wp_config_sem_ancora'
 }
 
 if cli plugin is-installed wp-super-cache >/dev/null 2>&1; then
@@ -145,6 +196,9 @@ expected_wpcachehome="$WP_ROOT/wp-content/plugins/wp-super-cache/"
 # symlink não pode receber constantes nem ser aceito como prova.
 config_path="$(cli config path)"
 require_managed_config_path "$config_path" 'wp_config_invalido'
+
+# Falha cedo e sem mutação: sem âncora, `wp config set` abortaria adiante.
+require_wp_config_anchor "$config_path"
 
 # O hook de ativação do WPSC cria advanced-cache.php e o arquivo de
 # configuração apenas quando WP_CACHE já está habilitado. Declarar a constante
