@@ -21,18 +21,18 @@ function wp_cache_setting(string $field, $value): bool {
     return true;
 }
 
-function wp_cache_enable(): bool {
-    global $events, $settings;
+function wp_cache_enable(): void {
+    global $events, $settings, $cache_enabled;
     $events[] = 'enable';
     $settings['cache_enabled'] = true;
-    return true;
+    $cache_enabled = true;
 }
 
-function wp_super_cache_enable(): bool {
-    global $events, $settings;
+function wp_super_cache_enable(): void {
+    global $events, $settings, $super_cache_enabled;
     $events[] = 'super-enable';
     $settings['super_cache_enabled'] = true;
-    return true;
+    $super_cache_enabled = true;
 }
 
 function prune_super_cache(string $path, bool $all): bool {
