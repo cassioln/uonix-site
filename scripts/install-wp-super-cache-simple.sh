@@ -54,12 +54,16 @@ cli() {
 
 canonical_path() {
   local candidate="$1"
-  local directory
-  local base
 
-  directory="$(dirname "$candidate")"
-  base="$(basename "$candidate")"
-  ( cd "$directory" >/dev/null 2>&1 && printf '%s/%s\n' "$(pwd -P)" "$base" )
+  # Resolve o ARQUIVO, não apenas o diretório: um symlink que aponta para fora
+  # da instalação precisa revelar o destino real, senão a comparação de
+  # localização avaliaria o link em vez do arquivo que será escrito.
+  UONIX_WPSC_PATH="$candidate" "$PHP_BIN" -r '
+$path = getenv("UONIX_WPSC_PATH");
+$real = realpath($path);
+if (false === $real) { exit(1); }
+echo $real, PHP_EOL;
+'
 }
 
 # `wp config path` é entrada de confiança limitada: se apontar para fora da
@@ -78,10 +82,14 @@ require_managed_config_path() {
     *) fail "$reason" ;;
   esac
   [ -f "$candidate" ] || fail "$reason"
+  # Defesa redundante e deliberada: a comparação de localização abaixo já
+  # recusa qualquer symlink, porque canonical_path() resolve o arquivo e o
+  # destino real nunca coincide com WP_ROOT/wp-config.php. Mantida como
+  # segunda barreira, por isso não é isoladamente coberta por mutação.
   [ ! -L "$candidate" ] || fail "$reason"
 
   resolved="$(canonical_path "$candidate")" || fail "$reason"
-  resolved_root="$(cd "$WP_ROOT" >/dev/null 2>&1 && pwd -P)" || fail "$reason"
+  resolved_root="$(canonical_path "$WP_ROOT")" || fail "$reason"
   [ -n "$resolved" ] && [ -n "$resolved_root" ] || fail "$reason"
 
   # O WordPress aceita wp-config.php na raiz ou um nível acima; qualquer outro
@@ -109,6 +117,67 @@ assert_wpsc_constants_persisted() {
 
   wpcachehome="$(cli config get WPCACHEHOME --type=constant 2>/dev/null)" || fail "wpcachehome_nao_persistido_${stage}"
   [ "$wpcachehome" = "$expected_home" ] || fail "wpcachehome_divergente_${stage}"
+}
+
+# `wp config set` exige um âncora de posicionamento: o comentário
+# "stop editing" ou um define( 'ABSPATH', ... ) em nível superior. O
+# wp-config.php de produção da Locaweb não tem nenhum dos dois — o define de
+# ABSPATH está aninhado num if — e o comando falha com "Unable to locate
+# placement anchor". Por isso as constantes são inseridas aqui, imediatamente
+# antes do require_once que carrega o WordPress, com backup para rollback.
+insert_wpsc_constants() {
+  local config_file="$1"
+  local expected_home="$2"
+  local backup="$3"
+
+  cp -p -- "$config_file" "$backup" || fail 'wp_config_backup_falhou'
+  [ -s "$backup" ] || fail 'wp_config_backup_vazio'
+
+  UONIX_WPSC_CONFIG_FILE="$config_file" \
+  UONIX_WPSC_EXPECTED_HOME="$expected_home" \
+  "$PHP_BIN" -r '
+$path = getenv("UONIX_WPSC_CONFIG_FILE");
+$home = getenv("UONIX_WPSC_EXPECTED_HOME");
+$contents = file_get_contents($path);
+if (false === $contents || "" === $contents) { fwrite(STDERR, "leitura\n"); exit(1); }
+
+// Idempotente: uma execução repetida não pode duplicar nem herdar um valor
+// divergente deixado por tentativa anterior.
+$contents = preg_replace("/^[ \t]*define\(\s*[\x27\"]WP_CACHE[\x27\"].*?\);[ \t]*\r?\n/m", "", $contents);
+$contents = preg_replace("/^[ \t]*define\(\s*[\x27\"]WPCACHEHOME[\x27\"].*?\);[ \t]*\r?\n/m", "", $contents);
+if (null === $contents) { fwrite(STDERR, "normalizacao\n"); exit(1); }
+
+$block = sprintf(
+    "define( %s, true );\ndefine( %s, %s );\n",
+    var_export("WP_CACHE", true),
+    var_export("WPCACHEHOME", true),
+    var_export($home, true)
+);
+
+// O bloco precisa ficar antes do carregamento do WordPress: depois dele o
+// WP_CACHE não tem efeito sobre o drop-in advanced-cache.php.
+$anchor = "/^[ \t]*(require_once|require|include_once|include)\s*\(?\s*ABSPATH\s*\.\s*[\x27\"]wp-settings\.php[\x27\"]\s*\)?\s*;[ \t]*\r?$/m";
+if (!preg_match($anchor, $contents, $match, PREG_OFFSET_CAPTURE)) {
+    fwrite(STDERR, "ancora_wp_settings_ausente\n");
+    exit(1);
+}
+$offset = $match[0][1];
+$updated = substr($contents, 0, $offset) . $block . substr($contents, $offset);
+
+$temporary = $path . ".uonix-wpsc-pending";
+if (false === file_put_contents($temporary, $updated)) { fwrite(STDERR, "escrita\n"); exit(1); }
+
+// Só substitui o arquivo em produção depois de provar que o resultado é PHP
+// válido; um wp-config quebrado derrubaria o site inteiro.
+$lint = null;
+$output = array();
+exec(escapeshellarg(PHP_BINARY) . " -l " . escapeshellarg($temporary) . " 2>&1", $output, $lint);
+if (0 !== $lint) { @unlink($temporary); fwrite(STDERR, "php_invalido\n"); exit(1); }
+
+$permissions = fileperms($path);
+if (!rename($temporary, $path)) { @unlink($temporary); fwrite(STDERR, "rename\n"); exit(1); }
+if (false !== $permissions) { @chmod($path, $permissions & 0777); }
+' || fail 'wp_config_insercao_falhou'
 }
 
 if cli plugin is-installed wp-super-cache >/dev/null 2>&1; then
@@ -149,11 +218,11 @@ require_managed_config_path "$config_path" 'wp_config_invalido'
 # O hook de ativação do WPSC cria advanced-cache.php e o arquivo de
 # configuração apenas quando WP_CACHE já está habilitado. Declarar a constante
 # depois da ativação deixaria o drop-in incompleto até uma ação manual.
-cli config set WP_CACHE true --raw
-cli config set WPCACHEHOME "$expected_wpcachehome" --type=constant
+config_backup="${config_path}.uonix-wpsc-$(date -u +%Y%m%d%H%M%S).bak"
+insert_wpsc_constants "$config_path" "$expected_wpcachehome" "$config_backup"
 
-# Fail-closed antes da mutação: se `wp config set` retornar sucesso sem
-# persistir, a ativação NÃO deve rodar em estado incorreto.
+# Fail-closed antes da mutação: se a inserção não persistir de fato, a
+# ativação NÃO deve rodar em estado incorreto.
 assert_wpsc_constants_persisted 'pre_ativacao' "$expected_wpcachehome"
 
 cli plugin install "$archive" --activate --force
