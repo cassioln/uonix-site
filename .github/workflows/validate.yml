@@ -93,6 +93,9 @@ jobs:
       - name: Test RFQ cookie session policy
         run: php scripts/tests/test-rfq-cookie-session-policy.php
 
+      - name: Test RFQ lazy session policy
+        run: php scripts/tests/test-rfq-lazy-session-contract.php
+
       - name: Test RFQ email product images and logo
         run: php scripts/tests/test-rfq-email-product-images.php
 

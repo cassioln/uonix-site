@@ -29,6 +29,7 @@ uonix_mu_require_files(
 		'28-catalogo-ajax-carrinho.php',
 		'29-rfq-email-imagens-produtos.php',
 		'30-rfq-cookie-session-policy.php',
+		'31-rfq-lazy-cookie-session.php',
 	),
 	'uonix-woocommerce'
 );
