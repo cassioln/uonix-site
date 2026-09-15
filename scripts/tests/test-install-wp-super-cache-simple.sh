@@ -336,8 +336,15 @@ mkdir -p "$interp_state/root/wp-content"
 cat > "$interp_state/root/wp-config.php" <<'CONFIG'
 <?php
 $suffix = 'db';
+$map = array( 'name' => 'uonix' );
+$heredoc = <<<SQL
+SELECT '{$map['name']}' AS n
+SQL;
 if ( ! defined( 'DB_NAME' ) ) {
     define( 'DB_NAME', "uonix_{$suffix}" );
+    define( 'DB_USER', "{$map['name']}_user" );
+    define( 'DB_HOST', "${suffix}.example" );
+    define( 'DB_EXTRA', "outer_{$map['name']}_inner" );
     define( 'ABSPATH', __DIR__ . '/' );
 }
 require_once ABSPATH . 'wp-settings.php';

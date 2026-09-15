@@ -58,6 +58,7 @@ canonical_path() {
   # Resolve o ARQUIVO, não apenas o diretório: um symlink apontando para fora da
   # instalação precisa revelar o destino real, senão a comparação de localização
   # avaliaria o link em vez do arquivo que o WP-CLI vai realmente alterar.
+  # shellcheck disable=SC2016 # o corpo é PHP: $real e $path NÃO devem expandir no shell
   UONIX_WPSC_PATH="$candidate" "$PHP_BIN" -r '
 $real = realpath(getenv("UONIX_WPSC_PATH"));
 if (false === $real) { exit(1); }
@@ -127,6 +128,7 @@ assert_wpsc_constants_persisted() {
 require_wp_config_anchor() {
   local config_file="$1"
 
+  # shellcheck disable=SC2016 # o corpo é PHP: $tokens, $depth e afins NÃO devem expandir no shell
   UONIX_WPSC_CONFIG_FILE="$config_file" "$PHP_BIN" -r '
 $path = getenv("UONIX_WPSC_CONFIG_FILE");
 $contents = file_get_contents($path);
