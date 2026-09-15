@@ -294,3 +294,19 @@ Antes de qualquer promoção para `master`, o aceite obrigatório é: (1) testar
 O teste de pré-mudança foi deliberadamente vermelho, com três bloqueios esperados: homepage e produto sem marcador de cache e ausência de URL de conta. A leitura oficial de QA retornou `woocommerce_cart_page_id=593`, `woocommerce_checkout_page_id=597` e `woocommerce_myaccount_page_id=0`; não há página de conta atribuída para validar. Em 2026-09-14, o controlador decidiu manter a funcionalidade de conta fora do produto e exigir exclusão preventiva de rotas de conta no cache. Portanto, o ensaio QA deverá ler a configuração do motor e provar rejeição explícita para os padrões de URI de conta adotados; criar uma página de conta apenas para produzir um teste não é permitido.
 
 Nenhum plugin, drop-in, regra de Apache, configuração de CDN ou opção WordPress foi alterado por este inventário. O aceite da Onda F continua pendente: cache seguro para carrinho/checkout/conta/RFQ, matriz HTTP de exclusões, p95 final `<600 ms` nas rotas cacheáveis e classificação final de cache de objeto em QA e produção.
+
+## 11. Candidato WP Super Cache Simple — ainda não publicado
+
+O candidato foi preparado para produção após a publicação da sessão RFQ preguiçosa. A fonte oficial fixa é `wp-super-cache.3.1.3.zip`, SHA-256 `e2773f2146be15c088d5fa4e6280d433b6c08c4d155257be5580b0d69dfcf270`; a versão do pacote foi relida como `3.1.3`. Não há instalação em produção neste ponto.
+
+O deploy recebe o novo input explícito `install_page_cache=false` por padrão. Somente quando ele for `true`, o workflow:
+
+1. recusa plugin/drop-ins/cache preexistentes (não atualiza nem substitui cache de terceiros);
+2. salva, com permissões privadas, o `wp-config.php` anterior e o caminho confirmado pelo WP-CLI;
+3. instala a fonte com hash conferido, em modo PHP/Simple (`wp_cache_mod_rewrite=0`), sem regras Expert ou alteração de `.htaccess`;
+4. configura os bypasses obrigatórios por cookie: `PHPSESSID`, `rfqtk_wp_session_`, `wp_woocommerce_session_`, `woocommerce_items_in_cart` e `woocommerce_cart_hash`;
+5. configura bypass por URI para `/cotacao/`, `/finalizar-orcamento/` e as rotas preventivas de conta `/minha-conta/`, `/conta/` e `/account/`;
+6. relê plugin, versão, `WP_CACHE`, modo Simple e cada exclusão antes de liberar o fluxo;
+7. em falha, restaura o `wp-config.php` salvo e remove exclusivamente os artefatos criados pelo candidato, preservando lock e marcador se o rollback não puder ser provado.
+
+Cobertura local do candidato: configuração `PASS`, instalador `PASS`, workflow/rollback `PASS` e guard de CI `89/89`. O aceite externo permanece pendente: deploy autorizado, matriz HTTP com `WP-Super-Cache` nas páginas públicas sem cookie e sua ausência em rotas/cookies excluídos, seguido de 50 amostras e p95 `<600 ms`.

@@ -96,6 +96,9 @@ jobs:
       - name: Test RFQ lazy session policy
         run: php scripts/tests/test-rfq-lazy-session-contract.php
 
+      - name: Test WP Super Cache Simple configuration
+        run: php scripts/tests/test-wp-super-cache-simple-config.php
+
       - name: Test RFQ email product images and logo
         run: php scripts/tests/test-rfq-email-product-images.php
 
@@ -320,6 +323,9 @@ jobs:
 
       - name: Test clear_cache real execution
         run: bash scripts/tests/test-clear-cache-execucao-real.sh
+
+      - name: Test WP Super Cache Simple installer
+        run: bash scripts/tests/test-install-wp-super-cache-simple.sh
 
       - name: Test deploy bundle
         run: bash scripts/tests/test-deploy-bundle.sh
