@@ -52,11 +52,9 @@ cli() {
   "$PHP_BIN" -d disable_functions= "$WP_BIN" --path="$WP_ROOT" "$@"
 }
 
-plugin_state="$(cli plugin status wp-super-cache --field=status 2>/dev/null || true)"
-case "$plugin_state" in
-  '') ;;
-  *) fail "plugin_preexistente status=${plugin_state}" ;;
-esac
+if cli plugin is-installed wp-super-cache >/dev/null 2>&1; then
+  fail 'plugin_preexistente'
+fi
 
 for path in \
   "$WP_ROOT/wp-content/advanced-cache.php" \
@@ -83,7 +81,7 @@ fi
 [ "$archive_checksum" = "$SOURCE_SHA256" ] || fail 'checksum_fonte_divergente'
 
 cli plugin install "$archive" --activate --force
-[ "$(cli plugin status wp-super-cache --field=status)" = active ] || fail 'plugin_nao_ativo'
+cli plugin is-active wp-super-cache >/dev/null 2>&1 || fail 'plugin_nao_ativo'
 [ "$(cli plugin get wp-super-cache --field=version)" = 3.1.3 ] || fail 'versao_divergente'
 cli eval-file "$CONFIG_SCRIPT"
 

@@ -783,7 +783,7 @@ jobs:
             --wp-bin="$wp_bin" \
             --config-script="$wpsc_backup/configure-wp-super-cache-simple.php"
 
-          test "$(cli plugin status wp-super-cache --field=status)" = active
+          cli plugin is-active wp-super-cache
           test "$(cli plugin get wp-super-cache --field=version)" = 3.1.3
           cli eval '
           $cookies = array("PHPSESSID", "rfqtk_wp_session_", "wp_woocommerce_session_", "woocommerce_items_in_cart", "woocommerce_cart_hash");

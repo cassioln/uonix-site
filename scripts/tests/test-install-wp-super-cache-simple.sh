@@ -30,14 +30,18 @@ state="${WPSC_TEST_STATE:?}"
 printf '%s\n' "$*" >> "$log"
 command="$*"
 case "$command" in
-  *'plugin status wp-super-cache --field=status'*)
-    [ -f "$state/active" ] && printf 'active\n'
+  *'plugin is-installed wp-super-cache'*)
+    [ -f "$state/installed" ]
+    ;;
+  *'plugin is-active wp-super-cache'*)
+    [ -f "$state/active" ]
     ;;
   *'plugin install '*'--activate --force'*)
     mkdir -p "$state/root/wp-content/plugins/wp-super-cache" "$state/root/wp-content/cache"
     : > "$state/root/wp-content/plugins/wp-super-cache/wp-cache.php"
     : > "$state/root/wp-content/advanced-cache.php"
     : > "$state/root/wp-content/wp-cache-config.php"
+    : > "$state/installed"
     : > "$state/active"
     ;;
   *'plugin get wp-super-cache --field=version'*) printf '3.1.3\n' ;;
@@ -93,8 +97,13 @@ bash "$SCRIPT" \
 grep -qx 'WPSC_SIMPLE_INSTALL=PASS version=3.1.3 mode=PHP' "$TMP_DIR/output" || fail 'instalação não confirmou perfil Simple'
 grep -F -- '--activate --force' "$TMP_DIR/commands.log" >/dev/null || fail 'plugin não foi ativado'
 grep -F -- 'eval-file' "$TMP_DIR/commands.log" >/dev/null || fail 'configurador não foi executado'
+grep -F -- 'plugin is-active wp-super-cache' "$TMP_DIR/commands.log" >/dev/null || fail 'instalador não confirmou ativação pelo comando suportado'
+if grep -F -- 'plugin status wp-super-cache --field=status' "$TMP_DIR/commands.log" >/dev/null; then
+  fail 'instalador ainda usa --field incompatível com o WP-CLI da Locaweb'
+fi
 
 # Falha fechada: plugin já presente não pode ser atualizado silenciosamente.
+: > "$state/installed"
 : > "$state/active"
 if bash "$SCRIPT" \
   --wp-root="$state/root" \
