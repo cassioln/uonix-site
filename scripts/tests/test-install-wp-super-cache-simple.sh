@@ -327,6 +327,92 @@ grep -Fq 'wp_config_sem_ancora' "$anchorless_output" || fail 'ausência de ânco
 anchorless_after="$(shasum -a 256 < "$anchorless_state/root/wp-config.php" | cut -d' ' -f1)"
 [ "$anchorless_before" = "$anchorless_after" ] || fail 'instalador alterou wp-config sem âncora'
 
+# Interpolação de string emite T_CURLY_OPEN seguido de um `}` bruto. Um contador
+# ingênuo decrementa a profundidade nesse `}` e passa a tratar um define de
+# ABSPATH AINDA ANINHADO como se estivesse em nível superior — aceitando um
+# wp-config que o `wp config set` continuaria recusando.
+interp_state="$TMP_DIR/interp-state"
+mkdir -p "$interp_state/root/wp-content"
+cat > "$interp_state/root/wp-config.php" <<'CONFIG'
+<?php
+$suffix = 'db';
+if ( ! defined( 'DB_NAME' ) ) {
+    define( 'DB_NAME', "uonix_{$suffix}" );
+    define( 'ABSPATH', __DIR__ . '/' );
+}
+require_once ABSPATH . 'wp-settings.php';
+CONFIG
+interp_before="$(shasum -a 256 < "$interp_state/root/wp-config.php" | cut -d' ' -f1)"
+cat > "$TMP_DIR/wp-cli-interp.php" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in
+  *'plugin is-installed wp-super-cache'*) exit 1 ;;
+  *'config path'*) printf '%s\n' "$interp_state/root/wp-config.php" ;;
+  *'config set '*) printf "Error: Unable to locate placement anchor.\n" >&2; exit 1 ;;
+  *) printf 'unexpected interp CLI command: %s\n' "\$*" >&2; exit 91 ;;
+esac
+SH
+chmod 700 "$TMP_DIR/wp-cli-interp.php"
+interp_output="$TMP_DIR/interp.out"
+if bash "$SCRIPT" \
+  --wp-root="$interp_state/root" \
+  --php-bin="$TMP_DIR/php-bin" \
+  --wp-bin="$TMP_DIR/wp-cli-interp.php" \
+  --config-script="$TMP_DIR/configure.php" \
+  --archive="$source_archive" \
+  --source-sha256='e2773f2146be15c088d5fa4e6280d433b6c08c4d155257be5580b0d69dfcf270' \
+  >"$interp_output" 2>&1; then
+  fail 'define de ABSPATH aninhado após interpolação foi aceito como âncora'
+fi
+grep -Fq 'wp_config_sem_ancora' "$interp_output" || fail 'interpolação precisa reprovar por ausência de âncora, não por outro motivo'
+interp_after="$(shasum -a 256 < "$interp_state/root/wp-config.php" | cut -d' ' -f1)"
+[ "$interp_before" = "$interp_after" ] || fail 'instalador alterou wp-config no cenário de interpolação'
+
+# Contraprova: um define de ABSPATH REALMENTE em nível superior é âncora válida,
+# mesmo que o arquivo contenha interpolação antes dele.
+toplevel_state="$TMP_DIR/toplevel-state"
+mkdir -p "$toplevel_state/root/wp-content"
+cat > "$toplevel_state/root/wp-config.php" <<'CONFIG'
+<?php
+$suffix = 'db';
+if ( ! defined( 'DB_NAME' ) ) {
+    define( 'DB_NAME', "uonix_{$suffix}" );
+}
+define( 'ABSPATH', __DIR__ . '/' );
+require_once ABSPATH . 'wp-settings.php';
+CONFIG
+cat > "$TMP_DIR/wp-cli-toplevel.php" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in
+  *'plugin is-installed wp-super-cache'*) exit 1 ;;
+  *'config path'*) printf '%s\n' "$toplevel_state/root/wp-config.php" ;;
+  *'config set '*) : ;;
+  *'config get WP_CACHE --type=constant'*) printf '1\n' ;;
+  *'config get WPCACHEHOME --type=constant'*) printf '%s\n' "$toplevel_state/root/wp-content/plugins/wp-super-cache/" ;;
+  *'plugin install '*)
+    mkdir -p "$toplevel_state/root/wp-content/plugins/wp-super-cache" "$toplevel_state/root/wp-content/cache"
+    : > "$toplevel_state/root/wp-content/plugins/wp-super-cache/wp-cache.php"
+    : > "$toplevel_state/root/wp-content/advanced-cache.php"
+    : > "$toplevel_state/root/wp-content/wp-cache-config.php"
+    ;;
+  *'plugin is-active wp-super-cache'*) : ;;
+  *'plugin get wp-super-cache --field=version'*) printf '3.1.3\n' ;;
+  *'eval-file '*) printf 'WPSC_SIMPLE_CONFIGURATION=PASS\n' ;;
+  *) printf 'unexpected toplevel CLI command: %s\n' "\$*" >&2; exit 91 ;;
+esac
+SH
+chmod 700 "$TMP_DIR/wp-cli-toplevel.php"
+bash "$SCRIPT" \
+  --wp-root="$toplevel_state/root" \
+  --php-bin="$TMP_DIR/php-bin" \
+  --wp-bin="$TMP_DIR/wp-cli-toplevel.php" \
+  --config-script="$TMP_DIR/configure.php" \
+  --archive="$source_archive" \
+  --source-sha256='e2773f2146be15c088d5fa4e6280d433b6c08c4d155257be5580b0d69dfcf270' \
+  >/dev/null || fail 'define de ABSPATH em nível superior deveria ser aceito como âncora'
+
 # O instalador NÃO deve reescrever o wp-config: essa abordagem foi reprovada por
 # risco de corromper o arquivo, expor cópias e trocar proprietário do inode.
 if grep -Fq 'insert_wpsc_constants' "$SCRIPT"; then

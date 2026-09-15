@@ -136,10 +136,22 @@ if (false === $contents || "" === $contents) { exit(1); }
 // define de ABSPATH comentado não são âncoras reais para o WP-CLI.
 $tokens = token_get_all($contents);
 $depth = 0;
+// Chaves de interpolação ("{$var}" e "${var}") emitem T_CURLY_OPEN ou
+// T_DOLLAR_OPEN_CURLY_BRACES e fecham com um `}` bruto. Sem contá-las, esse
+// fechamento decrementaria a profundidade estrutural e um define de ABSPATH
+// ainda aninhado passaria por âncora de nível superior — aceitando um
+// wp-config que o `wp config set` continuaria recusando.
+$interpolation = 0;
 foreach ($tokens as $index => $token) {
     if (!is_array($token)) {
         if ("{" === $token) { ++$depth; }
-        if ("}" === $token) { --$depth; }
+        if ("}" === $token) {
+            if ($interpolation > 0) { --$interpolation; } else { --$depth; }
+        }
+        continue;
+    }
+    if (T_CURLY_OPEN === $token[0] || T_DOLLAR_OPEN_CURLY_BRACES === $token[0]) {
+        ++$interpolation;
         continue;
     }
     if (T_COMMENT === $token[0] && false !== stripos($token[1], "stop editing")) {
@@ -147,7 +159,7 @@ foreach ($tokens as $index => $token) {
         exit(0);
     }
     // define( "ABSPATH", ... ) precisa estar em nível superior para servir de âncora.
-    if (0 === $depth && T_STRING === $token[0] && 0 === strcasecmp($token[1], "define")) {
+    if (0 === $depth && 0 === $interpolation && T_STRING === $token[0] && 0 === strcasecmp($token[1], "define")) {
         for ($ahead = $index + 1, $limit = min($index + 6, count($tokens)); $ahead < $limit; ++$ahead) {
             $next = $tokens[$ahead];
             if (is_array($next) && T_CONSTANT_ENCAPSED_STRING === $next[0]
