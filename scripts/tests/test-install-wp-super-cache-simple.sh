@@ -16,6 +16,11 @@ make_fake_cli() {
 #!/usr/bin/env bash
 set -euo pipefail
 args=("$@")
+# O preflight de âncora e a canonicalização usam PHP direto (`php -r`); as
+# chamadas de WP-CLI continuam passando por `-d disable_functions=`.
+if [ "${args[0]}" = '-r' ]; then
+  exec php "$@"
+fi
 [ "${args[0]}" = '-d' ]
 [ "${args[1]}" = 'disable_functions=' ]
 exec "${args[2]}" "${args[@]:3}"
@@ -96,7 +101,21 @@ SH
 make_fake_cli
 state="$TMP_DIR/state"
 mkdir -p "$state/root/wp-content"
-printf "<?php\n" > "$state/root/wp-config.php"
+# O wp-config precisa conter o âncora que `wp config set` exige. O de produção
+# na Locaweb não tinha, e o deploy falhou com "Unable to locate placement
+# anchor" — por isso o instalador passou a verificar isso no preflight.
+cat > "$state/root/wp-config.php" <<'CONFIG'
+<?php
+define( 'DB_NAME', 'exemplo' );
+$table_prefix = 'wpis_';
+
+/* That's all, stop editing! Happy publishing. */
+
+if ( ! defined( 'ABSPATH' ) ) {
+    define( 'ABSPATH', __DIR__ . '/' );
+}
+require_once ABSPATH . 'wp-settings.php';
+CONFIG
 : > "$TMP_DIR/configure.php"
 source_archive="$TMP_DIR/wp-super-cache.3.1.3.zip"
 curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
@@ -149,7 +168,13 @@ fi
 foreign_state="$TMP_DIR/foreign-state"
 mkdir -p "$foreign_state/root/wp-content" "$foreign_state/other"
 printf "<?php\n" > "$foreign_state/root/wp-config.php"
-printf "<?php\n" > "$foreign_state/other/wp-config.php"
+# O arquivo estrangeiro tem âncora válido: assim o teste isola a guarda de
+# localização, em vez de reprovar antes no preflight de âncora.
+cat > "$foreign_state/other/wp-config.php" <<'CONFIG'
+<?php
+/* That's all, stop editing! Happy publishing. */
+require_once ABSPATH . 'wp-settings.php';
+CONFIG
 cat > "$TMP_DIR/wp-cli-foreign.php" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
@@ -221,7 +246,11 @@ fi
 # diretório e o cache ficaria quebrado com aparência de instalação correta.
 divergent_state="$TMP_DIR/divergent-state"
 mkdir -p "$divergent_state/root/wp-content"
-printf "<?php\n" > "$divergent_state/root/wp-config.php"
+cat > "$divergent_state/root/wp-config.php" <<'CONFIG'
+<?php
+/* That's all, stop editing! Happy publishing. */
+require_once ABSPATH . 'wp-settings.php';
+CONFIG
 cat > "$TMP_DIR/wp-cli-divergent.php" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
@@ -258,6 +287,147 @@ if bash "$SCRIPT" \
   fail 'WPCACHEHOME divergente foi aceito'
 fi
 grep -Fq 'wpcachehome_divergente' "$divergent_output" || fail 'WPCACHEHOME divergente reprovou por outro motivo'
+
+# Sem o âncora, `wp config set` falha DEPOIS de o deploy já ter publicado
+# código. O preflight precisa recusar antes de qualquer escrita remota.
+anchorless_state="$TMP_DIR/anchorless-state"
+mkdir -p "$anchorless_state/root/wp-content"
+cat > "$anchorless_state/root/wp-config.php" <<'CONFIG'
+<?php
+define( 'DB_NAME', 'exemplo' );
+if ( ! defined( 'ABSPATH' ) ) {
+    define( 'ABSPATH', __DIR__ . '/' );
+}
+require_once ABSPATH . 'wp-settings.php';
+CONFIG
+anchorless_before="$(shasum -a 256 < "$anchorless_state/root/wp-config.php" | cut -d' ' -f1)"
+cat > "$TMP_DIR/wp-cli-anchorless.php" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in
+  *'plugin is-installed wp-super-cache'*) exit 1 ;;
+  *'config path'*) printf '%s\n' "$anchorless_state/root/wp-config.php" ;;
+  *'config set '*) printf "Error: Unable to locate placement anchor.\n" >&2; exit 1 ;;
+  *) printf 'unexpected anchorless CLI command: %s\n' "\$*" >&2; exit 91 ;;
+esac
+SH
+chmod 700 "$TMP_DIR/wp-cli-anchorless.php"
+anchorless_output="$TMP_DIR/anchorless.out"
+if bash "$SCRIPT" \
+  --wp-root="$anchorless_state/root" \
+  --php-bin="$TMP_DIR/php-bin" \
+  --wp-bin="$TMP_DIR/wp-cli-anchorless.php" \
+  --config-script="$TMP_DIR/configure.php" \
+  --archive="$source_archive" \
+  --source-sha256='e2773f2146be15c088d5fa4e6280d433b6c08c4d155257be5580b0d69dfcf270' \
+  >"$anchorless_output" 2>&1; then
+  fail 'wp-config sem âncora de posicionamento foi aceito'
+fi
+grep -Fq 'wp_config_sem_ancora' "$anchorless_output" || fail 'ausência de âncora precisa reprovar com diagnóstico próprio, não com erro genérico do wp config set'
+anchorless_after="$(shasum -a 256 < "$anchorless_state/root/wp-config.php" | cut -d' ' -f1)"
+[ "$anchorless_before" = "$anchorless_after" ] || fail 'instalador alterou wp-config sem âncora'
+
+# Interpolação de string emite T_CURLY_OPEN seguido de um `}` bruto. Um contador
+# ingênuo decrementa a profundidade nesse `}` e passa a tratar um define de
+# ABSPATH AINDA ANINHADO como se estivesse em nível superior — aceitando um
+# wp-config que o `wp config set` continuaria recusando.
+interp_state="$TMP_DIR/interp-state"
+mkdir -p "$interp_state/root/wp-content"
+cat > "$interp_state/root/wp-config.php" <<'CONFIG'
+<?php
+$suffix = 'db';
+$map = array( 'name' => 'uonix' );
+$heredoc = <<<SQL
+SELECT '{$map['name']}' AS n
+SQL;
+if ( ! defined( 'DB_NAME' ) ) {
+    define( 'DB_NAME', "uonix_{$suffix}" );
+    define( 'DB_USER', "{$map['name']}_user" );
+    define( 'DB_HOST', "${suffix}.example" );
+    define( 'DB_EXTRA', "outer_{$map['name']}_inner" );
+    define( 'ABSPATH', __DIR__ . '/' );
+}
+require_once ABSPATH . 'wp-settings.php';
+CONFIG
+interp_before="$(shasum -a 256 < "$interp_state/root/wp-config.php" | cut -d' ' -f1)"
+cat > "$TMP_DIR/wp-cli-interp.php" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in
+  *'plugin is-installed wp-super-cache'*) exit 1 ;;
+  *'config path'*) printf '%s\n' "$interp_state/root/wp-config.php" ;;
+  *'config set '*) printf "Error: Unable to locate placement anchor.\n" >&2; exit 1 ;;
+  *) printf 'unexpected interp CLI command: %s\n' "\$*" >&2; exit 91 ;;
+esac
+SH
+chmod 700 "$TMP_DIR/wp-cli-interp.php"
+interp_output="$TMP_DIR/interp.out"
+if bash "$SCRIPT" \
+  --wp-root="$interp_state/root" \
+  --php-bin="$TMP_DIR/php-bin" \
+  --wp-bin="$TMP_DIR/wp-cli-interp.php" \
+  --config-script="$TMP_DIR/configure.php" \
+  --archive="$source_archive" \
+  --source-sha256='e2773f2146be15c088d5fa4e6280d433b6c08c4d155257be5580b0d69dfcf270' \
+  >"$interp_output" 2>&1; then
+  fail 'define de ABSPATH aninhado após interpolação foi aceito como âncora'
+fi
+grep -Fq 'wp_config_sem_ancora' "$interp_output" || fail 'interpolação precisa reprovar por ausência de âncora, não por outro motivo'
+interp_after="$(shasum -a 256 < "$interp_state/root/wp-config.php" | cut -d' ' -f1)"
+[ "$interp_before" = "$interp_after" ] || fail 'instalador alterou wp-config no cenário de interpolação'
+
+# Contraprova: um define de ABSPATH REALMENTE em nível superior é âncora válida,
+# mesmo que o arquivo contenha interpolação antes dele.
+toplevel_state="$TMP_DIR/toplevel-state"
+mkdir -p "$toplevel_state/root/wp-content"
+cat > "$toplevel_state/root/wp-config.php" <<'CONFIG'
+<?php
+$suffix = 'db';
+if ( ! defined( 'DB_NAME' ) ) {
+    define( 'DB_NAME', "uonix_{$suffix}" );
+}
+define( 'ABSPATH', __DIR__ . '/' );
+require_once ABSPATH . 'wp-settings.php';
+CONFIG
+cat > "$TMP_DIR/wp-cli-toplevel.php" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in
+  *'plugin is-installed wp-super-cache'*) exit 1 ;;
+  *'config path'*) printf '%s\n' "$toplevel_state/root/wp-config.php" ;;
+  *'config set '*) : ;;
+  *'config get WP_CACHE --type=constant'*) printf '1\n' ;;
+  *'config get WPCACHEHOME --type=constant'*) printf '%s\n' "$toplevel_state/root/wp-content/plugins/wp-super-cache/" ;;
+  *'plugin install '*)
+    mkdir -p "$toplevel_state/root/wp-content/plugins/wp-super-cache" "$toplevel_state/root/wp-content/cache"
+    : > "$toplevel_state/root/wp-content/plugins/wp-super-cache/wp-cache.php"
+    : > "$toplevel_state/root/wp-content/advanced-cache.php"
+    : > "$toplevel_state/root/wp-content/wp-cache-config.php"
+    ;;
+  *'plugin is-active wp-super-cache'*) : ;;
+  *'plugin get wp-super-cache --field=version'*) printf '3.1.3\n' ;;
+  *'eval-file '*) printf 'WPSC_SIMPLE_CONFIGURATION=PASS\n' ;;
+  *) printf 'unexpected toplevel CLI command: %s\n' "\$*" >&2; exit 91 ;;
+esac
+SH
+chmod 700 "$TMP_DIR/wp-cli-toplevel.php"
+bash "$SCRIPT" \
+  --wp-root="$toplevel_state/root" \
+  --php-bin="$TMP_DIR/php-bin" \
+  --wp-bin="$TMP_DIR/wp-cli-toplevel.php" \
+  --config-script="$TMP_DIR/configure.php" \
+  --archive="$source_archive" \
+  --source-sha256='e2773f2146be15c088d5fa4e6280d433b6c08c4d155257be5580b0d69dfcf270' \
+  >/dev/null || fail 'define de ABSPATH em nível superior deveria ser aceito como âncora'
+
+# O instalador NÃO deve reescrever o wp-config: essa abordagem foi reprovada por
+# risco de corromper o arquivo, expor cópias e trocar proprietário do inode.
+if grep -Fq 'insert_wpsc_constants' "$SCRIPT"; then
+  fail 'instalador voltou a reescrever o wp-config diretamente'
+fi
+if grep -Eq 'file_put_contents|rename\(' "$SCRIPT"; then
+  fail 'instalador manipula o wp-config por escrita direta'
+fi
 
 # Falha fechada: plugin já presente não pode ser atualizado silenciosamente.
 : > "$state/installed"
