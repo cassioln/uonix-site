@@ -80,9 +80,18 @@ else
 fi
 [ "$archive_checksum" = "$SOURCE_SHA256" ] || fail 'checksum_fonte_divergente'
 
+# O hook de ativação do WPSC cria advanced-cache.php e o arquivo de
+# configuração apenas quando WP_CACHE já está habilitado. Declarar a constante
+# depois da ativação deixaria o drop-in incompleto até uma ação manual.
+cli config set WP_CACHE true --raw
+cli config set WPCACHEHOME "$WP_ROOT/wp-content/plugins/wp-super-cache/" --type=constant
 cli plugin install "$archive" --activate --force
 cli plugin is-active wp-super-cache >/dev/null 2>&1 || fail 'plugin_nao_ativo'
 [ "$(cli plugin get wp-super-cache --field=version)" = 3.1.3 ] || fail 'versao_divergente'
+config_path="$(cli config path)"
+[ -f "$config_path" ] && [ ! -L "$config_path" ] || fail 'wp_config_invalido_pos_ativacao'
+grep -Eq "define[[:space:]]*\([[:space:]]*['\"]WP_CACHE['\"][[:space:]]*,[[:space:]]*true" "$config_path" || fail 'wp_cache_nao_persistido'
+grep -Eq "define[[:space:]]*\([[:space:]]*['\"]WPCACHEHOME['\"]" "$config_path" || fail 'wpcachehome_nao_persistido'
 cli eval-file "$CONFIG_SCRIPT"
 
 for path in \

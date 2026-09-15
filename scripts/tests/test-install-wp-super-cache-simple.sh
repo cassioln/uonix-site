@@ -39,12 +39,17 @@ case "$command" in
   *'plugin install '*'--activate --force'*)
     mkdir -p "$state/root/wp-content/plugins/wp-super-cache" "$state/root/wp-content/cache"
     : > "$state/root/wp-content/plugins/wp-super-cache/wp-cache.php"
-    : > "$state/root/wp-content/advanced-cache.php"
-    : > "$state/root/wp-content/wp-cache-config.php"
+    if grep -Fq "define( 'WPCACHEHOME', '/tmp/wp-super-cache/' );" "$state/root/wp-config.php"; then
+      : > "$state/root/wp-content/advanced-cache.php"
+      : > "$state/root/wp-content/wp-cache-config.php"
+    fi
     : > "$state/installed"
     : > "$state/active"
     ;;
   *'plugin get wp-super-cache --field=version'*) printf '3.1.3\n' ;;
+  *'config path'*) printf '%s\n' "$state/root/wp-config.php" ;;
+  *'config set WP_CACHE true --raw'*) printf "define( 'WP_CACHE', true );\n" >> "$state/root/wp-config.php" ;;
+  *'config set WPCACHEHOME '*'--type=constant'*) printf "define( 'WPCACHEHOME', '/tmp/wp-super-cache/' );\n" >> "$state/root/wp-config.php" ;;
   *'eval-file '*) printf 'WPSC_SIMPLE_CONFIGURATION=PASS\n' ;;
   *) printf 'unexpected fake CLI command: %s\n' "$command" >&2; exit 91 ;;
 esac
@@ -73,6 +78,7 @@ SH
 make_fake_cli
 state="$TMP_DIR/state"
 mkdir -p "$state/root/wp-content"
+printf "<?php\n" > "$state/root/wp-config.php"
 : > "$TMP_DIR/configure.php"
 source_archive="$TMP_DIR/wp-super-cache.3.1.3.zip"
 curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
@@ -97,7 +103,14 @@ bash "$SCRIPT" \
 grep -qx 'WPSC_SIMPLE_INSTALL=PASS version=3.1.3 mode=PHP' "$TMP_DIR/output" || fail 'instalação não confirmou perfil Simple'
 grep -F -- '--activate --force' "$TMP_DIR/commands.log" >/dev/null || fail 'plugin não foi ativado'
 grep -F -- 'eval-file' "$TMP_DIR/commands.log" >/dev/null || fail 'configurador não foi executado'
+grep -F -- 'config set WP_CACHE true --raw' "$TMP_DIR/commands.log" >/dev/null || fail 'instalador não declarou WP_CACHE=true antes de configurar o WPSC'
+grep -F -- 'config set WPCACHEHOME ' "$TMP_DIR/commands.log" >/dev/null || fail 'instalador não declarou WPCACHEHOME antes de ativar o WPSC'
 grep -F -- 'plugin is-active wp-super-cache' "$TMP_DIR/commands.log" >/dev/null || fail 'instalador não confirmou ativação pelo comando suportado'
+wp_cache_line="$(grep -nF 'config set WP_CACHE true --raw' "$TMP_DIR/commands.log" | cut -d: -f1)"
+wpcachehome_line="$(grep -nF 'config set WPCACHEHOME ' "$TMP_DIR/commands.log" | cut -d: -f1)"
+plugin_install_line="$(grep -nF 'plugin install ' "$TMP_DIR/commands.log" | cut -d: -f1)"
+[ "$wp_cache_line" -lt "$plugin_install_line" ] || fail 'WP_CACHE=true precisa ser declarado antes da ativação do plugin'
+[ "$wpcachehome_line" -lt "$plugin_install_line" ] || fail 'WPCACHEHOME precisa ser declarado antes da ativação do plugin'
 if grep -F -- 'plugin status wp-super-cache --field=status' "$TMP_DIR/commands.log" >/dev/null; then
   fail 'instalador ainda usa --field incompatível com o WP-CLI da Locaweb'
 fi
