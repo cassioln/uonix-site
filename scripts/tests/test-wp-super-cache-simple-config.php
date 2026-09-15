@@ -22,17 +22,17 @@ function wp_cache_setting(string $field, $value): bool {
 }
 
 function wp_cache_enable(): void {
-    global $events, $settings, $cache_enabled;
+    global $events, $settings;
     $events[] = 'enable';
     $settings['cache_enabled'] = true;
-    $cache_enabled = true;
+    $GLOBALS['cache_enabled'] = true;
 }
 
 function wp_super_cache_enable(): void {
-    global $events, $settings, $super_cache_enabled;
+    global $events, $settings;
     $events[] = 'super-enable';
     $settings['super_cache_enabled'] = true;
-    $super_cache_enabled = true;
+    $GLOBALS['super_cache_enabled'] = true;
 }
 
 function prune_super_cache(string $path, bool $all): bool {
@@ -46,7 +46,7 @@ function wp_clear_scheduled_hook(string $hook): void {
     $events[] = 'clear:' . $hook;
 }
 
-$cache_path = '/tmp/uonix-wpsc-cache/';
+$GLOBALS['cache_path'] = '/tmp/uonix-wpsc-cache/';
 $wp_content_dir = '/tmp/uonix-wp-content';
 define('ABSPATH', '/tmp/uonix-wordpress/');
 define('WP_CONTENT_DIR', $wp_content_dir);
@@ -59,12 +59,16 @@ $wp_cache_make_known_anon = 1;
 $wp_cache_object_cache = 1;
 $cache_rebuild_files = 0;
 $wp_cache_preload_on = 1;
-$cache_enabled = false;
-$super_cache_enabled = false;
+$GLOBALS['cache_enabled'] = false;
+$GLOBALS['super_cache_enabled'] = false;
 
-ob_start();
-require $script;
-$output = ob_get_clean();
+function wpsc_run_configuration_in_eval_file_scope(string $script): string {
+    ob_start();
+    require $script;
+    return ob_get_clean();
+}
+
+$output = wpsc_run_configuration_in_eval_file_scope($script);
 
 $expected_cookies = array(
     'PHPSESSID',
@@ -102,7 +106,7 @@ foreach (array(
         wpsc_test_fail("configuração ausente/incorreta: {$key}");
     }
 }
-foreach (array('enable', 'super-enable', 'purge:/tmp/uonix-wpsc-cache/:1', 'clear:wp_cache_preload_hook') as $event) {
+foreach (array('enable', 'super-enable', 'purge:/tmp/uonix-wp-content/cache/:1', 'clear:wp_cache_preload_hook') as $event) {
     if (!in_array($event, $events, true)) {
         wpsc_test_fail("operação obrigatória ausente: {$event}");
     }

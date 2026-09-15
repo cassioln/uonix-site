@@ -58,7 +58,7 @@ foreach ($settings as $field => $value) {
 
 wp_cache_enable();
 wp_super_cache_enable();
-if (empty($cache_enabled) || empty($super_cache_enabled)) {
+if (empty($GLOBALS['cache_enabled']) || empty($GLOBALS['super_cache_enabled'])) {
     fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED enable_failed\n");
     exit(1);
 }
