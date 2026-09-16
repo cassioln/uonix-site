@@ -30,6 +30,7 @@ uonix_mu_require_files(
 		'29-rfq-email-imagens-produtos.php',
 		'30-rfq-cookie-session-policy.php',
 		'31-rfq-lazy-cookie-session.php',
+		'32-rfq-stable-asset-version.php',
 	),
 	'uonix-woocommerce'
 );
