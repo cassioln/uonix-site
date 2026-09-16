@@ -45,7 +45,7 @@ for needle, message in (
     ('wpsc-reconfigure', 'checkpoint específico ausente'),
     ('wpsc-reconfigure-started', 'marcador específico ausente'),
     ('cp -p -- "$config_path" "$backup/wp-cache-config.php"', 'checkpoint não preserva config WPSC'),
-    ('cli eval-file "$backup/configure-wp-super-cache-simple.php"', 'configurador não roda pelo WP-CLI'),
+    ('cli eval-file "$config_script"', 'configurador não roda pelo WP-CLI'),
     ('cp -p -- "$wpsc_reconfigure_backup" "$document_root/wp-content/wp-cache-config.php"', 'rollback não restaura só o config WPSC'),
     ('wpsc_reconfigure_marker="$operation_lock/wpsc-reconfigure-started"', 'rollback não declara o marcador de reconfiguração antes do gate inicial'),
     ('[ ! -e "$wpsc_reconfigure_marker" ] && [ ! -L "$wpsc_reconfigure_marker" ]', 'gate inicial de rollback ignora reconfiguração pendente'),
