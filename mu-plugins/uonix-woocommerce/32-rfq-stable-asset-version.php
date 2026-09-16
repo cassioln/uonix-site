@@ -74,30 +74,45 @@ if ( ! function_exists( 'uonix_rfq_stable_asset_path' ) ) {
 	 *
 	 * Retorna string vazia para URL externa ou fora de wp-content: nesse caso
 	 * não há arquivo local cujo mtime possa ser lido.
+	 *
+	 * A validação é conservadora de propósito. Uma URL de outro host contendo
+	 * "/wp-content/" no caminho não deve produzir o mtime de um arquivo local
+	 * homônimo, e o resultado é confinado a WP_CONTENT_DIR por realpath para
+	 * recusar symlink e travessia — inclusive codificada.
 	 */
 	function uonix_rfq_stable_asset_path( $src ) {
 		if ( ! is_string( $src ) || '' === $src ) {
 			return '';
 		}
 
-		$without_query = strtok( $src, '?' );
-		if ( ! is_string( $without_query ) || '' === $without_query ) {
+		$parts = function_exists( 'wp_parse_url' ) ? wp_parse_url( $src ) : parse_url( $src );
+		if ( ! is_array( $parts ) || empty( $parts['path'] ) ) {
+			return '';
+		}
+
+		// Só resolvemos caminho local para assets do próprio site: um host
+		// diferente indica CDN ou terceiro, sem arquivo local correspondente.
+		if ( ! empty( $parts['host'] ) && function_exists( 'home_url' ) ) {
+			$home = function_exists( 'wp_parse_url' ) ? wp_parse_url( home_url() ) : parse_url( home_url() );
+			$home_host = is_array( $home ) && ! empty( $home['host'] ) ? $home['host'] : '';
+			if ( '' !== $home_host && 0 !== strcasecmp( $parts['host'], $home_host ) ) {
+				return '';
+			}
+		}
+
+		$path = rawurldecode( (string) $parts['path'] );
+		if ( '' === $path ) {
 			return '';
 		}
 
 		$needle = '/wp-content/';
-		$position = strpos( $without_query, $needle );
+		$position = strpos( $path, $needle );
 		if ( false === $position ) {
 			return '';
 		}
 
-		$relative = substr( $without_query, $position + strlen( $needle ) );
+		$relative = substr( $path, $position + strlen( $needle ) );
 		if ( ! is_string( $relative ) || '' === $relative ) {
-			return '';
-		}
-
-		// Recusa travessia: o caminho precisa ficar dentro de wp-content.
-		if ( false !== strpos( $relative, '..' ) ) {
 			return '';
 		}
 
@@ -106,7 +121,20 @@ if ( ! function_exists( 'uonix_rfq_stable_asset_path' ) ) {
 			return '';
 		}
 
-		return rtrim( $base, '/' ) . '/' . ltrim( $relative, '/' );
+		$candidate = rtrim( $base, '/' ) . '/' . ltrim( $relative, '/' );
+
+		// Canonicaliza e confina: symlink ou travessia que escape de wp-content
+		// é recusado, e não apenas a forma textual "..".
+		$resolved = realpath( $candidate );
+		$resolved_base = realpath( $base );
+		if ( false === $resolved || false === $resolved_base ) {
+			return '';
+		}
+		if ( 0 !== strpos( $resolved, rtrim( $resolved_base, '/' ) . '/' ) ) {
+			return '';
+		}
+
+		return $resolved;
 	}
 }
 
@@ -129,27 +157,36 @@ if ( ! function_exists( 'uonix_rfq_stabilize_asset_src' ) ) {
 		}
 
 		$version = uonix_rfq_stable_asset_version( $src );
-		$without_query = strtok( $src, '?' );
-		if ( ! is_string( $without_query ) || '' === $without_query ) {
-			return $src;
+
+		// Separa fragmento antes de mexer na query: `?ver=` precisa ficar ANTES
+		// de `#`, senão o parâmetro entra no fragmento e o asset perde a versão.
+		$fragment = '';
+		$hash_at = strpos( $src, '#' );
+		if ( false !== $hash_at ) {
+			$fragment = substr( $src, $hash_at );
+			$src = substr( $src, 0, $hash_at );
 		}
 
-		// Preserva outros parâmetros de query que não sejam a versão.
+		$base_url = $src;
 		$preserved = array();
 		$query_start = strpos( $src, '?' );
 		if ( false !== $query_start ) {
+			$base_url = substr( $src, 0, $query_start );
 			$query = substr( $src, $query_start + 1 );
 			foreach ( explode( '&', (string) $query ) as $pair ) {
-				if ( '' === $pair || 0 === strpos( $pair, 'ver=' ) ) {
+				if ( '' === $pair || 'ver' === strtok( $pair, '=' ) ) {
 					continue;
 				}
 				$preserved[] = $pair;
 			}
 		}
+		if ( '' === $base_url ) {
+			return $src . $fragment;
+		}
 
 		$preserved[] = 'ver=' . rawurlencode( $version );
 
-		return $without_query . '?' . implode( '&', $preserved );
+		return $base_url . '?' . implode( '&', $preserved ) . $fragment;
 	}
 }
 
