@@ -37,8 +37,38 @@ define('WP_CONTENT_DIR', $content_dir);
  * Registrado em shutdown para que o diretório desapareça mesmo quando o teste
  * falha ou aborta no meio: fixture órfão acumula em disco a cada execução,
  * local e na CI.
+ *
+ * Fail-closed por desenho: a remoção recursiva só acontece se o caminho for o
+ * fixture que ESTE processo criou — dentro do diretório temporário do sistema e
+ * com o prefixo esperado. Sem isso, uma alteração futura em $content_dir
+ * poderia apagar uma árvore alheia durante o teste ou na CI.
  */
 function uonix_test_remove_tree(string $path): void {
+    $expected_prefix = realpath(sys_get_temp_dir());
+    if (false === $expected_prefix) {
+        return;
+    }
+    $expected_prefix = rtrim($expected_prefix, '/') . '/uonix-wp-content-';
+
+    // Compara o caminho REAL: symlink não pode redirecionar a remoção.
+    $resolved = realpath($path);
+    if (false === $resolved || !is_dir($resolved)) {
+        return;
+    }
+    if (0 !== strpos($resolved, $expected_prefix)) {
+        fwrite(STDERR, "REFUSED: limpeza fora do fixture esperado: {$resolved}\n");
+        return;
+    }
+    // O sufixo precisa ser o PID deste processo, nunca de outro.
+    if (substr($resolved, strlen($expected_prefix)) !== (string) getmypid()) {
+        fwrite(STDERR, "REFUSED: limpeza de fixture de outro processo: {$resolved}\n");
+        return;
+    }
+
+    uonix_test_remove_tree_unchecked($resolved);
+}
+
+function uonix_test_remove_tree_unchecked(string $path): void {
     if (!is_dir($path)) {
         if (is_file($path) || is_link($path)) {
             @unlink($path);
@@ -243,10 +273,26 @@ if (false === strpos($www_result, 'ver=1700000000')) {
 }
 
 // ---- Formatos de URL adicionais ------------------------------------------
-// `?ver` sem `=` também precisa ser substituído, não duplicado.
+// `?ver` sem `=` também precisa ser substituído, não duplicado. A contagem é
+// feita sobre os pares da query, porque uma regex com `(?:=|$|&)` consome o
+// separador e deixa de contar a ocorrência seguinte — isso mascarava a
+// regressão `?ver&ver=<versão>`.
 $bare = apply_filters('style_loader_src', $asset_url . '?ver', 'gpls_woo_rfq_css');
-if (1 !== preg_match_all('/(?:^|[?&])ver(?:=|$|&)/', $bare)) {
-    uonix_test_fail("parâmetro ver duplicado ou ausente com '?ver' sem valor: {$bare}");
+$bare_query = parse_url($bare, PHP_URL_QUERY);
+$bare_names = array();
+foreach (explode('&', (string) $bare_query) as $pair) {
+    if ('' === $pair) {
+        continue;
+    }
+    $bare_names[] = explode('=', $pair, 2)[0];
+}
+$bare_ver_count = count(array_filter($bare_names, static fn ($name) => 'ver' === $name));
+if (1 !== $bare_ver_count) {
+    uonix_test_fail("esperado exatamente um parâmetro ver com '?ver' sem valor, encontrado {$bare_ver_count}: {$bare}");
+}
+// A única ocorrência precisa carregar a versão estável, não ficar nua.
+if (false === strpos($bare, 'ver=' . '1700000000')) {
+    uonix_test_fail("'?ver' sem valor não recebeu a versão estável: {$bare}");
 }
 
 // Parâmetro repetido não pode sobreviver em nenhuma ocorrência.
@@ -270,7 +316,13 @@ $fragment_only = apply_filters('style_loader_src', $asset_url . '#topo', 'gpls_w
 if (false === strpos($fragment_only, '#topo')) {
     uonix_test_fail("fragmento sem query foi descartado: {$fragment_only}");
 }
-if (strpos($fragment_only, 'ver=') > strpos($fragment_only, '#')) {
+// A versão precisa EXISTIR: sem esta checagem, uma regressão que devolvesse a
+// URL sem `ver=` passaria, porque a comparação de posição não falharia.
+$fragment_ver_at = strpos($fragment_only, 'ver=');
+$fragment_hash_at = strpos($fragment_only, '#');
+if (false === $fragment_ver_at) {
+    uonix_test_fail("fragmento sem query perdeu o cache-busting: {$fragment_only}");
+} elseif (false !== $fragment_hash_at && $fragment_ver_at > $fragment_hash_at) {
     uonix_test_fail("versão caiu no fragmento quando não havia query: {$fragment_only}");
 }
 
