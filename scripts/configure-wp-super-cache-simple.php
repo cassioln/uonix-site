@@ -44,6 +44,9 @@ $settings = array(
     'wpsc_rejected_cookies' => $rejected_cookies,
     'cache_rejected_uri' => $rejected_uri,
     'wp_cache_mod_rewrite' => 0,
+    // Em Simple/PHP, sem esta guarda o WPSC só serve URLs sem barra final.
+    // WordPress canoniza categoria/produto com '/', então cache não era servido.
+    'wp_cache_slash_check' => 1,
     'wp_cache_not_logged_in' => 2,
     'wp_cache_mobile_enabled' => 0,
     'wp_cache_make_known_anon' => 0,
