@@ -102,6 +102,9 @@ jobs:
       - name: Test WP Super Cache Simple configuration
         run: php scripts/tests/test-wp-super-cache-simple-config.php
 
+      - name: Test WP Super Cache slash persistence
+        run: php scripts/tests/test-wp-super-cache-slash-persistence.php
+
       - name: Test RFQ email product images and logo
         run: php scripts/tests/test-rfq-email-product-images.php
 

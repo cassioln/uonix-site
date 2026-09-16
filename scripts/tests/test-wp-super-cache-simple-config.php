@@ -21,6 +21,13 @@ function wp_cache_setting(string $field, $value): void {
     $GLOBALS[$field] = $value;
 }
 
+function wp_cache_replace_line(string $old, string $new, string $file): bool {
+    global $settings, $events;
+    $events[] = "replace-line:{$old}:{$new}:{$file}";
+    $settings['persisted_wp_cache_slash_check'] = $new;
+    return true;
+}
+
 function wp_cache_enable(): void {
     global $events, $settings;
     $events[] = 'enable';
@@ -67,6 +74,7 @@ function wp_cache_verify_config_file(): bool {
 }
 
 $GLOBALS['cache_path'] = '/tmp/uonix-wpsc-cache/';
+$GLOBALS['wp_cache_config_file'] = '/tmp/uonix-wp-content/wp-cache-config.php';
 $wp_content_dir = '/tmp/uonix-wp-content';
 define('ABSPATH', '/tmp/uonix-wordpress/');
 define('WP_CONTENT_DIR', $wp_content_dir);
@@ -127,7 +135,7 @@ foreach (array(
         wpsc_test_fail("configuração ausente/incorreta: {$key}");
     }
 }
-foreach (array('verify-cache-dir', 'verify-advanced-cache', 'verify-config-file', 'enable', 'super-enable', 'purge:/tmp/uonix-wp-content/cache/:1', 'clear:wp_cache_preload_hook') as $event) {
+foreach (array('verify-cache-dir', 'verify-advanced-cache', 'verify-config-file', 'replace-line:^ *\\$wp_cache_slash_check:$wp_cache_slash_check = 1;:/tmp/uonix-wp-content/wp-cache-config.php', 'enable', 'super-enable', 'purge:/tmp/uonix-wp-content/cache/:1', 'clear:wp_cache_preload_hook') as $event) {
     if (!in_array($event, $events, true)) {
         wpsc_test_fail("operação obrigatória ausente: {$event}");
     }

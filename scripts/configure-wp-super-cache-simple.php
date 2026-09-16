@@ -10,7 +10,7 @@ if (!defined('ABSPATH')) {
     exit(1);
 }
 
-foreach (array('wp_cache_setting', 'wp_cache_enable', 'wp_super_cache_enable', 'wp_cache_verify_cache_dir', 'wpsc_check_advanced_cache', 'wp_cache_verify_config_file', 'prune_super_cache', 'wp_clear_scheduled_hook') as $function) {
+foreach (array('wp_cache_setting', 'wp_cache_replace_line', 'wp_cache_enable', 'wp_super_cache_enable', 'wp_cache_verify_cache_dir', 'wpsc_check_advanced_cache', 'wp_cache_verify_config_file', 'prune_super_cache', 'wp_clear_scheduled_hook') as $function) {
     if (!function_exists($function)) {
         fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED missing_function={$function}\n");
         exit(1);
@@ -23,6 +23,10 @@ $cache_path = isset($cache_path) && is_string($cache_path) && $cache_path !== ''
 
 if (!wp_cache_verify_cache_dir() || !wpsc_check_advanced_cache() || !wp_cache_verify_config_file()) {
     fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED bootstrap_artifacts\n");
+    exit(1);
+}
+if (!isset($GLOBALS['wp_cache_config_file']) || !is_string($GLOBALS['wp_cache_config_file']) || '' === $GLOBALS['wp_cache_config_file']) {
+    fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED config_path_missing\n");
     exit(1);
 }
 
@@ -61,6 +65,20 @@ foreach ($settings as $field => $value) {
     // A persistência é verificada na requisição WP-CLI separada do deploy.
     wp_cache_setting($field, $value);
 }
+
+// Em instalações existentes, wp_cache_slash_check pode não ter linha própria.
+// wp_cache_setting() atualiza o global, mas a API genérica do WPSC 3.1.3 não
+// garante a inserção dessa chave ausente. Persista explicitamente pela própria
+// rotina de escrita atômica do plugin; o processo WP-CLI seguinte confirma.
+if (!wp_cache_replace_line(
+    '^ *\\$wp_cache_slash_check',
+    '$wp_cache_slash_check = 1;',
+    $GLOBALS['wp_cache_config_file']
+)) {
+    fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED slash_persistence_failed\n");
+    exit(1);
+}
+$GLOBALS['wp_cache_slash_check'] = 1;
 
 wp_cache_enable();
 wp_super_cache_enable();
