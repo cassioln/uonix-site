@@ -31,6 +31,34 @@ $content_dir = sys_get_temp_dir() . '/uonix-wp-content-' . getmypid();
 @mkdir($content_dir . '/plugins/woo-rfq-for-woocommerce/gpls_assets/css', 0700, true);
 define('WP_CONTENT_DIR', $content_dir);
 
+/**
+ * Remove a árvore temporária por completo.
+ *
+ * Registrado em shutdown para que o diretório desapareça mesmo quando o teste
+ * falha ou aborta no meio: fixture órfão acumula em disco a cada execução,
+ * local e na CI.
+ */
+function uonix_test_remove_tree(string $path): void {
+    if (!is_dir($path)) {
+        if (is_file($path) || is_link($path)) {
+            @unlink($path);
+        }
+        return;
+    }
+    $items = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+    );
+    foreach ($items as $item) {
+        $item->isDir() && !$item->isLink() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+    }
+    @rmdir($path);
+}
+
+register_shutdown_function(static function () use ($content_dir): void {
+    uonix_test_remove_tree($content_dir);
+});
+
 function home_url(string $path = ''): string {
     return 'https://uonix.com.br' . $path;
 }
@@ -207,6 +235,45 @@ if (false !== strpos($traversal_result, 'ver=1500000000')) {
 }
 @unlink($outside_path);
 
+// ---- Variante www é o mesmo site: precisa resolver o mtime local ---------
+$www_url = 'https://www.uonix.com.br/wp-content' . $asset_rel . '?ver=999';
+$www_result = apply_filters('style_loader_src', $www_url, 'gpls_woo_rfq_css');
+if (false === strpos($www_result, 'ver=1700000000')) {
+    uonix_test_fail("variante www não resolveu o asset local: {$www_result}");
+}
+
+// ---- Formatos de URL adicionais ------------------------------------------
+// `?ver` sem `=` também precisa ser substituído, não duplicado.
+$bare = apply_filters('style_loader_src', $asset_url . '?ver', 'gpls_woo_rfq_css');
+if (1 !== preg_match_all('/(?:^|[?&])ver(?:=|$|&)/', $bare)) {
+    uonix_test_fail("parâmetro ver duplicado ou ausente com '?ver' sem valor: {$bare}");
+}
+
+// Parâmetro repetido não pode sobreviver em nenhuma ocorrência.
+$repeated = apply_filters('style_loader_src', $asset_url . '?ver=1&x=9&ver=2', 'gpls_woo_rfq_css');
+// Compara o VALOR exato, não substring: 'ver=1700000000' contém 'ver=1'.
+preg_match_all('/(?:^|[?&])ver=([^&#]*)/', $repeated, $repeated_values);
+foreach ($repeated_values[1] as $value) {
+    if ('1' === $value || '2' === $value) {
+        uonix_test_fail("versão antiga repetida sobreviveu: {$repeated}");
+    }
+}
+if (1 !== count($repeated_values[1])) {
+    uonix_test_fail("esperado exatamente um ver=, encontrado " . count($repeated_values[1]) . ": {$repeated}");
+}
+if (false === strpos($repeated, 'x=9')) {
+    uonix_test_fail("parâmetro legítimo perdido com ver repetido: {$repeated}");
+}
+
+// Fragmento sem query precisa ganhar a versão antes do `#`.
+$fragment_only = apply_filters('style_loader_src', $asset_url . '#topo', 'gpls_woo_rfq_css');
+if (false === strpos($fragment_only, '#topo')) {
+    uonix_test_fail("fragmento sem query foi descartado: {$fragment_only}");
+}
+if (strpos($fragment_only, 'ver=') > strpos($fragment_only, '#')) {
+    uonix_test_fail("versão caiu no fragmento quando não havia query: {$fragment_only}");
+}
+
 // ---- O módulo precisa estar registrado no loader e na CI -----------------
 $loader = file_get_contents($root . '/mu-plugins/uonix-woocommerce/module.php');
 if (false === strpos((string) $loader, '32-rfq-stable-asset-version.php')) {
@@ -217,11 +284,17 @@ if (false === strpos((string) $workflow, 'test-rfq-stable-asset-version.php')) {
     uonix_test_fail('teste não está registrado em .github/workflows/validate.yml');
 }
 
-// Limpeza do fixture temporário.
-@unlink($asset_path);
-
 if ($failures) {
     fwrite(STDERR, "FAIL: " . implode("\nFAIL: ", $failures) . "\n");
     exit(1);
 }
+
+// O fixture não pode sobreviver ao teste; o shutdown handler cuida dos casos de
+// falha, e aqui provamos a remoção no caminho de sucesso.
+uonix_test_remove_tree($content_dir);
+if (is_dir($content_dir)) {
+    fwrite(STDERR, "FAIL: fixture temporário não foi removido: {$content_dir}\n");
+    exit(1);
+}
+
 printf("PASS: versões de assets do RFQ são estáveis e não afetam terceiros.\n");

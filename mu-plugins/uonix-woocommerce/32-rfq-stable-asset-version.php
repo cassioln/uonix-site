@@ -95,7 +95,13 @@ if ( ! function_exists( 'uonix_rfq_stable_asset_path' ) ) {
 		if ( ! empty( $parts['host'] ) && function_exists( 'home_url' ) ) {
 			$home = function_exists( 'wp_parse_url' ) ? wp_parse_url( home_url() ) : parse_url( home_url() );
 			$home_host = is_array( $home ) && ! empty( $home['host'] ) ? $home['host'] : '';
-			if ( '' !== $home_host && 0 !== strcasecmp( $parts['host'], $home_host ) ) {
+			// `www.` é o mesmo site: tratar como host distinto faria o asset cair
+			// no fallback de versão sem necessidade, quando home_url() e a URL
+			// enfileirada usam variantes diferentes.
+			$normalize = static function ( $host ) {
+				return preg_replace( '/^www\./i', '', strtolower( (string) $host ) );
+			};
+			if ( '' !== $home_host && $normalize( $parts['host'] ) !== $normalize( $home_host ) ) {
 				return '';
 			}
 		}
