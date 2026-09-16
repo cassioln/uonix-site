@@ -70,13 +70,17 @@ function uonix_newsletter_referer_path() {
 }
 
 function uonix_gerar_form_newsletter_html($atts) {
+    static $instance = 0;
+
+    ++$instance;
+
     $a = shortcode_atts(array(
         'layout' => 'default' 
     ), $atts);
 
     $is_accordion = ($a['layout'] === 'accordion');
     $titulo_pagina = esc_attr(get_the_title());
-    $unique_id = uniqid('unf_');
+    $unique_id = 'unf_' . $instance;
     
     ob_start(); 
     ?>
