@@ -96,6 +96,9 @@ jobs:
       - name: Test RFQ lazy session policy
         run: php scripts/tests/test-rfq-lazy-session-contract.php
 
+      - name: Test RFQ stable asset version
+        run: php scripts/tests/test-rfq-stable-asset-version.php
+
       - name: Test RFQ email product images and logo
         run: php scripts/tests/test-rfq-email-product-images.php
 
