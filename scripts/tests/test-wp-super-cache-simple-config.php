@@ -113,6 +113,7 @@ if (($settings['cache_rejected_uri'] ?? null) !== $expected_uris) {
 }
 foreach (array(
     'wp_cache_mod_rewrite' => 0,
+    'wp_cache_slash_check' => 1,
     'wp_cache_not_logged_in' => 2,
     'wp_cache_mobile_enabled' => 0,
     'wp_cache_make_known_anon' => 0,
