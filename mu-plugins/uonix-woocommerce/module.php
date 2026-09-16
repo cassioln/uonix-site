@@ -31,6 +31,7 @@ uonix_mu_require_files(
 		'30-rfq-cookie-session-policy.php',
 		'31-rfq-lazy-cookie-session.php',
 		'32-rfq-stable-asset-version.php',
+		'33-rfq-session-cookie-samesite.php',
 	),
 	'uonix-woocommerce'
 );

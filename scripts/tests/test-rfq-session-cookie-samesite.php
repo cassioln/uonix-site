@@ -1,0 +1,2 @@
+<?php
+$root=dirname(__DIR__,2);$file=$root.'/mu-plugins/uonix-woocommerce/33-rfq-session-cookie-samesite.php';if(!is_file($file)){fwrite(STDERR,"FAIL: módulo SameSite RFQ ausente\n");exit(1);}$s=file_get_contents($file);foreach(array('RFQTK_WP_SESSION_COOKIE','SameSite=Lax','send_headers','header_remove') as $x){if(strpos($s,$x)===false){fwrite(STDERR,"FAIL: contrato ausente $x\n");exit(1);}}echo "PASS: cookie RFQ recebe SameSite=Lax sem alterar cookies públicos.\n";
