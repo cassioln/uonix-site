@@ -379,6 +379,7 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
         'UONIX_REQUEST_REF': 'refs/heads/master',
         'UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET': 'false',
         'UONIX_INSTALL_PAGE_CACHE': 'false',
+        'UONIX_CONFIGURE_PAGE_CACHE': 'false',
         'LOCAWEB_SSH_HOST': 'ftp.uonix.com.br',
         'LOCAWEB_SSH_PORT': '22',
         'LOCAWEB_SSH_USER': 'siteuonix1',

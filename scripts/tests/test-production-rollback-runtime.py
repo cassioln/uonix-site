@@ -1373,11 +1373,63 @@ def test_rollback(rollback_script: pathlib.Path, cleanup_script: pathlib.Path, t
         fail("rollback consumiu marcador de código pertencente a outra execução")
     assert_no_mysql(foreign_code, "foreign-code")
 
+    # Reconfigurar um WPSC já instalado não pode apagar plugin, drop-ins ou
+    # cache. Em falha, somente wp-cache-config.php volta do checkpoint privado.
+    reconfigure = RollbackFixture(temp / "wpsc-reconfigure", db_owner=None, code_owner=None)
+    config = reconfigure.document_root / "wp-content/wp-cache-config.php"
+    config.write_text("new WPSC config\n", encoding="utf-8")
+    config.chmod(0o600)
+    plugin = reconfigure.document_root / "wp-content/plugins/wp-super-cache"
+    plugin.mkdir(parents=True)
+    (plugin / "wp-cache.php").write_text("plugin\n", encoding="utf-8")
+    advanced = reconfigure.document_root / "wp-content/advanced-cache.php"
+    advanced.write_text("dropin\n", encoding="utf-8")
+    cache = reconfigure.document_root / "wp-content/cache/supercache"
+    cache.mkdir(parents=True)
+    (cache / "page.html").write_text("cached\n", encoding="utf-8")
+    checkpoint_dir = reconfigure.backup_dir / "wpsc-reconfigure"
+    checkpoint_dir.mkdir()
+    checkpoint_dir.chmod(0o700)
+    checkpoint = checkpoint_dir / "wp-cache-config.php"
+    checkpoint.write_text("old WPSC config\n", encoding="utf-8")
+    checkpoint.chmod(0o600)
+    marker = reconfigure.operation_lock / "wpsc-reconfigure-started"
+    marker.write_text(RUN_ID + "\n", encoding="utf-8")
+    marker.chmod(0o600)
+    result = reconfigure.run(rollback_script)
+    if result.returncode != 0:
+        fail(f"rollback de reconfiguração WPSC válido falhou: {result.stderr[-500:]}")
+    if config.read_text(encoding="utf-8") != "old WPSC config\n" or marker.exists():
+        fail("rollback de reconfiguração não restaurou exatamente wp-cache-config.php")
+    if not (plugin / "wp-cache.php").is_file() or not advanced.is_file() or not (cache / "page.html").is_file():
+        fail("rollback de reconfiguração alterou plugin, drop-in ou cache existente")
+    if not reconfigure.code_is_new() or reconfigure.code_is_old():
+        fail("rollback de reconfiguração alterou código gerenciado não relacionado")
+    assert_no_mysql(reconfigure, "wpsc-reconfigure")
+
+    public_reconfigure = RollbackFixture(temp / "wpsc-reconfigure-public", db_owner=None, code_owner=None)
+    public_config = public_reconfigure.document_root / "wp-content/wp-cache-config.php"
+    public_config.write_text("partial\n", encoding="utf-8")
+    public_config.chmod(0o600)
+    public_checkpoint_dir = public_reconfigure.backup_dir / "wpsc-reconfigure"
+    public_checkpoint_dir.mkdir()
+    public_checkpoint_dir.chmod(0o700)
+    public_checkpoint = public_checkpoint_dir / "wp-cache-config.php"
+    public_checkpoint.write_text("old\n", encoding="utf-8")
+    public_checkpoint.chmod(0o644)
+    public_marker = public_reconfigure.operation_lock / "wpsc-reconfigure-started"
+    public_marker.write_text(RUN_ID + "\n", encoding="utf-8")
+    public_marker.chmod(0o600)
+    result = public_reconfigure.run(rollback_script)
+    if result.returncode == 0 or public_config.read_text(encoding="utf-8") != "partial\n" or not public_marker.exists():
+        fail("rollback aceitou checkpoint WPSC reconfigurado sem modo 0600")
+
 
 def make_release_lock(
     root: pathlib.Path,
     *,
     marker_owner: str | None = None,
+    marker_name: str = "db-mutation-started",
     lock_owner: str = RUN_ID,
     owner_mode: int = 0o600,
     marker_mode: int = 0o600,
@@ -1388,7 +1440,7 @@ def make_release_lock(
     owner.write_text(lock_owner + "\n", encoding="utf-8")
     owner.chmod(owner_mode)
     if marker_owner is not None:
-        marker = lock / "db-mutation-started"
+        marker = lock / marker_name
         marker.write_text(marker_owner + "\n", encoding="utf-8")
         marker.chmod(marker_mode)
     return lock
@@ -1488,6 +1540,16 @@ def test_release(release_script: pathlib.Path, temp: pathlib.Path) -> None:
     if result.returncode == 0:
         fail("release após falha aceitou marcador de código pendente")
     assert_failed_release_preserves(failed_code_lock, "code-mutation-started")
+
+    failed_reconfigure_lock = make_release_lock(
+        temp / "release-failed-wpsc-reconfigure",
+        marker_owner=RUN_ID,
+        marker_name="wpsc-reconfigure-started",
+    )
+    result = run_release(release_script, failed_reconfigure_lock, "failure")
+    if result.returncode == 0:
+        fail("release após falha aceitou marcador de reconfiguração WPSC pendente")
+    assert_failed_release_preserves(failed_reconfigure_lock, "wpsc-reconfigure-started")
 
     clean_failed_lock = make_release_lock(temp / "release-clean")
     result = run_release(release_script, clean_failed_lock, "failure")
