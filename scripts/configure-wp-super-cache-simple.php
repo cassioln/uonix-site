@@ -60,10 +60,10 @@ $settings = array(
 );
 
 foreach ($settings as $field => $value) {
-    // O retorno de wp_cache_setting() depende da escrita do arquivo de
-    // configuração e pode ser false mesmo quando o global foi atualizado.
-    // A persistência é verificada na requisição WP-CLI separada do deploy.
-    wp_cache_setting($field, $value);
+    if (!wp_cache_setting($field, $value)) {
+        fwrite(STDERR, "WPSC_SIMPLE_CONFIGURATION=BLOCKED setting_persistence_failed field={$field}\n");
+        exit(1);
+    }
 }
 
 // Em instalações existentes, wp_cache_slash_check pode não ter linha própria.

@@ -4,6 +4,10 @@
  */
 declare(strict_types=1);
 
+if (in_array('--setting-failure-child', $argv, true)) {
+    putenv('WPSC_FAIL_SETTING=wp_cache_slash_check');
+}
+
 $root = dirname(__DIR__, 2);
 $script = $root . '/scripts/configure-wp-super-cache-simple.php';
 $failures = array();
@@ -15,10 +19,11 @@ function wpsc_test_fail(string $message): void {
     $failures[] = $message;
 }
 
-function wp_cache_setting(string $field, $value): void {
+function wp_cache_setting(string $field, $value): bool {
     global $settings;
     $settings[$field] = $value;
     $GLOBALS[$field] = $value;
+    return getenv('WPSC_FAIL_SETTING') !== $field;
 }
 
 function wp_cache_replace_line(string $old, string $new, string $file): bool {
@@ -142,6 +147,18 @@ foreach (array('verify-cache-dir', 'verify-advanced-cache', 'verify-config-file'
 }
 if (str_contains($output, 'WPSC_SIMPLE_CONFIGURATION=PASS') === false) {
     wpsc_test_fail('marcador de sucesso ausente.');
+}
+
+if (!in_array('--setting-failure-child', $argv, true)) {
+    $command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__) . ' --setting-failure-child 2>&1';
+    $failure_output = array();
+    $failure_status = 0;
+    exec($command, $failure_output, $failure_status);
+    $failure_text = implode("\n", $failure_output);
+    if (0 === $failure_status
+        || false === strpos($failure_text, 'WPSC_SIMPLE_CONFIGURATION=BLOCKED setting_persistence_failed field=wp_cache_slash_check')) {
+        wpsc_test_fail('falha física de setting não é rejeitada com campo explícito.');
+    }
 }
 
 if ($failures) {

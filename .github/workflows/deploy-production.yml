@@ -864,7 +864,17 @@ jobs:
           ( set -o noclobber; umask 077; printf '%s\n' "$run_id" > "$marker" )
           chmod 600 "$marker"
           cli eval-file "$config_script"
-          cli eval 'if (1 !== (int) ($GLOBALS["wp_cache_slash_check"] ?? 0) || 0 !== (int) ($GLOBALS["wp_cache_mod_rewrite"] ?? 1)) { exit(1); }'
+          cli eval '
+          global $wp_cache_slash_check, $wp_cache_mod_rewrite, $wp_cache_config_file;
+          $expected_config = WP_CONTENT_DIR . "/wp-cache-config.php";
+          if (!is_string($wp_cache_config_file)
+              || is_link($wp_cache_config_file)
+              || !is_file($wp_cache_config_file)
+              || false === realpath($wp_cache_config_file)
+              || realpath($wp_cache_config_file) !== realpath($expected_config)) { exit(1); }
+          include $wp_cache_config_file;
+          if (1 !== (int) ($wp_cache_slash_check ?? 0) || 0 !== (int) ($wp_cache_mod_rewrite ?? 1)) { exit(1); }
+          '
           REMOTE
 
       - name: Clear cache and run smoke tests
