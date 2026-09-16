@@ -1233,7 +1233,8 @@ jobs:
             test -f "$document_root/wp-content/wp-cache-config.php"
             test ! -L "$document_root/wp-content/wp-cache-config.php"
             cp -p -- "$wpsc_reconfigure_backup" "$document_root/wp-content/wp-cache-config.php"
-            rm -f -- "$wpsc_reconfigure_marker"
+            # Só o smoke HTTP externo comprova a reversão completa. Preserve o
+            # marcador até ele terminar, para que uma queda mantenha o lock fechado.
           fi
 
           # O dump permanece disponível para análise/contingência MANUAL. O rollback
@@ -1378,11 +1379,21 @@ jobs:
           test "$(file_mode "$lock_path/owner")" = 600
           test "$(cat "$lock_path/owner")" = "$run_id"
           marker="$lock_path/code-mutation-started"
-          test -f "$marker"
-          test ! -L "$marker"
-          test "$(file_mode "$marker")" = 600
-          test "$(cat "$marker")" = "$run_id"
-          rm -f -- "$marker"
+          reconfigure_marker="$lock_path/wpsc-reconfigure-started"
+          if [ -f "$marker" ]; then
+            test ! -L "$marker"
+            test "$(file_mode "$marker")" = 600
+            test "$(cat "$marker")" = "$run_id"
+            rm -f -- "$marker"
+          elif [ -f "$reconfigure_marker" ]; then
+            test ! -L "$reconfigure_marker"
+            test "$(file_mode "$reconfigure_marker")" = 600
+            test "$(cat "$reconfigure_marker")" = "$run_id"
+            rm -f -- "$reconfigure_marker"
+          else
+            printf 'rollback não encontrou marcador de código ou reconfiguração para esta execução\n' >&2
+            exit 1
+          fi
           REMOTE
           echo "Rollback validado a partir do backup $backup_id."
 

@@ -1399,8 +1399,79 @@ def test_rollback(rollback_script: pathlib.Path, cleanup_script: pathlib.Path, t
     result = reconfigure.run(rollback_script)
     if result.returncode != 0:
         fail(f"rollback de reconfiguração WPSC válido falhou: {result.stderr[-500:]}")
-    if config.read_text(encoding="utf-8") != "old WPSC config\n" or marker.exists():
+    if config.read_text(encoding="utf-8") != "old WPSC config\n":
         fail("rollback de reconfiguração não restaurou exatamente wp-cache-config.php")
+    if not marker.exists() or marker.read_text(encoding="utf-8") != RUN_ID + "\n":
+        fail("rollback de reconfiguração removeu marcador antes da validação HTTP final")
+    # O heredoc pós-smoke é a validação final: somente ele pode consumir o
+    # marcador e liberar o lock no caminho configure-only.
+    cleanup = subprocess.run(
+        ["bash", str(cleanup_script), str(reconfigure.operation_lock), RUN_ID],
+        env=reconfigure.env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if cleanup.returncode != 0 or marker.exists():
+        fail("cleanup pós-smoke não consumiu marcador de reconfiguração da própria execução")
+    if not reconfigure.operation_lock.is_dir():
+        fail("cleanup pós-smoke removeu lock antes do step de release")
+
+    # O fallback configure-only precisa recusar qualquer marcador que não seja
+    # regular, privado e pertencente à execução atual, sem consumir lock/alvo.
+    for case, owner, mode in (
+        ("foreign", "other-run", 0o600),
+        ("public", RUN_ID, 0o644),
+    ):
+        guarded = RollbackFixture(temp / f"wpsc-cleanup-{case}", db_owner=None, code_owner=None)
+        guarded_marker = guarded.operation_lock / "wpsc-reconfigure-started"
+        guarded_marker.write_text(owner + "\n", encoding="utf-8")
+        guarded_marker.chmod(mode)
+        guarded_cleanup = subprocess.run(
+            ["bash", str(cleanup_script), str(guarded.operation_lock), RUN_ID],
+            env=guarded.env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if guarded_cleanup.returncode == 0:
+            fail(f"cleanup configure-only aceitou marcador {case}")
+        if not guarded_marker.is_file() or guarded_marker.read_text(encoding="utf-8") != owner + "\n":
+            fail(f"cleanup configure-only consumiu/alterou marcador {case}")
+        if not guarded.operation_lock.is_dir():
+            fail(f"cleanup configure-only removeu lock com marcador {case}")
+
+    linked = RollbackFixture(temp / "wpsc-cleanup-symlink", db_owner=None, code_owner=None)
+    linked_target = temp / "wpsc-cleanup-external-marker"
+    linked_target.write_text(RUN_ID + "\n", encoding="utf-8")
+    linked_target.chmod(0o600)
+    linked_marker = linked.operation_lock / "wpsc-reconfigure-started"
+    linked_marker.symlink_to(linked_target)
+    linked_cleanup = subprocess.run(
+        ["bash", str(cleanup_script), str(linked.operation_lock), RUN_ID],
+        env=linked.env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if linked_cleanup.returncode == 0 or not linked_marker.is_symlink():
+        fail("cleanup configure-only aceitou/removeu marcador symlink")
+    if linked_target.read_text(encoding="utf-8") != RUN_ID + "\n":
+        fail("cleanup configure-only alterou alvo externo do marcador symlink")
+    if not linked.operation_lock.is_dir():
+        fail("cleanup configure-only removeu lock com marcador symlink")
+
+    missing = RollbackFixture(temp / "wpsc-cleanup-missing", db_owner=None, code_owner=None)
+    missing_cleanup = subprocess.run(
+        ["bash", str(cleanup_script), str(missing.operation_lock), RUN_ID],
+        env=missing.env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if missing_cleanup.returncode == 0 or not missing.operation_lock.is_dir():
+        fail("cleanup configure-only aceitou ausência dos dois marcadores")
+
     if not (plugin / "wp-cache.php").is_file() or not advanced.is_file() or not (cache / "page.html").is_file():
         fail("rollback de reconfiguração alterou plugin, drop-in ou cache existente")
     if not reconfigure.code_is_new() or reconfigure.code_is_old():
