@@ -141,7 +141,7 @@ cd "$(git rev-parse --show-toplevel)"
 HOSTGATOR_SSH_KEY='/caminho/para/chave-aprovada' HOSTGATOR_SSH_KNOWN_HOSTS_FILE='/caminho/para/known-hosts-aprovado' scripts/clone-environment.sh --source=qa --target=local --dry-run
 ```
 
-O script mantém o título local como `LOCAL - UONIX`, preserva SMTP/Turnstile/Loginizer do destino e deixa o Mailpit ativo apenas em localhost.
+O script mantém o título local como `LOCAL - UONIX`, preserva SMTP/Turnstile do destino e deixa o Mailpit ativo apenas em localhost.
 
 
 ## Validar Clone Sem Alterar

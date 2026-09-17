@@ -10,7 +10,8 @@ declare( strict_types=1 );
 
 define( 'ABSPATH', __DIR__ );
 
-$GLOBALS['uox_test_cache_flushes'] = 0;
+$GLOBALS['uox_test_cache_flushes']     = 0;
+$GLOBALS['uox_test_page_cache_clears'] = 0;
 $GLOBALS['uox_test_can_edit']      = true;
 $GLOBALS['uox_test_nonce_checks']  = 0;
 $GLOBALS['uox_test_nonce_valid']   = true;
@@ -29,6 +30,20 @@ function add_filter( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
 
 function wp_cache_flush() {
 	++$GLOBALS['uox_test_cache_flushes'];
+	return true;
+}
+
+/**
+ * Dublê do WP Super Cache.
+ *
+ * wp_cache_flush() cobre apenas o cache de OBJETO. O HTML que o editor quer
+ * atualizar vive no cache de PÁGINA, que o perfil Simple deste site grava em
+ * disco com wp_cache_object_cache = 0. Sem este dublê, o teste não distinguiria
+ * "limpou tudo" de "limpou só metade" — foi assim que a chamada órfã do WP Rocket
+ * sobreviveu meses guardada por function_exists, sempre verde e sem efeito.
+ */
+function wp_cache_clear_cache( $blog_id = 0 ) {
+	++$GLOBALS['uox_test_page_cache_clears'];
 	return true;
 }
 
@@ -113,6 +128,10 @@ uox_cache_security_assert(
 	'GET com uox_flush_action=run não pode limpar o cache'
 );
 uox_cache_security_assert(
+	0 === $GLOBALS['uox_test_page_cache_clears'],
+	'GET com uox_flush_action=run não pode limpar o cache de página'
+);
+uox_cache_security_assert(
 	1 !== preg_match( '#href="[^"]*[?&]uox_flush_action=run#', $get_output ),
 	'GET não deve renderizar um link mutante de limpeza'
 );
@@ -136,6 +155,10 @@ uox_cache_security_assert( $get_handler_blocked, 'handler deve rejeitar GET mesm
 uox_cache_security_assert(
 	0 === $GLOBALS['uox_test_cache_flushes'],
 	'GET no admin-post.php não pode limpar o cache'
+);
+uox_cache_security_assert(
+	0 === $GLOBALS['uox_test_page_cache_clears'],
+	'GET no admin-post.php não pode limpar o cache de página'
 );
 uox_cache_security_assert(
 	0 === $GLOBALS['uox_test_nonce_checks'],
@@ -167,6 +190,11 @@ uox_cache_security_assert(
 	'POST autorizado deve limpar o cache exatamente uma vez'
 );
 uox_cache_security_assert(
+	1 === $GLOBALS['uox_test_page_cache_clears'],
+	'POST autorizado deve limpar o cache de PÁGINA exatamente uma vez — sem isso o '
+		. 'editor recebe "cache totalmente limpa" e continua vendo o HTML antigo'
+);
+uox_cache_security_assert(
 	1 === $GLOBALS['uox_test_nonce_checks'],
 	'POST autorizado deve validar o nonce antes da limpeza'
 );
@@ -185,6 +213,10 @@ uox_cache_security_assert( $invalid_nonce_blocked, 'POST com nonce inválido dev
 uox_cache_security_assert(
 	1 === $GLOBALS['uox_test_cache_flushes'],
 	'POST com nonce inválido não pode limpar o cache'
+);
+uox_cache_security_assert(
+	1 === $GLOBALS['uox_test_page_cache_clears'],
+	'POST com nonce inválido não pode limpar o cache de página'
 );
 uox_cache_security_assert(
 	2 === $GLOBALS['uox_test_nonce_checks'],
@@ -206,6 +238,10 @@ uox_cache_security_assert( $blocked, 'POST sem edit_posts deve ser bloqueado' );
 uox_cache_security_assert(
 	1 === $GLOBALS['uox_test_cache_flushes'],
 	'POST sem edit_posts não pode limpar o cache'
+);
+uox_cache_security_assert(
+	1 === $GLOBALS['uox_test_page_cache_clears'],
+	'POST sem edit_posts não pode limpar o cache de página'
 );
 uox_cache_security_assert(
 	2 === $GLOBALS['uox_test_nonce_checks'],
@@ -231,6 +267,30 @@ uox_cache_security_assert(
 uox_cache_security_assert(
 	false !== strpos( $render_output, 'name="action" value="uonix_flush_cache"' ),
 	'formulário deve conter a action oculta do handler'
+);
+
+/*
+ * Asserção ESTRUTURAL: a purga de página tem de ser guardada por function_exists.
+ *
+ * Os dublês acima definem wp_cache_clear_cache(), então o teste comportamental
+ * passaria mesmo se a chamada fosse nua. Mas o WP Super Cache é instalado somente
+ * pelo deploy de produção: em QA, DEV e local a função não existe, e uma chamada
+ * nua daria fatal no admin-post.php — justamente onde um editor clica.
+ */
+$dashboard_source = file_get_contents( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/39-admin-editor-dashboard.php' );
+
+uox_cache_security_assert(
+	is_string( $dashboard_source ) && '' !== $dashboard_source,
+	'não consegui ler 39-admin-editor-dashboard.php para a asserção estrutural'
+);
+uox_cache_security_assert(
+	is_string( $dashboard_source )
+		&& 1 === preg_match(
+			'/function_exists\(\s*[\'"]wp_cache_clear_cache[\'"]\s*\)/',
+			$dashboard_source
+		),
+	'a purga de cache de página precisa estar guardada por function_exists( "wp_cache_clear_cache" ): '
+		. 'sem o guard, o botão dá fatal em QA, DEV e local, onde o WP Super Cache não é instalado'
 );
 
 if ( 0 !== $failures ) {

@@ -188,9 +188,6 @@ add_action( 'admin_bar_menu', function( $wp_admin_bar ) {
     // Remove o menu "Novo" da barra superior
     $wp_admin_bar->remove_node( 'new-content' );
 
-    // Remove o atalho do Loginizer "Open New Tab"
-    $wp_admin_bar->remove_node( 'loginizer-admin-shortcut' );
-
 }, 999 );
 
 // =========================================================================
@@ -1079,10 +1076,32 @@ function uox_handle_flush_cache() {
     }
 
     check_admin_referer( 'uonix_flush_cache' );
+
+    // O site tem DUAS camadas de cache locais, disjuntas por configuração, e o
+    // botão precisa das duas. wp_cache_flush() cobre só a primeira.
+    //
+    // 1) Cache de OBJETO.
     wp_cache_flush();
 
-    if ( function_exists( 'rocket_clean_domain' ) ) {
-        rocket_clean_domain();
+    // 2) Cache de PÁGINA (WP Super Cache, modo Simple/PHP). É esta que guarda o
+    //    HTML que o editor está tentando atualizar, e wp_cache_flush() NÃO a
+    //    alcança: o perfil aplicado por scripts/configure-wp-super-cache-simple.php
+    //    grava wp_cache_object_cache = 0, então o WPSC escreve em disco e ignora
+    //    o cache de objeto. Enquanto só havia wp_cache_flush() aqui, o aviso
+    //    "cache totalmente limpa" saía e a página continuava vindo do arquivo
+    //    estático antigo.
+    //
+    //    wp_cache_clear_cache() é a purga total do próprio plugin — a mesma que o
+    //    painel e a REST API dele chamam. Ela poda supercache/ e a raiz de
+    //    $cache_path e dispara a action wp_cache_cleared. Verificado no WPSC 3.1.3
+    //    de produção: wp-cache-phase2.php:3411.
+    //
+    //    function_exists porque o WPSC é instalado somente pelo deploy de
+    //    produção; em QA, DEV e local o botão precisa seguir funcionando sem ele.
+    //    Não há fallback para prune_super_cache(): as duas funções vivem no mesmo
+    //    wp-cache-phase2.php, então um elseif entre elas seria inalcançável.
+    if ( function_exists( 'wp_cache_clear_cache' ) ) {
+        wp_cache_clear_cache();
     }
 
     wp_safe_redirect( add_query_arg( 'uonix_cache_flushed', '1', admin_url( 'index.php' ) ) );

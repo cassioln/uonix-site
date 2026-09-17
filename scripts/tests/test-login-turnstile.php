@@ -167,7 +167,7 @@ function uonix_login_apply_authenticate_chain( $username, $password, $resolved_u
 	 * A revisão independente do PR #48 apontou que modelar só a prioridade 20
 	 * prova fidelidade parcial: o teste não demonstrava sobrevivência até o
 	 * último filtro. Ambos foram conferidos no core e no site real de DEV, onde a
-	 * instrumentação mostrou loginizer em 10001/10002.
+	 * instrumentação mostrou um plugin de terceiro ocupando 10001/10002.
 	 */
 	$chain[] = array(
 		'priority' => 99,
@@ -180,7 +180,7 @@ function uonix_login_apply_authenticate_chain( $username, $password, $resolved_u
 	$chain[] = array(
 		'priority' => 10001,
 		'callback' => function ( $user, $u, $p ) {
-			// loginizer_wp_authenticate: repassa o resultado anterior.
+			// Filtro de terceiro em prioridade alta: repassa o resultado anterior.
 			return $user;
 		},
 	);

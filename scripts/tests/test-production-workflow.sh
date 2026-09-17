@@ -121,6 +121,42 @@ require(
 if not migration_index < rollback_index < release_index:
     raise AssertionError('rollback deve ser o último gate antes da liberação do lock')
 
+# A purga do cache de PÁGINA pertence ao smoke, não às etapas opt-in de WPSC.
+#
+# install_page_cache e configure_page_cache são booleanos com default false. A única
+# purga de disco do workflow morava dentro de configure-wp-super-cache-simple.php,
+# que só roda com configure_page_cache=true — ou seja, num deploy normal NADA
+# purgava o cache de página. O deploy publicava PHP novo e o site seguia servindo o
+# HTML anterior do disco.
+#
+# Pior: a sondagem HTTP no fim do smoke confere a AUSÊNCIA de X-Robots-Tag
+# restritivo. Página cacheada não passa pelo PHP, então o header não sai e a
+# asserção passa pelo motivo errado. Daí a ordem exigida abaixo.
+# Comentários fora: o bloco explicativo acima da purga cita wp_cache_clear_cache, e
+# asserir sobre o texto cru deixaria a remoção da CHAMADA passar impune.
+smoke_executable = '\n'.join(
+    line for line in production_smoke_step.splitlines()
+    if line.strip() and not line.lstrip().startswith('#')
+)
+require(
+    smoke_executable,
+    r'cache flush',
+    'smoke precisa limpar o cache de objeto',
+)
+require(
+    smoke_executable,
+    r'function_exists\(\s*"wp_cache_clear_cache"\s*\)',
+    'smoke precisa purgar o cache de PÁGINA além do de objeto: sem isso o deploy '
+    'publica código novo e o site continua servindo o HTML anterior',
+)
+purge_index = smoke_executable.index('wp_cache_clear_cache')
+probe_index = smoke_executable.index('url_effective')
+if not purge_index < probe_index:
+    raise AssertionError(
+        'a purga do cache de página deve preceder a sondagem HTTP do smoke, '
+        'senão a sondagem mede a página cacheada em vez da recém-gerada'
+    )
+
 # Pós-cutover: https://uonix.com.br é produção definitiva e indexável. O smoke e
 # o rollback não podem mais exigir o estado histórico de noindex usado durante a
 # transição em site.uonix.com.br; essa divergência bloqueia publicação e mantém o

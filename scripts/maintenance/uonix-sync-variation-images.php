@@ -299,9 +299,6 @@ if ( $is_apply ) {
     $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_wc_var_%' OR option_name LIKE '_transient_timeout_wc_var_%'" );
     $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_wc_product_children_%' OR option_name LIKE '_transient_timeout_wc_product_children_%'" );
     wp_cache_flush();
-    if ( function_exists( "litespeed_purge_all" ) ) {
-        litespeed_purge_all();
-    }
     echo "✨ Caches limpos com sucesso!\n";
 }
 

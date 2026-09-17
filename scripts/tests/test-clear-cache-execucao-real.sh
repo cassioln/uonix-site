@@ -210,19 +210,19 @@ fi
 # uma cópia da função com a lista preenchida.
 # ---------------------------------------------------------------------------
 FONTE_COM_DIRS="$TMP/clear_cache_com_dirs.sh"
-sed 's/local cache_dirs=()/local cache_dirs=( min wp-rocket )/' "$FONTE_FN" > "$FONTE_COM_DIRS"
+sed 's/local cache_dirs=()/local cache_dirs=( cache-pagina-a cache-pagina-b )/' "$FONTE_FN" > "$FONTE_COM_DIRS"
 
 asserts=$((asserts + 1))
-if ! grep -q 'cache_dirs=( min wp-rocket )' "$FONTE_COM_DIRS"; then
+if ! grep -q 'cache_dirs=( cache-pagina-a cache-pagina-b )' "$FONTE_COM_DIRS"; then
   falhou "não consegui injetar a lista de diretórios — a declaração 'local cache_dirs=()' \
 mudou de forma? este cenário ficaria sem cobertura"
 fi
 
 WPC2="$TMP/wp-content-com-dirs"
-mkdir -p "$WPC2/cache"/{min,wp-rocket,pods-alternative-cache}
+mkdir -p "$WPC2/cache"/{cache-pagina-a,cache-pagina-b,pods-alternative-cache}
 mkdir -p "$WPC2/uploads"
-printf 'x\n' > "$WPC2/cache/min/a.css"
-printf 'x\n' > "$WPC2/cache/wp-rocket/b.html"
+printf 'x\n' > "$WPC2/cache/cache-pagina-a/a.css"
+printf 'x\n' > "$WPC2/cache/cache-pagina-b/b.html"
 printf 'objeto\n' > "$WPC2/cache/pods-alternative-cache/dado.php"
 printf 'img\n' > "$WPC2/uploads/foto.jpg"
 
@@ -239,8 +239,8 @@ printf 'img\n' > "$WPC2/uploads/foto.jpg"
   clear_cache "local"
 ) >/dev/null 2>&1
 
-assert_ausente "$WPC2/cache/min" "com a lista preenchida, 'min' deve ser removido"
-assert_ausente "$WPC2/cache/wp-rocket" "com a lista preenchida, 'wp-rocket' deve ser removido"
+assert_ausente "$WPC2/cache/cache-pagina-a" "com a lista preenchida, 'cache-pagina-a' deve ser removido"
+assert_ausente "$WPC2/cache/cache-pagina-b" "com a lista preenchida, 'cache-pagina-b' deve ser removido"
 assert_presente "$WPC2/cache" "a pasta cache em si nunca deve ser removida"
 assert_presente "$WPC2/cache/pods-alternative-cache/dado.php" \
   "pastas fora da lista devem ser preservadas"
