@@ -62,3 +62,8 @@ scripts/local/
 # Servidores MCP locais do workspace
 .agents/mcp/
 
+# Configuração e skills instalados do Claude Code. As skills em .claude/skills/
+# são cópias de .agents/skills/ e .hermes/skills/ (essas sim versionadas), então
+# versioná-las aqui duplicaria os mesmos arquivos. settings.local.json é por dev.
+/.claude/
+
