@@ -275,6 +275,42 @@ function uonix_dashboard_div_end_offset( $html, $opening_offset ) {
 	return null;
 }
 
+function uonix_dashboard_element_end_offset( $html, $opening_offset, $tag_name ) {
+	if ( ! is_int( $opening_offset ) || $opening_offset < 0 || ! is_string( $tag_name ) || '' === $tag_name ) {
+		return null;
+	}
+	$tag_start = strrpos( substr( $html, 0, $opening_offset + 1 ), '<' . strtolower( $tag_name ) );
+	if ( false === $tag_start ) {
+		return null;
+	}
+	$opening_offset = $tag_start;
+	$fragment = substr( $html, $opening_offset );
+	if ( ! is_string( $fragment ) || preg_match_all( '#</?[a-z][a-z0-9:-]*\b[^>]*>#i', $fragment, $matches, PREG_OFFSET_CAPTURE ) < 1 ) {
+		return null;
+	}
+	$tag_name = strtolower( $tag_name );
+	$depth = 0;
+	foreach ( $matches[0] as $match ) {
+		$tag = $match[0];
+		if ( ! preg_match( '#^</?([a-z][a-z0-9:-]*)\b#i', $tag, $tag_match ) ) {
+			continue;
+		}
+		$current_tag = strtolower( $tag_match[1] );
+		if ( $current_tag !== $tag_name ) {
+			continue;
+		}
+		if ( 0 === strpos( $tag, '</' ) ) {
+			--$depth;
+			if ( 0 === $depth ) {
+				return $opening_offset + $match[1] + strlen( $tag );
+			}
+			continue;
+		}
+		++$depth;
+	}
+	return null;
+}
+
 // Carrega os módulos na mesma ordem do loader administrativo.
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/52-admin-analytics-dashboard.php';
@@ -445,6 +481,51 @@ uonix_dashboard_assert(
 	1 === preg_match( '/\.uonix-tabs-nav\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;/s', $output )
 	&& 1 === preg_match( '/@media\s*\(max-width:\s*960px\)\s*\{[\s\S]*?\.uonix-tabs-nav\s+\.uonix-tab-btn\s*\{[^}]*flex:\s*1\s+1\s+140px;[^}]*min-width:\s*0;/s', $output ),
 	'Subabas do catálogo quebram de forma controlada em telas estreitas, sem overflow horizontal'
+);
+
+// Asserções da Issue #209: remoção de emojis e hierarquia do painel
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-metrics"[^>]*>\s*Métricas\s*</a>#u', $output ), 'Aba principal Métricas não possui emoji' );
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-destinations"[^>]*>\s*Destinos de marketing configurados\s*</a>#u', $output ), 'Aba principal Destinos não possui emoji' );
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-aggregate"[^>]*>\s*Métricas agregadas\s*</a>#u', $output ), 'Subaba Métricas agregadas não possui emoji' );
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-catalog"[^>]*>\s*Catálogo &amp; conteúdo\s*</a>#u', $output ) || 1 === preg_match( '#<a[^>]*id="uonix-tab-catalog"[^>]*>\s*Catálogo & conteúdo\s*</a>#u', $output ), 'Subaba Catálogo & conteúdo não possui emoji' );
+
+$metrics_panel_pos = strpos( $output, 'id="uonix-panel-metrics"' );
+$metrics_header_pos = strpos( $output, 'class="uonix-panel-header uonix-metrics-panel-header"' );
+$secondary_tabs_pos = strpos( $output, 'class="uonix-secondary-tabs"' );
+$aggregate_panel_pos = strpos( $output, 'id="uonix-panel-aggregate"' );
+$catalog_panel_pos = strpos( $output, 'id="uonix-panel-catalog"' );
+$metrics_panel_end = uonix_dashboard_element_end_offset( $output, $metrics_panel_pos, 'section' );
+uonix_dashboard_assert(
+	$metrics_panel_pos !== false
+	&& $metrics_header_pos !== false
+	&& $secondary_tabs_pos !== false
+	&& $aggregate_panel_pos !== false
+	&& $catalog_panel_pos !== false
+	&& $metrics_panel_pos < $metrics_header_pos
+	&& $metrics_header_pos < $secondary_tabs_pos
+	&& $secondary_tabs_pos < $aggregate_panel_pos
+	&& $secondary_tabs_pos < $catalog_panel_pos
+	&& is_int( $metrics_panel_end )
+	&& $catalog_panel_pos < $metrics_panel_end,
+	'Cabeçalho e barra de ferramentas ficam dentro do painel de métricas e acima das subabas compartilhadas'
+);
+
+$destinations_panel_pos = strpos( $output, 'id="uonix-panel-destinations"' );
+$status_strip_pos = strpos( $output, 'class="uonix-status-strip"' );
+$marketing_grid_pos = strpos( $output, 'class="uonix-marketing-grid"' );
+$status_strip_count = substr_count( $output, 'class="uonix-status-strip"' );
+$destinations_panel_end = uonix_dashboard_element_end_offset( $output, $destinations_panel_pos, 'section' );
+uonix_dashboard_assert(
+	$destinations_panel_pos !== false
+	&& $status_strip_pos !== false
+	&& $marketing_grid_pos !== false
+	&& 1 === $status_strip_count
+	&& is_int( $destinations_panel_end )
+	&& $destinations_panel_pos < $status_strip_pos
+	&& $status_strip_pos < $marketing_grid_pos
+	&& $marketing_grid_pos < $destinations_panel_end
+	&& $metrics_panel_end < $status_strip_pos,
+	'Faixa de status existe uma única vez, dentro de destinos e fora do painel de métricas agregadas'
 );
 
 $_GET = array(
