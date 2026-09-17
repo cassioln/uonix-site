@@ -65,8 +65,18 @@ require(
     r'migrate_variation_technical_sheet:.*?required:\s*true.*?default:\s*false.*?type:\s*boolean',
     'migração da ficha em produção precisa ser input booleano explícito e desligado por padrão',
 )
+require(
+    trigger_block,
+    r'install_page_cache:.*?required:\s*true.*?default:\s*false.*?type:\s*boolean',
+    'instalação de cache precisa ser input booleano explícito e desligado por padrão',
+)
 require(production, r'^concurrency:\s*\n\s+group:\s*uonix-environment-prod\s*$', 'produção precisa compartilhar o lock lógico do destino prod')
 require(production, r'inputs\.migrate_variation_technical_sheet', 'migração da ficha precisa depender do input explícito')
+require(production, r'inputs\.install_page_cache', 'instalação de cache precisa depender do input explícito')
+require(production, r'- name: Install WP Super Cache Simple safely', 'etapa versionada de cache ausente')
+require(production, r'- name: Install WP Super Cache Simple safely\s*\n\s+if:\s*\$\{\{\s*inputs\.install_page_cache\s*\}\}', 'cache precisa ficar desligado sem input explícito')
+require(production, r'bash "\$wpsc_backup/install-wp-super-cache-simple\.sh"', 'instalador do cache precisa usar bash explícito para checkpoint noexec')
+forbid(production, r'^\s+"\$wpsc_backup/install-wp-super-cache-simple\.sh"\s+\\', 'instalador do cache não pode depender de execução direta no checkpoint')
 require(production, r'- name: Migrate legacy variation technical sheets', 'etapa versionada de migração da ficha ausente')
 require(production, r'--dry-run.*?--execute', 'produção precisa executar dry-run antes da migração efetiva')
 require(production, r'migration_args=\(.*?--execute', 'migração de produção precisa usar argumentos protegidos reutilizáveis')
@@ -152,7 +162,7 @@ require(
     r'- name: Roll back managed code after failure\s*\n\s+if:\s*\$\{\{\s*failure\(\)\s*\|\|\s*cancelled\(\)\s*\}\}',
     'cancelamento durante a migração também precisa entrar no rollback',
 )
-for marker in ('code-mutation-started', 'db-mutation-started'):
+for marker in ('code-mutation-started', 'db-mutation-started', 'wpsc-mutation-started'):
     if marker not in production:
         raise AssertionError(f'marcador remoto de mutação ausente: {marker}')
 if production_publish_step.index('code-mutation-started') > production_publish_step.index('rsync_retry -az --delete'):
@@ -254,7 +264,7 @@ require(
     r'migrate\s+\\?\s*--rollback.*?rollback_failed=1.*?rollback incompleto; código, lock e marcadores serão preservados',
     'falha seletiva precisa permanecer fail-closed sem fallback integral',
 )
-for marker in ('code-mutation-started', 'db-mutation-started'):
+for marker in ('code-mutation-started', 'db-mutation-started', 'wpsc-mutation-started'):
     require(
         production_release_step,
         rf'test ! -e "\$lock_path/{marker}"',
@@ -368,6 +378,8 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
         'UONIX_REQUEST_SHA': sha,
         'UONIX_REQUEST_REF': 'refs/heads/master',
         'UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET': 'false',
+        'UONIX_INSTALL_PAGE_CACHE': 'false',
+        'UONIX_CONFIGURE_PAGE_CACHE': 'false',
         'LOCAWEB_SSH_HOST': 'ftp.uonix.com.br',
         'LOCAWEB_SSH_PORT': '22',
         'LOCAWEB_SSH_USER': 'siteuonix1',

@@ -12,6 +12,16 @@ on:
         required: true
         default: false
         type: boolean
+      install_page_cache:
+        description: Instalar WP Super Cache em modo Simple (somente candidato aprovado)
+        required: true
+        default: false
+        type: boolean
+      configure_page_cache:
+        description: Reconfigurar WP Super Cache já instalado (somente candidato aprovado)
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -30,6 +40,8 @@ jobs:
       UONIX_REQUEST_SHA: ${{ github.sha }}
       UONIX_REQUEST_REF: ${{ github.ref }}
       UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET: ${{ inputs.migrate_variation_technical_sheet }}
+      UONIX_INSTALL_PAGE_CACHE: ${{ inputs.install_page_cache }}
+      UONIX_CONFIGURE_PAGE_CACHE: ${{ inputs.configure_page_cache }}
       LOCAWEB_SSH_HOST: ${{ vars.LOCAWEB_SSH_HOST }}
       LOCAWEB_SSH_PORT: ${{ vars.LOCAWEB_SSH_PORT }}
       LOCAWEB_SSH_USER: ${{ vars.LOCAWEB_SSH_USER }}
@@ -49,6 +61,11 @@ jobs:
           expected_confirmation="PUBLICAR ${UONIX_REQUEST_SHA}"
           [ "$UONIX_PRODUCTION_CONFIRMATION" = "$expected_confirmation" ]
           case "$UONIX_MIGRATE_VARIATION_TECHNICAL_SHEET" in true|false) ;; *) exit 1 ;; esac
+          case "$UONIX_INSTALL_PAGE_CACHE" in true|false) ;; *) exit 1 ;; esac
+          case "$UONIX_CONFIGURE_PAGE_CACHE" in true|false) ;; *) exit 1 ;; esac
+          if [ "$UONIX_INSTALL_PAGE_CACHE" = true ] && [ "$UONIX_CONFIGURE_PAGE_CACHE" = true ]; then
+            exit 1
+          fi
           [ "$LOCAWEB_SSH_HOST" = 'ftp.uonix.com.br' ]
           [ "$LOCAWEB_SSH_PORT" = '22' ]
           [ "$LOCAWEB_SSH_USER" = 'siteuonix1' ]
@@ -79,6 +96,7 @@ jobs:
       TARGET_URL: ${{ vars.PRODUCTION_URL }}
       DEPLOY_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       DEPLOY_LOCK_ACQUIRED: 'false'
+      UONIX_CONFIGURE_PAGE_CACHE: ${{ inputs.configure_page_cache }}
 
     steps:
       - name: Validate canonical production target before credentials
@@ -363,6 +381,7 @@ jobs:
           printf 'Backup de banco criado: %s\n' "${db_backup_file##*/}"
 
       - name: Publish only managed paths and verify manifest
+        if: ${{ ! inputs.configure_page_cache }}
         env:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
         run: |
@@ -463,7 +482,7 @@ jobs:
           # disco e a dependência ainda não — e mu-plugins carregam em toda
           # requisição. O loader tolera a ausência (is_readable + fallback), mas
           # publicar na ordem correta fecha a janela em vez de apenas sobreviver a
-          # ela. Não inverta sem reler scripts/tests/test-mu-loader-resilience.sh.
+          # ela. Não inverta sem reler o contrato de resiliência do loader MU.
           for module_name in "${expected_modules[@]}"; do
             rsync_retry -az --delete \
               -e "$ssh_transport" \
@@ -663,6 +682,199 @@ jobs:
               exit 1
             fi
           done < "$manifest"
+          REMOTE
+
+      - name: Install WP Super Cache Simple safely
+        if: ${{ inputs.install_page_cache }}
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          remote="$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST"
+          ssh_transport="sshpass -e ssh -p $LOCAWEB_SSH_PORT -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/locaweb_known_hosts"
+          operation_lock="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
+          wpsc_backup="$BACKUP_DIR/wpsc-preinstall"
+
+          # Scripts operacionais não entram no bundle do site. Eles são copiados
+          # somente para o checkpoint privado deste run e executados dali.
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$remote" \
+            bash -s -- "$operation_lock" "$DEPLOY_RUN_ID" "$wpsc_backup" <<'REMOTE'
+          set -euo pipefail
+          operation_lock="$1"
+          run_id="$2"
+          wpsc_backup="$3"
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then stat -c '%a' "$1"; else stat -f '%Lp' "$1"; fi
+          }
+          test -f "$operation_lock/owner"
+          test ! -L "$operation_lock/owner"
+          test "$(file_mode "$operation_lock/owner")" = 600
+          test "$(cat "$operation_lock/owner")" = "$run_id"
+          test ! -e "$wpsc_backup"
+          test ! -L "$wpsc_backup"
+          umask 077
+          mkdir -- "$wpsc_backup"
+          chmod 700 "$wpsc_backup"
+          REMOTE
+          rsync -az --chmod=F600 -e "$ssh_transport" \
+            scripts/configure-wp-super-cache-simple.php \
+            "$remote:$wpsc_backup/configure-wp-super-cache-simple.php"
+          rsync -az --chmod=F700 -e "$ssh_transport" \
+            scripts/install-wp-super-cache-simple.sh \
+            "$remote:$wpsc_backup/install-wp-super-cache-simple.sh"
+
+          sshpass -e ssh \
+            -p "$LOCAWEB_SSH_PORT" \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o NumberOfPasswordPrompts=1 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" \
+            "$remote" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$operation_lock" "$DEPLOY_RUN_ID" "$wpsc_backup" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"
+          php_bin="$2"
+          wp_bin="$3"
+          operation_lock="$4"
+          run_id="$5"
+          wpsc_backup="$6"
+          cli() { "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" "$@"; }
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then stat -c '%a' "$1"; else stat -f '%Lp' "$1"; fi
+          }
+
+          test -f "$operation_lock/owner"
+          test ! -L "$operation_lock/owner"
+          test "$(file_mode "$operation_lock/owner")" = 600
+          test "$(cat "$operation_lock/owner")" = "$run_id"
+          test -d "$wpsc_backup"
+          test ! -L "$wpsc_backup"
+          test -f "$wpsc_backup/configure-wp-super-cache-simple.php"
+          test "$(file_mode "$wpsc_backup/configure-wp-super-cache-simple.php")" = 600
+          test -f "$wpsc_backup/install-wp-super-cache-simple.sh"
+          test "$(file_mode "$wpsc_backup/install-wp-super-cache-simple.sh")" = 700
+
+          if cli plugin is-installed wp-super-cache; then
+            printf 'WP Super Cache já está instalado; instalação automática recusada.\n' >&2
+            exit 1
+          fi
+          for path in "$document_root/wp-content/advanced-cache.php" "$document_root/wp-content/wp-cache-config.php" "$document_root/wp-content/cache"; do
+            test ! -e "$path"
+            test ! -L "$path"
+          done
+
+          config_path="$(cli config path)"
+          test -f "$config_path"
+          test ! -L "$config_path"
+          umask 077
+          mkdir -- "$wpsc_backup/preinstall"
+          cp -p -- "$config_path" "$wpsc_backup/preinstall/wp-config.php"
+          printf '%s\n' "$config_path" > "$wpsc_backup/preinstall/config-path"
+          chmod 600 "$wpsc_backup/preinstall/wp-config.php" "$wpsc_backup/preinstall/config-path"
+
+          marker="$operation_lock/wpsc-mutation-started"
+          test ! -e "$marker"
+          test ! -L "$marker"
+          ( set -o noclobber; umask 077; printf '%s\n' "$run_id" > "$marker" )
+          chmod 600 "$marker"
+
+          # Backups privados podem estar em filesystem montado com noexec. O
+          # interpretador explícito preserva a verificação do conteúdo e evita
+          # depender do bit executável do diretório de checkpoint.
+          bash "$wpsc_backup/install-wp-super-cache-simple.sh" \
+            --wp-root="$document_root" \
+            --php-bin="$php_bin" \
+            --wp-bin="$wp_bin" \
+            --config-script="$wpsc_backup/configure-wp-super-cache-simple.php"
+
+          cli plugin is-active wp-super-cache
+          test "$(cli plugin get wp-super-cache --field=version)" = 3.1.3
+          cli eval '
+          $cookies = array("PHPSESSID", "rfqtk_wp_session_", "wp_woocommerce_session_", "woocommerce_items_in_cart", "woocommerce_cart_hash");
+          $uris = array("^/cotacao(?:/|$)", "^/finalizar-orcamento(?:/|$)", "^/(?:minha-conta|conta|account)(?:/|$)");
+          foreach (array("cache_enabled", "super_cache_enabled") as $name) { if (empty($GLOBALS[$name])) { exit(1); } }
+          if (!defined("WP_CACHE") || true !== WP_CACHE || !isset($GLOBALS["wp_cache_mod_rewrite"]) || 0 !== (int) $GLOBALS["wp_cache_mod_rewrite"]) { exit(1); }
+          foreach ($cookies as $cookie) { if (!in_array($cookie, (array) $GLOBALS["wpsc_rejected_cookies"], true)) { exit(1); } }
+          foreach ($uris as $uri) { if (!in_array($uri, (array) $GLOBALS["cache_rejected_uri"], true)) { exit(1); } }
+          '
+          REMOTE
+
+      - name: Configure existing WP Super Cache safely
+        if: ${{ inputs.configure_page_cache }}
+        env:
+          SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          remote="$LOCAWEB_SSH_USER@$LOCAWEB_SSH_HOST"
+          ssh_transport="sshpass -e ssh -p $LOCAWEB_SSH_PORT -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/locaweb_known_hosts"
+          operation_lock="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
+          wpsc_reconfigure_backup="$BACKUP_DIR/wpsc-reconfigure"
+
+          sshpass -e ssh -p "$LOCAWEB_SSH_PORT" -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" "$remote" \
+            bash -s -- "$operation_lock" "$DEPLOY_RUN_ID" "$wpsc_reconfigure_backup" <<'REMOTE'
+          set -euo pipefail
+          lock="$1"; run_id="$2"; backup="$3"
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then stat -c '%a' "$1"; else stat -f '%Lp' "$1"; fi
+          }
+          test -f "$lock/owner" && test ! -L "$lock/owner"
+          test "$(file_mode "$lock/owner")" = 600
+          test "$(cat "$lock/owner")" = "$run_id"
+          test ! -e "$backup" && test ! -L "$backup"
+          umask 077
+          mkdir -- "$backup"
+          chmod 700 "$backup"
+          REMOTE
+
+          rsync -az --chmod=F600 -e "$ssh_transport" scripts/configure-wp-super-cache-simple.php "$remote:$wpsc_reconfigure_backup/configure-wp-super-cache-simple.php"
+
+          sshpass -e ssh -p "$LOCAWEB_SSH_PORT" -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/locaweb_known_hosts" "$remote" \
+            bash -s -- "$LOCAWEB_DOCUMENT_ROOT" "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$operation_lock" "$DEPLOY_RUN_ID" "$wpsc_reconfigure_backup" <<'REMOTE'
+          set -euo pipefail
+          document_root="$1"; php_bin="$2"; wp_bin="$3"; lock="$4"; run_id="$5"; backup="$6"
+          cli() { "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" "$@"; }
+          file_mode() {
+            if stat -c '%a' /dev/null >/dev/null 2>&1; then stat -c '%a' "$1"; else stat -f '%Lp' "$1"; fi
+          }
+          config_path="$document_root/wp-content/wp-cache-config.php"
+          config_script="$backup/configure-wp-super-cache-simple.php"
+          test -f "$lock/owner" && test ! -L "$lock/owner"
+          test "$(file_mode "$lock/owner")" = 600
+          test "$(cat "$lock/owner")" = "$run_id"
+          test -d "$backup" && test ! -L "$backup"
+          test "$(file_mode "$backup")" = 700
+          test -f "$config_script" && test ! -L "$config_script"
+          test "$(file_mode "$config_script")" = 600
+          cli plugin is-installed wp-super-cache
+          cli plugin is-active wp-super-cache
+          test "$(cli plugin get wp-super-cache --field=version)" = 3.1.3
+          test -f "$config_path" && test ! -L "$config_path"
+          cp -p -- "$config_path" "$backup/wp-cache-config.php"
+          chmod 600 "$backup/wp-cache-config.php"
+          marker="$lock/wpsc-reconfigure-started"
+          test ! -e "$marker" && test ! -L "$marker"
+          ( set -o noclobber; umask 077; printf '%s\n' "$run_id" > "$marker" )
+          chmod 600 "$marker"
+          cli eval-file "$config_script"
+          cli eval '
+          global $wp_cache_slash_check, $wp_cache_mod_rewrite, $wp_cache_config_file;
+          $expected_config = WP_CONTENT_DIR . "/wp-cache-config.php";
+          if (!is_string($wp_cache_config_file)
+              || is_link($wp_cache_config_file)
+              || !is_file($wp_cache_config_file)
+              || false === realpath($wp_cache_config_file)
+              || realpath($wp_cache_config_file) !== realpath($expected_config)) { exit(1); }
+          include $wp_cache_config_file;
+          if (1 !== (int) ($wp_cache_slash_check ?? 0) || 0 !== (int) ($wp_cache_mod_rewrite ?? 1)) { exit(1); }
+          '
           REMOTE
 
       - name: Clear cache and run smoke tests
@@ -879,6 +1091,8 @@ jobs:
           operation_lock="$document_root/.uonix-operation.lock"
           code_mutation_marker="$operation_lock/code-mutation-started"
           db_mutation_marker="$operation_lock/db-mutation-started"
+          wpsc_mutation_marker="$operation_lock/wpsc-mutation-started"
+          wpsc_reconfigure_marker="$operation_lock/wpsc-reconfigure-started"
           migration_lock="$document_root/.uonix-vts-migration.lock"
           rollback_failed=0
 
@@ -942,16 +1156,17 @@ jobs:
           test ! -L "$operation_lock/owner"
           test "$(file_mode "$operation_lock/owner")" = 600
           test "$(cat "$operation_lock/owner")" = "$run_id"
-          if [ ! -e "$code_mutation_marker" ] && [ ! -L "$code_mutation_marker" ] && [ ! -e "$db_mutation_marker" ] && [ ! -L "$db_mutation_marker" ]; then
+          if [ ! -e "$code_mutation_marker" ] && [ ! -L "$code_mutation_marker" ] && [ ! -e "$db_mutation_marker" ] && [ ! -L "$db_mutation_marker" ] && [ ! -e "$wpsc_mutation_marker" ] && [ ! -L "$wpsc_mutation_marker" ] && [ ! -e "$wpsc_reconfigure_marker" ] && [ ! -L "$wpsc_reconfigure_marker" ]; then
             printf 'rollback: nenhuma mutação foi iniciada; nada a restaurar\n'
             exit 0
           fi
 
-          for marker in "$code_mutation_marker" "$db_mutation_marker"; do
+          for marker in "$code_mutation_marker" "$db_mutation_marker" "$wpsc_mutation_marker" "$wpsc_reconfigure_marker"; do
             if [ -e "$marker" ] || [ -L "$marker" ]; then
               test -f "$marker"
               test ! -L "$marker"
               test "$(file_mode "$marker")" = 600
+              test "$(cat "$marker")" = "$run_id"
             fi
           done
 
@@ -975,6 +1190,62 @@ jobs:
           cli() {
             "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" "$@"
           }
+
+          # O checkpoint WPSC só existe quando o input opt-in iniciou sua escrita.
+          # A restauração é restrita aos quatro artefatos comprovadamente ausentes
+          # no preflight e ao wp-config salvo antes da instalação.
+          if [ -f "$wpsc_mutation_marker" ]; then
+            if [ "$(cat "$wpsc_mutation_marker")" != "$run_id" ]; then
+              printf 'rollback recusado: marcador WPSC pertence a outra execução\n' >&2
+              exit 1
+            fi
+            wpsc_backup="$backup_dir/wpsc-preinstall"
+            config_backup="$wpsc_backup/preinstall/wp-config.php"
+            config_path_file="$wpsc_backup/preinstall/config-path"
+            test -f "$config_backup"
+            test ! -L "$config_backup"
+            test "$(file_mode "$config_backup")" = 600
+            test -f "$config_path_file"
+            test ! -L "$config_path_file"
+            test "$(file_mode "$config_path_file")" = 600
+            config_path="$(cat "$config_path_file")"
+            test "$config_path" = "$(cli config path)"
+            test -f "$config_path"
+            test ! -L "$config_path"
+            if cli plugin is-installed wp-super-cache; then
+              cli plugin deactivate wp-super-cache
+              cli plugin delete wp-super-cache
+            fi
+            rm -rf -- "$document_root/wp-content/cache"
+            rm -f -- "$document_root/wp-content/advanced-cache.php" "$document_root/wp-content/wp-cache-config.php"
+            cp -p -- "$config_backup" "$config_path"
+            test ! -e "$document_root/wp-content/plugins/wp-super-cache"
+            test ! -e "$document_root/wp-content/advanced-cache.php"
+            test ! -e "$document_root/wp-content/wp-cache-config.php"
+            test ! -e "$document_root/wp-content/cache"
+            rm -f -- "$wpsc_mutation_marker"
+          fi
+
+          # Reconfiguração de WPSC existente: restaura exclusivamente wp-cache-config.php.
+          # Não desativa/remove o plugin nem altera wp-config, drop-ins ou cache.
+          if [ -f "$wpsc_reconfigure_marker" ]; then
+            test ! -L "$wpsc_reconfigure_marker"
+            test "$(file_mode "$wpsc_reconfigure_marker")" = 600
+            test "$(cat "$wpsc_reconfigure_marker")" = "$run_id"
+            wpsc_reconfigure_dir="$backup_dir/wpsc-reconfigure"
+            wpsc_reconfigure_backup="$wpsc_reconfigure_dir/wp-cache-config.php"
+            test -d "$wpsc_reconfigure_dir"
+            test ! -L "$wpsc_reconfigure_dir"
+            test "$(file_mode "$wpsc_reconfigure_dir")" = 700
+            test -f "$wpsc_reconfigure_backup"
+            test ! -L "$wpsc_reconfigure_backup"
+            test "$(file_mode "$wpsc_reconfigure_backup")" = 600
+            test -f "$document_root/wp-content/wp-cache-config.php"
+            test ! -L "$document_root/wp-content/wp-cache-config.php"
+            cp -p -- "$wpsc_reconfigure_backup" "$document_root/wp-content/wp-cache-config.php"
+            # Só o smoke HTTP externo comprova a reversão completa. Preserve o
+            # marcador até ele terminar, para que uma queda mantenha o lock fechado.
+          fi
 
           # O dump permanece disponível para análise/contingência MANUAL. O rollback
           # automático toca apenas as cinco fichas; nunca rebobina pedidos ou outras
@@ -1118,11 +1389,21 @@ jobs:
           test "$(file_mode "$lock_path/owner")" = 600
           test "$(cat "$lock_path/owner")" = "$run_id"
           marker="$lock_path/code-mutation-started"
-          test -f "$marker"
-          test ! -L "$marker"
-          test "$(file_mode "$marker")" = 600
-          test "$(cat "$marker")" = "$run_id"
-          rm -f -- "$marker"
+          reconfigure_marker="$lock_path/wpsc-reconfigure-started"
+          if [ -f "$marker" ]; then
+            test ! -L "$marker"
+            test "$(file_mode "$marker")" = 600
+            test "$(cat "$marker")" = "$run_id"
+            rm -f -- "$marker"
+          elif [ -f "$reconfigure_marker" ]; then
+            test ! -L "$reconfigure_marker"
+            test "$(file_mode "$reconfigure_marker")" = 600
+            test "$(cat "$reconfigure_marker")" = "$run_id"
+            rm -f -- "$reconfigure_marker"
+          else
+            printf 'rollback não encontrou marcador de código ou reconfiguração para esta execução\n' >&2
+            exit 1
+          fi
           REMOTE
           echo "Rollback validado a partir do backup $backup_id."
 
@@ -1166,7 +1447,7 @@ jobs:
             test ! -L "$lock_path/owner"
             test "$(file_mode "$lock_path/owner")" = 600
             test "$(cat "$lock_path/owner")" = "$run_id"
-            for marker in code-mutation-started db-mutation-started; do
+            for marker in code-mutation-started db-mutation-started wpsc-mutation-started wpsc-reconfigure-started; do
               if [ -e "$lock_path/$marker" ] || [ -L "$lock_path/$marker" ]; then
                 test -f "$lock_path/$marker"
                 test ! -L "$lock_path/$marker"
@@ -1175,12 +1456,14 @@ jobs:
               fi
             done
             if [ "$job_status" = success ]; then
-              rm -f -- "$lock_path/code-mutation-started" "$lock_path/db-mutation-started"
+              rm -f -- "$lock_path/code-mutation-started" "$lock_path/db-mutation-started" "$lock_path/wpsc-mutation-started" "$lock_path/wpsc-reconfigure-started"
             fi
             # Em falha/cancelamento, somente um rollback integralmente validado
             # remove os marcadores. Preservá-los mantém o lock fail-closed.
             test ! -e "$lock_path/code-mutation-started"
             test ! -e "$lock_path/db-mutation-started"
+            test ! -e "$lock_path/wpsc-mutation-started"
+            test ! -e "$lock_path/wpsc-reconfigure-started"
             rm -f -- "$lock_path/owner"
             rmdir -- "$lock_path"
           fi

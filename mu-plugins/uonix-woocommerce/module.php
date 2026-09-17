@@ -28,6 +28,10 @@ uonix_mu_require_files(
 		'26-turnstile-store-api-checkout.php',
 		'28-catalogo-ajax-carrinho.php',
 		'29-rfq-email-imagens-produtos.php',
+		'30-rfq-cookie-session-policy.php',
+		'31-rfq-lazy-cookie-session.php',
+		'32-rfq-stable-asset-version.php',
+		'33-rfq-session-cookie-samesite.php',
 	),
 	'uonix-woocommerce'
 );

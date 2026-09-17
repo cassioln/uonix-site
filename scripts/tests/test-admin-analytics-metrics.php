@@ -162,7 +162,24 @@ if ( function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ) ) {
 if ( function_exists( 'uonix_analytics_metrics_requested_period' ) && function_exists( 'uonix_analytics_metrics_refresh_redirect_url' ) ) {
 	uonix_metrics_assert( 90 === uonix_analytics_metrics_requested_period( array( 'uonix_period' => '90' ) ), 'POST preserva o período permitido escolhido' );
 	uonix_metrics_assert( 30 === uonix_analytics_metrics_requested_period( array( 'uonix_period' => '13' ) ), 'POST inválido volta ao período seguro de 30 dias' );
-	uonix_metrics_assert( 'https://uonix.com.br/wp-admin/admin.php?page=uonix-analytics&uonix_period=365&uonix_metrics_refresh=1' === uonix_analytics_metrics_refresh_redirect_url( 365 ), 'Redirect retorna ao período efetivamente sincronizado' );
+	uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_requested_dashboard_state' ), 'Estado de abas seguro existe no módulo de métricas' );
+	$tab_state = uonix_analytics_metrics_requested_dashboard_state( array( 'tab' => 'metrics', 'subtab' => 'catalog', 'catalog_tab' => 'blog' ) );
+	uonix_metrics_assert( array( 'tab' => 'metrics', 'subtab' => 'catalog', 'catalog_tab' => 'blog' ) === $tab_state, 'Estado permitido de abas é preservado no POST de sincronização' );
+	$invalid_tab_state = uonix_analytics_metrics_requested_dashboard_state( array( 'tab' => 'qualquer', 'subtab' => 'qualquer', 'catalog_tab' => 'qualquer' ) );
+	uonix_metrics_assert( array( 'tab' => 'metrics', 'subtab' => 'aggregate', 'catalog_tab' => 'products' ) === $invalid_tab_state, 'Estado de abas fora da allowlist volta ao padrão seguro' );
+	$non_scalar_warning = false;
+	set_error_handler(
+		static function () use ( &$non_scalar_warning ) {
+			$non_scalar_warning = true;
+			return true;
+		}
+	);
+	$non_scalar_tab_state = uonix_analytics_metrics_requested_dashboard_state( array( 'tab' => array( 'destinations' ), 'subtab' => array( 'catalog' ), 'catalog_tab' => array( 'blog' ) ) );
+	restore_error_handler();
+	uonix_metrics_assert( ! $non_scalar_warning && array( 'tab' => 'metrics', 'subtab' => 'aggregate', 'catalog_tab' => 'products' ) === $non_scalar_tab_state, 'Estado de abas não aceita parâmetros não escalares sem gerar warning' );
+	uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_dashboard_url' ), 'Construtor de URL estável do dashboard existe' );
+	uonix_metrics_assert( 'https://uonix.com.br/wp-admin/admin.php?page=uonix-analytics&uonix_period=90&tab=destinations&subtab=aggregate&catalog_tab=products' === uonix_analytics_metrics_dashboard_url( 90, array( 'tab' => 'destinations', 'subtab' => 'aggregate', 'catalog_tab' => 'products' ) ), 'URL de navegação preserva período e não propaga marcador de sincronização' );
+	uonix_metrics_assert( 'https://uonix.com.br/wp-admin/admin.php?page=uonix-analytics&uonix_period=365&tab=metrics&subtab=catalog&catalog_tab=blog&uonix_metrics_refresh=1' === uonix_analytics_metrics_refresh_redirect_url( 365, $tab_state ), 'Redirect preserva período e estado de abas após a sincronização' );
 }
 
 if ( function_exists( 'uonix_analytics_metrics_finite_number' ) ) {

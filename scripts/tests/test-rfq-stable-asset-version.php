@@ -1,0 +1,352 @@
+<?php
+/**
+ * Contrato: versões de assets do RFQ precisam ser estáveis entre requisições.
+ *
+ * O plugin enfileira CSS/JS com wp_rand(10, 100000) como versão (por exemplo
+ * woo-rfq-for-woocommerce.php:878). Isso muda o HTML a cada requisição, o
+ * WP Super Cache regrava o arquivo em vez de servi-lo, e categoria/produto
+ * nunca são entregues do cache — medido em produção: p95 ~2,1 s e ~2,8 s,
+ * contra 260 ms na home.
+ */
+declare(strict_types=1);
+
+$root = dirname(__DIR__, 2);
+$module = $root . '/mu-plugins/uonix-woocommerce/32-rfq-stable-asset-version.php';
+$failures = array();
+
+function uonix_test_fail(string $message): void {
+    global $failures;
+    $failures[] = $message;
+}
+
+// ---- Ambiente mínimo do WordPress ----------------------------------------
+define('ABSPATH', '/tmp/uonix-wp/');
+
+$GLOBALS['uonix_filters'] = array();
+$GLOBALS['uonix_registered_styles'] = array();
+$GLOBALS['uonix_registered_scripts'] = array();
+
+// wp-content real em diretório temporário: permite provar mtime e confinamento.
+$content_dir = sys_get_temp_dir() . '/uonix-wp-content-' . getmypid();
+@mkdir($content_dir . '/plugins/woo-rfq-for-woocommerce/gpls_assets/css', 0700, true);
+define('WP_CONTENT_DIR', $content_dir);
+
+/**
+ * Remove a árvore temporária por completo.
+ *
+ * Registrado em shutdown para que o diretório desapareça mesmo quando o teste
+ * falha ou aborta no meio: fixture órfão acumula em disco a cada execução,
+ * local e na CI.
+ *
+ * Fail-closed por desenho: a remoção recursiva só acontece se o caminho for o
+ * fixture que ESTE processo criou — dentro do diretório temporário do sistema e
+ * com o prefixo esperado. Sem isso, uma alteração futura em $content_dir
+ * poderia apagar uma árvore alheia durante o teste ou na CI.
+ */
+function uonix_test_remove_tree(string $path): void {
+    $expected_prefix = realpath(sys_get_temp_dir());
+    if (false === $expected_prefix) {
+        return;
+    }
+    $expected_prefix = rtrim($expected_prefix, '/') . '/uonix-wp-content-';
+
+    // Compara o caminho REAL: symlink não pode redirecionar a remoção.
+    $resolved = realpath($path);
+    if (false === $resolved || !is_dir($resolved)) {
+        return;
+    }
+    if (0 !== strpos($resolved, $expected_prefix)) {
+        fwrite(STDERR, "REFUSED: limpeza fora do fixture esperado: {$resolved}\n");
+        return;
+    }
+    // O sufixo precisa ser o PID deste processo, nunca de outro.
+    if (substr($resolved, strlen($expected_prefix)) !== (string) getmypid()) {
+        fwrite(STDERR, "REFUSED: limpeza de fixture de outro processo: {$resolved}\n");
+        return;
+    }
+
+    uonix_test_remove_tree_unchecked($resolved);
+}
+
+function uonix_test_remove_tree_unchecked(string $path): void {
+    if (!is_dir($path)) {
+        if (is_file($path) || is_link($path)) {
+            @unlink($path);
+        }
+        return;
+    }
+    $items = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+    );
+    foreach ($items as $item) {
+        $item->isDir() && !$item->isLink() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+    }
+    @rmdir($path);
+}
+
+register_shutdown_function(static function () use ($content_dir): void {
+    uonix_test_remove_tree($content_dir);
+});
+
+function home_url(string $path = ''): string {
+    return 'https://uonix.com.br' . $path;
+}
+
+function wp_parse_url(string $url) {
+    return parse_url($url);
+}
+
+function add_filter(string $hook, $callback, int $priority = 10, int $args = 1): bool {
+    $GLOBALS['uonix_filters'][$hook][$priority][] = $callback;
+    return true;
+}
+
+function apply_filters(string $hook, $value, ...$rest) {
+    if (empty($GLOBALS['uonix_filters'][$hook])) {
+        return $value;
+    }
+    $priorities = $GLOBALS['uonix_filters'][$hook];
+    ksort($priorities);
+    foreach ($priorities as $callbacks) {
+        foreach ($callbacks as $callback) {
+            $value = $callback($value, ...$rest);
+        }
+    }
+    return $value;
+}
+
+// ---- Carrega o módulo ----------------------------------------------------
+if (!file_exists($module)) {
+    fwrite(STDERR, "FAIL: módulo ausente: {$module}\n");
+    exit(1);
+}
+require $module;
+
+$asset_rel = '/plugins/woo-rfq-for-woocommerce/gpls_assets/css/gpls_woo_rfq.css';
+$asset_path = $content_dir . $asset_rel;
+$asset_url = 'https://uonix.com.br/wp-content' . $asset_rel;
+file_put_contents($asset_path, "/* v1 */\n");
+touch($asset_path, 1600000000);
+
+// ---- O filtro precisa estar registrado ----------------------------------
+foreach (array('style_loader_src', 'script_loader_src') as $hook) {
+    if (empty($GLOBALS['uonix_filters'][$hook])) {
+        uonix_test_fail("filtro obrigatório não registrado: {$hook}");
+    }
+}
+
+// ---- Handles do RFQ: versão precisa ser estável e idêntica entre chamadas -
+$rfq_handles = array(
+    'gpls_woo_rfq_css',
+    'url_gpls_wh_css',
+    'url_gpls_wh_css2',
+    'gpls_woo_rfq_js',
+    'url_gpls_wh_js',
+    'gpls_woo_password_js',
+    'rfq_dummy_js',
+);
+foreach ($rfq_handles as $handle) {
+    $random_a = 'https://uonix.com.br/wp-content/plugins/woo-rfq-for-woocommerce/a.css?ver=18224';
+    $random_b = 'https://uonix.com.br/wp-content/plugins/woo-rfq-for-woocommerce/a.css?ver=51545';
+
+    $first = apply_filters('style_loader_src', $random_a, $handle);
+    $second = apply_filters('style_loader_src', $random_b, $handle);
+
+    if ($first !== $second) {
+        uonix_test_fail("versão instável para {$handle}: '{$first}' != '{$second}'");
+    }
+    if (false !== strpos($first, '18224') || false !== strpos($first, '51545')) {
+        uonix_test_fail("versão aleatória preservada em {$handle}: {$first}");
+    }
+    // A URL do asset precisa continuar apontando para o mesmo arquivo.
+    if (false === strpos($first, '/woo-rfq-for-woocommerce/a.css')) {
+        uonix_test_fail("URL do asset foi corrompida em {$handle}: {$first}");
+    }
+}
+
+// ---- Handles de terceiros NÃO podem ser alterados ------------------------
+$foreign = array(
+    'woocommerce-general' => 'https://uonix.com.br/wp-content/plugins/woocommerce/assets/css/woocommerce.css?ver=9.4.2',
+    'kadence-blocks-global' => 'https://uonix.com.br/wp-content/plugins/kadence-blocks/dist/style.css?ver=3.2.1',
+    'jquery-core' => 'https://uonix.com.br/wp-includes/js/jquery/jquery.min.js?ver=3.7.1',
+);
+foreach ($foreign as $handle => $src) {
+    if (apply_filters('style_loader_src', $src, $handle) !== $src) {
+        uonix_test_fail("asset de terceiro foi alterado: {$handle}");
+    }
+    if (apply_filters('script_loader_src', $src, $handle) !== $src) {
+        uonix_test_fail("script de terceiro foi alterado: {$handle}");
+    }
+}
+
+// ---- Assets do RFQ sem ?ver= não podem ganhar versão inválida ------------
+$no_version = 'https://uonix.com.br/wp-content/plugins/woo-rfq-for-woocommerce/b.css';
+$result = apply_filters('style_loader_src', $no_version, 'gpls_woo_rfq_css');
+if ('' === $result || null === $result) {
+    uonix_test_fail('asset sem ?ver= retornou vazio');
+}
+
+// ---- A versão aplicada precisa ser determinística e não vazia ------------
+$applied = apply_filters('style_loader_src', 'https://uonix.com.br/a.css?ver=999', 'gpls_woo_rfq_css');
+if (!preg_match('/[?&]ver=([^&]+)/', $applied, $match)) {
+    uonix_test_fail("versão estável ausente no resultado: {$applied}");
+} elseif ('' === trim($match[1])) {
+    uonix_test_fail('versão estável ficou vazia');
+}
+
+// ---- Cache-busting real: mudar o arquivo precisa mudar a versão ----------
+$before = apply_filters('style_loader_src', $asset_url . '?ver=111', 'gpls_woo_rfq_css');
+if (false === strpos($before, 'ver=1600000000')) {
+    uonix_test_fail("versão não derivou do mtime do asset: {$before}");
+}
+file_put_contents($asset_path, "/* v2 alterado */\n");
+touch($asset_path, 1700000000);
+clearstatcache(true, $asset_path);
+$after = apply_filters('style_loader_src', $asset_url . '?ver=222', 'gpls_woo_rfq_css');
+if ($before === $after) {
+    uonix_test_fail('versão não mudou após alteração real do asset: cache-busting quebrado');
+}
+if (false === strpos($after, 'ver=1700000000')) {
+    uonix_test_fail("versão não acompanhou o novo mtime: {$after}");
+}
+
+// ---- Múltiplos parâmetros de query precisam ser preservados --------------
+$multi = apply_filters('style_loader_src', $asset_url . '?a=1&ver=999&b=2', 'gpls_woo_rfq_css');
+foreach (array('a=1', 'b=2') as $pair) {
+    if (false === strpos($multi, $pair)) {
+        uonix_test_fail("parâmetro legítimo perdido ({$pair}): {$multi}");
+    }
+}
+if (false !== strpos($multi, 'ver=999')) {
+    uonix_test_fail("versão aleatória sobreviveu com múltiplos parâmetros: {$multi}");
+}
+
+// Um parâmetro com prefixo "ver" NÃO pode ser confundido com a versão.
+$prefixed = apply_filters('style_loader_src', $asset_url . '?version=abc&ver=999', 'gpls_woo_rfq_css');
+if (false === strpos($prefixed, 'version=abc')) {
+    uonix_test_fail("parâmetro 'version' foi removido por engano: {$prefixed}");
+}
+
+// ---- Fragmento: ?ver= precisa ficar ANTES do # --------------------------
+$fragment = apply_filters('style_loader_src', $asset_url . '?ver=999#bloco', 'gpls_woo_rfq_css');
+$hash_at = strpos($fragment, '#');
+$ver_at = strpos($fragment, 'ver=');
+if (false === $hash_at || false === $ver_at) {
+    uonix_test_fail("fragmento ou versão ausente: {$fragment}");
+} elseif ($ver_at > $hash_at) {
+    uonix_test_fail("versão caiu dentro do fragmento e o asset perde cache-busting: {$fragment}");
+}
+if (false === strpos($fragment, '#bloco')) {
+    uonix_test_fail("fragmento foi descartado: {$fragment}");
+}
+
+// ---- URL externa contendo /wp-content/ não pode virar caminho local ------
+$external = 'https://cdn.example.com/wp-content/plugins/woo-rfq-for-woocommerce/gpls_assets/css/gpls_woo_rfq.css?ver=999';
+$external_result = apply_filters('style_loader_src', $external, 'gpls_woo_rfq_css');
+if (false !== strpos($external_result, 'ver=1700000000')) {
+    uonix_test_fail("URL externa recebeu mtime de arquivo local homônimo: {$external_result}");
+}
+if (0 !== strpos($external_result, 'https://cdn.example.com/')) {
+    uonix_test_fail("host externo foi alterado: {$external_result}");
+}
+
+// ---- Travessia codificada precisa ser recusada ---------------------------
+// O alvo é criado FORA de wp-content, com mtime distinto: sem o confinamento
+// por realpath, o filtro leria o mtime desse arquivo e vazaria a informação.
+$outside_path = dirname($content_dir) . '/uonix-outside-' . getmypid() . '.php';
+file_put_contents($outside_path, "<?php\n");
+touch($outside_path, 1500000000);
+clearstatcache(true, $outside_path);
+$traversal = 'https://uonix.com.br/wp-content/plugins/%2e%2e/%2e%2e/' . basename($outside_path) . '?ver=999';
+$traversal_result = apply_filters('style_loader_src', $traversal, 'gpls_woo_rfq_css');
+if (false !== strpos($traversal_result, 'ver=1500000000')) {
+    uonix_test_fail("travessia resolveu mtime de arquivo fora de wp-content: {$traversal_result}");
+}
+@unlink($outside_path);
+
+// ---- Variante www é o mesmo site: precisa resolver o mtime local ---------
+$www_url = 'https://www.uonix.com.br/wp-content' . $asset_rel . '?ver=999';
+$www_result = apply_filters('style_loader_src', $www_url, 'gpls_woo_rfq_css');
+if (false === strpos($www_result, 'ver=1700000000')) {
+    uonix_test_fail("variante www não resolveu o asset local: {$www_result}");
+}
+
+// ---- Formatos de URL adicionais ------------------------------------------
+// `?ver` sem `=` também precisa ser substituído, não duplicado. A contagem é
+// feita sobre os pares da query, porque uma regex com `(?:=|$|&)` consome o
+// separador e deixa de contar a ocorrência seguinte — isso mascarava a
+// regressão `?ver&ver=<versão>`.
+$bare = apply_filters('style_loader_src', $asset_url . '?ver', 'gpls_woo_rfq_css');
+$bare_query = parse_url($bare, PHP_URL_QUERY);
+$bare_names = array();
+foreach (explode('&', (string) $bare_query) as $pair) {
+    if ('' === $pair) {
+        continue;
+    }
+    $bare_names[] = explode('=', $pair, 2)[0];
+}
+$bare_ver_count = count(array_filter($bare_names, static fn ($name) => 'ver' === $name));
+if (1 !== $bare_ver_count) {
+    uonix_test_fail("esperado exatamente um parâmetro ver com '?ver' sem valor, encontrado {$bare_ver_count}: {$bare}");
+}
+// A única ocorrência precisa carregar a versão estável, não ficar nua.
+if (false === strpos($bare, 'ver=' . '1700000000')) {
+    uonix_test_fail("'?ver' sem valor não recebeu a versão estável: {$bare}");
+}
+
+// Parâmetro repetido não pode sobreviver em nenhuma ocorrência.
+$repeated = apply_filters('style_loader_src', $asset_url . '?ver=1&x=9&ver=2', 'gpls_woo_rfq_css');
+// Compara o VALOR exato, não substring: 'ver=1700000000' contém 'ver=1'.
+preg_match_all('/(?:^|[?&])ver=([^&#]*)/', $repeated, $repeated_values);
+foreach ($repeated_values[1] as $value) {
+    if ('1' === $value || '2' === $value) {
+        uonix_test_fail("versão antiga repetida sobreviveu: {$repeated}");
+    }
+}
+if (1 !== count($repeated_values[1])) {
+    uonix_test_fail("esperado exatamente um ver=, encontrado " . count($repeated_values[1]) . ": {$repeated}");
+}
+if (false === strpos($repeated, 'x=9')) {
+    uonix_test_fail("parâmetro legítimo perdido com ver repetido: {$repeated}");
+}
+
+// Fragmento sem query precisa ganhar a versão antes do `#`.
+$fragment_only = apply_filters('style_loader_src', $asset_url . '#topo', 'gpls_woo_rfq_css');
+if (false === strpos($fragment_only, '#topo')) {
+    uonix_test_fail("fragmento sem query foi descartado: {$fragment_only}");
+}
+// A versão precisa EXISTIR: sem esta checagem, uma regressão que devolvesse a
+// URL sem `ver=` passaria, porque a comparação de posição não falharia.
+$fragment_ver_at = strpos($fragment_only, 'ver=');
+$fragment_hash_at = strpos($fragment_only, '#');
+if (false === $fragment_ver_at) {
+    uonix_test_fail("fragmento sem query perdeu o cache-busting: {$fragment_only}");
+} elseif (false !== $fragment_hash_at && $fragment_ver_at > $fragment_hash_at) {
+    uonix_test_fail("versão caiu no fragmento quando não havia query: {$fragment_only}");
+}
+
+// ---- O módulo precisa estar registrado no loader e na CI -----------------
+$loader = file_get_contents($root . '/mu-plugins/uonix-woocommerce/module.php');
+if (false === strpos((string) $loader, '32-rfq-stable-asset-version.php')) {
+    uonix_test_fail('módulo não está registrado em mu-plugins/uonix-woocommerce/module.php');
+}
+$workflow = file_get_contents($root . '/.github/workflows/validate.yml');
+if (false === strpos((string) $workflow, 'test-rfq-stable-asset-version.php')) {
+    uonix_test_fail('teste não está registrado em .github/workflows/validate.yml');
+}
+
+if ($failures) {
+    fwrite(STDERR, "FAIL: " . implode("\nFAIL: ", $failures) . "\n");
+    exit(1);
+}
+
+// O fixture não pode sobreviver ao teste; o shutdown handler cuida dos casos de
+// falha, e aqui provamos a remoção no caminho de sucesso.
+uonix_test_remove_tree($content_dir);
+if (is_dir($content_dir)) {
+    fwrite(STDERR, "FAIL: fixture temporário não foi removido: {$content_dir}\n");
+    exit(1);
+}
+
+printf("PASS: versões de assets do RFQ são estáveis e não afetam terceiros.\n");

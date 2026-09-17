@@ -217,6 +217,23 @@ function uonix_render_analytics_dashboard_page()
 	$metrics_updated_label = false !== $metrics_updated_timestamp ? wp_date( 'd/m/Y H:i', $metrics_updated_timestamp ) : '';
 	$metrics_cache_class = $metrics_is_fresh ? 'uonix-cache-fresh' : ( is_array( $metrics_snapshot ) ? 'uonix-cache-stale' : 'uonix-cache-empty' );
 	$metrics_cache_label = $metrics_is_fresh ? 'Cache atualizado' : ( is_array( $metrics_snapshot ) ? 'Cache vencido' : 'Sem snapshot' );
+	$dashboard_state = function_exists( 'uonix_analytics_metrics_requested_dashboard_state' )
+		? uonix_analytics_metrics_requested_dashboard_state( $_GET )
+		: array( 'tab' => 'metrics', 'subtab' => 'aggregate', 'catalog_tab' => 'products' );
+	$active_dashboard_tab = $dashboard_state['tab'];
+	$active_metrics_subtab = $dashboard_state['subtab'];
+	$active_catalog_tab = $dashboard_state['catalog_tab'];
+	$dashboard_tab_url = static function ( $tab, $subtab, $catalog_tab ) use ( $metrics_period_days ) {
+		$state = array(
+			'tab' => $tab,
+			'subtab' => $subtab,
+			'catalog_tab' => $catalog_tab,
+		);
+		if ( function_exists( 'uonix_analytics_metrics_dashboard_url' ) ) {
+			return uonix_analytics_metrics_dashboard_url( $metrics_period_days, $state );
+		}
+		return admin_url( 'admin.php?page=uonix-analytics&uonix_period=' . $metrics_period_days );
+	};
 	?>
 	<div class="wrap uonix-analytics-wrap">
 		<!-- Header Principal -->
@@ -229,41 +246,12 @@ function uonix_render_analytics_dashboard_page()
 			</div>
 		</div>
 
-		<!-- Status das Tags & Rastreamento -->
-		<div class="uonix-status-strip">
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
-				<span class="uonix-status-label">Google Tag Manager:</span>
-				<strong><?php echo esc_html($gtm_status); ?></strong>
-			</div>
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
-				<span class="uonix-status-label">Google Analytics 4:</span>
-				<strong><?php echo esc_html($ga4_status); ?></strong>
-			</div>
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($google_ads_dot_class); ?>"></span>
-				<span class="uonix-status-label">Google Ads:</span>
-				<strong><?php echo esc_html($google_ads_status); ?></strong>
-			</div>
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
-				<span class="uonix-status-label">Meta Pixel:</span>
-				<strong><?php echo esc_html($meta_status); ?></strong>
-			</div>
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($gsc_dot_class); ?>"></span>
-				<span class="uonix-status-label">Search Console:</span>
-				<strong><?php echo esc_html($gsc_status); ?></strong>
-			</div>
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
-				<span class="uonix-status-label">LGPD AdOpt:</span>
-				<strong><?php echo esc_html($adopt_status); ?></strong>
-			</div>
-		</div>
+		<nav class="uonix-primary-tabs" role="tablist" aria-label="Seções do painel">
+			<a id="uonix-tab-metrics" role="tab" aria-selected="<?php echo 'metrics' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-metrics" tabindex="<?php echo 'metrics' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-metrics" data-uonix-query-key="tab" data-uonix-query-value="metrics">Métricas</a>
+			<a id="uonix-tab-destinations" role="tab" aria-selected="<?php echo 'destinations' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-destinations" tabindex="<?php echo 'destinations' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'destinations', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-destinations" data-uonix-query-key="tab" data-uonix-query-value="destinations">Destinos de marketing configurados</a>
+		</nav>
 
-		<section class="uonix-marketing-section" aria-labelledby="uonix-metrics-title">
+		<section id="uonix-panel-metrics" role="tabpanel" aria-labelledby="uonix-tab-metrics"<?php echo 'metrics' === $active_dashboard_tab ? '' : ' hidden'; ?>>
 			<div class="uonix-panel-header uonix-metrics-panel-header">
 				<div class="uonix-metrics-copy">
 					<h2 id="uonix-metrics-title">Métricas agregadas dos últimos <?php echo esc_html( $metrics_period_days ); ?> dias</h2>
@@ -278,6 +266,9 @@ function uonix_render_analytics_dashboard_page()
 				<div class="uonix-metrics-toolbar">
 				<form method="get" action="<?php echo esc_url( admin_url( 'admin.php' ) ); ?>" class="uonix-metrics-period-form">
 					<input type="hidden" name="page" value="uonix-analytics" />
+					<input type="hidden" name="tab" value="<?php echo esc_attr( $active_dashboard_tab ); ?>" />
+					<input type="hidden" name="subtab" value="<?php echo esc_attr( $active_metrics_subtab ); ?>" />
+					<input type="hidden" name="catalog_tab" value="<?php echo esc_attr( $active_catalog_tab ); ?>" />
 					<label for="uonix-metrics-period">Período</label>
 					<select id="uonix-metrics-period" name="uonix_period" onchange="this.form.requestSubmit()">
 						<?php foreach ( array( 7, 30, 90, 365 ) as $period_option ) : ?>
@@ -289,6 +280,9 @@ function uonix_render_analytics_dashboard_page()
 				<?php if ( current_user_can( 'manage_options' ) ) : ?>
 					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="uonix-metrics-refresh-form"<?php echo $metrics_auto_refresh ? ' data-uonix-auto-refresh="1"' : ''; ?>>
 						<input type="hidden" name="action" value="uonix_analytics_metrics_refresh" />
+						<input type="hidden" name="tab" value="<?php echo esc_attr( $active_dashboard_tab ); ?>" />
+						<input type="hidden" name="subtab" value="<?php echo esc_attr( $active_metrics_subtab ); ?>" />
+						<input type="hidden" name="catalog_tab" value="<?php echo esc_attr( $active_catalog_tab ); ?>" />
 						<input type="hidden" name="uonix_period" value="<?php echo esc_attr( $metrics_period_days ); ?>" />
 						<?php wp_nonce_field( 'uonix_analytics_metrics_refresh' ); ?>
 						<button type="submit" class="button button-secondary">Atualizar métricas agora</button>
@@ -312,6 +306,14 @@ function uonix_render_analytics_dashboard_page()
 				<?php endif; ?>
 				</div>
 			</div>
+
+			<nav class="uonix-secondary-tabs" role="tablist" aria-label="Seções de métricas">
+				<a id="uonix-tab-aggregate" role="tab" aria-selected="<?php echo 'aggregate' === $active_metrics_subtab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-aggregate" tabindex="<?php echo 'aggregate' === $active_metrics_subtab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'aggregate', $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-aggregate" data-uonix-query-key="subtab" data-uonix-query-value="aggregate">Métricas agregadas</a>
+				<a id="uonix-tab-catalog" role="tab" aria-selected="<?php echo 'catalog' === $active_metrics_subtab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-catalog" tabindex="<?php echo 'catalog' === $active_metrics_subtab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-catalog" data-uonix-query-key="subtab" data-uonix-query-value="catalog">Catálogo &amp; conteúdo</a>
+			</nav>
+
+			<div id="uonix-panel-aggregate" role="tabpanel" aria-labelledby="uonix-tab-aggregate"<?php echo 'aggregate' === $active_metrics_subtab ? '' : ' hidden'; ?>>
+		<section class="uonix-marketing-section" aria-labelledby="uonix-metrics-title">
 			<?php if ( is_array( $metrics_snapshot ) && isset( $metrics_snapshot['ga4'], $metrics_snapshot['search_console'] ) ) :
 				$ga4_summary = $metrics_snapshot['ga4']['summary'];
 				$gsc_summary = $metrics_snapshot['search_console']['summary'];
@@ -372,7 +374,9 @@ function uonix_render_analytics_dashboard_page()
 			</div>
 			<?php endif; ?>
 		</section>
+			</div>
 
+			<div id="uonix-panel-catalog" role="tabpanel" aria-labelledby="uonix-tab-catalog"<?php echo 'catalog' === $active_metrics_subtab ? '' : ' hidden'; ?>>
 		<!-- Cards de Métricas Rápidas -->
 		<div class="uonix-kpi-grid">
 			<div class="uonix-kpi-card">
@@ -410,26 +414,26 @@ function uonix_render_analytics_dashboard_page()
 			</div>
 		</div>
 
-		<!-- Abas de Navegação -->
-		<div class="uonix-tabs-nav">
-			<button class="uonix-tab-btn active" data-tab="tab-products">
+		<!-- Abas de Navegação do catálogo -->
+		<div class="uonix-tabs-nav" role="tablist" aria-label="Seções do catálogo">
+			<a id="uonix-catalog-tab-products" class="uonix-tab-btn<?php echo 'products' === $active_catalog_tab ? ' active' : ''; ?>" role="tab" aria-selected="<?php echo 'products' === $active_catalog_tab ? 'true' : 'false'; ?>" aria-controls="tab-products" tabindex="<?php echo 'products' === $active_catalog_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', 'products' ) ); ?>" data-uonix-panel="tab-products" data-uonix-query-key="catalog_tab" data-uonix-query-value="products">
 				<span class="dashicons dashicons-products"></span> Produtos (<?php echo esc_html($total_products); ?>)
-			</button>
-			<button class="uonix-tab-btn" data-tab="tab-blog">
+			</a>
+			<a id="uonix-catalog-tab-blog" class="uonix-tab-btn<?php echo 'blog' === $active_catalog_tab ? ' active' : ''; ?>" role="tab" aria-selected="<?php echo 'blog' === $active_catalog_tab ? 'true' : 'false'; ?>" aria-controls="tab-blog" tabindex="<?php echo 'blog' === $active_catalog_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', 'blog' ) ); ?>" data-uonix-panel="tab-blog" data-uonix-query-key="catalog_tab" data-uonix-query-value="blog">
 				<span class="dashicons dashicons-welcome-write-blog"></span> Artigos de Blog
 				(<?php echo esc_html($total_posts); ?>)
-			</button>
-			<button class="uonix-tab-btn" data-tab="tab-services">
+			</a>
+			<a id="uonix-catalog-tab-services" class="uonix-tab-btn<?php echo 'services' === $active_catalog_tab ? ' active' : ''; ?>" role="tab" aria-selected="<?php echo 'services' === $active_catalog_tab ? 'true' : 'false'; ?>" aria-controls="tab-services" tabindex="<?php echo 'services' === $active_catalog_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', 'services' ) ); ?>" data-uonix-panel="tab-services" data-uonix-query-key="catalog_tab" data-uonix-query-value="services">
 				<span class="dashicons dashicons-hammer"></span> Serviços
 				(<?php echo esc_html($total_services); ?>)
-			</button>
+			</a>
 		</div>
 
 		<!-- Conteúdo das Abas -->
 		<div class="uonix-tab-content-wrapper">
 
 			<!-- ABA 1: PRODUTOS -->
-			<div id="tab-products" class="uonix-tab-panel active">
+			<div id="tab-products" role="tabpanel" aria-labelledby="uonix-catalog-tab-products"<?php echo 'products' === $active_catalog_tab ? '' : ' hidden'; ?> class="uonix-tab-panel<?php echo 'products' === $active_catalog_tab ? ' active' : ''; ?>">
 				<div class="uonix-panel-header">
 					<h2>Catálogo de Dispositivos e Fixações (<?php echo esc_html($total_products); ?> Produtos)</h2>
 					<p>Monitore os títulos comerciais, palavras-chave de foco e consulte o desempenho de busca no Google
@@ -494,7 +498,7 @@ function uonix_render_analytics_dashboard_page()
 			</div>
 
 			<!-- ABA 2: BLOG -->
-			<div id="tab-blog" class="uonix-tab-panel">
+			<div id="tab-blog" role="tabpanel" aria-labelledby="uonix-catalog-tab-blog"<?php echo 'blog' === $active_catalog_tab ? '' : ' hidden'; ?> class="uonix-tab-panel<?php echo 'blog' === $active_catalog_tab ? ' active' : ''; ?>">
 				<div class="uonix-panel-header">
 					<h2>Artigos Técnicos e Guias Normativos (<?php echo esc_html($total_posts); ?> Artigos)</h2>
 					<p>Artigos que atraem tráfego orgânico qualificado para palavras-chave de engenharia e trabalho em
@@ -557,7 +561,7 @@ function uonix_render_analytics_dashboard_page()
 			</div>
 
 			<!-- ABA 3: SERVIÇOS -->
-			<div id="tab-services" class="uonix-tab-panel">
+			<div id="tab-services" role="tabpanel" aria-labelledby="uonix-catalog-tab-services"<?php echo 'services' === $active_catalog_tab ? '' : ' hidden'; ?> class="uonix-tab-panel<?php echo 'services' === $active_catalog_tab ? ' active' : ''; ?>">
 				<div class="uonix-panel-header">
 					<h2>Serviços Técnicos e Consultoria de Engenharia (<?php echo esc_html($total_services); ?> Serviços)
 					</h2>
@@ -621,13 +625,50 @@ function uonix_render_analytics_dashboard_page()
 			</div>
 
 		</div>
+			</div>
+		</section>
 
 		<!-- Destinos de marketing: fatos técnicos locais, sem métricas externas não consultadas. -->
-		<section class="uonix-marketing-section" aria-labelledby="uonix-marketing-title">
+		<section id="uonix-panel-destinations" class="uonix-marketing-section" role="tabpanel" aria-labelledby="uonix-tab-destinations"<?php echo 'destinations' === $active_dashboard_tab ? '' : ' hidden'; ?>>
 			<div class="uonix-panel-header">
 				<h2 id="uonix-marketing-title">Destinos de marketing configurados</h2>
 				<p>Este painel confirma apenas a configuração local. Dados de audiência, campanhas e resultados devem ser conferidos na plataforma indicada.</p>
 			</div>
+
+			<!-- Status das Tags & Rastreamento -->
+			<div class="uonix-status-strip">
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
+					<span class="uonix-status-label">Google Tag Manager:</span>
+					<strong><?php echo esc_html($gtm_status); ?></strong>
+				</div>
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
+					<span class="uonix-status-label">Google Analytics 4:</span>
+					<strong><?php echo esc_html($ga4_status); ?></strong>
+				</div>
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($google_ads_dot_class); ?>"></span>
+					<span class="uonix-status-label">Google Ads:</span>
+					<strong><?php echo esc_html($google_ads_status); ?></strong>
+				</div>
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
+					<span class="uonix-status-label">Meta Pixel:</span>
+					<strong><?php echo esc_html($meta_status); ?></strong>
+				</div>
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($gsc_dot_class); ?>"></span>
+					<span class="uonix-status-label">Search Console:</span>
+					<strong><?php echo esc_html($gsc_status); ?></strong>
+				</div>
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
+					<span class="uonix-status-label">LGPD AdOpt:</span>
+					<strong><?php echo esc_html($adopt_status); ?></strong>
+				</div>
+			</div>
+
 			<div class="uonix-marketing-grid">
 				<div class="uonix-marketing-card">
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-admin-generic uonix-sc-icon-gtm"></span><h3>Google Tag Manager</h3></div>
@@ -721,6 +762,61 @@ function uonix_render_analytics_dashboard_page()
 			margin: 0;
 			font-size: 14px;
 			max-width: 680px;
+		}
+
+		.uonix-primary-tabs,
+		.uonix-secondary-tabs {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 8px;
+		}
+
+		.uonix-primary-tabs {
+			margin: 0 0 20px;
+			padding-bottom: 10px;
+			border-bottom: 2px solid #cbd5e1;
+		}
+
+		.uonix-secondary-tabs {
+			margin: 0 0 18px;
+		}
+
+		.uonix-primary-tabs [role="tab"],
+		.uonix-secondary-tabs [role="tab"] {
+			display: inline-flex;
+			align-items: center;
+			border: 1px solid #cbd5e1;
+			border-radius: 6px;
+			background: #ffffff;
+			color: #475569;
+			cursor: pointer;
+			font-weight: 700;
+			line-height: 1.3;
+			padding: 10px 14px;
+			text-decoration: none;
+		}
+
+		.uonix-primary-tabs [role="tab"][aria-selected="true"] {
+			border-color: #1d4ed8;
+			background: #1d4ed8;
+			color: #ffffff;
+		}
+
+		.uonix-secondary-tabs [role="tab"][aria-selected="true"] {
+			border-color: #2563eb;
+			background: #eff6ff;
+			color: #1d4ed8;
+		}
+
+		.uonix-primary-tabs [role="tab"]:focus-visible,
+		.uonix-secondary-tabs [role="tab"]:focus-visible,
+		.uonix-tabs-nav [role="tab"]:focus-visible {
+			outline: 3px solid #93c5fd;
+			outline-offset: 2px;
+		}
+
+		[role="tabpanel"][hidden] {
+			display: none !important;
 		}
 
 		.uonix-btn {
@@ -981,6 +1077,7 @@ function uonix_render_analytics_dashboard_page()
 
 		.uonix-tabs-nav {
 			display: flex;
+			flex-wrap: wrap;
 			gap: 6px;
 			border-bottom: 2px solid #e2e8f0;
 			margin-bottom: 20px;
@@ -999,6 +1096,7 @@ function uonix_render_analytics_dashboard_page()
 			gap: 6px;
 			border-bottom: 2px solid transparent;
 			margin-bottom: -2px;
+			text-decoration: none;
 			transition: all 0.15s ease;
 		}
 
@@ -1352,6 +1450,18 @@ function uonix_render_analytics_dashboard_page()
 		}
 
 		@media (max-width: 960px) {
+			.uonix-primary-tabs [role="tab"],
+			.uonix-secondary-tabs [role="tab"] {
+				flex: 1 1 220px;
+				text-align: left;
+			}
+
+			.uonix-tabs-nav .uonix-tab-btn {
+				flex: 1 1 140px;
+				min-width: 0;
+				justify-content: center;
+			}
+
 			.uonix-metrics-panel-header {
 				align-items: stretch;
 				flex-direction: column;
@@ -1375,24 +1485,73 @@ function uonix_render_analytics_dashboard_page()
 		}
 	</style>
 
-	<!-- Script JS para Troca de Abas -->
+	<!-- Script JS para navegação acessível das abas -->
 	<script>
 		document.addEventListener('DOMContentLoaded', function () {
-			var tabButtons = document.querySelectorAll('.uonix-tab-btn');
-			var tabPanels = document.querySelectorAll('.uonix-tab-panel');
+			function syncFormState() {
+				var state = new URL(window.location.href).searchParams;
+				document.querySelectorAll('.uonix-metrics-period-form, .uonix-metrics-refresh-form').forEach(function (form) {
+					['tab', 'subtab', 'catalog_tab'].forEach(function (key) {
+						var input = form.querySelector('input[name="' + key + '"]');
+						if (input && state.has(key)) input.value = state.get(key);
+					});
+				});
+			}
 
-			tabButtons.forEach(function (btn) {
-				btn.addEventListener('click', function () {
-					var targetTab = this.getAttribute('data-tab');
-
-					tabButtons.forEach(function (b) { b.classList.remove('active'); });
-					tabPanels.forEach(function (p) { p.classList.remove('active'); });
-
-					this.classList.add('active');
-					var activePanel = document.getElementById(targetTab);
-					if (activePanel) {
-						activePanel.classList.add('active');
+			function activateTab(tab, persist) {
+				var tablist = tab.closest('[role="tablist"]');
+				if (!tablist) return;
+				var tabs = Array.prototype.slice.call(tablist.querySelectorAll('[role="tab"]'));
+				tabs.forEach(function (candidate) {
+					var selected = candidate === tab;
+					candidate.setAttribute('aria-selected', selected ? 'true' : 'false');
+					candidate.tabIndex = selected ? 0 : -1;
+					candidate.classList.toggle('active', selected);
+					var panel = document.getElementById(candidate.getAttribute('aria-controls'));
+					if (panel) {
+						panel.hidden = !selected;
+						panel.classList.toggle('active', selected);
 					}
+				});
+
+				if (persist && tab.href) {
+					history.replaceState({}, '', tab.href);
+					syncFormState();
+				}
+			}
+
+			document.querySelectorAll('[role="tablist"]').forEach(function (tablist) {
+				var tabs = Array.prototype.slice.call(tablist.querySelectorAll('[role="tab"]'));
+				tabs.forEach(function (tab, index) {
+					tab.addEventListener('click', function (event) {
+						if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+							return;
+						}
+						event.preventDefault();
+						activateTab(tab, true);
+					});
+					tab.addEventListener('keydown', function (event) {
+						var targetIndex = index;
+						switch (event.key) {
+							case 'ArrowRight':
+								targetIndex = (index + 1) % tabs.length;
+								break;
+							case 'ArrowLeft':
+								targetIndex = (index - 1 + tabs.length) % tabs.length;
+								break;
+							case 'Home':
+								targetIndex = 0;
+								break;
+							case 'End':
+								targetIndex = tabs.length - 1;
+								break;
+							default:
+								return;
+						}
+						event.preventDefault();
+						tabs[targetIndex].focus();
+						activateTab(tabs[targetIndex], true);
+					});
 				});
 			});
 		});

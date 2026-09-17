@@ -57,6 +57,12 @@ jobs:
       - name: Test analytics policy
         run: php scripts/tests/test-analytics-policy.php
 
+      - name: Test comments nosnippet and replytocom SEO
+        run: php scripts/tests/test-comments-nosnippet-seo.php
+
+      - name: Test consent-aware campaign attribution
+        run: php scripts/tests/test-attribution-tracking.php
+
       - name: Test Uônix Insights GA4 and Search Console metrics
         run: php scripts/tests/test-admin-analytics-metrics.php
 
@@ -84,11 +90,32 @@ jobs:
       - name: Test Mini-Cart drawer layer hierarchy
         run: php scripts/tests/test-mini-cart-drawer-layer-hierarchy.php
 
+      - name: Test mobile menu indicator geometry
+        run: php scripts/tests/test-mobile-menu-indicator.php
+
       - name: Test Cart badge sync
         run: php scripts/tests/test-cart-badge-sync.php
 
       - name: Test RFQ product default
         run: php scripts/tests/test-rfq-product-default.php
+
+      - name: Test RFQ cookie session policy
+        run: php scripts/tests/test-rfq-cookie-session-policy.php
+
+      - name: Test RFQ lazy session policy
+        run: php scripts/tests/test-rfq-lazy-session-contract.php
+
+      - name: Test RFQ stable asset version
+        run: php scripts/tests/test-rfq-stable-asset-version.php
+
+      - name: Test RFQ session cookie SameSite policy
+        run: php scripts/tests/test-rfq-session-cookie-samesite.php
+
+      - name: Test WP Super Cache Simple configuration
+        run: php scripts/tests/test-wp-super-cache-simple-config.php
+
+      - name: Test WP Super Cache slash persistence
+        run: php scripts/tests/test-wp-super-cache-slash-persistence.php
 
       - name: Test RFQ email product images and logo
         run: php scripts/tests/test-rfq-email-product-images.php
@@ -123,6 +150,9 @@ jobs:
       - name: Test newsletter source URL
         run: php scripts/tests/test-newsletter-source-url.php
 
+      - name: Test newsletter deterministic IDs
+        run: php scripts/tests/test-newsletter-deterministic-id.php
+
       - name: Test managed code has no implicit schema mutations
         run: php scripts/tests/test-managed-code-no-schema-mutations.php
 
@@ -151,6 +181,9 @@ jobs:
 
       - name: Test admin analytics dashboard
         run: php scripts/tests/test-admin-analytics-dashboard.php
+
+      - name: Test admin cache security
+        run: php scripts/tests/test-admin-cache-security.php
 
   shell-and-config:
     name: Shell, workflows, Node and Compose
@@ -196,6 +229,9 @@ jobs:
 
       - name: Test product excerpt editor lifecycle
         run: node --test scripts/tests/test-product-excerpt-editor.mjs
+
+      - name: Test consent-aware campaign attribution browser flow
+        run: node scripts/tests/test-attribution-tracking.mjs
 
       - name: Run ShellCheck
         run: find scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck -x
@@ -285,6 +321,9 @@ jobs:
       - name: Test production workflow contract
         run: bash scripts/tests/test-production-workflow.sh
 
+      - name: Test WPSC reconfiguration workflow
+        run: bash scripts/tests/test-wpsc-reconfigure-workflow.sh
+
       - name: Test production rollback runtime
         run: python3 scripts/tests/test-production-rollback-runtime.py
 
@@ -311,6 +350,9 @@ jobs:
 
       - name: Test clear_cache real execution
         run: bash scripts/tests/test-clear-cache-execucao-real.sh
+
+      - name: Test WP Super Cache Simple installer
+        run: bash scripts/tests/test-install-wp-super-cache-simple.sh
 
       - name: Test deploy bundle
         run: bash scripts/tests/test-deploy-bundle.sh

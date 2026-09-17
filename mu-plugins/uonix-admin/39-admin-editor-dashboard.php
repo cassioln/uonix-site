@@ -1069,20 +1069,50 @@ function uox_render_crm_orcamentos() {
 }
 
 // NOVO: Bloco 9 - Botão de Limpeza do Cache Dinâmico
+function uox_handle_flush_cache() {
+    if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
+        wp_die( 'Método inválido para limpar o cache.' );
+    }
+
+    if ( ! current_user_can( 'edit_posts' ) ) {
+        wp_die( 'Você não tem permissão para limpar o cache.' );
+    }
+
+    check_admin_referer( 'uonix_flush_cache' );
+    wp_cache_flush();
+
+    if ( function_exists( 'rocket_clean_domain' ) ) {
+        rocket_clean_domain();
+    }
+
+    wp_safe_redirect( add_query_arg( 'uonix_cache_flushed', '1', admin_url( 'index.php' ) ) );
+    exit;
+}
+add_action( 'admin_post_uonix_flush_cache', 'uox_handle_flush_cache' );
+
 function uox_render_manutencao_cache() {
-    // Escuta a ação do clique do botão para limpar o cache de forma limpa
-    if (isset($_GET['uox_flush_action']) && $_GET['uox_flush_action'] == 'run') {
-        wp_cache_flush();
-        if (function_exists('rocket_clean_domain')) { rocket_clean_domain(); }
-        
+    $cache_flushed = isset( $_GET['uonix_cache_flushed'] )
+        && is_string( $_GET['uonix_cache_flushed'] )
+        && '1' === sanitize_key( wp_unslash( $_GET['uonix_cache_flushed'] ) );
+
+    if ( $cache_flushed ) {
         echo '<div class="notice notice-success is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>A memória cache do site foi totalmente limpa e atualizada!</p></div>';
+    }
+
+    if ( ! current_user_can( 'edit_posts' ) ) {
+        echo '<p>Você não tem permissão para limpar o cache do site.</p>';
+        return;
     }
     ?>
     <p style="font-size: 13px; color: #64748b; margin-top: 0; margin-bottom: 15px; line-height: 1.5;">
         Caso faça alterações em textos, imagens ou banners e não consiga visualizar de imediato, force a limpeza global da memória cache clicando abaixo.
     </p>
     <div class="uox-btn-group">
-        <a href="<?php echo esc_url(add_query_arg('uox_flush_action', 'run')); ?>" class="uox-btn uox-btn-primary">Limpar Memória do Site</a>
+        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+            <?php wp_nonce_field( 'uonix_flush_cache' ); ?>
+            <input type="hidden" name="action" value="uonix_flush_cache">
+            <button type="submit" class="uox-btn uox-btn-primary">Limpar Memória do Site</button>
+        </form>
     </div>
     <?php
 }
