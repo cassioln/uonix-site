@@ -58,3 +58,7 @@ docs/superpowers/
 # Scripts/manifestos operacionais locais; não são artefatos do site nem do deploy.
 scripts/maintenance/local/
 scripts/local/
+
+# Servidores MCP locais do workspace
+.agents/mcp/
+
