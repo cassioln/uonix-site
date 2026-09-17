@@ -23,11 +23,26 @@ if ( ! function_exists( 'uonix_rfq_cookie_with_samesite' ) ) {
 		if ( false !== stripos( $header, 'samesite=' ) ) {
 			return null;
 		}
-		if ( false === stripos( $header, '; secure' ) || false === stripos( $header, '; httponly' ) ) {
+		$attributes = array_map( 'trim', explode( ';', substr( $header, strpos( $header, ';' ) + 1 ) ) );
+		$attributes = array_map( 'strtolower', $attributes );
+		if ( ! in_array( 'secure', $attributes, true ) || ! in_array( 'httponly', $attributes, true ) ) {
 			return null;
 		}
 
 		return $header . '; SameSite=Lax';
+	}
+}
+
+if ( ! function_exists( 'uonix_rfq_latest_cookie_with_samesite' ) ) {
+	function uonix_rfq_latest_cookie_with_samesite( $headers, $cookie_name ) {
+		$replacement = null;
+		foreach ( (array) $headers as $header ) {
+			$candidate = uonix_rfq_cookie_with_samesite( $header, $cookie_name );
+			if ( null !== $candidate ) {
+				$replacement = $candidate;
+			}
+		}
+		return $replacement;
 	}
 }
 
@@ -37,13 +52,7 @@ header_register_callback(
 			return;
 		}
 
-		$replacement = null;
-		foreach ( headers_list() as $header ) {
-			$candidate = uonix_rfq_cookie_with_samesite( $header, RFQTK_WP_SESSION_COOKIE );
-			if ( null !== $candidate ) {
-				$replacement = $candidate;
-			}
-		}
+		$replacement = uonix_rfq_latest_cookie_with_samesite( headers_list(), RFQTK_WP_SESSION_COOKIE );
 		if ( null !== $replacement ) {
 			header( $replacement, false );
 		}
