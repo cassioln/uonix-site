@@ -15,6 +15,7 @@ uonix_mu_require_files(
 		'43-avaliacoes-google-trustindex.php',
 		'49-email-environment-label.php',
 		'53-header-nosnippet.php',
+		'54-comments-nosnippet-seo.php',
 	),
 	'uonix-integrations'
 );
