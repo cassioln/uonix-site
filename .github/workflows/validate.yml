@@ -99,6 +99,9 @@ jobs:
       - name: Test RFQ stable asset version
         run: php scripts/tests/test-rfq-stable-asset-version.php
 
+      - name: Test RFQ session cookie SameSite policy
+        run: php scripts/tests/test-rfq-session-cookie-samesite.php
+
       - name: Test WP Super Cache Simple configuration
         run: php scripts/tests/test-wp-super-cache-simple-config.php
 
