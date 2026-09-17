@@ -31,20 +31,21 @@ if ( ! function_exists( 'uonix_rfq_cookie_with_samesite' ) ) {
 	}
 }
 
-add_action(
-	'send_headers',
+header_register_callback(
 	function () {
 		if ( ! defined( 'RFQTK_WP_SESSION_COOKIE' ) || ! apply_filters( 'uonix_rfq_samesite_enabled', true ) ) {
 			return;
 		}
 
+		$replacement = null;
 		foreach ( headers_list() as $header ) {
-			$replacement = uonix_rfq_cookie_with_samesite( $header, RFQTK_WP_SESSION_COOKIE );
-			if ( null !== $replacement ) {
-				header( $replacement, false );
-				break;
+			$candidate = uonix_rfq_cookie_with_samesite( $header, RFQTK_WP_SESSION_COOKIE );
+			if ( null !== $candidate ) {
+				$replacement = $candidate;
 			}
 		}
-	},
-	PHP_INT_MAX
+		if ( null !== $replacement ) {
+			header( $replacement, false );
+		}
+	}
 );

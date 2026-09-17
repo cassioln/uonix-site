@@ -7,8 +7,6 @@ if ( ! is_file( $file ) ) {
 }
 
 define( 'ABSPATH', $root . '/' );
-$GLOBALS['uonix_actions'] = array();
-function add_action( $tag, $callback, $priority = 10 ) { $GLOBALS['uonix_actions'][] = compact( 'tag', 'callback', 'priority' ); }
 function apply_filters( $tag, $value ) { return $value; }
 require $file;
 
@@ -26,6 +24,6 @@ check( null === uonix_rfq_cookie_with_samesite( $base . '; SameSite=Strict', $na
 check( null === uonix_rfq_cookie_with_samesite( "Set-Cookie: {$name}=x; HttpOnly", $name ), 'cookie sem Secure foi aceito' );
 check( null === uonix_rfq_cookie_with_samesite( "Set-Cookie: {$name}=x; secure", $name ), 'cookie sem HttpOnly foi aceito' );
 check( null === uonix_rfq_cookie_with_samesite( $base . "\r\nInjected: x", $name ), 'CRLF foi aceito' );
-check( 1 === count( $GLOBALS['uonix_actions'] ) && 'send_headers' === $GLOBALS['uonix_actions'][0]['tag'], 'hook send_headers ausente' );
+check( false !== strpos( file_get_contents( $file ), 'header_register_callback' ), 'callback final de headers ausente' );
 check( false === strpos( file_get_contents( $file ), "header_remove( 'Set-Cookie' )" ), 'implementação ainda remove cookies globalmente' );
 echo "PASS: cookie RFQ recebe SameSite=Lax sem reconstruir cookies de terceiros.\n";
