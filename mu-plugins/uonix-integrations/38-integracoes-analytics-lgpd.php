@@ -417,6 +417,11 @@ function uonix_render_analytics_head( $configuration = null ) {
                         adopt_statistics: statisticsGranted,
                         accepted_tags: nextTags.slice()
                     });
+                    if (typeof window.CustomEvent === 'function') {
+                        window.dispatchEvent(new CustomEvent('uonix_adopt_consent_updated', {
+                            detail: { marketing: marketingGranted, statistics: statisticsGranted }
+                        }));
+                    }
                 } catch(e) {}
             }
         }
