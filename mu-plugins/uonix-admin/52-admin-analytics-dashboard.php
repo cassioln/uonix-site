@@ -247,52 +247,11 @@ function uonix_render_analytics_dashboard_page()
 		</div>
 
 		<nav class="uonix-primary-tabs" role="tablist" aria-label="Seções do painel">
-			<a id="uonix-tab-metrics" role="tab" aria-selected="<?php echo 'metrics' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-metrics" tabindex="<?php echo 'metrics' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-metrics" data-uonix-query-key="tab" data-uonix-query-value="metrics">📊 Métricas</a>
-			<a id="uonix-tab-destinations" role="tab" aria-selected="<?php echo 'destinations' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-destinations" tabindex="<?php echo 'destinations' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'destinations', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-destinations" data-uonix-query-key="tab" data-uonix-query-value="destinations">🎯 Destinos de marketing configurados</a>
+			<a id="uonix-tab-metrics" role="tab" aria-selected="<?php echo 'metrics' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-metrics" tabindex="<?php echo 'metrics' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-metrics" data-uonix-query-key="tab" data-uonix-query-value="metrics">Métricas</a>
+			<a id="uonix-tab-destinations" role="tab" aria-selected="<?php echo 'destinations' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-destinations" tabindex="<?php echo 'destinations' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'destinations', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-destinations" data-uonix-query-key="tab" data-uonix-query-value="destinations">Destinos de marketing configurados</a>
 		</nav>
 
 		<section id="uonix-panel-metrics" role="tabpanel" aria-labelledby="uonix-tab-metrics"<?php echo 'metrics' === $active_dashboard_tab ? '' : ' hidden'; ?>>
-			<nav class="uonix-secondary-tabs" role="tablist" aria-label="Seções de métricas">
-				<a id="uonix-tab-aggregate" role="tab" aria-selected="<?php echo 'aggregate' === $active_metrics_subtab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-aggregate" tabindex="<?php echo 'aggregate' === $active_metrics_subtab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'aggregate', $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-aggregate" data-uonix-query-key="subtab" data-uonix-query-value="aggregate">📈 Métricas agregadas</a>
-				<a id="uonix-tab-catalog" role="tab" aria-selected="<?php echo 'catalog' === $active_metrics_subtab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-catalog" tabindex="<?php echo 'catalog' === $active_metrics_subtab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-catalog" data-uonix-query-key="subtab" data-uonix-query-value="catalog">📦 Catálogo &amp; conteúdo</a>
-			</nav>
-
-			<div id="uonix-panel-aggregate" role="tabpanel" aria-labelledby="uonix-tab-aggregate"<?php echo 'aggregate' === $active_metrics_subtab ? '' : ' hidden'; ?>>
-				<!-- Status das Tags & Rastreamento -->
-		<div class="uonix-status-strip">
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
-				<span class="uonix-status-label">Google Tag Manager:</span>
-				<strong><?php echo esc_html($gtm_status); ?></strong>
-			</div>
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
-				<span class="uonix-status-label">Google Analytics 4:</span>
-				<strong><?php echo esc_html($ga4_status); ?></strong>
-			</div>
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($google_ads_dot_class); ?>"></span>
-				<span class="uonix-status-label">Google Ads:</span>
-				<strong><?php echo esc_html($google_ads_status); ?></strong>
-			</div>
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
-				<span class="uonix-status-label">Meta Pixel:</span>
-				<strong><?php echo esc_html($meta_status); ?></strong>
-			</div>
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($gsc_dot_class); ?>"></span>
-				<span class="uonix-status-label">Search Console:</span>
-				<strong><?php echo esc_html($gsc_status); ?></strong>
-			</div>
-			<div class="uonix-status-item">
-				<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
-				<span class="uonix-status-label">LGPD AdOpt:</span>
-				<strong><?php echo esc_html($adopt_status); ?></strong>
-			</div>
-		</div>
-
-		<section class="uonix-marketing-section" aria-labelledby="uonix-metrics-title">
 			<div class="uonix-panel-header uonix-metrics-panel-header">
 				<div class="uonix-metrics-copy">
 					<h2 id="uonix-metrics-title">Métricas agregadas dos últimos <?php echo esc_html( $metrics_period_days ); ?> dias</h2>
@@ -347,6 +306,14 @@ function uonix_render_analytics_dashboard_page()
 				<?php endif; ?>
 				</div>
 			</div>
+
+			<nav class="uonix-secondary-tabs" role="tablist" aria-label="Seções de métricas">
+				<a id="uonix-tab-aggregate" role="tab" aria-selected="<?php echo 'aggregate' === $active_metrics_subtab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-aggregate" tabindex="<?php echo 'aggregate' === $active_metrics_subtab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'aggregate', $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-aggregate" data-uonix-query-key="subtab" data-uonix-query-value="aggregate">Métricas agregadas</a>
+				<a id="uonix-tab-catalog" role="tab" aria-selected="<?php echo 'catalog' === $active_metrics_subtab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-catalog" tabindex="<?php echo 'catalog' === $active_metrics_subtab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-catalog" data-uonix-query-key="subtab" data-uonix-query-value="catalog">Catálogo &amp; conteúdo</a>
+			</nav>
+
+			<div id="uonix-panel-aggregate" role="tabpanel" aria-labelledby="uonix-tab-aggregate"<?php echo 'aggregate' === $active_metrics_subtab ? '' : ' hidden'; ?>>
+		<section class="uonix-marketing-section" aria-labelledby="uonix-metrics-title">
 			<?php if ( is_array( $metrics_snapshot ) && isset( $metrics_snapshot['ga4'], $metrics_snapshot['search_console'] ) ) :
 				$ga4_summary = $metrics_snapshot['ga4']['summary'];
 				$gsc_summary = $metrics_snapshot['search_console']['summary'];
@@ -667,6 +634,41 @@ function uonix_render_analytics_dashboard_page()
 				<h2 id="uonix-marketing-title">Destinos de marketing configurados</h2>
 				<p>Este painel confirma apenas a configuração local. Dados de audiência, campanhas e resultados devem ser conferidos na plataforma indicada.</p>
 			</div>
+
+			<!-- Status das Tags & Rastreamento -->
+			<div class="uonix-status-strip">
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
+					<span class="uonix-status-label">Google Tag Manager:</span>
+					<strong><?php echo esc_html($gtm_status); ?></strong>
+				</div>
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
+					<span class="uonix-status-label">Google Analytics 4:</span>
+					<strong><?php echo esc_html($ga4_status); ?></strong>
+				</div>
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($google_ads_dot_class); ?>"></span>
+					<span class="uonix-status-label">Google Ads:</span>
+					<strong><?php echo esc_html($google_ads_status); ?></strong>
+				</div>
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
+					<span class="uonix-status-label">Meta Pixel:</span>
+					<strong><?php echo esc_html($meta_status); ?></strong>
+				</div>
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($gsc_dot_class); ?>"></span>
+					<span class="uonix-status-label">Search Console:</span>
+					<strong><?php echo esc_html($gsc_status); ?></strong>
+				</div>
+				<div class="uonix-status-item">
+					<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
+					<span class="uonix-status-label">LGPD AdOpt:</span>
+					<strong><?php echo esc_html($adopt_status); ?></strong>
+				</div>
+			</div>
+
 			<div class="uonix-marketing-grid">
 				<div class="uonix-marketing-card">
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-admin-generic uonix-sc-icon-gtm"></span><h3>Google Tag Manager</h3></div>

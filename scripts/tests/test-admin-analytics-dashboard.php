@@ -447,6 +447,25 @@ uonix_dashboard_assert(
 	'Subabas do catálogo quebram de forma controlada em telas estreitas, sem overflow horizontal'
 );
 
+// Asserções da Issue #209: remoção de emojis e hierarquia do painel
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-metrics"[^>]*>\s*Métricas\s*</a>#u', $output ), 'Aba principal Métricas não possui emoji' );
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-destinations"[^>]*>\s*Destinos de marketing configurados\s*</a>#u', $output ), 'Aba principal Destinos não possui emoji' );
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-aggregate"[^>]*>\s*Métricas agregadas\s*</a>#u', $output ), 'Subaba Métricas agregadas não possui emoji' );
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-catalog"[^>]*>\s*Catálogo &amp; conteúdo\s*</a>#u', $output ) || 1 === preg_match( '#<a[^>]*id="uonix-tab-catalog"[^>]*>\s*Catálogo & conteúdo\s*</a>#u', $output ), 'Subaba Catálogo & conteúdo não possui emoji' );
+
+$metrics_panel_pos = strpos( $output, 'id="uonix-panel-metrics"' );
+$metrics_header_pos = strpos( $output, 'class="uonix-panel-header uonix-metrics-panel-header"' );
+$secondary_tabs_pos = strpos( $output, 'class="uonix-secondary-tabs"' );
+uonix_dashboard_assert( $metrics_panel_pos !== false && $metrics_header_pos !== false && $secondary_tabs_pos !== false && $metrics_panel_pos < $metrics_header_pos && $metrics_header_pos < $secondary_tabs_pos, 'Cabeçalho e barra de ferramentas de métricas ficam posicionados acima das subabas' );
+
+$destinations_panel_pos = strpos( $output, 'id="uonix-panel-destinations"' );
+$status_strip_pos = strpos( $output, 'class="uonix-status-strip"' );
+$marketing_grid_pos = strpos( $output, 'class="uonix-marketing-grid"' );
+$aggregate_subpanel_pos = strpos( $output, 'id="uonix-subpanel-aggregate"' );
+$aggregate_subpanel_end = uonix_dashboard_div_end_offset( $output, $aggregate_subpanel_pos );
+uonix_dashboard_assert( $destinations_panel_pos !== false && $status_strip_pos !== false && $marketing_grid_pos !== false && $destinations_panel_pos < $status_strip_pos && $status_strip_pos < $marketing_grid_pos, 'Faixa de status de integrações está dentro do painel de destinos e posicionada acima dos cards' );
+uonix_dashboard_assert( $status_strip_pos > $aggregate_subpanel_end, 'Faixa de status não pertence mais ao subpainel de métricas agregadas' );
+
 $_GET = array(
 	'tab' => 'metrics',
 	'subtab' => 'catalog',
