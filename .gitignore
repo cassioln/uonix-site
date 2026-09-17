@@ -45,6 +45,9 @@ scripts/email-migration/passfiles/
 __pycache__/
 *.pyc
 
+# Ferramentas MCP locais; não são parte do site nem do deploy.
+.agents/mcp/
+
 # Planos e especificações gerados por agentes (contexto de trabalho, não entrega do site).
 .hermes/plans/
 docs/superpowers/
