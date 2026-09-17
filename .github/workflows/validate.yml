@@ -31,7 +31,12 @@ jobs:
           coverage: none
 
       - name: Lint managed PHP
-        run: find mu-plugins themes/kadence-child -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+        # `scripts` entra aqui porque scripts/maintenance/ ficou sem lint e sem
+        # teste, e foi exatamente onde uma chamada órfã a um plugin removido
+        # sobreviveu — guardada por function_exists, portanto sem sintoma algum.
+        # O checkout do CI não traz scripts/local/ nem scripts/maintenance/local/,
+        # que são gitignored.
+        run: find mu-plugins themes/kadence-child scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
 
       - name: Test environment contract
         run: php scripts/tests/test-environment-map.php
@@ -167,9 +172,6 @@ jobs:
 
       - name: Test forms global autofill and blog comments AdOpt
         run: php scripts/tests/test-forms-global-autofill.php
-
-      - name: Lint SEO metadata sync script
-        run: php -l scripts/apply-seo-metadata-production.php
 
       - name: Validate variation technical sheet admin script
         run: |

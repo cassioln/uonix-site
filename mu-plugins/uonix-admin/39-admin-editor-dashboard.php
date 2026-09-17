@@ -1066,6 +1066,32 @@ function uox_render_crm_orcamentos() {
 }
 
 // NOVO: Bloco 9 - Botão de Limpeza do Cache Dinâmico
+if ( ! function_exists( 'uox_cache_flush_throttle_seconds' ) ) {
+    /**
+     * Janela mínima entre duas purgas manuais de cache, em segundos.
+     *
+     * Enquanto o botão só limpava cache de objeto ele era inofensivo. Agora que
+     * purga o cache de PÁGINA, cada clique esfria o site inteiro: a home era
+     * servida do disco em 260 ms e categoria/produto regeneravam em ~2,1 s e
+     * ~2,8 s (medições registradas em 32-rfq-stable-asset-version.php). Um editor
+     * publicando em sequência clica várias vezes seguidas, e o p95 público já
+     * estava acima da meta de 600 ms.
+     *
+     * A capability segue `edit_posts` de propósito: o botão existe justamente
+     * para o editor não depender de um dev. O throttle limita o dano sem tirar a
+     * ferramenta de quem precisa dela.
+     *
+     * Filtrável para ajuste sem alterar código. Zero desliga o throttle.
+     *
+     * @return int
+     */
+    function uox_cache_flush_throttle_seconds() {
+        $seconds = (int) apply_filters( 'uonix_cache_flush_throttle_seconds', 60 );
+
+        return $seconds > 0 ? $seconds : 0;
+    }
+}
+
 function uox_handle_flush_cache() {
     if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
         wp_die( 'Método inválido para limpar o cache.' );
@@ -1076,6 +1102,19 @@ function uox_handle_flush_cache() {
     }
 
     check_admin_referer( 'uonix_flush_cache' );
+
+    // Throttle DEPOIS de método, capability e nonce: gravar o transient é efeito
+    // colateral, e nenhum efeito colateral pode acontecer antes da autorização.
+    // Também impede que a janela seja sondada por quem não passou pelos gates.
+    $throttle_seconds = uox_cache_flush_throttle_seconds();
+
+    if ( $throttle_seconds > 0 && get_transient( 'uonix_cache_flush_lock' ) ) {
+        // Redirect com estado próprio, não com sucesso: dizer "limpou" sem ter
+        // limpado é o mesmo defeito que este bloco de código acabou de corrigir na
+        // outra ponta.
+        wp_safe_redirect( add_query_arg( 'uonix_cache_flushed', 'aguarde', admin_url( 'index.php' ) ) );
+        exit;
+    }
 
     // O site tem DUAS camadas de cache locais, disjuntas por configuração, e o
     // botão precisa das duas. wp_cache_flush() cobre só a primeira.
@@ -1104,18 +1143,29 @@ function uox_handle_flush_cache() {
         wp_cache_clear_cache();
     }
 
+    if ( $throttle_seconds > 0 ) {
+        set_transient( 'uonix_cache_flush_lock', 1, $throttle_seconds );
+    }
+
     wp_safe_redirect( add_query_arg( 'uonix_cache_flushed', '1', admin_url( 'index.php' ) ) );
     exit;
 }
 add_action( 'admin_post_uonix_flush_cache', 'uox_handle_flush_cache' );
 
 function uox_render_manutencao_cache() {
-    $cache_flushed = isset( $_GET['uonix_cache_flushed'] )
-        && is_string( $_GET['uonix_cache_flushed'] )
-        && '1' === sanitize_key( wp_unslash( $_GET['uonix_cache_flushed'] ) );
+    $flush_state = isset( $_GET['uonix_cache_flushed'] ) && is_string( $_GET['uonix_cache_flushed'] )
+        ? sanitize_key( wp_unslash( $_GET['uonix_cache_flushed'] ) )
+        : '';
 
-    if ( $cache_flushed ) {
+    if ( '1' === $flush_state ) {
         echo '<div class="notice notice-success is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>A memória cache do site foi totalmente limpa e atualizada!</p></div>';
+    } elseif ( 'aguarde' === $flush_state ) {
+        // Aviso explícito, não silêncio: o editor precisa saber que NÃO limpou
+        // agora, e por quê. Um "sucesso" aqui reproduziria o defeito original.
+        printf(
+            '<div class="notice notice-info is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>A memória cache já foi limpa há pouco. Aguarde %d segundos antes de limpar de novo — cada limpeza deixa o site mais lento por alguns instantes enquanto as páginas são regeradas.</p></div>',
+            (int) uox_cache_flush_throttle_seconds()
+        );
     }
 
     if ( ! current_user_can( 'edit_posts' ) ) {

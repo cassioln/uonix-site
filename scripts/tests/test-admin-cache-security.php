@@ -12,6 +12,7 @@ define( 'ABSPATH', __DIR__ );
 
 $GLOBALS['uox_test_cache_flushes']     = 0;
 $GLOBALS['uox_test_page_cache_clears'] = 0;
+$GLOBALS['uox_test_transients']        = array();
 $GLOBALS['uox_test_can_edit']      = true;
 $GLOBALS['uox_test_nonce_checks']  = 0;
 $GLOBALS['uox_test_nonce_valid']   = true;
@@ -44,6 +45,24 @@ function wp_cache_flush() {
  */
 function wp_cache_clear_cache( $blog_id = 0 ) {
 	++$GLOBALS['uox_test_page_cache_clears'];
+	return true;
+}
+
+function apply_filters( $hook, $value ) {
+	return $value;
+}
+
+function get_transient( $key ) {
+	return $GLOBALS['uox_test_transients'][ $key ] ?? false;
+}
+
+function set_transient( $key, $value, $expiration = 0 ) {
+	$GLOBALS['uox_test_transients'][ $key ] = $value;
+	return true;
+}
+
+function delete_transient( $key ) {
+	unset( $GLOBALS['uox_test_transients'][ $key ] );
 	return true;
 }
 
@@ -199,6 +218,56 @@ uox_cache_security_assert(
 	'POST autorizado deve validar o nonce antes da limpeza'
 );
 
+/*
+ * Throttle: a purga de página esfria o site inteiro, então dois cliques seguidos
+ * não podem purgar duas vezes. E o segundo clique não pode dizer "limpou" — seria
+ * o mesmo defeito que este handler acabou de corrigir, em nova forma.
+ */
+uox_cache_security_assert(
+	isset( $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] ),
+	'purga bem-sucedida deve registrar o lock de throttle'
+);
+
+$nonce_checks_antes_do_throttle = $GLOBALS['uox_test_nonce_checks'];
+$GLOBALS['uox_test_redirect'] = '';
+try {
+	call_user_func( $flush_handler );
+} catch ( RuntimeException $exception ) {
+	// redirect esperado
+}
+
+uox_cache_security_assert(
+	'https://uonix.com.br/wp-admin/index.php?uonix_cache_flushed=aguarde' === $GLOBALS['uox_test_redirect'],
+	'segundo POST na janela do throttle deve redirecionar com estado "aguarde", nunca como sucesso'
+);
+uox_cache_security_assert(
+	1 === $GLOBALS['uox_test_cache_flushes'] && 1 === $GLOBALS['uox_test_page_cache_clears'],
+	'segundo POST na janela do throttle não pode purgar nenhuma das duas camadas'
+);
+uox_cache_security_assert(
+	$GLOBALS['uox_test_nonce_checks'] === $nonce_checks_antes_do_throttle + 1,
+	'o throttle deve agir DEPOIS do nonce: gravar transient é efeito colateral e não '
+		. 'pode acontecer antes da autorização, nem a janela ser sondável sem nonce'
+);
+
+// A janela expira: o throttle é limite de frequência, não trava de uso único.
+delete_transient( 'uonix_cache_flush_lock' );
+$GLOBALS['uox_test_redirect'] = '';
+try {
+	call_user_func( $flush_handler );
+} catch ( RuntimeException $exception ) {
+	// redirect esperado
+}
+
+uox_cache_security_assert(
+	2 === $GLOBALS['uox_test_cache_flushes'] && 2 === $GLOBALS['uox_test_page_cache_clears'],
+	'expirada a janela, um novo POST autorizado deve purgar as duas camadas de novo'
+);
+uox_cache_security_assert(
+	'https://uonix.com.br/wp-admin/index.php?uonix_cache_flushed=1' === $GLOBALS['uox_test_redirect'],
+	'purga após a janela deve voltar a redirecionar como sucesso'
+);
+
 $GLOBALS['uox_test_nonce_valid'] = false;
 $invalid_nonce_blocked = false;
 try {
@@ -211,15 +280,15 @@ try {
 
 uox_cache_security_assert( $invalid_nonce_blocked, 'POST com nonce inválido deve ser bloqueado' );
 uox_cache_security_assert(
-	1 === $GLOBALS['uox_test_cache_flushes'],
+	2 === $GLOBALS['uox_test_cache_flushes'],
 	'POST com nonce inválido não pode limpar o cache'
 );
 uox_cache_security_assert(
-	1 === $GLOBALS['uox_test_page_cache_clears'],
+	2 === $GLOBALS['uox_test_page_cache_clears'],
 	'POST com nonce inválido não pode limpar o cache de página'
 );
 uox_cache_security_assert(
-	2 === $GLOBALS['uox_test_nonce_checks'],
+	4 === $GLOBALS['uox_test_nonce_checks'],
 	'POST com nonce inválido deve ser rejeitado pelo verificador'
 );
 
@@ -236,15 +305,15 @@ try {
 
 uox_cache_security_assert( $blocked, 'POST sem edit_posts deve ser bloqueado' );
 uox_cache_security_assert(
-	1 === $GLOBALS['uox_test_cache_flushes'],
+	2 === $GLOBALS['uox_test_cache_flushes'],
 	'POST sem edit_posts não pode limpar o cache'
 );
 uox_cache_security_assert(
-	1 === $GLOBALS['uox_test_page_cache_clears'],
+	2 === $GLOBALS['uox_test_page_cache_clears'],
 	'POST sem edit_posts não pode limpar o cache de página'
 );
 uox_cache_security_assert(
-	2 === $GLOBALS['uox_test_nonce_checks'],
+	4 === $GLOBALS['uox_test_nonce_checks'],
 	'POST sem edit_posts deve ser rejeitado antes da validação do nonce'
 );
 
