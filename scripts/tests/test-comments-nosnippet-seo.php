@@ -75,8 +75,8 @@ foreach ( $GLOBALS['uonix_test_actions'] as $a ) {
 
 uonix_test_assert( isset( $registered_actions['comment_form_before'] ), 'comment_form_before registrado' );
 uonix_test_assert( isset( $registered_actions['comment_form_after'] ), 'comment_form_after registrado' );
-uonix_test_assert( isset( $registered_actions['kadence_before_comments'] ), 'kadence_before_comments registrado' );
-uonix_test_assert( isset( $registered_actions['kadence_after_comments'] ), 'kadence_after_comments registrado' );
+uonix_test_assert( ! isset( $registered_actions['kadence_before_comments'] ), 'kadence_before_comments não envolve comentários publicados com data-nosnippet' );
+uonix_test_assert( ! isset( $registered_actions['kadence_after_comments'] ), 'kadence_after_comments não envolve comentários publicados com data-nosnippet' );
 uonix_test_assert( isset( $registered_filters['comment_form_defaults'] ), 'comment_form_defaults registrado' );
 uonix_test_assert( isset( $registered_filters['comment_reply_link'] ), 'comment_reply_link registrado' );
 uonix_test_assert( isset( $registered_filters['cancel_comment_reply_link'] ), 'cancel_comment_reply_link registrado' );
@@ -173,6 +173,17 @@ $output_after = ob_get_clean();
 uonix_test_assert(
 	'</div>' === trim( $output_after ),
 	'uonix_comments_form_nosnippet_after fecha a div'
+);
+
+$published_comments = '<ol class="comment-list"><li>Comentário técnico publicado</li></ol>';
+$form_fragment      = $output_before . '<form id="commentform">Boilerplate do formulário</form>' . $output_after;
+uonix_test_assert(
+	false === strpos( $published_comments, 'data-nosnippet' ),
+	'Lista de comentários publicados permanece fora de data-nosnippet'
+);
+uonix_test_assert(
+	1 === substr_count( $form_fragment, 'data-nosnippet' ),
+	'Apenas o fragmento do formulário é envolvido por data-nosnippet'
 );
 
 if ( $failures > 0 ) {

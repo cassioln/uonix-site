@@ -8,7 +8,7 @@
  *
  * Mantém o formulário de comentários 100% aberto, funcional e acessível aos usuários,
  * mas impede a diluição temática e snippets indesejados através de:
- * 1. Atributo data-nosnippet no container de comentários e elementos do formulário.
+ * 1. Atributo data-nosnippet estritamente nos elementos do formulário.
  * 2. Inclusão de rel="nofollow" nos links de resposta e cancelamento de resposta.
  * 3. Diretiva Disallow: /*?replytocom=* no robots.txt.
  * 4. Ativação forçada da remoção/redirecionamento de ?replytocom no Rank Math.
@@ -48,31 +48,6 @@ if ( ! function_exists( 'uonix_comments_form_nosnippet_after' ) ) {
 }
 add_action( 'comment_form_after', 'uonix_comments_form_nosnippet_after', 999 );
 
-if ( ! function_exists( 'uonix_kadence_before_comments_nosnippet' ) ) {
-	/**
-	 * Abre container com data-nosnippet antes da área de comentários do tema Kadence.
-	 */
-	function uonix_kadence_before_comments_nosnippet() {
-		if ( is_admin() ) {
-			return;
-		}
-		echo '<div data-nosnippet class="uonix-comments-area-nosnippet">';
-	}
-}
-add_action( 'kadence_before_comments', 'uonix_kadence_before_comments_nosnippet', 1 );
-
-if ( ! function_exists( 'uonix_kadence_after_comments_nosnippet' ) ) {
-	/**
-	 * Fecha container com data-nosnippet após a área de comentários do tema Kadence.
-	 */
-	function uonix_kadence_after_comments_nosnippet() {
-		if ( is_admin() ) {
-			return;
-		}
-		echo '</div>';
-	}
-}
-add_action( 'kadence_after_comments', 'uonix_kadence_after_comments_nosnippet', 999 );
 
 if ( ! function_exists( 'uonix_comments_form_defaults_nosnippet' ) ) {
 	/**
