@@ -68,6 +68,10 @@ function wp_unslash( $value ) {
 	return $value;
 }
 
+function sanitize_key( $value ) {
+	return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $value ) );
+}
+
 function wp_parse_url( $url, $component = -1 ) {
 	return parse_url( $url, $component );
 }
@@ -271,7 +275,8 @@ function uonix_dashboard_div_end_offset( $html, $opening_offset ) {
 	return null;
 }
 
-// Carrega o arquivo a ser testado
+// Carrega os módulos na mesma ordem do loader administrativo.
+require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/52-admin-analytics-dashboard.php';
 
 uonix_dashboard_assert( function_exists( 'uonix_analytics_dashboard_page_view_value' ), 'Resolvedor de visualizações por permalink existe' );
@@ -393,7 +398,7 @@ uonix_dashboard_assert( strpos( $output, 'uonix-shortcuts-grid' ) === false, 'Gr
 uonix_dashboard_assert( strpos( $output, 'Destinos de marketing configurados' ) !== false, 'Dashboard apresenta a central de destinos de marketing' );
 $catalog_content_start = strpos( $output, '<div class="uonix-tab-content-wrapper">' );
 $catalog_content_end = uonix_dashboard_div_end_offset( $output, $catalog_content_start );
-$marketing_section_start = strpos( $output, '<section class="uonix-marketing-section" aria-labelledby="uonix-marketing-title">' );
+$marketing_section_start = strpos( $output, '<section id="uonix-panel-destinations"' );
 uonix_dashboard_assert( is_int( $catalog_content_end ) && is_int( $marketing_section_start ) && $marketing_section_start > $catalog_content_end, 'Central de destinos de marketing é a última seção de conteúdo do dashboard' );
 uonix_dashboard_assert( strpos( $output, 'Google Ads via GTM' ) !== false, 'Dashboard apresenta card dedicado ao Google Ads via GTM' );
 uonix_dashboard_assert( strpos( $output, 'AW-6012006717' ) !== false, 'Dashboard mostra a conta técnica Google Ads auditada' );
@@ -421,7 +426,46 @@ uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">17</t
 uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">11</td>' ) !== false, 'Artigo mostra visualizações da sua URL' );
 uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">5</td>' ) !== false, 'Serviço mostra visualizações da sua URL' );
 uonix_dashboard_assert( strpos( $output, '<td class="uonix-page-views-col">0</td>' ) !== false, 'Conteúdo ausente de relatório completo mostra zero' );
-uonix_dashboard_assert( 1 === preg_match( '#<button class="uonix-tab-btn" data-tab="tab-services">\s*<span class="dashicons dashicons-hammer"></span>\s*Serviços\s*\([0-9]+\)\s*</button>#u', $output ), 'Aba de serviços usa exatamente o rótulo curto solicitado' );
+uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-catalog-tab-services")(?=[^>]*role="tab")(?=[^>]*aria-controls="tab-services")[^>]*>\s*<span class="dashicons dashicons-hammer"></span>\s*Serviços\s*\([0-9]+\)\s*</a>#u', $output ), 'Aba de serviços usa exatamente o rótulo curto solicitado' );
+
+// O estado de navegação é URL-driven e as abas usam a semântica ARIA completa.
+uonix_dashboard_assert( function_exists( 'uonix_analytics_metrics_requested_dashboard_state' ), 'Resolvedor compartilhado do estado de abas existe' );
+uonix_dashboard_assert( strpos( $output, 'role="tablist" aria-label="Seções do painel"' ) !== false, 'Abas principais expõem tablist com rótulo acessível' );
+uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-metrics")(?=[^>]*role="tab")(?=[^>]*aria-selected="true")(?=[^>]*aria-controls="uonix-panel-metrics")(?=[^>]*href="[^"]*tab=metrics[^"]*")[^>]*>#', $output ), 'Métricas é a aba principal padrão, selecionada e navegável sem JavaScript' );
+uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-destinations")(?=[^>]*role="tab")(?=[^>]*aria-selected="false")(?=[^>]*aria-controls="uonix-panel-destinations")(?=[^>]*href="[^"]*tab=destinations[^"]*")[^>]*>#', $output ), 'Destinos é a segunda aba principal disponível e navegável sem JavaScript' );
+uonix_dashboard_assert( strpos( $output, 'id="uonix-panel-metrics" role="tabpanel" aria-labelledby="uonix-tab-metrics"' ) !== false, 'Painel de métricas é relacionado semanticamente à sua aba' );
+uonix_dashboard_assert( 1 === preg_match( '#<section(?=[^>]*id="uonix-panel-destinations")(?=[^>]*role="tabpanel")(?=[^>]*aria-labelledby="uonix-tab-destinations")[^>]*\bhidden\b[^>]*>#', $output ), 'Painel de destinos começa oculto fora da aba ativa' );
+uonix_dashboard_assert( strpos( $output, 'role="tablist" aria-label="Seções de métricas"' ) !== false, 'Métricas contém subabas acessíveis' );
+uonix_dashboard_assert( strpos( $output, 'data-uonix-query-key="tab" data-uonix-query-value="metrics"' ) !== false, 'Aba principal declara o estado de URL que representa' );
+uonix_dashboard_assert( strpos( $output, 'data-uonix-query-key="subtab" data-uonix-query-value="catalog"' ) !== false, 'Subaba de catálogo declara o estado de URL que representa' );
+uonix_dashboard_assert( strpos( $output, 'data-uonix-query-key="catalog_tab" data-uonix-query-value="blog"' ) !== false, 'Subaba interna de blog declara o estado de URL que representa' );
+uonix_dashboard_assert( 0 === preg_match( '#<a[^>]+href="[^"]*uonix_metrics_refresh=1#', $output ), 'Links de abas não propagam o marcador transitório de sincronização' );
+uonix_dashboard_assert( strpos( $output, "case 'ArrowRight':" ) !== false && strpos( $output, "case 'Home':" ) !== false && strpos( $output, 'history.replaceState' ) !== false, 'Tabs suportam teclado e atualizam URL sem recarregar' );
+uonix_dashboard_assert(
+	1 === preg_match( '/\.uonix-tabs-nav\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;/s', $output )
+	&& 1 === preg_match( '/@media\s*\(max-width:\s*960px\)\s*\{[\s\S]*?\.uonix-tabs-nav\s+\.uonix-tab-btn\s*\{[^}]*flex:\s*1\s+1\s+140px;[^}]*min-width:\s*0;/s', $output ),
+	'Subabas do catálogo quebram de forma controlada em telas estreitas, sem overflow horizontal'
+);
+
+$_GET = array(
+	'tab' => 'metrics',
+	'subtab' => 'catalog',
+	'catalog_tab' => 'blog',
+	'uonix_period' => '90',
+);
+ob_start();
+uonix_render_analytics_dashboard_page();
+$output_catalog_blog = ob_get_clean();
+uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-catalog")(?=[^>]*role="tab")(?=[^>]*aria-selected="true")(?=[^>]*aria-controls="uonix-panel-catalog")[^>]*>#', $output_catalog_blog ), 'Subaba catálogo é restaurada pela URL e navegável sem JavaScript' );
+uonix_dashboard_assert( 1 === preg_match( '#<div(?=[^>]*id="tab-blog")(?=[^>]*role="tabpanel")(?=[^>]*aria-labelledby="uonix-catalog-tab-blog")[^>]*>#', $output_catalog_blog ) && 1 === preg_match( '#<a(?=[^>]*id="uonix-catalog-tab-blog")(?=[^>]*role="tab")(?=[^>]*aria-selected="true")(?=[^>]*aria-controls="tab-blog")[^>]*>#', $output_catalog_blog ), 'Subaba interna blog é restaurada pela URL e navegável sem JavaScript' );
+uonix_dashboard_assert( strpos( $output_catalog_blog, 'name="tab" value="metrics"' ) !== false && strpos( $output_catalog_blog, 'name="subtab" value="catalog"' ) !== false && strpos( $output_catalog_blog, 'name="catalog_tab" value="blog"' ) !== false, 'Formulários preservam as abas durante mudança de período e sincronização' );
+
+$_GET = array( 'tab' => 'invalida', 'subtab' => 'invalida', 'catalog_tab' => 'invalida' );
+ob_start();
+uonix_render_analytics_dashboard_page();
+$output_invalid_tabs = ob_get_clean();
+uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-metrics")(?=[^>]*aria-selected="true")[^>]*>#', $output_invalid_tabs ) && 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-aggregate")(?=[^>]*aria-selected="true")[^>]*>#', $output_invalid_tabs ) && 1 === preg_match( '#<a(?=[^>]*id="uonix-catalog-tab-products")(?=[^>]*aria-selected="true")[^>]*>#', $output_invalid_tabs ), 'Valores de abas fora da allowlist voltam ao estado padrão seguro' );
+$_GET = array();
 
 $_GET['uonix_period'] = '90';
 $GLOBALS['uonix_test_snapshot_fresh'] = false;

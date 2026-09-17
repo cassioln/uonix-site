@@ -670,10 +670,66 @@ if ( ! function_exists( 'uonix_analytics_metrics_requested_period' ) ) {
 	}
 }
 
-if ( ! function_exists( 'uonix_analytics_metrics_refresh_redirect_url' ) ) {
-	function uonix_analytics_metrics_refresh_redirect_url( $days ) {
+if ( ! function_exists( 'uonix_analytics_metrics_requested_dashboard_state' ) ) {
+	/**
+	 * Normaliza o estado navegável do Uônix Insights vindo de GET ou POST.
+	 *
+	 * A allowlist evita que parâmetros arbitrários reapareçam no redirect de
+	 * sincronização e mantém uma URL estável para links compartilháveis.
+	 *
+	 * @param array|null $request Fonte opcional dos parâmetros.
+	 * @return array{tab:string,subtab:string,catalog_tab:string}
+	 */
+	function uonix_analytics_metrics_requested_dashboard_state( $request = null ) {
+		$request = is_array( $request ) ? $request : $_POST;
+		$raw_tab = isset( $request['tab'] ) ? wp_unslash( $request['tab'] ) : 'metrics';
+		$raw_subtab = isset( $request['subtab'] ) ? wp_unslash( $request['subtab'] ) : 'aggregate';
+		$raw_catalog_tab = isset( $request['catalog_tab'] ) ? wp_unslash( $request['catalog_tab'] ) : 'products';
+		$tab = is_scalar( $raw_tab ) ? sanitize_key( (string) $raw_tab ) : 'metrics';
+		$subtab = is_scalar( $raw_subtab ) ? sanitize_key( (string) $raw_subtab ) : 'aggregate';
+		$catalog_tab = is_scalar( $raw_catalog_tab ) ? sanitize_key( (string) $raw_catalog_tab ) : 'products';
+
+		if ( ! in_array( $tab, array( 'metrics', 'destinations' ), true ) ) {
+			$tab = 'metrics';
+		}
+		if ( ! in_array( $subtab, array( 'aggregate', 'catalog' ), true ) ) {
+			$subtab = 'aggregate';
+		}
+		if ( ! in_array( $catalog_tab, array( 'products', 'blog', 'services' ), true ) ) {
+			$catalog_tab = 'products';
+		}
+
+		return array(
+			'tab' => $tab,
+			'subtab' => $subtab,
+			'catalog_tab' => $catalog_tab,
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_dashboard_url' ) ) {
+	/**
+	 * Constrói a URL canônica do painel sem efeitos transitórios de sincronização.
+	 *
+	 * @param mixed      $days Janela de métricas solicitada.
+	 * @param array|null $state Estado de abas permitido.
+	 * @return string
+	 */
+	function uonix_analytics_metrics_dashboard_url( $days, $state = null ) {
 		$days = uonix_analytics_metrics_sanitize_period_days( $days );
-		return admin_url( 'admin.php?page=uonix-analytics&uonix_period=' . $days . '&uonix_metrics_refresh=1' );
+		$state = uonix_analytics_metrics_requested_dashboard_state( is_array( $state ) ? $state : null );
+		return admin_url(
+			'admin.php?page=uonix-analytics&uonix_period=' . $days
+			. '&tab=' . rawurlencode( $state['tab'] )
+			. '&subtab=' . rawurlencode( $state['subtab'] )
+			. '&catalog_tab=' . rawurlencode( $state['catalog_tab'] )
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_refresh_redirect_url' ) ) {
+	function uonix_analytics_metrics_refresh_redirect_url( $days, $state = null ) {
+		return uonix_analytics_metrics_dashboard_url( $days, $state ) . '&uonix_metrics_refresh=1';
 	}
 }
 
@@ -683,8 +739,9 @@ if ( ! function_exists( 'uonix_analytics_metrics_manual_refresh' ) ) {
 			wp_die( esc_html__( 'Você não tem permissão para atualizar métricas.', 'uonix' ) );
 		}
 		$days = uonix_analytics_metrics_requested_period();
+		$state = uonix_analytics_metrics_requested_dashboard_state();
 		uonix_analytics_metrics_sync( null, null, $days );
-		wp_safe_redirect( uonix_analytics_metrics_refresh_redirect_url( $days ) );
+		wp_safe_redirect( uonix_analytics_metrics_refresh_redirect_url( $days, $state ) );
 		exit;
 	}
 }
