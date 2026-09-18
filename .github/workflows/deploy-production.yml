@@ -1358,6 +1358,19 @@ jobs:
 
           rollback_check 'wp cache flush'
           "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" cache flush
+          # A purga de PÁGINA é obrigatória aqui, e por um motivo mais grave que no
+          # smoke. Quando o rollback roda, o smoke já purgou o disco e o site
+          # regenerou as páginas com o código NOVO — o que está sendo revertido.
+          # Restaurar o PHP anterior sem purgar deixaria o cache quente servindo
+          # justamente o HTML do código ruim, e o workflow declararia "rollback
+          # concluído" enquanto o público continua vendo a versão revertida.
+          #
+          # Vale também o invariante declarado acima: as assertivas do rollback
+          # espelham as do smoke. A sondagem de X-Robots-Tag abaixo mede HTML
+          # servido; sobre página cacheada ela passa pelo motivo errado, porque
+          # cache de página não passa pelo PHP e o header simplesmente não sai.
+          rollback_check 'purga do cache de página'
+          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'if ( function_exists( "wp_cache_clear_cache" ) ) { wp_cache_clear_cache(); }'
           rollback_check 'wp core is-installed'
           "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" core is-installed
           rollback_check 'UONIX_ENV = production'

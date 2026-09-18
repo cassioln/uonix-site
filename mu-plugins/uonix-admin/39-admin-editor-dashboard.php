@@ -1092,6 +1092,41 @@ if ( ! function_exists( 'uox_cache_flush_throttle_seconds' ) ) {
     }
 }
 
+if ( ! function_exists( 'uox_cache_flush_remaining_seconds' ) ) {
+    /**
+     * Segundos restantes da janela de throttle, para o aviso ao editor.
+     *
+     * O transient guarda o instante da última purga, então o restante é derivado —
+     * nunca a janela inteira, que faria quem esperou 55s ler "aguarde 60 segundos".
+     *
+     * Nunca devolve 0: o aviso só aparece quando a purga FOI recusada, e "aguarde 0
+     * segundos" contradiria a recusa.
+     *
+     * @return int
+     */
+    function uox_cache_flush_remaining_seconds() {
+        $janela = uox_cache_flush_throttle_seconds();
+
+        if ( $janela <= 0 ) {
+            return 0;
+        }
+
+        $inicio = get_transient( 'uonix_cache_flush_lock' );
+
+        if ( ! is_numeric( $inicio ) ) {
+            return $janela;
+        }
+
+        $restante = $janela - ( time() - (int) $inicio );
+
+        if ( $restante < 1 ) {
+            return 1;
+        }
+
+        return $restante > $janela ? $janela : $restante;
+    }
+}
+
 function uox_handle_flush_cache() {
     if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
         wp_die( 'Método inválido para limpar o cache.' );
@@ -1144,7 +1179,11 @@ function uox_handle_flush_cache() {
     }
 
     if ( $throttle_seconds > 0 ) {
-        set_transient( 'uonix_cache_flush_lock', 1, $throttle_seconds );
+        // Guarda o INSTANTE da purga, não um booleano: é o que permite informar
+        // quanto falta em vez de repetir a janela inteira. O TTL vem do throttle,
+        // nunca 0 — no WordPress, expiração 0 significa transient SEM expiração, e o
+        // botão viraria trava permanente de uso único.
+        set_transient( 'uonix_cache_flush_lock', time(), $throttle_seconds );
     }
 
     wp_safe_redirect( add_query_arg( 'uonix_cache_flushed', '1', admin_url( 'index.php' ) ) );
@@ -1162,9 +1201,14 @@ function uox_render_manutencao_cache() {
     } elseif ( 'aguarde' === $flush_state ) {
         // Aviso explícito, não silêncio: o editor precisa saber que NÃO limpou
         // agora, e por quê. Um "sucesso" aqui reproduziria o defeito original.
+        //
+        // Mostra o tempo RESTANTE, não a janela inteira: quem esperou 55s e clicou de
+        // novo não pode ler "aguarde 60 segundos". E deixa claro que a janela é do
+        // SITE, não do usuário — o lock é único, então a limpeza pode ter sido feita
+        // por outro editor.
         printf(
-            '<div class="notice notice-info is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>A memória cache já foi limpa há pouco. Aguarde %d segundos antes de limpar de novo — cada limpeza deixa o site mais lento por alguns instantes enquanto as páginas são regeradas.</p></div>',
-            (int) uox_cache_flush_throttle_seconds()
+            '<div class="notice notice-info is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>A memória cache do site já foi limpa nos últimos instantes, por você ou por outro editor. Aguarde %d segundo(s) antes de limpar de novo — cada limpeza deixa o site mais lento enquanto as páginas são regeradas.</p></div>',
+            (int) uox_cache_flush_remaining_seconds()
         );
     }
 

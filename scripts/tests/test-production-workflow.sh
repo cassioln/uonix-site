@@ -157,6 +157,42 @@ if not purge_index < probe_index:
         'senão a sondagem mede a página cacheada em vez da recém-gerada'
     )
 
+# O ROLLBACK precisa espelhar o smoke, e a exigência é mais forte aqui.
+#
+# O próprio workflow declara o invariante: "As assertivas abaixo espelham as do
+# smoke. Um rollback que valide MENOS pode declarar sucesso num estado que o smoke
+# reprovaria — e o operador confiaria num rollback incompleto."
+#
+# No caso da purga de página o risco é pior que validar menos. Quando o rollback
+# roda, o smoke já purgou o disco e o site regenerou com o código NOVO — o que está
+# sendo revertido. Restaurar o PHP anterior sem purgar deixa o cache quente servindo
+# o HTML do código ruim, e o workflow imprime "rollback concluído".
+#
+# Esta assertiva existe porque a assimetria já aconteceu de fato: a purga foi
+# adicionada ao smoke e esquecida no rollback, e nenhum guard reclamou.
+rollback_executable = '\n'.join(
+    line for line in production_rollback_step.splitlines()
+    if line.strip() and not line.lstrip().startswith('#')
+)
+require(
+    rollback_executable,
+    r'cache flush',
+    'rollback precisa limpar o cache de objeto',
+)
+require(
+    rollback_executable,
+    r'function_exists\(\s*"wp_cache_clear_cache"\s*\)',
+    'rollback precisa purgar o cache de PÁGINA como o smoke: sem isso ele restaura o '
+    'código anterior e deixa o cache servindo o HTML do código revertido',
+)
+rollback_purge_index = rollback_executable.index('wp_cache_clear_cache')
+rollback_probe_index = rollback_executable.index('url_effective')
+if not rollback_purge_index < rollback_probe_index:
+    raise AssertionError(
+        'no rollback a purga do cache de página deve preceder a sondagem HTTP, '
+        'senão a sondagem valida o HTML antigo e o rollback declara sucesso indevido'
+    )
+
 # Pós-cutover: https://uonix.com.br é produção definitiva e indexável. O smoke e
 # o rollback não podem mais exigir o estado histórico de noindex usado durante a
 # transição em site.uonix.com.br; essa divergência bloqueia publicação e mantém o

@@ -13,6 +13,7 @@ define( 'ABSPATH', __DIR__ );
 $GLOBALS['uox_test_cache_flushes']     = 0;
 $GLOBALS['uox_test_page_cache_clears'] = 0;
 $GLOBALS['uox_test_transients']        = array();
+$GLOBALS['uox_test_transient_ttls']    = array();
 $GLOBALS['uox_test_can_edit']      = true;
 $GLOBALS['uox_test_nonce_checks']  = 0;
 $GLOBALS['uox_test_nonce_valid']   = true;
@@ -56,8 +57,18 @@ function get_transient( $key ) {
 	return $GLOBALS['uox_test_transients'][ $key ] ?? false;
 }
 
+/*
+ * O dublê REGISTRA a expiração, e isso não é detalhe.
+ *
+ * Enquanto ele descartava o terceiro argumento, a propriedade "a janela expira" não
+ * tinha cobertura alguma: trocar o TTL por 0 mantinha a suíte verde. E no WordPress
+ * `set_transient( $k, $v, 0 )` significa transient SEM expiração — o botão viraria
+ * trava permanente de uso único e nunca mais purgaria. Achado pela revisão
+ * independente do PR #212, por mutação executada.
+ */
 function set_transient( $key, $value, $expiration = 0 ) {
-	$GLOBALS['uox_test_transients'][ $key ] = $value;
+	$GLOBALS['uox_test_transients'][ $key ]      = $value;
+	$GLOBALS['uox_test_transient_ttls'][ $key ]  = $expiration;
 	return true;
 }
 
@@ -226,6 +237,38 @@ uox_cache_security_assert(
 uox_cache_security_assert(
 	isset( $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] ),
 	'purga bem-sucedida deve registrar o lock de throttle'
+);
+
+/*
+ * O TTL do lock tem de ser a janela do throttle, e NUNCA 0.
+ *
+ * `set_transient( $k, $v, 0 )` cria transient sem expiração: o throttle deixaria de
+ * ser limite de frequência e viraria trava de uso único, com o botão nunca mais
+ * purgando. Sem esta assertiva a regressão passa verde — foi medido.
+ */
+$ttl_lock = $GLOBALS['uox_test_transient_ttls']['uonix_cache_flush_lock'] ?? null;
+
+uox_cache_security_assert(
+	is_int( $ttl_lock ) && $ttl_lock > 0,
+	'o lock de throttle precisa de TTL positivo; 0 significa transient sem expiração '
+		. 'no WordPress e transformaria o botão em trava permanente de uso único'
+);
+uox_cache_security_assert(
+	$ttl_lock === uox_cache_flush_throttle_seconds(),
+	'o TTL do lock deve ser exatamente a janela de uox_cache_flush_throttle_seconds()'
+);
+
+// O valor guardado é o INSTANTE da purga, não um booleano: é o que permite informar
+// o tempo restante em vez de repetir a janela inteira.
+uox_cache_security_assert(
+	is_int( $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] )
+		&& $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] > 0,
+	'o lock deve guardar o timestamp da purga, para o aviso mostrar o tempo restante'
+);
+uox_cache_security_assert(
+	uox_cache_flush_remaining_seconds() >= 1
+		&& uox_cache_flush_remaining_seconds() <= uox_cache_flush_throttle_seconds(),
+	'o tempo restante deve ficar entre 1 e a janela completa, nunca 0 nem maior que a janela'
 );
 
 $nonce_checks_antes_do_throttle = $GLOBALS['uox_test_nonce_checks'];
