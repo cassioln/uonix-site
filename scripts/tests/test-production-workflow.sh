@@ -179,7 +179,20 @@ def executavel(step):
 # binário é exatamente o furo que este padrão fecha, e composto não é estilo usado em
 # nenhum passo deste workflow. A assertiva troca um falso negativo raro por zero falso
 # positivo — e falha fechada.
-CHAMADA_WP = r'^\s*(?:cli\b|"\$php_bin")[^\n]*'
+# A classe `[^\n#;&|]*` fecha duas formas encontradas na sexta revisão, ambas medidas
+# com as chamadas reais APAGADAS:
+#
+#   - comentário de FIM DE LINHA: `"$php_bin" ... cache flush  # ... function_exists(
+#     "wp_cache_clear_cache" ) desativada`. executavel() só remove comentário de linha
+#     inteira, então o alvo era alcançado dentro do comentário. Proibir `#` no trecho
+#     casado resolve sem precisar de um parser de aspas.
+#   - prosa numa CONTINUAÇÃO unida: `cli option get home \` + `&& echo 'pendente: cache
+#     flush'`. A âncora de posição não protege o que vem depois do join, mas o trecho
+#     precisa cruzar `&&` para chegar ao alvo.
+#
+# Nenhum dos dois comandos reais tem `#`, `;`, `&` ou `|` entre o binário e o alvo — o
+# `;` do PHP (`wp_cache_clear_cache();`) vem DEPOIS do que a assertiva casa.
+CHAMADA_WP = r'^\s*(?:cli\b|"\$php_bin")[^\n#;&|]*'
 
 # AUTOTESTE DO PADRÃO — a parte que faltava nas quatro tentativas anteriores.
 #
@@ -207,6 +220,12 @@ _ROTULOS_E_PROSA = (
     "          cli_check 'wp cache flush'",
     "          cli_note 'wp cache flush'",
     "          cliente_log 'wp cache flush'",
+    # Sexta revisão: comentário de fim de linha numa linha que COMEÇA com o binário.
+    '          "$php_bin" --path="$document_root" core is-installed  # pendente: cache flush',
+    # Sexta revisão: prosa depois de `&&`, como fica após executavel() unir a continuação.
+    "          cli option get home   && echo 'pendente: cache flush'",
+    # Multilinha: pega o afrouxamento de `[^\n...]*` para `.*`, que cruzaria linhas sob re.S.
+    '          cli option get home\n          echo "pendente: cache flush"',
 )
 
 for _exemplo in _CHAMADAS_REAIS:
@@ -222,6 +241,38 @@ for _exemplo in _ROTULOS_E_PROSA:
             'CHAMADA_WP afrouxou e passou a casar rótulo/prosa, então apagar a chamada e '
             f'deixar só o texto voltaria a passar verde: {_exemplo.strip()}'
         )
+
+# INCONDICIONALIDADE do smoke — a propriedade que o PR inteiro existe para garantir.
+#
+# Todas as assertivas de purga verificam LOCALIZAÇÃO e ORDEM dentro do step. Nenhuma
+# impedia que o STEP voltasse a ser opt-in. Medido na sexta revisão: acrescentar
+# `if: ${{ inputs.install_page_cache }}` ao step faz o smoke INTEIRO — com a purga
+# dentro — não rodar num deploy normal, e o teste passava verde.
+#
+# Isso é literalmente o defeito de origem deste PR: "num deploy normal NADA purgava o
+# cache de página". A propriedade estava descrita em comentário e verificada por
+# posição, nunca por incondicionalidade. Contraste com a linha que EXIGE
+# `if: inputs.install_page_cache` no step de instalação: o inverso nunca foi asserido.
+forbid(
+    production,
+    r'- name: Clear cache and run smoke tests\s*\n\s+if:',
+    'o step do smoke não pode ser condicional: com um `if:` o smoke inteiro, e a purga '
+    'de cache de página dentro dele, deixa de rodar num deploy normal — que é exatamente '
+    'o defeito que este PR corrigiu',
+)
+
+# O rollback PODE ser condicional, mas só ao fracasso — nunca a um input opt-in.
+require(
+    production,
+    r'- name: Roll back managed code after failure\s*\n\s+if:\s*\$\{\{\s*failure\(\)\s*\|\|\s*cancelled\(\)\s*\}\}',
+    'o rollback precisa ser guardado por failure()/cancelled(), a condição que o faz '
+    'existir',
+)
+forbid(
+    production,
+    r'- name: Roll back managed code after failure\s*\n\s+if:[^\n]*inputs\.',
+    'o rollback não pode depender de input opt-in: ele é a rede de segurança do deploy',
+)
 
 smoke_executable = executavel(production_smoke_step)
 
