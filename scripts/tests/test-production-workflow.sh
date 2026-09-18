@@ -170,7 +170,58 @@ def executavel(step):
 # `executavel()` já uniu as continuações de linha, então um comando quebrado com `\`
 # chega aqui como uma linha só e continua casando. `[^\n]*` mantém o resto do casamento
 # na mesma linha, porque o require usa re.S e `.` cruzaria linhas.
-CHAMADA_WP = r'^\s*(?:cli|"\$php_bin")[^\n]*'
+# O `\b` depois de `cli` NÃO é decorativo: sem ele qualquer primeiro token que COMECE
+# com "cli" satisfaz a âncora, e o defeito do rótulo reabre por prefixo
+# (`cli_check '...'`, `cli_note '...'`, `cliente_log '...'`).
+#
+# LIMITE DELIBERADO: comando composto na mesma linha (`true && "$php_bin" ... cache
+# flush`) reprova mesmo com a chamada presente. Aceitar prefixo arbitrário antes do
+# binário é exatamente o furo que este padrão fecha, e composto não é estilo usado em
+# nenhum passo deste workflow. A assertiva troca um falso negativo raro por zero falso
+# positivo — e falha fechada.
+CHAMADA_WP = r'^\s*(?:cli\b|"\$php_bin")[^\n]*'
+
+# AUTOTESTE DO PADRÃO — a parte que faltava nas quatro tentativas anteriores.
+#
+# Este padrão foi corrigido três vezes, e cada correção abriu um furo novo pelo qual um
+# RÓTULO voltava a satisfazer a assertiva: primeiro sem âncora, depois ancorado em token
+# (`\bcli\b` casava dentro de `wp-cli.phar`), depois ancorado em posição mas sem `\b` de
+# fechamento. Remendar a regex e conferir à mão não convergiu.
+#
+# Cada furo já encontrado virou exemplo NEGATIVO abaixo. Se o padrão afrouxar de novo
+# por qualquer caminho — inclusive um que ninguém pensou —, o teste reprova aqui, no
+# ponto onde a causa está, em vez de passar verde e deixar a regressão para a próxima
+# revisão descobrir.
+_PADRAO_TESTE = CHAMADA_WP + r'cache flush'
+
+_CHAMADAS_REAIS = (
+    '          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" cache flush',
+    '          cli cache flush',
+)
+_ROTULOS_E_PROSA = (
+    "          check 'wp cache flush'",
+    "          rollback_check 'wp cache flush'",
+    "          rollback_check 'wp cli cache flush'",
+    "          check 'wp-cli.phar cache flush'",
+    '          echo "pulando cli cache flush por ora"',
+    "          cli_check 'wp cache flush'",
+    "          cli_note 'wp cache flush'",
+    "          cliente_log 'wp cache flush'",
+)
+
+for _exemplo in _CHAMADAS_REAIS:
+    if not re.search(_PADRAO_TESTE, _exemplo, re.M | re.S):
+        raise AssertionError(
+            'CHAMADA_WP deixou de casar uma chamada real, então as assertivas abaixo '
+            f'acusariam ausência de código presente: {_exemplo.strip()}'
+        )
+
+for _exemplo in _ROTULOS_E_PROSA:
+    if re.search(_PADRAO_TESTE, _exemplo, re.M | re.S):
+        raise AssertionError(
+            'CHAMADA_WP afrouxou e passou a casar rótulo/prosa, então apagar a chamada e '
+            f'deixar só o texto voltaria a passar verde: {_exemplo.strip()}'
+        )
 
 smoke_executable = executavel(production_smoke_step)
 

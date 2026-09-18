@@ -256,7 +256,9 @@ falhas=$((falhas + UONIX_ACHADOS_TERMOS))
 
 # Erro de encanamento não é "nada encontrado": aborta em vez de reportar limpo.
 if [ "$UONIX_VARREDURA_ERRO" -ne 0 ]; then
-  printf '\nFALHOU: a varredura falhou tecnicamente; não é possível afirmar ausência.\n' >&2
+  # Mensagem neutra de propósito: o ramo acima já disse SE a causa foi arquivo ausente
+  # ou falha técnica, e repetir "falhou tecnicamente" contradizia o diagnóstico benigno.
+  printf '\nFALHOU: a varredura não pôde ser concluída; não é possível afirmar ausência.\n' >&2
   exit 1
 fi
 

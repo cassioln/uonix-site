@@ -287,12 +287,17 @@ uox_cache_security_assert(
  * à mão para que só a derivação real satisfaça a assertiva.
  */
 $janela = uox_cache_flush_throttle_seconds();
-$decorridos = $janela - 5;
+
+// Mesmo esperado, mesma tolerância derivada do cenário do aviso mais abaixo. A faixa
+// fixa 3..7 anterior estava acoplada ao default de 60: com uma janela pequena, restante
+// e janela cheia caberiam os dois na faixa e a assertiva passaria por coincidência.
+$restante_esperado_parcial = 5;
+$decorridos = $janela - $restante_esperado_parcial;
 $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] = time() - $decorridos;
 $restante_parcial = uox_cache_flush_remaining_seconds();
 
 uox_cache_security_assert(
-	$restante_parcial >= 3 && $restante_parcial <= 7,
+	abs( $restante_parcial - $restante_esperado_parcial ) <= 2,
 	sprintf(
 		'com %ds de %ds já decorridos o restante deve ser ~5s, não a janela cheia; obtido: %ds',
 		$decorridos,
