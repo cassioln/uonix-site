@@ -45,8 +45,9 @@ scripts/email-migration/passfiles/
 __pycache__/
 *.pyc
 
-# Planos e especificações gerados por agentes (contexto de trabalho, não entrega do site).
-.hermes/plans/
+# Planos, specs e configuração de agentes (contexto de trabalho local, não entrega do site).
+.hermes/
+.agents/
 docs/superpowers/
 
 # Worktrees git criados para trabalho isolado (git worktree add .worktrees/...).
@@ -58,3 +59,7 @@ docs/superpowers/
 # Scripts/manifestos operacionais locais; não são artefatos do site nem do deploy.
 scripts/maintenance/local/
 scripts/local/
+
+# Configuração e skills instalados do Claude Code (dev-específico, não sincroniza).
+/.claude/
+
