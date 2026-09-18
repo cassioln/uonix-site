@@ -292,9 +292,15 @@ git -C "$FIXTURE_DIR" ls-files -z -- residuos.txt \
 if [ ! -s "$FIXTURE_LISTA" ]; then
   reprova 'não consegui montar o fixture do autoteste; a fase 3 ficaria sem cobertura'
 else
+  UONIX_VARREDURA_ERRO=0
   varrer_lista "$FIXTURE_LISTA" silencioso || true
 
-  if [ "$UONIX_ACHADOS_TERMOS" -ne "${#TERMOS[@]}" ]; then
+  # A flag de erro é checada ANTES da contagem. Sem isso, uma falha técnica no meio da
+  # varredura do fixture abortaria o laço com contagem parcial, e a mensagem culparia o
+  # "encanamento não reporta achados" quando a causa real foi um erro já impresso.
+  if [ "$UONIX_VARREDURA_ERRO" -ne 0 ]; then
+    reprova 'a varredura do fixture falhou tecnicamente; o autoteste não pode concluir nada'
+  elif [ "$UONIX_ACHADOS_TERMOS" -ne "${#TERMOS[@]}" ]; then
     reprova "a varredura encontrou ${UONIX_ACHADOS_TERMOS} de ${#TERMOS[@]} termos num fixture \
 que contém TODOS eles — o encanamento da varredura não está reportando achados, então a \
 fase 2 passaria por não procurar, não por estar limpa"
