@@ -132,28 +132,46 @@ if not migration_index < rollback_index < release_index:
 # Pior: a sondagem HTTP no fim do smoke confere a AUSÊNCIA de X-Robots-Tag
 # restritivo. Página cacheada não passa pelo PHP, então o header não sai e a
 # asserção passa pelo motivo errado. Daí a ordem exigida abaixo.
-# Comentários fora: o bloco explicativo acima da purga cita wp_cache_clear_cache, e
-# asserir sobre o texto cru deixaria a remoção da CHAMADA passar impune.
-smoke_executable = '\n'.join(
-    line for line in production_smoke_step.splitlines()
-    if line.strip() and not line.lstrip().startswith('#')
-)
-# As assertivas ancoram em `"$wp_bin"` de propósito, e `[^\n]*` mantém o casamento na
-# MESMA linha (o require usa re.S, então `.` cruzaria linhas).
+def executavel(step):
+    """Corpo executável de um step: sem comentários e com continuações de linha unidas.
+
+    Comentários fora porque o bloco explicativo acima da purga cita
+    wp_cache_clear_cache, e asserir sobre o texto cru deixaria a remoção da CHAMADA
+    passar impune.
+
+    Continuações unidas porque este mesmo workflow já quebra comandos com `\\` +
+    indentação em vários passos. Sem a normalização, um padrão ancorado em `"$wp_bin"`
+    deixa de casar quando alguém reformata assim — e a mensagem acusa ausência de uma
+    chamada que está presente. Falha fechada, mas manda o leitor para o lugar errado.
+    """
+    sem_comentario = '\n'.join(
+        line for line in step.splitlines()
+        if line.strip() and not line.lstrip().startswith('#')
+    )
+    return re.sub(r'\\\n\s+', ' ', sem_comentario)
+
+
+# Âncora da CHAMADA, não do rótulo.
 #
-# Sem a âncora, o padrão `cache flush` casava o RÓTULO `check 'wp cache flush'` em vez
-# do comando: apagar a chamada e deixar o rótulo mantinha o teste verde. Medido pela
-# revisão independente do PR #212, por mutação executada. Um teste satisfeito pelo
-# texto do log, e não pela chamada, é a mesma classe de verde-sem-trabalho que este
-# PR combate.
+# Sem ela, o padrão `cache flush` casava o texto de `check 'wp cache flush'`: apagar a
+# chamada e deixar o rótulo mantinha o teste verde. Um teste satisfeito pelo texto do
+# log, e não pela chamada, é a mesma classe de verde-sem-trabalho que este PR combate.
+#
+# Aceita as duas formas idiomáticas do arquivo: o binário explícito e o helper `cli`,
+# que o passo de rollback define e já usa. `[^\n]*` mantém o casamento na mesma linha,
+# porque o require usa re.S e `.` cruzaria linhas.
+CHAMADA_WP = r'("\$wp_bin"|\bcli\b)[^\n]*'
+
+smoke_executable = executavel(production_smoke_step)
+
 require(
     smoke_executable,
-    r'"\$wp_bin"[^\n]*cache flush',
+    CHAMADA_WP + r'cache flush',
     'smoke precisa EXECUTAR a limpeza do cache de objeto, não apenas rotulá-la',
 )
 require(
     smoke_executable,
-    r'"\$wp_bin"[^\n]*function_exists\(\s*"wp_cache_clear_cache"\s*\)',
+    CHAMADA_WP + r'function_exists\(\s*"wp_cache_clear_cache"\s*\)',
     'smoke precisa purgar o cache de PÁGINA além do de objeto: sem isso o deploy '
     'publica código novo e o site continua servindo o HTML anterior',
 )
@@ -178,18 +196,15 @@ if not purge_index < probe_index:
 #
 # Esta assertiva existe porque a assimetria já aconteceu de fato: a purga foi
 # adicionada ao smoke e esquecida no rollback, e nenhum guard reclamou.
-rollback_executable = '\n'.join(
-    line for line in production_rollback_step.splitlines()
-    if line.strip() and not line.lstrip().startswith('#')
-)
+rollback_executable = executavel(production_rollback_step)
 require(
     rollback_executable,
-    r'"\$wp_bin"[^\n]*cache flush',
+    CHAMADA_WP + r'cache flush',
     'rollback precisa EXECUTAR a limpeza do cache de objeto, não apenas rotulá-la',
 )
 require(
     rollback_executable,
-    r'"\$wp_bin"[^\n]*function_exists\(\s*"wp_cache_clear_cache"\s*\)',
+    CHAMADA_WP + r'function_exists\(\s*"wp_cache_clear_cache"\s*\)',
     'rollback precisa purgar o cache de PÁGINA como o smoke: sem isso ele restaura o '
     'código anterior e deixa o cache servindo o HTML do código revertido',
 )

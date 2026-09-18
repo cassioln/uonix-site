@@ -201,6 +201,9 @@ $_POST = array(
 	'action'  => 'uonix_flush_cache',
 	'_wpnonce' => 'fixture',
 );
+// Janela de tempo em que a purga acontece, para asserir o timestamp do lock por
+// INTERVALO em vez de tolerância — exato, e imune a stall do processo.
+$t_antes_da_purga = time();
 $redirected = false;
 if ( is_callable( $flush_handler ) ) {
 	try {
@@ -270,7 +273,7 @@ uox_cache_security_assert(
 $valor_lock = $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'];
 
 uox_cache_security_assert(
-	is_int( $valor_lock ) && abs( $valor_lock - time() ) <= 2,
+	is_int( $valor_lock ) && $valor_lock >= $t_antes_da_purga && $valor_lock <= time(),
 	'o lock deve guardar o TIMESTAMP da purga (≈ time()), não um booleano: com valor 1 o '
 		. 'aviso diz "aguarde 1 segundo" enquanto a janela inteira ainda corre'
 );
@@ -318,7 +321,10 @@ uox_cache_security_assert(
 	'com valor não numérico no lock o restante deve cair na janela inteira'
 );
 
-// Restaura o estado que os cenários seguintes esperam.
+// Restaura o valor original por HIGIENE, não por dependência: o 'lixo' acima também é
+// truthy para get_transient(), então o ramo do throttle dispararia igual. Registrado
+// para que ninguém remova esta linha achando que os cenários seguintes a exigem — nem
+// a mantenha achando que ela é o que os faz passar.
 $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] = $valor_lock;
 
 $nonce_checks_antes_do_throttle = $GLOBALS['uox_test_nonce_checks'];
@@ -429,6 +435,54 @@ uox_cache_security_assert(
 uox_cache_security_assert(
 	false !== strpos( $render_output, 'name="action" value="uonix_flush_cache"' ),
 	'formulário deve conter a action oculta do handler'
+);
+
+/*
+ * O AVISO RENDERIZADO no estado "aguarde" — a metade visível do throttle.
+ *
+ * Até aqui o teste conferia apenas a URL do redirect. O ramo do renderer que produz o
+ * aviso não tinha cobertura alguma, e duas regressões passavam verdes:
+ *
+ *   1. apagar o `elseif ( 'aguarde' === ... )` inteiro — o editor é redirecionado e não
+ *      recebe explicação nenhuma de por que nada aconteceu, contra o invariante que o
+ *      próprio comentário do código declara ("aviso explícito, não silêncio");
+ *   2. trocar uox_cache_flush_remaining_seconds() por uox_cache_flush_throttle_seconds()
+ *      no printf — o aviso volta a imprimir a janela cheia, que é exatamente o que o
+ *      docblock proíbe ("quem esperou 55s não pode ler aguarde 60 segundos").
+ *
+ * A lacuna anterior era de CALL SITE: a função estava coberta por chamada direta, o
+ * consumidor dela não. Renderizar o estado mata as duas de uma vez. Achado pela
+ * terceira revisão independente do PR #212, por mutação executada.
+ */
+$janela_aviso = uox_cache_flush_throttle_seconds();
+$GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] = time() - ( $janela_aviso - 5 );
+$_GET  = array( 'uonix_cache_flushed' => 'aguarde' );
+$_POST = array();
+ob_start();
+uox_render_manutencao_cache();
+$aviso_aguarde = ob_get_clean();
+
+$casou_aviso     = preg_match( '/Aguarde (\d+) segundo\(s\)/', $aviso_aguarde, $captura );
+$segundos_no_aviso = 1 === $casou_aviso ? (int) $captura[1] : -1;
+
+uox_cache_security_assert(
+	1 === $casou_aviso,
+	'o estado "aguarde" precisa RENDERIZAR o aviso: sem ele o editor é redirecionado e '
+		. 'não recebe explicação nenhuma de por que a limpeza não aconteceu'
+);
+uox_cache_security_assert(
+	$segundos_no_aviso >= 3 && $segundos_no_aviso <= 7,
+	sprintf(
+		'com %ds de %ds decorridos o aviso deve exibir ~5s, não a janela cheia; exibiu: %d',
+		$janela_aviso - 5,
+		$janela_aviso,
+		$segundos_no_aviso
+	)
+);
+uox_cache_security_assert(
+	false === strpos( $aviso_aguarde, 'foi totalmente limpa' ),
+	'o estado "aguarde" nunca pode renderizar o aviso de SUCESSO — dizer "limpou" sem '
+		. 'ter limpado é o defeito que este handler existe para não cometer'
 );
 
 /*

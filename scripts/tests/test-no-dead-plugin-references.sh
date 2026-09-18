@@ -110,6 +110,12 @@ falhas=0
 UONIX_ACHADOS_TERMOS=0
 UONIX_VARREDURA_ERRO=0
 
+# UM único temporário para o stderr da varredura, criado fora do laço e coberto pelo
+# trap. Antes o mktemp ficava dentro do laço: 7 arquivos por chamada, e um SIGINT entre
+# o mktemp e o rm deixava órfão.
+UONIX_ERROS_FILE="$(mktemp "${TMPDIR:-/tmp}/uonix-varredura-erros.XXXXXX")"
+trap 'rm -f "$UONIX_ERROS_FILE"' EXIT
+
 reprova() {
   printf 'FAIL: %s\n' "$1" >&2
   falhas=$((falhas + 1))
@@ -126,9 +132,12 @@ varrer_lista() {
   local lista="$1"
   local silencioso="${2:-}"
   local indice=0
-  local termo motivo achados erros
+  local termo motivo achados
 
+  # As DUAS flags zeram na entrada. Deixar o reset de uma delas para o call site é
+  # convite a bug: a próxima chamada que esquecer herda o estado da anterior.
   UONIX_ACHADOS_TERMOS=0
+  UONIX_VARREDURA_ERRO=0
 
   while [ "$indice" -lt "${#TERMOS[@]}" ]; do
     termo="${TERMOS[$indice]}"
@@ -143,20 +152,27 @@ varrer_lista() {
     # aqui indistinguível de "nada encontrado" — a mesma classe de verde-sem-trabalho
     # que este teste existe para impedir. O xargs mascara o código de saída do grep
     # (devolve 123 para qualquer 1..125), então o stderr é o sinal utilizável.
-    erros="$(mktemp "${TMPDIR:-/tmp}/uonix-varredura-erros.XXXXXX")"
+    : > "$UONIX_ERROS_FILE"
     achados="$(
-      xargs -0 grep -niIE -- "$termo" /dev/null < "$lista" 2>"$erros" \
+      xargs -0 grep -niIE -- "$termo" /dev/null < "$lista" 2>"$UONIX_ERROS_FILE" \
         | grep -v "^${SELF_REL}:" || true
     )"
 
-    if [ -s "$erros" ]; then
-      printf 'FAIL: a varredura do termo <%s> emitiu erro; o resultado não é confiável:\n' "$termo" >&2
-      cat "$erros" >&2
-      rm -f "$erros"
+    if [ -s "$UONIX_ERROS_FILE" ]; then
+      # Arquivo rastreado que não existe na worktree é o caso comum e benigno: alguém
+      # apagou com `rm` em vez de `git rm`. Merece mensagem própria, porque a causa e a
+      # ação são outras — não é falha do encanamento da varredura.
+      if ! grep -qv 'No such file or directory' "$UONIX_ERROS_FILE"; then
+        printf 'FAIL: há arquivo rastreado ausente na worktree; a varredura não cobre tudo.\n' >&2
+        printf '      Use "git rm" (ou "git checkout --" para restaurar) e rode de novo:\n' >&2
+        sed 's/^/      /' "$UONIX_ERROS_FILE" >&2
+      else
+        printf 'FAIL: a varredura do termo <%s> emitiu erro; o resultado não é confiável:\n' "$termo" >&2
+        sed 's/^/      /' "$UONIX_ERROS_FILE" >&2
+      fi
       UONIX_VARREDURA_ERRO=1
       return 1
     fi
-    rm -f "$erros"
 
     if [ -n "$achados" ]; then
       UONIX_ACHADOS_TERMOS=$((UONIX_ACHADOS_TERMOS + 1))
@@ -233,7 +249,7 @@ ALVOS=(
 )
 
 LISTA="$(mktemp "${TMPDIR:-/tmp}/uonix-dead-plugins.XXXXXX")"
-trap 'rm -f "$LISTA"' EXIT
+trap 'rm -f "$LISTA" "$UONIX_ERROS_FILE"' EXIT
 git ls-files -z -- "${ALVOS[@]}" > "$LISTA"
 
 # Sanidade: lista vazia faria todos os termos "passarem" sem varrer arquivo algum.
@@ -267,7 +283,7 @@ fi
 # MESMA função varrer_lista encontre todos.
 # ---------------------------------------------------------------------------
 FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/uonix-dead-plugins-fixture.XXXXXX")"
-trap 'rm -f "$LISTA"; rm -rf "$FIXTURE_DIR"' EXIT
+trap 'rm -f "$LISTA" "$UONIX_ERROS_FILE"; rm -rf "$FIXTURE_DIR"' EXIT
 
 (
   cd "$FIXTURE_DIR"
