@@ -126,7 +126,7 @@ varrer_lista() {
   local lista="$1"
   local silencioso="${2:-}"
   local indice=0
-  local termo motivo achados
+  local termo motivo achados erros
 
   UONIX_ACHADOS_TERMOS=0
 
