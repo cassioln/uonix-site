@@ -174,11 +174,15 @@ def executavel(step):
 # com "cli" satisfaz a âncora, e o defeito do rótulo reabre por prefixo
 # (`cli_check '...'`, `cli_note '...'`, `cliente_log '...'`).
 #
-# LIMITE DELIBERADO: comando composto na mesma linha (`true && "$php_bin" ... cache
-# flush`) reprova mesmo com a chamada presente. Aceitar prefixo arbitrário antes do
-# binário é exatamente o furo que este padrão fecha, e composto não é estilo usado em
-# nenhum passo deste workflow. A assertiva troca um falso negativo raro por zero falso
-# positivo — e falha fechada.
+# LIMITE DELIBERADO: QUALQUER prefixo antes do binário reprova, mesmo com a chamada
+# presente — comando composto (`true && "$php_bin" ...`), wrapper (`env FOO=1 ...`,
+# `timeout 30 ...`) ou negação (`if ! ...`). Aceitar prefixo arbitrário é exatamente o
+# furo que a âncora de posição fecha, e nenhuma dessas formas é estilo usado em passo
+# algum deste workflow. A assertiva troca um falso negativo raro por zero falso
+# positivo, e falha fechada.
+#
+# Indentação NÃO burla: chamada dentro de `if true; then ... fi` continua casando,
+# porque `^\s*` aceita qualquer recuo.
 # A classe `[^\n#;&|]*` fecha duas formas encontradas na sexta revisão, ambas medidas
 # com as chamadas reais APAGADAS:
 #
