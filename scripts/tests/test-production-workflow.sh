@@ -151,16 +151,26 @@ def executavel(step):
     return re.sub(r'\\\n\s+', ' ', sem_comentario)
 
 
-# Âncora da CHAMADA, não do rótulo.
+# Âncora de POSIÇÃO: a linha tem de COMEÇAR com o comando.
 #
-# Sem ela, o padrão `cache flush` casava o texto de `check 'wp cache flush'`: apagar a
-# chamada e deixar o rótulo mantinha o teste verde. Um teste satisfeito pelo texto do
-# log, e não pela chamada, é a mesma classe de verde-sem-trabalho que este PR combate.
+# Sem âncora nenhuma, o padrão `cache flush` casava o texto de `check 'wp cache flush'`:
+# apagar a chamada e deixar o rótulo mantinha o teste verde.
 #
-# Aceita as duas formas idiomáticas do arquivo: o binário explícito e o helper `cli`,
-# que o passo de rollback define e já usa. `[^\n]*` mantém o casamento na mesma linha,
-# porque o require usa re.S e `.` cruzaria linhas.
-CHAMADA_WP = r'("\$wp_bin"|\bcli\b)[^\n]*'
+# A primeira tentativa de correção ancorou em tokens (`"$wp_bin"` ou `\bcli\b`) e
+# REABRIU o mesmo defeito por outro caminho, porque token casa em prosa: um rótulo
+# `rollback_check 'wp cli cache flush'`, um `check 'wp-cli.phar cache flush'` (o `\b`
+# casa dentro de `wp-cli.phar`) ou um `echo "pulando cli cache flush"` satisfaziam a
+# assertiva sem chamada alguma. Medido pela quarta revisão independente do PR #212.
+#
+# Ancorar no INÍCIO da linha resolve porque rótulo e echo nunca começam com o comando:
+# `rollback_check ...` e `echo ...` são outros comandos. Aceita as duas formas
+# idiomáticas do arquivo — o binário explícito, que é como as linhas estão hoje, e o
+# helper `cli`, que os passos de WPSC e de rollback definem e usam.
+#
+# `executavel()` já uniu as continuações de linha, então um comando quebrado com `\`
+# chega aqui como uma linha só e continua casando. `[^\n]*` mantém o resto do casamento
+# na mesma linha, porque o require usa re.S e `.` cruzaria linhas.
+CHAMADA_WP = r'^\s*(?:cli|"\$php_bin")[^\n]*'
 
 smoke_executable = executavel(production_smoke_step)
 

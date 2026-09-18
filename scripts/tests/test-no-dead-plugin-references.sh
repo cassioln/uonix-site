@@ -154,7 +154,7 @@ varrer_lista() {
     # (devolve 123 para qualquer 1..125), então o stderr é o sinal utilizável.
     : > "$UONIX_ERROS_FILE"
     achados="$(
-      xargs -0 grep -niIE -- "$termo" /dev/null < "$lista" 2>"$UONIX_ERROS_FILE" \
+      LC_ALL=C xargs -0 grep -niIE -- "$termo" /dev/null < "$lista" 2>"$UONIX_ERROS_FILE" \
         | grep -v "^${SELF_REL}:" || true
     )"
 
@@ -162,7 +162,7 @@ varrer_lista() {
       # Arquivo rastreado que não existe na worktree é o caso comum e benigno: alguém
       # apagou com `rm` em vez de `git rm`. Merece mensagem própria, porque a causa e a
       # ação são outras — não é falha do encanamento da varredura.
-      if ! grep -qv 'No such file or directory' "$UONIX_ERROS_FILE"; then
+      if ! grep -qvE '^grep: .+: No such file or directory$' "$UONIX_ERROS_FILE"; then
         printf 'FAIL: há arquivo rastreado ausente na worktree; a varredura não cobre tudo.\n' >&2
         printf '      Use "git rm" (ou "git checkout --" para restaurar) e rode de novo:\n' >&2
         sed 's/^/      /' "$UONIX_ERROS_FILE" >&2
@@ -237,20 +237,16 @@ command -v git >/dev/null 2>&1 || { printf 'FAIL: git não encontrado.\n' >&2; e
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
   || { printf 'FAIL: não é um repositório Git; o escopo do teste depende de git ls-files.\n' >&2; exit 1; }
 
-# `local/README.md` entra explicitamente porque o resto de `local/` é runtime.
-ALVOS=(
-  mu-plugins
-  themes
-  scripts
-  docs
-  .github
-  local/README.md
-  README.md
-)
-
+# TODOS os arquivos versionados, sem lista de caminhos.
+#
+# A versão anterior enumerava mu-plugins, themes, scripts, docs, .github e dois README.
+# Isso deixava 97 arquivos versionados fora do alcance (.agents/, .hermes/, plugins/,
+# skills-lock.json, .gitignore e o resto de local/) — sem resíduo hoje, verificado, mas
+# um resíduo futuro em plugins/ não seria pego. Uma lista de caminhos é exatamente o
+# tipo de escopo que envelhece calado; o `.gitignore` já faz o recorte que interessa.
 LISTA="$(mktemp "${TMPDIR:-/tmp}/uonix-dead-plugins.XXXXXX")"
 trap 'rm -f "$LISTA" "$UONIX_ERROS_FILE"' EXIT
-git ls-files -z -- "${ALVOS[@]}" > "$LISTA"
+git ls-files -z > "$LISTA"
 
 # Sanidade: lista vazia faria todos os termos "passarem" sem varrer arquivo algum.
 [ -s "$LISTA" ] || { printf 'FAIL: git ls-files não retornou arquivo algum nos alvos.\n' >&2; exit 1; }
@@ -308,7 +304,6 @@ git -C "$FIXTURE_DIR" ls-files -z -- residuos.txt \
 if [ ! -s "$FIXTURE_LISTA" ]; then
   reprova 'não consegui montar o fixture do autoteste; a fase 3 ficaria sem cobertura'
 else
-  UONIX_VARREDURA_ERRO=0
   varrer_lista "$FIXTURE_LISTA" silencioso || true
 
   # A flag de erro é checada ANTES da contagem. Sem isso, uma falha técnica no meio da

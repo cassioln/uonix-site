@@ -455,7 +455,25 @@ uox_cache_security_assert(
  * terceira revisão independente do PR #212, por mutação executada.
  */
 $janela_aviso = uox_cache_flush_throttle_seconds();
-$GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] = time() - ( $janela_aviso - 5 );
+
+/*
+ * O cenário só distingue "restante" de "janela cheia" se a janela for grande o
+ * bastante para os dois valores caírem fora da tolerância. Com janela <= 7 o esperado
+ * (~5) e a janela inteira ficariam ambos dentro da faixa, e a assertiva passaria por
+ * coincidência em vez de por derivação. Falhar aqui é o aviso de que baixar o default
+ * do throttle exige revisitar este cenário.
+ */
+uox_cache_security_assert(
+	$janela_aviso > 7,
+	sprintf(
+		'a janela do throttle (%ds) ficou pequena demais para este cenário distinguir o '
+			. 'tempo restante da janela cheia; ajuste o cenário junto com o default',
+		$janela_aviso
+	)
+);
+
+$restante_esperado = 5;
+$GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] = time() - ( $janela_aviso - $restante_esperado );
 $_GET  = array( 'uonix_cache_flushed' => 'aguarde' );
 $_POST = array();
 ob_start();
@@ -471,11 +489,12 @@ uox_cache_security_assert(
 		. 'não recebe explicação nenhuma de por que a limpeza não aconteceu'
 );
 uox_cache_security_assert(
-	$segundos_no_aviso >= 3 && $segundos_no_aviso <= 7,
+	abs( $segundos_no_aviso - $restante_esperado ) <= 2,
 	sprintf(
-		'com %ds de %ds decorridos o aviso deve exibir ~5s, não a janela cheia; exibiu: %d',
-		$janela_aviso - 5,
+		'com %ds de %ds decorridos o aviso deve exibir ~%ds, não a janela cheia; exibiu: %d',
+		$janela_aviso - $restante_esperado,
 		$janela_aviso,
+		$restante_esperado,
 		$segundos_no_aviso
 	)
 );
