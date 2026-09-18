@@ -1,11 +1,11 @@
 ---
 name: lgpd-site-mapping-and-policies
-description: Mapeia fluxos de dados do site (formulários, cookies, storage, scripts de terceiros) e gera/atualiza as políticas legais obrigatórias (Privacidade, Cookies, Termos de Uso, Avisos de Consentimento e RoPA) em conformidade com a LGPD (Lei 13.709/2018) e orientações da ANPD, trabalhando em conjunto com a skill lgpd-brasil.
+description: Mapeia fluxos de dados do site (formulários, cookies, storage, scripts de terceiros) e gera/atualiza as políticas legais obrigatórias (Privacidade, Cookies, Termos de Uso, Avisos de Consentimento e RoPA) em conformidade com a LGPD (Lei 13.709/2018) e orientações da ANPD.
 ---
 
 # LGPD: Mapeamento de Site e Elaboração de Políticas
 
-Esta skill é a camada **técnico-operacional** complementar à skill `lgpd-brasil` (que provê a fundamentação jurídica e legal da Lei 13.709/2018). Enquanto a `lgpd-brasil` orienta sobre as regras da lei, esta skill orienta sobre **como auditar o código do site, levantar o inventário de dados (RoPA) e redigir/atualizar as políticas públicas e avisos de consentimento**.
+Esta skill é a camada **técnico-operacional** da conformidade com a LGPD. Orienta sobre **como auditar o código do site, levantar o inventário de dados (RoPA), redigir/atualizar as políticas legais obrigatórias (Privacidade, Cookies, Termos de Uso) e avisos de consentimento em conformidade com a Lei 13.709/2018 e orientações da ANPD**.
 
 ---
 
@@ -28,11 +28,12 @@ Ative esta skill quando você ou o usuário precisarem:
 
 ---
 
-## Relação com a Skill `lgpd-brasil`
+## Fundamentação Jurídica
 
-Sempre trabalhe em sinergia com a skill `lgpd-brasil`:
-- **`lgpd-brasil` (O Direito):** Define os princípios (Art. 6º), as 10 bases legais para dados pessoais (Art. 7º), as hipóteses para dados sensíveis (Art. 11), os requisitos do consentimento (Art. 8º) e os direitos do titular (Art. 18).
-- **`lgpd-site-mapping-and-policies` (A Operação):** Varre o código, identifica os campos dos formulários e tecnologias ativas, cruza cada campo com a base legal apropriada da LGPD e produz os textos claros, transparentes e acessíveis que vão para o ar.
+Esta skill aplica os conceitos da Lei 13.709/2018 (LGPD) e orientações da ANPD:
+- **Princípios da LGPD (Art. 6º):** Legalidade, finalidade, adequação, necessidade, livre acesso, qualidade, transparência, segurança, prevenção, não-discriminação e accountability.
+- **Bases Legais (Art. 7º e 11):** Consentimento, execução de contrato, cumprimento de obrigação legal, legítimo interesse, prevenção à fraude, dados sensíveis.
+- **Direitos do Titular (Art. 18):** Confirmação, acesso, correção, anonimização, bloqueio, eliminação, portabilidade, revogação de consentimento, oposição.
 
 ---
 
