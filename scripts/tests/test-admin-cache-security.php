@@ -258,18 +258,68 @@ uox_cache_security_assert(
 	'o TTL do lock deve ser exatamente a janela de uox_cache_flush_throttle_seconds()'
 );
 
-// O valor guardado é o INSTANTE da purga, não um booleano: é o que permite informar
-// o tempo restante em vez de repetir a janela inteira.
+/*
+ * O valor guardado tem de ser o INSTANTE da purga, e a assertiva precisa provar isso.
+ *
+ * `is_int( $v ) && $v > 0` é satisfeito pelo literal 1 — o valor legado. Com 1, o
+ * clamp de uox_cache_flush_remaining_seconds() absorve o resultado negativo e o aviso
+ * imprime "Aguarde 1 segundo(s)" quando ainda faltam 60. Comparar com time() é o que
+ * distingue timestamp de booleano. Achado pela revisão independente do PR #212, por
+ * mutação executada.
+ */
+$valor_lock = $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'];
+
 uox_cache_security_assert(
-	is_int( $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] )
-		&& $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] > 0,
-	'o lock deve guardar o timestamp da purga, para o aviso mostrar o tempo restante'
+	is_int( $valor_lock ) && abs( $valor_lock - time() ) <= 2,
+	'o lock deve guardar o TIMESTAMP da purga (≈ time()), não um booleano: com valor 1 o '
+		. 'aviso diz "aguarde 1 segundo" enquanto a janela inteira ainda corre'
 );
+
+/*
+ * E o tempo restante precisa ser exercitado numa janela PARCIALMENTE decorrida.
+ *
+ * O cenário acima grava time() e mede no mesmo segundo, então restante == janela por
+ * construção — e um `return $janela;` no topo da função (o comportamento antigo, que
+ * imprimia sempre a janela cheia) passaria pelo range check. Aqui a janela é envelhecida
+ * à mão para que só a derivação real satisfaça a assertiva.
+ */
+$janela = uox_cache_flush_throttle_seconds();
+$decorridos = $janela - 5;
+$GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] = time() - $decorridos;
+$restante_parcial = uox_cache_flush_remaining_seconds();
+
 uox_cache_security_assert(
-	uox_cache_flush_remaining_seconds() >= 1
-		&& uox_cache_flush_remaining_seconds() <= uox_cache_flush_throttle_seconds(),
-	'o tempo restante deve ficar entre 1 e a janela completa, nunca 0 nem maior que a janela'
+	$restante_parcial >= 3 && $restante_parcial <= 7,
+	sprintf(
+		'com %ds de %ds já decorridos o restante deve ser ~5s, não a janela cheia; obtido: %ds',
+		$decorridos,
+		$janela,
+		$restante_parcial
+	)
 );
+
+// Janela vencida: o clamp evita 0 e negativo, porque o aviso só aparece quando a purga
+// FOI recusada e "aguarde 0 segundos" contradiria a recusa.
+$GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] = time() - ( $janela * 2 );
+uox_cache_security_assert(
+	1 === uox_cache_flush_remaining_seconds(),
+	'com a janela já vencida o restante deve ser clampado em 1, nunca 0 nem negativo'
+);
+
+// Transient ausente ou com valor não numérico: devolve a janela inteira, sem warning.
+unset( $GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] );
+uox_cache_security_assert(
+	$janela === uox_cache_flush_remaining_seconds(),
+	'sem lock registrado o restante deve ser a janela inteira'
+);
+$GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] = 'lixo';
+uox_cache_security_assert(
+	$janela === uox_cache_flush_remaining_seconds(),
+	'com valor não numérico no lock o restante deve cair na janela inteira'
+);
+
+// Restaura o estado que os cenários seguintes esperam.
+$GLOBALS['uox_test_transients']['uonix_cache_flush_lock'] = $valor_lock;
 
 $nonce_checks_antes_do_throttle = $GLOBALS['uox_test_nonce_checks'];
 $GLOBALS['uox_test_redirect'] = '';

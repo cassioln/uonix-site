@@ -108,6 +108,7 @@ NEGATIVOS=(
 
 falhas=0
 UONIX_ACHADOS_TERMOS=0
+UONIX_VARREDURA_ERRO=0
 
 reprova() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -136,10 +137,26 @@ varrer_lista() {
     # `/dev/null` extra força o grep a prefixar o nome do arquivo mesmo quando o
     # xargs entrega um único caminho. `|| true`: grep sai 1 quando não encontra
     # nada, que é o caso de sucesso na varredura real.
+    #
+    # O stderr é CAPTURADO em vez de descartado. Com `2>/dev/null`, uma falha real de
+    # grep ou xargs (arquivo ilegível, limite de argumentos, binário ausente) chegava
+    # aqui indistinguível de "nada encontrado" — a mesma classe de verde-sem-trabalho
+    # que este teste existe para impedir. O xargs mascara o código de saída do grep
+    # (devolve 123 para qualquer 1..125), então o stderr é o sinal utilizável.
+    erros="$(mktemp "${TMPDIR:-/tmp}/uonix-varredura-erros.XXXXXX")"
     achados="$(
-      xargs -0 grep -niIE -- "$termo" /dev/null < "$lista" 2>/dev/null \
+      xargs -0 grep -niIE -- "$termo" /dev/null < "$lista" 2>"$erros" \
         | grep -v "^${SELF_REL}:" || true
     )"
+
+    if [ -s "$erros" ]; then
+      printf 'FAIL: a varredura do termo <%s> emitiu erro; o resultado não é confiável:\n' "$termo" >&2
+      cat "$erros" >&2
+      rm -f "$erros"
+      UONIX_VARREDURA_ERRO=1
+      return 1
+    fi
+    rm -f "$erros"
 
     if [ -n "$achados" ]; then
       UONIX_ACHADOS_TERMOS=$((UONIX_ACHADOS_TERMOS + 1))
@@ -222,8 +239,14 @@ git ls-files -z -- "${ALVOS[@]}" > "$LISTA"
 # Sanidade: lista vazia faria todos os termos "passarem" sem varrer arquivo algum.
 [ -s "$LISTA" ] || { printf 'FAIL: git ls-files não retornou arquivo algum nos alvos.\n' >&2; exit 1; }
 
-varrer_lista "$LISTA"
+varrer_lista "$LISTA" || true
 falhas=$((falhas + UONIX_ACHADOS_TERMOS))
+
+# Erro de encanamento não é "nada encontrado": aborta em vez de reportar limpo.
+if [ "$UONIX_VARREDURA_ERRO" -ne 0 ]; then
+  printf '\nFALHOU: a varredura falhou tecnicamente; não é possível afirmar ausência.\n' >&2
+  exit 1
+fi
 
 if [ "$falhas" -ne 0 ]; then
   printf '\n%d termo(s) proibido(s) encontrado(s). Se um destes plugins voltar a ser\n' "$falhas" >&2
@@ -269,7 +292,7 @@ git -C "$FIXTURE_DIR" ls-files -z -- residuos.txt \
 if [ ! -s "$FIXTURE_LISTA" ]; then
   reprova 'não consegui montar o fixture do autoteste; a fase 3 ficaria sem cobertura'
 else
-  varrer_lista "$FIXTURE_LISTA" silencioso
+  varrer_lista "$FIXTURE_LISTA" silencioso || true
 
   if [ "$UONIX_ACHADOS_TERMOS" -ne "${#TERMOS[@]}" ]; then
     reprova "a varredura encontrou ${UONIX_ACHADOS_TERMOS} de ${#TERMOS[@]} termos num fixture \

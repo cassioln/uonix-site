@@ -138,14 +138,22 @@ smoke_executable = '\n'.join(
     line for line in production_smoke_step.splitlines()
     if line.strip() and not line.lstrip().startswith('#')
 )
+# As assertivas ancoram em `"$wp_bin"` de propósito, e `[^\n]*` mantém o casamento na
+# MESMA linha (o require usa re.S, então `.` cruzaria linhas).
+#
+# Sem a âncora, o padrão `cache flush` casava o RÓTULO `check 'wp cache flush'` em vez
+# do comando: apagar a chamada e deixar o rótulo mantinha o teste verde. Medido pela
+# revisão independente do PR #212, por mutação executada. Um teste satisfeito pelo
+# texto do log, e não pela chamada, é a mesma classe de verde-sem-trabalho que este
+# PR combate.
 require(
     smoke_executable,
-    r'cache flush',
-    'smoke precisa limpar o cache de objeto',
+    r'"\$wp_bin"[^\n]*cache flush',
+    'smoke precisa EXECUTAR a limpeza do cache de objeto, não apenas rotulá-la',
 )
 require(
     smoke_executable,
-    r'function_exists\(\s*"wp_cache_clear_cache"\s*\)',
+    r'"\$wp_bin"[^\n]*function_exists\(\s*"wp_cache_clear_cache"\s*\)',
     'smoke precisa purgar o cache de PÁGINA além do de objeto: sem isso o deploy '
     'publica código novo e o site continua servindo o HTML anterior',
 )
@@ -176,12 +184,12 @@ rollback_executable = '\n'.join(
 )
 require(
     rollback_executable,
-    r'cache flush',
-    'rollback precisa limpar o cache de objeto',
+    r'"\$wp_bin"[^\n]*cache flush',
+    'rollback precisa EXECUTAR a limpeza do cache de objeto, não apenas rotulá-la',
 )
 require(
     rollback_executable,
-    r'function_exists\(\s*"wp_cache_clear_cache"\s*\)',
+    r'"\$wp_bin"[^\n]*function_exists\(\s*"wp_cache_clear_cache"\s*\)',
     'rollback precisa purgar o cache de PÁGINA como o smoke: sem isso ele restaura o '
     'código anterior e deixa o cache servindo o HTML do código revertido',
 )

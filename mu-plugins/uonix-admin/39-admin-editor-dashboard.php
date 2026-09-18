@@ -1099,8 +1099,10 @@ if ( ! function_exists( 'uox_cache_flush_remaining_seconds' ) ) {
      * O transient guarda o instante da última purga, então o restante é derivado —
      * nunca a janela inteira, que faria quem esperou 55s ler "aguarde 60 segundos".
      *
-     * Nunca devolve 0: o aviso só aparece quando a purga FOI recusada, e "aguarde 0
-     * segundos" contradiria a recusa.
+     * Com o throttle ativo nunca devolve 0: o aviso só aparece quando a purga FOI
+     * recusada, e "aguarde 0 segundos" contradiria a recusa. Devolve 0 apenas quando o
+     * throttle está DESLIGADO (janela 0) — situação em que o handler nunca redireciona
+     * para o estado "aguarde", e o renderer não imprime o aviso.
      *
      * @return int
      */
@@ -1198,7 +1200,10 @@ function uox_render_manutencao_cache() {
 
     if ( '1' === $flush_state ) {
         echo '<div class="notice notice-success is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>A memória cache do site foi totalmente limpa e atualizada!</p></div>';
-    } elseif ( 'aguarde' === $flush_state ) {
+    } elseif ( 'aguarde' === $flush_state && uox_cache_flush_throttle_seconds() > 0 ) {
+        // A guarda da janela > 0 evita "Aguarde 0 segundo(s)": com o throttle desligado
+        // o handler nunca redireciona para este estado, então só se chega aqui por URL
+        // obsoleta ou montada à mão.
         // Aviso explícito, não silêncio: o editor precisa saber que NÃO limpou
         // agora, e por quê. Um "sucesso" aqui reproduziria o defeito original.
         //
