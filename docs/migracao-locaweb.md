@@ -156,13 +156,6 @@ Descobertas em operação; economizam horas de diagnóstico.
   use `token_get_all($src, TOKEN_PARSE)` via `wp eval`, ou um container PHP local.
 - **Servidor em UTC-03.** Datas de arquivo (`ls -la`) não batem com timestamps UTC do
   GitHub Actions. Converta antes de concluir que algo não foi escrito.
-- **SpeedyCache serve página estática.** Alterações de banco ou de código não
-  aparecem no HTML até limpar:
-  ```bash
-  find wp-content/cache/speedycache -mindepth 1 -delete
-  wp cache flush
-  ```
-  Já causou diagnóstico errado: o banco mudava e o HTML não.
 - **Caminhos:** document root em
   `/home/storage/f/34/12/siteuonix1/public_html`; `wp-cli` em
   `/home/storage/f/34/12/siteuonix1/bin/wp-cli.phar`; PHP em `/usr/bin/php85`.
@@ -200,10 +193,11 @@ o bug se espalhou. A correção precisa ser feita em cada ambiente, não propaga
 `protected_options_where()` (`scripts/clone-environment.sh:317`) e o guarda
 `scripts/tests/test-clone-path-bound-options.sh` impede regressão — ao incluir nova
 opção que guarde caminho de disco, some-a à lista `path_bound_options` do teste.
-Antes disso a lista protegia `admin_email`, `active_plugins`, `cron`, `backuply`,
-`ai1wm`, `compressx`, `fluentform`, `mailchimp`, `smtp`, `loginizer`, `speedycache`,
-`turnstile`, `captcha`, `wp_mail_logging` e `wpvivid`, mas nenhuma opção com caminho
-de disco — e nenhum dos 14 testes de clone cobria essa classe.
+Antes disso a lista já protegia e-mail do admin, plugins ativos, cron, migração e
+backup, CompressX, Fluent Forms, Mailchimp, SMTP, Turnstile, captcha e logging de
+e-mail — mas nenhuma opção com caminho de disco, e nenhum dos 14 testes de clone
+cobria essa classe. A lista vigente é a de `protected_options_where()`; consulte-a
+no código em vez de reproduzi-la aqui.
 
 Verificação rápida:
 
@@ -253,8 +247,8 @@ curl -sI https://site.uonix.com.br/ | grep -i x-robots-tag
 
 > **Verifique a URL limpa, nunca só com `?query`.** Um plugin de cache de página
 > serve HTML estático antes de o PHP executar, então o header emitido pelo
-> mu-plugin desaparece exatamente na URL que os buscadores visitam. Em
-> 2026-08-03 o SpeedyCache produziu esse efeito em produção: com `?query` o
+> mu-plugin desaparece exatamente na URL que os buscadores visitam. Medido em
+> produção em 2026-08-03, com o cache de página então ativo: com `?query` o
 > header saía, sem query não. Regra de verificação: sempre medir a URL sem
 > query e com `-A Googlebot`.
 
@@ -275,7 +269,7 @@ Descoberto em 2026-08-03, depois de aplicar o bloco em QA e o header não aparec
 
 | Camada | Onde | Como invalidar |
 | --- | --- | --- |
-| ~~SpeedyCache~~ | ~~`wp-content/cache/speedycache`~~ | **EXTINTO** — plugin removido de produção. WP Rocket também foi removido em 2026-08-15. Nenhum cache de página ativo hoje; a única camada é `pods-alternative-cache` (cache de objeto do Pods). |
+| cache de página no servidor | `wp-content/cache/` | conforme o plugin em uso; confira qual está ativo antes de concluir que a origem não mudou |
 | Cloudflare (borda) | fora do servidor | purga na conta, ou esperar expirar |
 | navegador/CDN cliente | — | `?query` para bypass |
 

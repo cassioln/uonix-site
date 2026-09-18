@@ -1,6 +1,6 @@
 <?php
 /**
- * Bloqueia XML-RPC e pingbacks sem depender do Loginizer Pro.
+ * Bloqueia XML-RPC e pingbacks no próprio código do site.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {

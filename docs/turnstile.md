@@ -1,7 +1,7 @@
 # Cloudflare Turnstile
 
 Os formulários protegidos da Uonix usam o módulo `mu-plugins/uonix-integrations/34-turnstile-custom-forms.php`.
-Essa proteção não depende do Loginizer Pro.
+Essa proteção é do próprio site e não depende de plugin de terceiro.
 
 ## Ambientes
 

@@ -8,7 +8,8 @@
  *    - margin-top é estritamente 0 !important;
  *    - height é calc(100dvh - 60px) !important;
  *    - Prova matemática de ausência de overflow: 60px + 0px + (100dvh - 60px) = 100dvh.
- * 2. Ausência de chamadas órfãs do LiteSpeed Cache em 39-admin-editor-dashboard.php.
+ * 2. Contratos de presença em 39-admin-editor-dashboard.php: limpeza de cache de
+ *    objeto, atalhos do Acesso Rápido e cards de altura dinâmica.
  */
 
 declare(strict_types=1);
@@ -72,26 +73,17 @@ test_assert(
 );
 echo "ok   Prova de geometria: bottom final = {$bottom_rendered}px em viewport de {$viewport_mock}px (overflow = 0px)\n";
 
-// 2. Validação da remoção do LiteSpeed em 39-admin-editor-dashboard.php
+// 2. Contratos de presença em 39-admin-editor-dashboard.php
 $admin_file = $repo_root . '/mu-plugins/uonix-admin/39-admin-editor-dashboard.php';
 test_assert(file_exists($admin_file), "Arquivo admin não encontrado: {$admin_file}");
 $admin_content = file_get_contents($admin_file);
 
-test_assert(
-    strpos($admin_content, 'LiteSpeed_Cache_API') === false,
-    '39-admin-editor-dashboard.php: Não deve conter referências órfãs a LiteSpeed_Cache_API'
-);
-test_assert(
-    strpos($admin_content, 'litespeed_purge_all') === false,
-    '39-admin-editor-dashboard.php: Não deve conter referências órfãs a litespeed_purge_all'
-);
+// A ausência de chamadas a plugins descontinuados é verificada no repositório
+// inteiro por scripts/tests/test-no-dead-plugin-references.sh, que cobre este
+// arquivo junto com todos os outros. Aqui ficam apenas os contratos de PRESENÇA.
 test_assert(
     strpos($admin_content, 'wp_cache_flush') !== false,
     '39-admin-editor-dashboard.php: Deve manter wp_cache_flush para limpeza de cache de objeto'
-);
-test_assert(
-    strpos($admin_content, 'rocket_clean_domain') !== false,
-    '39-admin-editor-dashboard.php: Deve manter rocket_clean_domain para WP Rocket'
 );
 test_assert(
     strpos($admin_content, 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags') !== false,
@@ -113,6 +105,6 @@ test_assert(
     strpos($admin_content, 'Meta Pixel Ativo') !== false,
     '39-admin-editor-dashboard.php: Deve conter badge do Meta Pixel Ativo no bloco de tráfego'
 );
-echo "ok   39-admin-editor-dashboard.php: Atalhos AdOpt, Leads e Meta Pixel, cards dinâmicos sem min-height fixo, chamadas órfãs eliminadas\n";
+echo "ok   39-admin-editor-dashboard.php: Atalhos AdOpt, Leads e Meta Pixel, cards dinâmicos sem min-height fixo, cache de objeto preservado\n";
 
 echo "\nPASS: Todos os contratos de geometria mobile, cache e cards dinâmicos foram aprovados com sucesso!\n";

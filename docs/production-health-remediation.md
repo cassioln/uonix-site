@@ -93,7 +93,7 @@ A causa local confirmada era uma ação administrativa mutante acessível por qu
   - rejeita qualquer `REQUEST_METHOD` diferente de POST antes de autorização, nonce e efeitos colaterais;
   - exige `current_user_can( 'edit_posts' )`;
   - valida `check_admin_referer( 'uonix_flush_cache' )`;
-  - executa `wp_cache_flush()` e `rocket_clean_domain()` somente se existir;
+  - executa `wp_cache_flush()`;
   - usa `wp_safe_redirect()` com `uonix_cache_flushed=1`;
   - substitui o link por formulário POST com action oculta e nonce;
   - renderer não executa mutação.
