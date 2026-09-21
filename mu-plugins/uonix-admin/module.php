@@ -21,6 +21,7 @@ uonix_mu_require_files(
 		'48-admin-clone-ambientes.php',
 		'51-login-turnstile.php',
 		'53-admin-analytics-metrics.php',
+		'55-admin-intelligence-metrics.php',
 		'52-admin-analytics-dashboard.php',
 	),
 	'uonix-admin'

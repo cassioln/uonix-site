@@ -115,6 +115,12 @@ if ( function_exists( 'uonix_analytics_metrics_periods' ) ) {
 
 if ( function_exists( 'uonix_analytics_metrics_get_snapshot' ) ) {
 	$GLOBALS['uonix_metrics_options'] = array(
+		'uonix_analytics_metrics_snapshot_v3_7' => array(
+			'version' => 3,
+			'period_days' => 7,
+			'status' => 'updated',
+			'updated_at' => '2026-09-14T00:00:00+00:00',
+		),
 		'uonix_analytics_metrics_snapshot_v2_7' => array(
 			'version' => 2,
 			'period_days' => 7,
@@ -128,8 +134,14 @@ if ( function_exists( 'uonix_analytics_metrics_get_snapshot' ) ) {
 		),
 	);
 	$seven_day_snapshot = uonix_analytics_metrics_get_snapshot( 7 );
-	$legacy_snapshot = uonix_analytics_metrics_get_snapshot( 30 );
 	uonix_metrics_assert( is_array( $seven_day_snapshot ) && isset( $seven_day_snapshot['period_days'] ) && 7 === $seven_day_snapshot['period_days'], 'Snapshot de 7 dias usa chave própria' );
+	uonix_metrics_assert( is_array( $seven_day_snapshot ) && 3 === $seven_day_snapshot['version'], 'Snapshot v3 tem precedência sobre v2 no mesmo período' );
+
+	unset( $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_snapshot_v3_7'] );
+	$fallback_snapshot = uonix_analytics_metrics_get_snapshot( 7 );
+	uonix_metrics_assert( is_array( $fallback_snapshot ) && 2 === $fallback_snapshot['version'] && 7 === $fallback_snapshot['period_days'], 'Ausência de v3 cai para v2 do mesmo período' );
+
+	$legacy_snapshot = uonix_analytics_metrics_get_snapshot( 30 );
 	uonix_metrics_assert( is_array( $legacy_snapshot ) && 1 === $legacy_snapshot['version'], 'Snapshot legado é fallback somente de 30 dias' );
 	uonix_metrics_assert( false === uonix_analytics_metrics_get_snapshot( 90 ), 'Período sem cache não herda snapshot de 30 dias' );
 	$GLOBALS['uonix_metrics_options'] = array();
@@ -428,6 +440,27 @@ if ( function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 	uonix_metrics_assert( 1 === count( $gsc['queries'] ) && 'linha de vida' === $gsc['queries'][0]['query'], 'Normalizador Search Console remove consultas potencialmente pessoais' );
 	uonix_metrics_assert( '/servicos/' === $gsc['pages'][0]['page'], 'Normalizador Search Console remove domínio e query da página' );
 	uonix_metrics_assert( is_wp_error( uonix_analytics_metrics_normalize_search_console( array( 'summary_current' => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5 ), 'summary_previous' => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ) ) ) ), 'Search Console falha fechado quando métrica obrigatória está ausente' );
+
+	$many_queries = array();
+	for ( $i = 1; $i <= 12; ++$i ) {
+		$many_queries[] = array( 'query' => 'consulta ' . $i, 'clicks' => 1, 'impressions' => 100 + $i, 'ctr' => .01, 'position' => 5 );
+	}
+	// Linha com PII no meio do universo ampliado: a sanitização é por linha, então
+	// precisa derrubar igual, esteja a linha entre as 10 exibidas ou no fim das mil.
+	array_splice( $many_queries, 3, 0, array( array( 'query' => 'orcamento cliente@example.test', 'clicks' => 9, 'impressions' => 999, 'ctr' => .01, 'position' => 5 ) ) );
+	$gsc_many = uonix_analytics_metrics_normalize_search_console(
+		array(
+			'summary_current' => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ),
+			'summary_previous' => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ),
+			'queries' => $many_queries,
+			'pages' => array(),
+		)
+	);
+	uonix_metrics_assert( is_array( $gsc_many ) && 10 === count( $gsc_many['queries'] ), 'Lista de exibição do Search Console continua limitada a 10 consultas' );
+	uonix_metrics_assert( is_array( $gsc_many ) && 12 === count( $gsc_many['queries_extended'] ), 'Universo de mineração preserva as consultas válidas além das 10 exibidas' );
+	uonix_metrics_assert( is_array( $gsc_many ) && $gsc_many['queries'] === array_slice( $gsc_many['queries_extended'], 0, 10 ), 'Lista de exibição é prefixo do universo de mineração' );
+	$extended_terms = implode( ' ', array_column( $gsc_many['queries_extended'], 'query' ) );
+	uonix_metrics_assert( false === strpos( $extended_terms, '@' ), 'Universo ampliado aplica a mesma remoção de PII da lista curta' );
 }
 
 if ( function_exists( 'uonix_analytics_metrics_sync' ) ) {
@@ -439,7 +472,8 @@ if ( function_exists( 'uonix_analytics_metrics_sync' ) ) {
 		);
 	};
 	$sync = uonix_analytics_metrics_sync( $fixture_fetcher, $test_config );
-	uonix_metrics_assert( is_array( $sync ) && 2 === $sync['version'] && 30 === $sync['period_days'] && 'updated' === $sync['status'] && 3.0 === $sync['ga4']['summary']['active_users']['current'], 'Sincronização armazena snapshot agregado de 30 dias com transport injetado' );
+	uonix_metrics_assert( is_array( $sync ) && 3 === $sync['version'] && 30 === $sync['period_days'] && 'updated' === $sync['status'] && 3.0 === $sync['ga4']['summary']['active_users']['current'], 'Sincronização armazena snapshot agregado de 30 dias com transport injetado' );
+	uonix_metrics_assert( is_array( $sync ) && isset( $sync['search_console']['queries_extended'] ) && is_array( $sync['search_console']['queries_extended'] ), 'Snapshot v3 persiste o universo de mineração de consultas' );
 	$stale = uonix_analytics_metrics_sync( static function () { throw new RuntimeException( 'transport failure' ); }, $test_config );
 	uonix_metrics_assert( is_array( $stale ) && 'stale' === $stale['status'] && 3.0 === $stale['ga4']['summary']['active_users']['current'], 'Falha posterior preserva último snapshot como desatualizado' );
 	$secret_error = uonix_analytics_metrics_sync( static function () { throw new RuntimeException( 'token email@example.test secret-marker' ); }, $test_config );
@@ -463,7 +497,7 @@ if ( function_exists( 'uonix_analytics_metrics_sync' ) ) {
 	$ninety_sync = uonix_analytics_metrics_sync( $fixture_fetcher, $test_config, 90 );
 	uonix_metrics_assert( 7 === $seven_sync['period_days'] && 90 === $ninety_sync['period_days'], 'Sincronização persiste o período selecionado' );
 	uonix_metrics_assert( $seven_sync['periods'] !== $ninety_sync['periods'], 'Snapshots usam intervalos diferentes por período' );
-	uonix_metrics_assert( isset( $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_snapshot_v2_7'], $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_snapshot_v2_90'] ), 'Snapshots de 7 e 90 dias usam opções distintas' );
+	uonix_metrics_assert( isset( $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_snapshot_v3_7'], $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_snapshot_v3_90'] ), 'Snapshots de 7 e 90 dias usam opções distintas' );
 
 	$seven_stale = uonix_analytics_metrics_sync( static function () { throw new RuntimeException( 'transport failure' ); }, $test_config, 7 );
 	uonix_metrics_assert( 'stale' === $seven_stale['status'], 'Falha marca somente o período solicitado como stale' );
