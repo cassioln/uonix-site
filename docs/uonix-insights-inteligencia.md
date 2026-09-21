@@ -25,11 +25,13 @@ Specs que governam código pertencem a `docs/`, versionadas e revisadas.
 | Concorrência | `53:619` | Lock por `add_option`, reivindicado após 600s |
 | Sync agendada | `53:655-663` | WP-Cron `daily`, mais refresh manual via `admin_post` |
 | Write-path autenticado | `53:736-748` | `admin-post` + `check_admin_referer` + `current_user_can('manage_options')` |
-| Guard de e-mail por ambiente | `mu-plugins/uonix-integrations/49-email-environment-label.php:172-207` | Rotula assunto em QA/DEV/LOCAL e **bloqueia envio** sem `UONIX_NONPROD_EMAIL_TO` |
+| Guard de e-mail por ambiente | `mu-plugins/uonix-integrations/49-email-environment-label.php:58-66` e `:172-208` | Rotula o assunto em QA, DEV e LOCAL; **bloqueia o envio apenas em QA e DEV** quando `UONIX_NONPROD_EMAIL_TO` está ausente. Em LOCAL **não há bloqueio** — o e-mail é enviado, e a contenção é o Mailpit do ambiente |
 | Atribuição de origem | `mu-plugins/uonix-integrations/39-rastreamento-utm-atribuicao.php` | Captura gated por consentimento de marketing AdOpt; grava meta `_uonix_*` no pedido WooCommerce |
 | Templates de e-mail HTML | `themes/kadence-child/woocommerce/emails/` | Padrão RFQ, com helper de imagem em `mu-plugins/uonix-woocommerce/29-rfq-email-imagens-produtos.php` |
 
-Identificadores de propriedade GA4 e de site do Search Console estão pinados em `53-admin-analytics-metrics.php` e revalidados em runtime; não são configuráveis por UI e não se repetem aqui.
+Os identificadores de propriedade GA4 e de site do Search Console estão **hardcoded como default de parâmetro** em `53-admin-analytics-metrics.php:20`, ou seja, em arquivo versionado. Isso **contradiz** [ambientes.md](ambientes.md), que determina que IDs de analytics fiquem fora do Git.
+
+Este documento **registra o desvio, não o legitima**. A correção é rastreada em issue própria. Enquanto ela não ocorrer, nenhum código novo pode repetir o padrão: identificador de plataforma novo entra por constante no `wp-config.php`, como já ocorre com o caminho da chave da service account.
 
 ## Correções à especificação original
 
@@ -39,7 +41,7 @@ A issue #193 descreve o produto corretamente e o repositório incorretamente. As
 |---|---|
 | Credenciais vêm do `.env` | **PHP não lê `.env`**: zero `getenv()`, `$_ENV`, `parse_ini_file` ou Dotenv em `mu-plugins/`, `themes/`, `plugins/`. O único leitor do `.env` é Bash (`scripts/lib/environment-map.sh`) |
 | Token de desenvolvedor do Google Ads disponível | Não existe no repositório. Não há uma linha de código de Google Ads API |
-| "Metadados CAPI no banco"; auditoria de EMQ | **Meta CAPI não existe** (zero chamadas a `graph.facebook.com`). Sem CAPI não há EMQ para medir. O Pixel é client-side via GTM |
+| "Metadados CAPI no banco"; auditoria de EMQ | **Meta CAPI não está implementado**: nenhuma chamada a `graph.facebook.com` em código executável (`mu-plugins/`, `themes/`, `scripts/`); as ocorrências no repositório estão em documentação de skill. Sem CAPI não há EMQ para medir. O Pixel é client-side via GTM |
 | "Transients de 12 horas já existentes no Uônix Insights" | **Zero transients no Insights.** O padrão é snapshot em `wp_options` com frescor de 24h e lock |
 | `scripts/cron/send-weekly-executive-report.php` | `scripts/cron/` não existe; nenhum cronjob de servidor documentado; nenhum workflow com `schedule:` |
 | `page=uonix-insights`, submenu `> Central de Inteligência` | Slug é `uonix-analytics`, menu top-level sem submenus |
@@ -88,13 +90,13 @@ Lista em `wp_options`. E-mail de destinatário não é segredo; token de API é 
 
 - **Escrita**: `admin-post` + `check_admin_referer` + `current_user_can('manage_options')`, espelhando `53:736-748`.
 - **Leitura e visualização**: `edit_posts`, como o resto do Insights.
-- **Anti-padrão a não replicar**: `mu-plugins/uonix-admin/40-admin-dados-globais-rfq.php:39-45` grava `$_POST` cru, sem nonce e sem re-checagem de capability.
+- **Anti-padrão a não replicar**: `mu-plugins/uonix-admin/40-admin-dados-globais-rfq.php:39-43` grava sem nonce e sem re-checagem de capability, e — o defeito mais grave — **o nome da option vem de input do usuário** (`update_option( 'uox_' . $chave, … )`) sem allowlist de chave. Os valores passam por `sanitize_text_field()`, então o problema **não** é falta de sanitização: é ausência de verificação de intenção e de allowlist. Rastreado em issue própria.
 
 ### Agendamento
 
-WP-Cron `weekly`. O painel exibe o **próximo disparo real** (`wp_next_scheduled`), e o texto ao usuário diz "semanal, às segundas pela manhã".
+WP-Cron `weekly`. O painel exibe o **próximo disparo real** lido do agendador (`wp_next_scheduled`) e o horário do último envio. O texto ao usuário declara apenas a **frequência** — "semanal" — sem horário e **sem período do dia**.
 
-É proibido prometer horário exato na interface ou no e-mail: WP-Cron dispara por tráfego, não por relógio, e o site não tem cronjob de servidor. Prometer "08:00" e entregar deriva de horas é dano de credibilidade com o cliente.
+É proibido prometer horário ou período do dia na interface e no e-mail, incluindo formulações brandas como "às segundas pela manhã". WP-Cron dispara por tráfego, não por relógio, e o site não tem cronjob de servidor: a deriva pode atravessar o dia inteiro, o que torna "pela manhã" tão insustentável quanto "08:00". A única afirmação que o sistema consegue provar é a frequência somada ao próximo disparo agendado.
 
 ## Módulo 3 — Oportunidades no Search Console
 
@@ -159,7 +161,7 @@ Implementação obrigatória **antes** do primeiro envio a destinatário externo
 
 ## Validação dos números
 
-O Search Console do domínio de produção só tem dados de produção. Em `local` valida-se lógica e HTML; não se valida se o número está certo. Por isso a validação de números acontece em QA, com o guard de deploy correspondente habilitado e `UONIX_NONPROD_EMAIL_TO` definido no `wp-config.php` daquele ambiente — sem essa constante o envio é bloqueado silenciosamente pelo guard.
+O Search Console do domínio de produção só tem dados de produção. Em `local` valida-se lógica e HTML; não se valida se o número está certo. Por isso a validação de números acontece em QA, com o guard de deploy correspondente habilitado e `UONIX_NONPROD_EMAIL_TO` definido no `wp-config.php` daquele ambiente — sem essa constante o guard bloqueia o envio, registrando em `error_log`, disparando a ação `wp_mail_failed` e exibindo aviso no admin — a falha é observável, mas o relatório não chega.
 
 O primeiro destinatário do relatório é o operador, por semanas, antes de qualquer envio a destinatário externo. Um número errado no primeiro e-mail externo custa mais que o atraso.
 
