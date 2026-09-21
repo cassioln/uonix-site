@@ -191,6 +191,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 		$current  = isset( $data['summary_current'] ) && is_array( $data['summary_current'] ) ? $data['summary_current'] : array();
 		$previous = isset( $data['summary_previous'] ) && is_array( $data['summary_previous'] ) ? $data['summary_previous'] : array();
 		$queries  = array();
+		$queries_extended = array();
 		$pages    = array();
 
 		foreach ( isset( $data['queries'] ) && is_array( $data['queries'] ) ? $data['queries'] : array() as $row ) {
@@ -202,8 +203,14 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 			if ( '' === $query || null === $clicks || null === $impressions || null === $ctr || null === $position ) {
 				continue;
 			}
-			$queries[] = array( 'query' => $query, 'clicks' => $clicks, 'impressions' => $impressions, 'ctr' => $ctr, 'position' => $position );
-			if ( 10 === count( $queries ) ) break;
+			$entry = array( 'query' => $query, 'clicks' => $clicks, 'impressions' => $impressions, 'ctr' => $ctr, 'position' => $position );
+			// `queries` segue sendo a lista curta de exibição, para não alterar o que o
+			// painel já renderiza hoje. `queries_extended` é o universo de mineração.
+			if ( count( $queries ) < 10 ) {
+				$queries[] = $entry;
+			}
+			$queries_extended[] = $entry;
+			if ( count( $queries_extended ) >= uonix_analytics_metrics_extended_query_limit() ) break;
 		}
 		foreach ( isset( $data['pages'] ) && is_array( $data['pages'] ) ? $data['pages'] : array() as $row ) {
 			$page = uonix_analytics_metrics_normalize_path( isset( $row['page'] ) ? $row['page'] : '' );
@@ -231,13 +238,27 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 		);
 		foreach ( $summary as $comparison ) if ( is_wp_error( $comparison ) ) return $comparison;
 
-		return array( 'summary' => $summary, 'queries' => $queries, 'pages' => $pages );
+		return array( 'summary' => $summary, 'queries' => $queries, 'queries_extended' => $queries_extended, 'pages' => $pages );
 	}
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_allowed_period_days' ) ) {
 	function uonix_analytics_metrics_allowed_period_days() {
 		return array( 7, 30, 90, 365 );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_extended_query_limit' ) ) {
+	/**
+	 * Universo de consultas do Search Console persistido para mineração.
+	 *
+	 * O painel exibe apenas as 10 primeiras, mas detectar oportunidades em posição
+	 * 4 a 12 exige um universo muito maior — num universo de 10 a regra não tem o
+	 * que peneirar. Cada linha passa pela mesma sanitização de PII aplicada hoje,
+	 * então ampliar o volume não afrouxa nenhum filtro.
+	 */
+	function uonix_analytics_metrics_extended_query_limit() {
+		return 1000;
 	}
 }
 
@@ -271,15 +292,27 @@ if ( ! function_exists( 'uonix_analytics_metrics_periods' ) ) {
 
 if ( ! function_exists( 'uonix_analytics_metrics_snapshot_option' ) ) {
 	function uonix_analytics_metrics_snapshot_option( $days = 30 ) {
-		return 'uonix_analytics_metrics_snapshot_v2_' . uonix_analytics_metrics_sanitize_period_days( $days );
+		return 'uonix_analytics_metrics_snapshot_v3_' . uonix_analytics_metrics_sanitize_period_days( $days );
 	}
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_get_snapshot' ) ) {
+	/**
+	 * Lê o snapshot da versão corrente e, na ausência dela, cai para as versões
+	 * anteriores em ordem decrescente. O snapshot v2 não possui
+	 * `search_console.queries_extended`; quem consome esse campo precisa tratar a
+	 * ausência como "dado insuficiente", nunca como zero.
+	 */
 	function uonix_analytics_metrics_get_snapshot( $days = 30 ) {
 		$days = uonix_analytics_metrics_sanitize_period_days( $days );
-		$snapshot = function_exists( 'get_option' ) ? get_option( uonix_analytics_metrics_snapshot_option( $days ), false ) : false;
-		if ( ! is_array( $snapshot ) && 30 === $days && function_exists( 'get_option' ) ) {
+		if ( ! function_exists( 'get_option' ) ) {
+			return false;
+		}
+		$snapshot = get_option( uonix_analytics_metrics_snapshot_option( $days ), false );
+		if ( ! is_array( $snapshot ) ) {
+			$snapshot = get_option( 'uonix_analytics_metrics_snapshot_v2_' . $days, false );
+		}
+		if ( ! is_array( $snapshot ) && 30 === $days ) {
 			$snapshot = get_option( 'uonix_analytics_metrics_snapshot_v1', false );
 		}
 		return is_array( $snapshot ) ? $snapshot : false;
@@ -552,8 +585,10 @@ if ( ! function_exists( 'uonix_analytics_metrics_ga4_rows' ) ) {
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
-	function uonix_analytics_metrics_search_console_rows( $access_token, $site_url, $period, $dimension = null ) {
-		$body = array( 'startDate' => $period['start'], 'endDate' => $period['end'], 'rowLimit' => null === $dimension ? 1 : 10 );
+	function uonix_analytics_metrics_search_console_rows( $access_token, $site_url, $period, $dimension = null, $row_limit = 10 ) {
+		// A Search Console API aceita no máximo 25000 linhas por requisição.
+		$row_limit = is_int( $row_limit ) && $row_limit > 0 ? min( $row_limit, 25000 ) : 10;
+		$body = array( 'startDate' => $period['start'], 'endDate' => $period['end'], 'rowLimit' => null === $dimension ? 1 : $row_limit );
 		if ( null !== $dimension ) $body['dimensions'] = array( $dimension );
 		return uonix_analytics_metrics_google_json( 'https://www.googleapis.com/webmasters/v3/sites/' . rawurlencode( $site_url ) . '/searchAnalytics/query', $access_token, $body );
 	}
@@ -590,7 +625,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
 		$ga_page_views = uonix_analytics_metrics_fetch_ga4_page_views( $config['ga4_property_id'], $token, $periods['current'] );
 		$gsc_current = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'] );
 		$gsc_previous = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['previous'] );
-		$gsc_queries = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'query' );
+		$gsc_queries = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'query', uonix_analytics_metrics_extended_query_limit() );
 		$gsc_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'page' );
 		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views );
 	}
@@ -637,7 +672,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_sync' ) ) {
 			if ( is_wp_error( $ga4 ) ) throw new RuntimeException( $ga4->get_error_code() );
 			if ( is_wp_error( $search_console ) ) throw new RuntimeException( $search_console->get_error_code() );
 			$snapshot = array(
-				'version' => 2, 'period_days' => $days, 'status' => 'updated', 'updated_at' => gmdate( 'c' ), 'periods' => $periods,
+				'version' => 3, 'period_days' => $days, 'status' => 'updated', 'updated_at' => gmdate( 'c' ), 'periods' => $periods,
 				'ga4' => $ga4, 'search_console' => $search_console,
 			);
 			if ( function_exists( 'update_option' ) ) update_option( uonix_analytics_metrics_snapshot_option( $days ), $snapshot, false );
