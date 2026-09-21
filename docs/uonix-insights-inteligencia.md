@@ -31,7 +31,7 @@ Specs que governam código pertencem a `docs/`, versionadas e revisadas.
 
 Os identificadores de propriedade GA4 e de site do Search Console estão **hardcoded como default de parâmetro** em `53-admin-analytics-metrics.php:20`, ou seja, em arquivo versionado. Isso **contradiz** [ambientes.md](ambientes.md), que determina que IDs de analytics fiquem fora do Git.
 
-Este documento **registra o desvio, não o legitima**. A correção é rastreada em issue própria. Enquanto ela não ocorrer, nenhum código novo pode repetir o padrão: identificador de plataforma novo entra por constante no `wp-config.php`, como já ocorre com o caminho da chave da service account.
+Este documento **registra o desvio, não o legitima**. A correção é rastreada na issue #248. Enquanto ela não ocorrer, nenhum código novo pode repetir o padrão: identificador de plataforma novo entra por constante no `wp-config.php`, como já ocorre com o caminho da chave da service account.
 
 ## Correções à especificação original
 
@@ -90,7 +90,7 @@ Lista em `wp_options`. E-mail de destinatário não é segredo; token de API é 
 
 - **Escrita**: `admin-post` + `check_admin_referer` + `current_user_can('manage_options')`, espelhando `53:736-748`.
 - **Leitura e visualização**: `edit_posts`, como o resto do Insights.
-- **Anti-padrão a não replicar**: `mu-plugins/uonix-admin/40-admin-dados-globais-rfq.php:39-43` grava sem nonce e sem re-checagem de capability, e — o defeito mais grave — **o nome da option vem de input do usuário** (`update_option( 'uox_' . $chave, … )`) sem allowlist de chave. Os valores passam por `sanitize_text_field()`, então o problema **não** é falta de sanitização: é ausência de verificação de intenção e de allowlist. Rastreado em issue própria.
+- **Anti-padrão a não replicar**: `mu-plugins/uonix-admin/40-admin-dados-globais-rfq.php:39-43` grava sem nonce e sem re-checagem de capability, e — o defeito mais grave — **o nome da option vem de input do usuário** (`update_option( 'uox_' . $chave, … )`) sem allowlist de chave. Os valores passam por `sanitize_text_field()`, então o problema **não** é falta de sanitização: é ausência de verificação de intenção e de allowlist. Rastreado na issue #249.
 
 ### Agendamento
 
