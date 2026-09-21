@@ -461,6 +461,24 @@ if ( function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 	uonix_metrics_assert( is_array( $gsc_many ) && $gsc_many['queries'] === array_slice( $gsc_many['queries_extended'], 0, 10 ), 'Lista de exibição é prefixo do universo de mineração' );
 	$extended_terms = implode( ' ', array_column( $gsc_many['queries_extended'], 'query' ) );
 	uonix_metrics_assert( false === strpos( $extended_terms, '@' ), 'Universo ampliado aplica a mesma remoção de PII da lista curta' );
+
+	// O teto do universo precisa ser exercitado de fato: sem isso, o `break` que o
+	// impõe nunca roda em teste e um limite quebrado passaria despercebido.
+	$overflow = array();
+	$limit = uonix_analytics_metrics_extended_query_limit();
+	for ( $i = 1; $i <= $limit + 5; ++$i ) {
+		$overflow[] = array( 'query' => 'termo ' . $i, 'clicks' => 1, 'impressions' => 200, 'ctr' => .01, 'position' => 5 );
+	}
+	$gsc_overflow = uonix_analytics_metrics_normalize_search_console(
+		array(
+			'summary_current' => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ),
+			'summary_previous' => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ),
+			'queries' => $overflow,
+			'pages' => array(),
+		)
+	);
+	uonix_metrics_assert( is_array( $gsc_overflow ) && $limit === count( $gsc_overflow['queries_extended'] ), 'Universo de mineração respeita o teto configurado' );
+	uonix_metrics_assert( is_array( $gsc_overflow ) && 10 === count( $gsc_overflow['queries'] ), 'Teto do universo não afeta o tamanho da lista de exibição' );
 }
 
 if ( function_exists( 'uonix_analytics_metrics_sync' ) ) {

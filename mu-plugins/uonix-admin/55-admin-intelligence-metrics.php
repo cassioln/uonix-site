@@ -160,10 +160,17 @@ if ( ! function_exists( 'uonix_intelligence_seo_opportunities' ) ) {
 			: true;
 		$context   = array( 'synced_at' => $synced_at, 'stale' => $stale );
 
+		// Snapshot legado (v1) não tem `period_days`, e `mark_stale()` pode promover um
+		// payload legado para a chave corrente. Sem esta distinção, a ausência do campo
+		// seria reportada como "período divergente" — diagnóstico falso que manda quem
+		// depura olhar para o seletor de período em vez de para a migração.
+		if ( ! isset( $snapshot['period_days'] ) ) {
+			return uonix_intelligence_unavailable( 'snapshot_legacy', $context );
+		}
+
 		// Os limiares são expressos em 30 dias. Aplicá-los a outro período produziria
 		// número sem significado, então é recusa explícita, não adaptação silenciosa.
-		$period = isset( $snapshot['period_days'] ) ? (int) $snapshot['period_days'] : 0;
-		if ( $period !== $rules['period_days'] ) {
+		if ( (int) $snapshot['period_days'] !== $rules['period_days'] ) {
 			return uonix_intelligence_unavailable( 'period_mismatch', $context );
 		}
 

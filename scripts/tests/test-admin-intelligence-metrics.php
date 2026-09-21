@@ -186,11 +186,42 @@ $empty = uonix_intelligence_seo_opportunities( uonix_intel_snapshot( array( uoni
 uonix_intel_assert( true === $empty['available'] && array() === $empty['rows'], 'Universo sem candidato é disponível com zero linhas, estado distinto de indisponível' );
 
 // ---------------------------------------------------------------------------
+// Migração real: mark_stale() lê em cascata e grava na chave corrente, então um
+// payload antigo pode acabar sob a chave nova. A camada tem que dizer a verdade
+// sobre o que encontrou, em vez de culpar o período.
+// ---------------------------------------------------------------------------
+$GLOBALS['uonix_metrics_options'] = array(
+	'uonix_analytics_metrics_snapshot_v2_30' => array(
+		'version' => 2,
+		'period_days' => 30,
+		'status' => 'updated',
+		'updated_at' => gmdate( 'c' ),
+		'ga4' => array(),
+		'search_console' => array( 'queries' => array(), 'pages' => array() ),
+	),
+);
+uonix_analytics_metrics_mark_stale( 30 );
+$promoted = uonix_intelligence_seo_opportunities();
+uonix_intel_assert( false === $promoted['available'] && 'queries_extended_missing' === $promoted['reason'], 'Payload v2 promovido à chave corrente é reconhecido como universo ausente' );
+
+$GLOBALS['uonix_metrics_options'] = array(
+	'uonix_analytics_metrics_snapshot_v1' => array(
+		'version' => 1,
+		'status' => 'updated',
+		'updated_at' => gmdate( 'c' ),
+	),
+);
+uonix_analytics_metrics_mark_stale( 30 );
+$legacy = uonix_intelligence_seo_opportunities();
+uonix_intel_assert( false === $legacy['available'] && 'snapshot_legacy' === $legacy['reason'], 'Snapshot legado sem period_days é reportado como legado, nunca como período divergente' );
+$GLOBALS['uonix_metrics_options'] = array();
+
+// ---------------------------------------------------------------------------
 // Sugestão determinística de Title.
 // ---------------------------------------------------------------------------
 $plain = uonix_intelligence_title_suggestion( 'olhal de ancoragem' );
 uonix_intel_assert( array( 'Aço Inox 304/316', 'Laudo com ART' ) === $plain, 'Consulta sem diferencial recebe os dois primeiros da lista, em ordem fixa' );
-uonix_intel_assert( $plain === uonix_intelligence_title_suggestion( 'olhal de ancoragem' ), 'Mesma consulta produz sempre a mesma sugestão' );
+uonix_intel_assert( $plain === uonix_intelligence_title_suggestion( 'linha de vida' ), 'Sugestão depende da cobertura de diferenciais, não do texto da consulta' );
 
 $has_inox = uonix_intelligence_title_suggestion( 'olhal de ancoragem inox' );
 uonix_intel_assert( ! in_array( 'Aço Inox 304/316', $has_inox, true ), 'Diferencial já presente na consulta não é sugerido' );
