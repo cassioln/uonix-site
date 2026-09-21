@@ -16,6 +16,8 @@ $GLOBALS['uox_options'] = array();
 $GLOBALS['uox_actions'] = array();
 $GLOBALS['uox_can'] = true;
 $GLOBALS['uox_referer_ok'] = true;
+$GLOBALS['uox_referer_action'] = null;
+$GLOBALS['uox_nonce_field_action'] = null;
 
 function uox_assert( $condition, $message ) {
 	global $failures;
@@ -42,6 +44,10 @@ function update_option( $key, $value ) { $GLOBALS['uox_options'][ $key ] = $valu
 
 function current_user_can( $capability ) { return (bool) $GLOBALS['uox_can']; }
 function check_admin_referer( $action = -1 ) {
+	// Registra a ação verificada para que o teste possa confrontá-la com a emitida
+	// pelo formulário. Um stub que ignora o argumento deixaria passar uma
+	// divergência que quebraria 100% das gravações legítimas em produção.
+	$GLOBALS['uox_referer_action'] = $action;
 	if ( ! $GLOBALS['uox_referer_ok'] ) {
 		throw new Uox_Die_Exception( 'nonce invalido' );
 	}
@@ -58,7 +64,7 @@ function esc_html__( $text, $domain = '' ) { return $text; }
 function esc_html( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_attr( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_url( $url ) { return $url; }
-function wp_nonce_field( $action = -1 ) { echo '<input type="hidden" name="_wpnonce" value="stub-' . $action . '">'; }
+function wp_nonce_field( $action = -1 ) { $GLOBALS['uox_nonce_field_action'] = $action; echo '<input type="hidden" name="_wpnonce" value="stub">'; }
 
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/40-admin-dados-globais-rfq.php';
 
@@ -135,10 +141,17 @@ $GLOBALS['uox_referer_ok'] = true;
 $GLOBALS['uox_options'] = array();
 $_POST = array(
 	'uox_dados' => array(
-		'telefone_1'    => '  11 4372 9366  ',
-		'hackeado'      => 'valor arbitrario',
+		'telefone_1'     => '  11 4372 9366  ',
+		'hackeado'       => 'valor arbitrario',
 		'active_plugins' => 'tentativa de escalada',
 		'rota_orcamento' => array( 'array' => 'nao escalar' ),
+		// PHP converte chave numérica de array para int. Quem barra este vetor é a
+		// comparação estrita do `in_array` — verificado por mutação: remover o
+		// `is_string` do handler não abre a porta. O `is_string` fica como defesa
+		// explícita e redundante, não como o guarda efetivo.
+		'123'            => 'chave numerica',
+		'telefone_1 '    => 'chave com espaco a direita',
+		'TELEFONE_1'     => 'chave em caixa alta',
 	),
 );
 $redirect = '';
@@ -152,9 +165,20 @@ uox_assert( '11 4372 9366' === get_option( 'uox_telefone_1' ), 'Chave permitida 
 uox_assert( false === get_option( 'uox_hackeado' ), 'Chave fora da allowlist não é gravada' );
 uox_assert( false === get_option( 'uox_active_plugins' ), 'Chave de escalada não é gravada nem com o prefixo' );
 uox_assert( false === get_option( 'uox_rota_orcamento' ), 'Valor não escalar é recusado' );
+uox_assert( false === get_option( 'uox_123' ), 'Chave numérica, que PHP converte para int, é recusada' );
+uox_assert( false === get_option( 'uox_telefone_1 ' ), 'Chave permitida com espaço à direita é recusada' );
+uox_assert( false === get_option( 'uox_TELEFONE_1' ), 'Chave permitida em caixa diferente é recusada' );
 uox_assert( 1 === count( $GLOBALS['uox_options'] ), 'Apenas a chave permitida chegou ao banco' );
 uox_assert( false !== strpos( $redirect, 'uox_salvos=1' ), 'Redirect informa quantos campos foram salvos' );
-uox_assert( false !== strpos( $redirect, 'uox_recusados=3' ), 'Redirect informa quantos campos foram recusados' );
+uox_assert( false !== strpos( $redirect, 'uox_recusados=6' ), 'Redirect informa quantos campos foram recusados' );
+
+// ---------------------------------------------------------------------------
+// As duas pontas do nonce têm que usar a mesma ação. Se divergirem, nenhuma
+// gravação legítima passa — e a tela quebra em silêncio, sem erro visível.
+// ---------------------------------------------------------------------------
+uox_assert( null !== $GLOBALS['uox_nonce_field_action'], 'Formulário emitiu campo de nonce com uma ação' );
+uox_assert( null !== $GLOBALS['uox_referer_action'], 'Handler verificou o nonce com uma ação' );
+uox_assert( $GLOBALS['uox_nonce_field_action'] === $GLOBALS['uox_referer_action'], 'A ação do nonce emitida pelo formulário é a mesma verificada pelo handler' );
 
 // ---------------------------------------------------------------------------
 // Handler registrado no hook correto.
