@@ -1523,16 +1523,16 @@ enforce_smtp_plugin_policy() {
 clear_cache() {
   local env="$1"
 
-  # Não há mais diretório de cache de página a limpar.
+  # Lista deliberadamente vazia: não há diretório de cache de PÁGINA a remover.
   #
-  # Esta lista continha `min`, `critical-css`, `background-css`, `busting` e
-  # `wp-rocket` — TODOS do WP Rocket, removido de produção em 2026-08-15 (plugin +
-  # 7 tabelas wpis_wpr_* + 18 options órfãs). O SpeedyCache, anterior, também já
-  # havia saído. Hoje nenhum plugin de cache de PÁGINA está ativo.
+  # Ela já enumerou diretórios de plugins de cache de página que foram
+  # descontinuados no site (o último deles removido de produção em 2026-08-15,
+  # junto com suas tabelas e options órfãs). Nenhum sobreviveu, e a lista foi
+  # esvaziada em vez de manter caminhos que não existem mais.
   #
-  # A única camada restante é `pods-alternative-cache` (cache de OBJETO do Pods),
-  # mantida de propósito — e ela é invalidada por `cache flush`, não por remoção
-  # de diretório.
+  # A camada mantida de propósito é `pods-alternative-cache` (cache de OBJETO do
+  # Pods) — invalidada por `cache flush`, não por remoção de diretório. Por isso
+  # esta função nunca deve apagar `wp-content/cache/` inteiro.
   #
   # Se um plugin de cache de página voltar, reintroduzir os diretórios aqui.
   local cache_dirs=()

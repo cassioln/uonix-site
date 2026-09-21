@@ -188,9 +188,6 @@ add_action( 'admin_bar_menu', function( $wp_admin_bar ) {
     // Remove o menu "Novo" da barra superior
     $wp_admin_bar->remove_node( 'new-content' );
 
-    // Remove o atalho do Loginizer "Open New Tab"
-    $wp_admin_bar->remove_node( 'loginizer-admin-shortcut' );
-
 }, 999 );
 
 // =========================================================================
@@ -1069,6 +1066,69 @@ function uox_render_crm_orcamentos() {
 }
 
 // NOVO: Bloco 9 - Botão de Limpeza do Cache Dinâmico
+if ( ! function_exists( 'uox_cache_flush_throttle_seconds' ) ) {
+    /**
+     * Janela mínima entre duas purgas manuais de cache, em segundos.
+     *
+     * Enquanto o botão só limpava cache de objeto ele era inofensivo. Agora que
+     * purga o cache de PÁGINA, cada clique esfria o site inteiro: a home era
+     * servida do disco em 260 ms e categoria/produto regeneravam em ~2,1 s e
+     * ~2,8 s (medições registradas em 32-rfq-stable-asset-version.php). Um editor
+     * publicando em sequência clica várias vezes seguidas, e o p95 público já
+     * estava acima da meta de 600 ms.
+     *
+     * A capability segue `edit_posts` de propósito: o botão existe justamente
+     * para o editor não depender de um dev. O throttle limita o dano sem tirar a
+     * ferramenta de quem precisa dela.
+     *
+     * Filtrável para ajuste sem alterar código. Zero desliga o throttle.
+     *
+     * @return int
+     */
+    function uox_cache_flush_throttle_seconds() {
+        $seconds = (int) apply_filters( 'uonix_cache_flush_throttle_seconds', 60 );
+
+        return $seconds > 0 ? $seconds : 0;
+    }
+}
+
+if ( ! function_exists( 'uox_cache_flush_remaining_seconds' ) ) {
+    /**
+     * Segundos restantes da janela de throttle, para o aviso ao editor.
+     *
+     * O transient guarda o instante da última purga, então o restante é derivado —
+     * nunca a janela inteira, que faria quem esperou 55s ler "aguarde 60 segundos".
+     *
+     * Com o throttle ativo nunca devolve 0: o aviso só aparece quando a purga FOI
+     * recusada, e "aguarde 0 segundos" contradiria a recusa. Devolve 0 apenas quando o
+     * throttle está DESLIGADO (janela 0) — situação em que o handler nunca redireciona
+     * para o estado "aguarde", e o renderer não imprime o aviso.
+     *
+     * @return int
+     */
+    function uox_cache_flush_remaining_seconds() {
+        $janela = uox_cache_flush_throttle_seconds();
+
+        if ( $janela <= 0 ) {
+            return 0;
+        }
+
+        $inicio = get_transient( 'uonix_cache_flush_lock' );
+
+        if ( ! is_numeric( $inicio ) ) {
+            return $janela;
+        }
+
+        $restante = $janela - ( time() - (int) $inicio );
+
+        if ( $restante < 1 ) {
+            return 1;
+        }
+
+        return $restante > $janela ? $janela : $restante;
+    }
+}
+
 function uox_handle_flush_cache() {
     if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
         wp_die( 'Método inválido para limpar o cache.' );
@@ -1079,10 +1139,53 @@ function uox_handle_flush_cache() {
     }
 
     check_admin_referer( 'uonix_flush_cache' );
+
+    // Throttle DEPOIS de método, capability e nonce: gravar o transient é efeito
+    // colateral, e nenhum efeito colateral pode acontecer antes da autorização.
+    // Também impede que a janela seja sondada por quem não passou pelos gates.
+    $throttle_seconds = uox_cache_flush_throttle_seconds();
+
+    if ( $throttle_seconds > 0 && get_transient( 'uonix_cache_flush_lock' ) ) {
+        // Redirect com estado próprio, não com sucesso: dizer "limpou" sem ter
+        // limpado é o mesmo defeito que este bloco de código acabou de corrigir na
+        // outra ponta.
+        wp_safe_redirect( add_query_arg( 'uonix_cache_flushed', 'aguarde', admin_url( 'index.php' ) ) );
+        exit;
+    }
+
+    // O site tem DUAS camadas de cache locais, disjuntas por configuração, e o
+    // botão precisa das duas. wp_cache_flush() cobre só a primeira.
+    //
+    // 1) Cache de OBJETO.
     wp_cache_flush();
 
-    if ( function_exists( 'rocket_clean_domain' ) ) {
-        rocket_clean_domain();
+    // 2) Cache de PÁGINA (WP Super Cache, modo Simple/PHP). É esta que guarda o
+    //    HTML que o editor está tentando atualizar, e wp_cache_flush() NÃO a
+    //    alcança: o perfil aplicado por scripts/configure-wp-super-cache-simple.php
+    //    grava wp_cache_object_cache = 0, então o WPSC escreve em disco e ignora
+    //    o cache de objeto. Enquanto só havia wp_cache_flush() aqui, o aviso
+    //    "cache totalmente limpa" saía e a página continuava vindo do arquivo
+    //    estático antigo.
+    //
+    //    wp_cache_clear_cache() é a purga total do próprio plugin — a mesma que o
+    //    painel e a REST API dele chamam. Ela poda supercache/ e a raiz de
+    //    $cache_path e dispara a action wp_cache_cleared. Verificado no WPSC 3.1.3
+    //    de produção: wp-cache-phase2.php:3411.
+    //
+    //    function_exists porque o WPSC é instalado somente pelo deploy de
+    //    produção; em QA, DEV e local o botão precisa seguir funcionando sem ele.
+    //    Não há fallback para prune_super_cache(): as duas funções vivem no mesmo
+    //    wp-cache-phase2.php, então um elseif entre elas seria inalcançável.
+    if ( function_exists( 'wp_cache_clear_cache' ) ) {
+        wp_cache_clear_cache();
+    }
+
+    if ( $throttle_seconds > 0 ) {
+        // Guarda o INSTANTE da purga, não um booleano: é o que permite informar
+        // quanto falta em vez de repetir a janela inteira. O TTL vem do throttle,
+        // nunca 0 — no WordPress, expiração 0 significa transient SEM expiração, e o
+        // botão viraria trava permanente de uso único.
+        set_transient( 'uonix_cache_flush_lock', time(), $throttle_seconds );
     }
 
     wp_safe_redirect( add_query_arg( 'uonix_cache_flushed', '1', admin_url( 'index.php' ) ) );
@@ -1091,12 +1194,27 @@ function uox_handle_flush_cache() {
 add_action( 'admin_post_uonix_flush_cache', 'uox_handle_flush_cache' );
 
 function uox_render_manutencao_cache() {
-    $cache_flushed = isset( $_GET['uonix_cache_flushed'] )
-        && is_string( $_GET['uonix_cache_flushed'] )
-        && '1' === sanitize_key( wp_unslash( $_GET['uonix_cache_flushed'] ) );
+    $flush_state = isset( $_GET['uonix_cache_flushed'] ) && is_string( $_GET['uonix_cache_flushed'] )
+        ? sanitize_key( wp_unslash( $_GET['uonix_cache_flushed'] ) )
+        : '';
 
-    if ( $cache_flushed ) {
+    if ( '1' === $flush_state ) {
         echo '<div class="notice notice-success is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>A memória cache do site foi totalmente limpa e atualizada!</p></div>';
+    } elseif ( 'aguarde' === $flush_state && uox_cache_flush_throttle_seconds() > 0 ) {
+        // A guarda da janela > 0 evita "Aguarde 0 segundo(s)": com o throttle desligado
+        // o handler nunca redireciona para este estado, então só se chega aqui por URL
+        // obsoleta ou montada à mão.
+        // Aviso explícito, não silêncio: o editor precisa saber que NÃO limpou
+        // agora, e por quê. Um "sucesso" aqui reproduziria o defeito original.
+        //
+        // Mostra o tempo RESTANTE, não a janela inteira: quem esperou 55s e clicou de
+        // novo não pode ler "aguarde 60 segundos". E deixa claro que a janela é do
+        // SITE, não do usuário — o lock é único, então a limpeza pode ter sido feita
+        // por outro editor.
+        printf(
+            '<div class="notice notice-info is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>A memória cache do site já foi limpa nos últimos instantes, por você ou por outro editor. Aguarde %d segundo(s) antes de limpar de novo — cada limpeza deixa o site mais lento enquanto as páginas são regeradas.</p></div>',
+            (int) uox_cache_flush_remaining_seconds()
+        );
     }
 
     if ( ! current_user_can( 'edit_posts' ) ) {

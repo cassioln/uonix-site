@@ -746,9 +746,11 @@ O clone não termina logo após importar banco e arquivos. Ele também:
 - ativa `fluent-smtp` em `prod`, `qa` e `dev` e falha se o plugin não estiver
   previamente instalado;
 - desativa `fluent-smtp` no `local` e valida o Mailpit sem autenticação ou TLS;
-- remove caches selecionados (`min`, `critical-css`, `background-css`, `busting`
-  e `wp-rocket`), apaga transients e executa `wp cache flush` (best-effort:
-  falhas na remoção de diretórios e transients não interrompem o clone);
+- apaga transients e executa `wp cache flush` (best-effort: falhas não
+  interrompem o clone). A lista de diretórios de cache de página em
+  `clear_cache()` está vazia, então nenhum diretório sob `wp-content/cache/` é
+  removido — se um plugin de cache de página voltar, os diretórios precisam ser
+  reintroduzidos lá;
 - preserva a configuração Turnstile do destino e valida que ela está habilitada
   remotamente e desabilitada no local;
 - valida redirecionamento seguro de e-mail em QA/DEV;

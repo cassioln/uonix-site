@@ -121,6 +121,217 @@ require(
 if not migration_index < rollback_index < release_index:
     raise AssertionError('rollback deve ser o último gate antes da liberação do lock')
 
+# A purga do cache de PÁGINA pertence ao smoke, não às etapas opt-in de WPSC.
+#
+# install_page_cache e configure_page_cache são booleanos com default false. A única
+# purga de disco do workflow morava dentro de configure-wp-super-cache-simple.php,
+# que só roda com configure_page_cache=true — ou seja, num deploy normal NADA
+# purgava o cache de página. O deploy publicava PHP novo e o site seguia servindo o
+# HTML anterior do disco.
+#
+# Pior: a sondagem HTTP no fim do smoke confere a AUSÊNCIA de X-Robots-Tag
+# restritivo. Página cacheada não passa pelo PHP, então o header não sai e a
+# asserção passa pelo motivo errado. Daí a ordem exigida abaixo.
+def executavel(step):
+    """Corpo executável de um step: sem comentários e com continuações de linha unidas.
+
+    Comentários fora porque o bloco explicativo acima da purga cita
+    wp_cache_clear_cache, e asserir sobre o texto cru deixaria a remoção da CHAMADA
+    passar impune.
+
+    Continuações unidas porque este mesmo workflow já quebra comandos com `\\` +
+    indentação em vários passos. Sem a normalização, um padrão ancorado em `"$wp_bin"`
+    deixa de casar quando alguém reformata assim — e a mensagem acusa ausência de uma
+    chamada que está presente. Falha fechada, mas manda o leitor para o lugar errado.
+    """
+    sem_comentario = '\n'.join(
+        line for line in step.splitlines()
+        if line.strip() and not line.lstrip().startswith('#')
+    )
+    return re.sub(r'\\\n\s+', ' ', sem_comentario)
+
+
+# Âncora de POSIÇÃO: a linha tem de COMEÇAR com o comando.
+#
+# Sem âncora nenhuma, o padrão `cache flush` casava o texto de `check 'wp cache flush'`:
+# apagar a chamada e deixar o rótulo mantinha o teste verde.
+#
+# A primeira tentativa de correção ancorou em tokens (`"$wp_bin"` ou `\bcli\b`) e
+# REABRIU o mesmo defeito por outro caminho, porque token casa em prosa: um rótulo
+# `rollback_check 'wp cli cache flush'`, um `check 'wp-cli.phar cache flush'` (o `\b`
+# casa dentro de `wp-cli.phar`) ou um `echo "pulando cli cache flush"` satisfaziam a
+# assertiva sem chamada alguma. Medido pela quarta revisão independente do PR #212.
+#
+# Ancorar no INÍCIO da linha resolve porque rótulo e echo nunca começam com o comando:
+# `rollback_check ...` e `echo ...` são outros comandos. Aceita as duas formas
+# idiomáticas do arquivo — o binário explícito, que é como as linhas estão hoje, e o
+# helper `cli`, que os passos de WPSC e de rollback definem e usam.
+#
+# `executavel()` já uniu as continuações de linha, então um comando quebrado com `\`
+# chega aqui como uma linha só e continua casando. `[^\n]*` mantém o resto do casamento
+# na mesma linha, porque o require usa re.S e `.` cruzaria linhas.
+# O `\b` depois de `cli` NÃO é decorativo: sem ele qualquer primeiro token que COMECE
+# com "cli" satisfaz a âncora, e o defeito do rótulo reabre por prefixo
+# (`cli_check '...'`, `cli_note '...'`, `cliente_log '...'`).
+#
+# LIMITE DELIBERADO: QUALQUER prefixo antes do binário reprova, mesmo com a chamada
+# presente — comando composto (`true && "$php_bin" ...`), wrapper (`env FOO=1 ...`,
+# `timeout 30 ...`) ou negação (`if ! ...`). Aceitar prefixo arbitrário é exatamente o
+# furo que a âncora de posição fecha, e nenhuma dessas formas é estilo usado em passo
+# algum deste workflow. A assertiva troca um falso negativo raro por zero falso
+# positivo, e falha fechada.
+#
+# Indentação NÃO burla: chamada dentro de `if true; then ... fi` continua casando,
+# porque `^\s*` aceita qualquer recuo.
+# A classe `[^\n#;&|]*` fecha duas formas encontradas na sexta revisão, ambas medidas
+# com as chamadas reais APAGADAS:
+#
+#   - comentário de FIM DE LINHA: `"$php_bin" ... cache flush  # ... function_exists(
+#     "wp_cache_clear_cache" ) desativada`. executavel() só remove comentário de linha
+#     inteira, então o alvo era alcançado dentro do comentário. Proibir `#` no trecho
+#     casado resolve sem precisar de um parser de aspas.
+#   - prosa numa CONTINUAÇÃO unida: `cli option get home \` + `&& echo 'pendente: cache
+#     flush'`. A âncora de posição não protege o que vem depois do join, mas o trecho
+#     precisa cruzar `&&` para chegar ao alvo.
+#
+# Nenhum dos dois comandos reais tem `#`, `;`, `&` ou `|` entre o binário e o alvo — o
+# `;` do PHP (`wp_cache_clear_cache();`) vem DEPOIS do que a assertiva casa.
+CHAMADA_WP = r'^\s*(?:cli\b|"\$php_bin")[^\n#;&|]*'
+
+# AUTOTESTE DO PADRÃO — a parte que faltava nas quatro tentativas anteriores.
+#
+# Este padrão foi corrigido três vezes, e cada correção abriu um furo novo pelo qual um
+# RÓTULO voltava a satisfazer a assertiva: primeiro sem âncora, depois ancorado em token
+# (`\bcli\b` casava dentro de `wp-cli.phar`), depois ancorado em posição mas sem `\b` de
+# fechamento. Remendar a regex e conferir à mão não convergiu.
+#
+# Cada furo já encontrado virou exemplo NEGATIVO abaixo. Se o padrão afrouxar de novo
+# por qualquer caminho — inclusive um que ninguém pensou —, o teste reprova aqui, no
+# ponto onde a causa está, em vez de passar verde e deixar a regressão para a próxima
+# revisão descobrir.
+_PADRAO_TESTE = CHAMADA_WP + r'cache flush'
+
+_CHAMADAS_REAIS = (
+    '          "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" cache flush',
+    '          cli cache flush',
+)
+_ROTULOS_E_PROSA = (
+    "          check 'wp cache flush'",
+    "          rollback_check 'wp cache flush'",
+    "          rollback_check 'wp cli cache flush'",
+    "          check 'wp-cli.phar cache flush'",
+    '          echo "pulando cli cache flush por ora"',
+    "          cli_check 'wp cache flush'",
+    "          cli_note 'wp cache flush'",
+    "          cliente_log 'wp cache flush'",
+    # Sexta revisão: comentário de fim de linha numa linha que COMEÇA com o binário.
+    '          "$php_bin" --path="$document_root" core is-installed  # pendente: cache flush',
+    # Sexta revisão: prosa depois de `&&`, como fica após executavel() unir a continuação.
+    "          cli option get home   && echo 'pendente: cache flush'",
+    # Multilinha: pega o afrouxamento de `[^\n...]*` para `.*`, que cruzaria linhas sob re.S.
+    '          cli option get home\n          echo "pendente: cache flush"',
+)
+
+for _exemplo in _CHAMADAS_REAIS:
+    if not re.search(_PADRAO_TESTE, _exemplo, re.M | re.S):
+        raise AssertionError(
+            'CHAMADA_WP deixou de casar uma chamada real, então as assertivas abaixo '
+            f'acusariam ausência de código presente: {_exemplo.strip()}'
+        )
+
+for _exemplo in _ROTULOS_E_PROSA:
+    if re.search(_PADRAO_TESTE, _exemplo, re.M | re.S):
+        raise AssertionError(
+            'CHAMADA_WP afrouxou e passou a casar rótulo/prosa, então apagar a chamada e '
+            f'deixar só o texto voltaria a passar verde: {_exemplo.strip()}'
+        )
+
+# INCONDICIONALIDADE do smoke — a propriedade que o PR inteiro existe para garantir.
+#
+# Todas as assertivas de purga verificam LOCALIZAÇÃO e ORDEM dentro do step. Nenhuma
+# impedia que o STEP voltasse a ser opt-in. Medido na sexta revisão: acrescentar
+# `if: ${{ inputs.install_page_cache }}` ao step faz o smoke INTEIRO — com a purga
+# dentro — não rodar num deploy normal, e o teste passava verde.
+#
+# Isso é literalmente o defeito de origem deste PR: "num deploy normal NADA purgava o
+# cache de página". A propriedade estava descrita em comentário e verificada por
+# posição, nunca por incondicionalidade. Contraste com a linha que EXIGE
+# `if: inputs.install_page_cache` no step de instalação: o inverso nunca foi asserido.
+forbid(
+    production,
+    r'- name: Clear cache and run smoke tests\s*\n\s+if:',
+    'o step do smoke não pode ser condicional: com um `if:` o smoke inteiro, e a purga '
+    'de cache de página dentro dele, deixa de rodar num deploy normal — que é exatamente '
+    'o defeito que este PR corrigiu',
+)
+
+# O rollback PODE ser condicional, mas só ao fracasso — nunca a um input opt-in.
+require(
+    production,
+    r'- name: Roll back managed code after failure\s*\n\s+if:\s*\$\{\{\s*failure\(\)\s*\|\|\s*cancelled\(\)\s*\}\}',
+    'o rollback precisa ser guardado por failure()/cancelled(), a condição que o faz '
+    'existir',
+)
+forbid(
+    production,
+    r'- name: Roll back managed code after failure\s*\n\s+if:[^\n]*inputs\.',
+    'o rollback não pode depender de input opt-in: ele é a rede de segurança do deploy',
+)
+
+smoke_executable = executavel(production_smoke_step)
+
+require(
+    smoke_executable,
+    CHAMADA_WP + r'cache flush',
+    'smoke precisa EXECUTAR a limpeza do cache de objeto, não apenas rotulá-la',
+)
+require(
+    smoke_executable,
+    CHAMADA_WP + r'function_exists\(\s*"wp_cache_clear_cache"\s*\)',
+    'smoke precisa purgar o cache de PÁGINA além do de objeto: sem isso o deploy '
+    'publica código novo e o site continua servindo o HTML anterior',
+)
+purge_index = smoke_executable.index('wp_cache_clear_cache')
+probe_index = smoke_executable.index('url_effective')
+if not purge_index < probe_index:
+    raise AssertionError(
+        'a purga do cache de página deve preceder a sondagem HTTP do smoke, '
+        'senão a sondagem mede a página cacheada em vez da recém-gerada'
+    )
+
+# O ROLLBACK precisa espelhar o smoke, e a exigência é mais forte aqui.
+#
+# O próprio workflow declara o invariante: "As assertivas abaixo espelham as do
+# smoke. Um rollback que valide MENOS pode declarar sucesso num estado que o smoke
+# reprovaria — e o operador confiaria num rollback incompleto."
+#
+# No caso da purga de página o risco é pior que validar menos. Quando o rollback
+# roda, o smoke já purgou o disco e o site regenerou com o código NOVO — o que está
+# sendo revertido. Restaurar o PHP anterior sem purgar deixa o cache quente servindo
+# o HTML do código ruim, e o workflow imprime "rollback concluído".
+#
+# Esta assertiva existe porque a assimetria já aconteceu de fato: a purga foi
+# adicionada ao smoke e esquecida no rollback, e nenhum guard reclamou.
+rollback_executable = executavel(production_rollback_step)
+require(
+    rollback_executable,
+    CHAMADA_WP + r'cache flush',
+    'rollback precisa EXECUTAR a limpeza do cache de objeto, não apenas rotulá-la',
+)
+require(
+    rollback_executable,
+    CHAMADA_WP + r'function_exists\(\s*"wp_cache_clear_cache"\s*\)',
+    'rollback precisa purgar o cache de PÁGINA como o smoke: sem isso ele restaura o '
+    'código anterior e deixa o cache servindo o HTML do código revertido',
+)
+rollback_purge_index = rollback_executable.index('wp_cache_clear_cache')
+rollback_probe_index = rollback_executable.index('url_effective')
+if not rollback_purge_index < rollback_probe_index:
+    raise AssertionError(
+        'no rollback a purga do cache de página deve preceder a sondagem HTTP, '
+        'senão a sondagem valida o HTML antigo e o rollback declara sucesso indevido'
+    )
+
 # Pós-cutover: https://uonix.com.br é produção definitiva e indexável. O smoke e
 # o rollback não podem mais exigir o estado histórico de noindex usado durante a
 # transição em site.uonix.com.br; essa divergência bloqueia publicação e mantém o

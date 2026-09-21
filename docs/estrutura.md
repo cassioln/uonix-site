@@ -10,7 +10,7 @@
 - Scripts locais.
 - Documentação.
 - Código próprio em `plugins/plugins-customizados/` e `mu-plugins/`.
-- Hardening próprio em `mu-plugins/uonix-security/`, incluindo bloqueio XML-RPC/pingback sem depender do Loginizer Pro.
+- Hardening próprio em `mu-plugins/uonix-security/`, incluindo bloqueio XML-RPC/pingback sem depender de plugin de terceiro.
 
 ## Não Versionado
 
