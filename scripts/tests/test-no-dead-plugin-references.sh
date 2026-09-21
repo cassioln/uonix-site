@@ -8,7 +8,7 @@
 # não são cosméticos:
 #
 #   - `39-admin-editor-dashboard.php` chamava `rocket_clean_domain()` guardado por
-#     `function_exists`, então o botão "Limpar Memória do Site" continuava verde
+#     `function_exists`, então o botão de limpeza de cache continuava verde
 #     enquanto limpava menos do que o rótulo prometia;
 #   - `test-husky-mobile-drawer-geometry.php` chegou a EXIGIR `rocket_clean_domain`
 #     no código, transformando o resíduo em contrato e bloqueando a limpeza;

@@ -1156,6 +1156,13 @@ function uox_handle_flush_cache() {
     // O site tem DUAS camadas de cache locais, disjuntas por configuração, e o
     // botão precisa das duas. wp_cache_flush() cobre só a primeira.
     //
+    // Existe uma TERCEIRA camada, fora do servidor, que este botão NÃO alcança: a
+    // borda da Cloudflare. Não há chamada à API de purge aqui, então a borda só
+    // expira por TTL. É por isso que o aviso de sucesso não promete limpeza total —
+    // ver uox_render_manutencao_cache(). Implementar a purga real depende de
+    // provisionar CLOUDFLARE_ZONE_ID e CLOUDFLARE_API_TOKEN como constantes no
+    // wp-config.php de produção, e está rastreado em issue própria.
+    //
     // 1) Cache de OBJETO.
     wp_cache_flush();
 
@@ -1199,7 +1206,11 @@ function uox_render_manutencao_cache() {
         : '';
 
     if ( '1' === $flush_state ) {
-        echo '<div class="notice notice-success is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>A memória cache do site foi totalmente limpa e atualizada!</p></div>';
+        // O aviso descreve SOMENTE o que o botão realmente faz. Dizer "totalmente
+        // limpa" era falso: a borda da Cloudflare fica intacta e continua servindo
+        // HTML antigo por até ~1h, então o editor via conteúdo velho depois de um
+        // "sucesso" e perdia confiança na ferramenta.
+        echo '<div class="notice notice-success is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>Cache do servidor limpo: memória de objetos e páginas gravadas em disco. A borda da Cloudflare não é limpa por aqui — ela expira sozinha, o que pode levar cerca de uma hora.</p></div>';
     } elseif ( 'aguarde' === $flush_state && uox_cache_flush_throttle_seconds() > 0 ) {
         // A guarda da janela > 0 evita "Aguarde 0 segundo(s)": com o throttle desligado
         // o handler nunca redireciona para este estado, então só se chega aqui por URL
@@ -1223,13 +1234,13 @@ function uox_render_manutencao_cache() {
     }
     ?>
     <p style="font-size: 13px; color: #64748b; margin-top: 0; margin-bottom: 15px; line-height: 1.5;">
-        Caso faça alterações em textos, imagens ou banners e não consiga visualizar de imediato, force a limpeza global da memória cache clicando abaixo.
+        Caso faça alterações em textos, imagens ou banners e não consiga visualizar de imediato, limpe o cache do servidor clicando abaixo. Isso cobre a memória de objetos e as páginas gravadas em disco, mas não a borda da Cloudflare, que expira por conta própria.
     </p>
     <div class="uox-btn-group">
         <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
             <?php wp_nonce_field( 'uonix_flush_cache' ); ?>
             <input type="hidden" name="action" value="uonix_flush_cache">
-            <button type="submit" class="uox-btn uox-btn-primary">Limpar Memória do Site</button>
+            <button type="submit" class="uox-btn uox-btn-primary">Limpar Cache do Servidor</button>
         </form>
     </div>
     <?php

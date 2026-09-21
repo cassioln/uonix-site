@@ -30,3 +30,15 @@ O deploy transfere somente o tema filho e os MU-plugins gerenciados. Não versio
 ## Pós-deploy aprovado
 
 Após uma publicação autorizada, confirmar limpeza de cache, `wp cache flush` quando WP-CLI estiver disponível e smoke tests HTTP no URL canônico do ambiente. Uma falha em preflight, backup, manifesto, publicação ou smoke test exige a rota de rollback definida antes da mutação.
+
+### Limite conhecido: a borda da Cloudflare não é purgada
+
+Todos os hosts do projeto passam por Cloudflare, e **nenhuma etapa do deploy nem o botão de limpeza no painel administrativo invalidam a borda** — não há chamada à API de purge. A borda expira somente por TTL, o que pode levar cerca de uma hora.
+
+Consequência prática: uma correção publicada e confirmada na origem pode continuar ausente na URL pública. Antes de concluir que o deploy falhou, distinguir os dois casos:
+
+```bash
+curl -sI https://uonix.com.br/ | grep -iE 'cf-cache-status|^age|cache-control'
+```
+
+`cf-cache-status: HIT` com `age` alto indica resposta da borda, não da origem. Para ver a origem imediatamente, acrescentar uma query string qualquer à URL (`?v=1`), que a borda trata como recurso distinto. Purgar a borda de verdade exige a conta Cloudflare — ou a implementação da purga automática, rastreada em issue própria.

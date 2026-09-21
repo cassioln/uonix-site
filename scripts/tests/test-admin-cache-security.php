@@ -225,7 +225,7 @@ uox_cache_security_assert(
 uox_cache_security_assert(
 	1 === $GLOBALS['uox_test_page_cache_clears'],
 	'POST autorizado deve limpar o cache de PÁGINA exatamente uma vez — sem isso o '
-		. 'editor recebe "cache totalmente limpa" e continua vendo o HTML antigo'
+		. 'editor recebe aviso de sucesso e continua vendo o HTML antigo'
 );
 uox_cache_security_assert(
 	1 === $GLOBALS['uox_test_nonce_checks'],
@@ -449,8 +449,24 @@ uox_render_manutencao_cache();
 $render_output = ob_get_clean();
 
 uox_cache_security_assert(
-	false !== strpos( $render_output, 'A memória cache do site foi totalmente limpa' ),
+	false !== strpos( $render_output, 'Cache do servidor limpo' ),
 	'retorno com uonix_cache_flushed=1 deve renderizar o aviso de sucesso'
+);
+/*
+ * O aviso não pode voltar a prometer mais do que o botão entrega. Ele limpa duas
+ * camadas locais (objeto e página em disco) e NÃO toca a borda da Cloudflare, que
+ * segue servindo HTML antigo por até ~1h. A versão anterior dizia "totalmente
+ * limpa": o editor lia sucesso, continuava vendo conteúdo velho e concluía que a
+ * ferramenta não funciona. Esta asserção existe para que a promessa só possa
+ * voltar junto com uma purga de borda de verdade.
+ */
+uox_cache_security_assert(
+	false === stripos( $render_output, 'totalmente' ),
+	'o aviso de sucesso não pode alegar limpeza total enquanto a borda da Cloudflare não for purgada'
+);
+uox_cache_security_assert(
+	false !== stripos( $render_output, 'Cloudflare' ),
+	'o aviso de sucesso deve declarar que a borda não é limpa por aqui'
 );
 uox_cache_security_assert(
 	false !== strpos( $render_output, '<form method="post" action="https://uonix.com.br/wp-admin/admin-post.php">' ),
@@ -507,7 +523,7 @@ uox_cache_security_assert(
 	)
 );
 uox_cache_security_assert(
-	false === strpos( $aviso_aguarde, 'foi totalmente limpa' ),
+	false === strpos( $aviso_aguarde, 'Cache do servidor limpo' ),
 	'o estado "aguarde" nunca pode renderizar o aviso de SUCESSO — dizer "limpou" sem '
 		. 'ter limpado é o defeito que este handler existe para não cometer'
 );
