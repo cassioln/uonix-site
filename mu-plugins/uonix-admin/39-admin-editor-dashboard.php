@@ -1173,7 +1173,7 @@ function uox_handle_flush_cache() {
     //    de produção: wp-cache-phase2.php:3411.
     //
     //    function_exists porque o WPSC é instalado somente pelo deploy de
-    //    produção; em QA, DEV e local o botão precisa seguir funcionando sem ele.
+    //    produção; em QA e local o botão precisa seguir funcionando sem ele.
     //    Não há fallback para prune_super_cache(): as duas funções vivem no mesmo
     //    wp-cache-phase2.php, então um elseif entre elas seria inalcançável.
     if ( function_exists( 'wp_cache_clear_cache' ) ) {

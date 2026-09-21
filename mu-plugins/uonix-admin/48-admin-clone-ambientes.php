@@ -24,7 +24,6 @@ function uox_clone_env_labels() {
 	return array(
 		'prod'  => 'Produção',
 		'qa'    => 'QA',
-		'dev'   => 'DEV',
 		'local' => 'Local',
 	);
 }
@@ -33,7 +32,6 @@ function uox_clone_env_details() {
 	return array(
 		'prod'  => array( 'url' => 'https://uonix.com.br', 'host' => 'Locaweb' ),
 		'qa'    => array( 'url' => 'https://uonix.ksio.dev', 'host' => 'HostGator / public_html' ),
-		'dev'   => array( 'url' => 'https://test.uonix.ksio.dev', 'host' => 'HostGator / dev_uonix' ),
 		'local' => array( 'url' => 'http://localhost:8080', 'host' => 'Podman no Mac' ),
 	);
 }
@@ -255,7 +253,7 @@ function uox_clone_render_page() {
 	?>
 	<div class="wrap">
 		<h1>Clone de Ambientes</h1>
-		<p>Ferramenta interna para clonar banco e arquivos runtime entre produção, QA, DEV e local.</p>
+		<p>Ferramenta interna para clonar banco e arquivos runtime entre produção, QA e local.</p>
 
 		<?php uox_clone_render_notice( $result ); ?>
 

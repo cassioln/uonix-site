@@ -2,7 +2,7 @@
 # Regressão: o transporte de opções protegidas do clone precisa ser
 # multibyte-safe.
 #
-# Bug real (2026-08-10): `fluentmail-settings` chegou ao DEV truncado em 283 de
+# Bug real (2026-08-10): `fluentmail-settings` chegou a um ambiente remoto truncado em 283 de
 # 1202 bytes, cortado no meio do `Ô` de "SITE UÔNIX" (0xC3 0x94). O
 # `unserialize()` do PHP então devolvia `false`, `get_option()` retornava a
 # string crua em vez do array, e o painel do Fluent SMTP ficava em loading
@@ -91,7 +91,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # 4. Simetria dump/restore. Um lado em utf8mb4 e o outro no default do
-#    servidor é precisamente a assimetria que corrompeu o DEV.
+#    servidor é precisamente a assimetria que corrompeu aquele ambiente.
 # ---------------------------------------------------------------------------
 restore_body="$(extract_function restore_options)"
 

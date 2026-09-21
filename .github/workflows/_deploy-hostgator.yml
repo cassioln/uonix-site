@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: uonix-environment-${{ inputs.environment_name == 'qa-hostgator' && 'qa' || inputs.environment_name == 'development-hostgator' && 'dev' || 'invalid' }}
+  group: uonix-environment-${{ inputs.environment_name == 'qa-hostgator' && 'qa' || 'invalid' }}
   cancel-in-progress: false
 
 jobs:
@@ -53,11 +53,6 @@ jobs:
               expected_root='/home2/uonix/public_html'
               expected_url='https://uonix.ksio.dev'
               expected_uonix_env='staging'
-              ;;
-            development-hostgator)
-              expected_root='/home2/uonix/dev_uonix'
-              expected_url='https://test.uonix.ksio.dev'
-              expected_uonix_env='development'
               ;;
             *)
               printf 'Environment name is not an allowed HostGator target.\n' >&2
@@ -234,7 +229,7 @@ jobs:
           # T59A — política de convergência com allowlist explícita.
           # Só os módulos declarados no bundle podem ser removidos do destino. Qualquer
           # módulo uonix-* fora dessa allowlist é PRESERVADO, e o delta é inventariado e
-          # copiado para o backup antes de qualquer remoção. Motivo concreto: DEV serve
+          # copiado para o backup antes de qualquer remoção. Motivo concreto: um ambiente não produtivo serve
           # mu-plugins/uonix-local (Mailpit), que não entra no bundle porque os workflows
           # passam include_local_module=false — a remoção cega de órfãos o apagaria.
           expected_modules=()
@@ -411,7 +406,7 @@ jobs:
           # T59A — UONIX_DELETE_POLICY_ALLOWLIST: apenas os módulos declarados no bundle
           # são convergidos. Módulos uonix-* fora da allowlist são PRESERVADOS em vez de
           # removidos, alinhando o deploy à garantia de extras remotos verificada por
-          # hash em T56A, T56 e T57. Caso concreto: uonix-local (Mailpit) existe em DEV,
+          # hash em T56A, T56 e T57. Caso concreto: uonix-local (Mailpit) existe em ambiente não produtivo,
           # é carregado por uonix-core.php e não entra no bundle
           # (include_local_module=false) — apagá-lo seria uma perda silenciosa.
           allowlist=("$@")

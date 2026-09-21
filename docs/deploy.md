@@ -4,7 +4,6 @@ O contrato canônico de ambientes fica em [ambientes.md](ambientes.md). A topolo
 
 - Produção: `https://uonix.com.br/` na branch `master` e Locaweb (cutover concluído em 2026-08-15).
 - QA: `https://uonix.ksio.dev/` na branch `qa` e HostGator.
-- DEV: `https://test.uonix.ksio.dev/` na branch `dev` e HostGator.
 - Local: `http://localhost:8080/` em Podman no Mac; não possui deploy remoto.
 
 ## Guardas e aprovação
@@ -17,8 +16,7 @@ Produção não tem deploy automático autorizado. Qualquer publicação para `u
 
 - `.github/workflows/deploy-production.yml`: produção provisória em `master`, protegida por `ENABLE_DEPLOY_PRODUCTION=false` até aprovação posterior.
 - `.github/workflows/deploy-qa.yml`: QA em `qa`, protegida por `ENABLE_DEPLOY_QA=false` até validação posterior.
-- `.github/workflows/deploy-development.yml`: DEV em `dev`, protegida por `ENABLE_DEPLOY_DEVELOPMENT=false` até validação posterior.
-- `.github/workflows/_deploy-hostgator.yml`: implementação reutilizável para QA e DEV; não é acionada diretamente.
+- `.github/workflows/_deploy-hostgator.yml`: implementação reutilizável para QA; não é acionada diretamente.
 - `.github/workflows/clone-environment.yml`: workflow manual de clone, separado do deploy de código.
 
 ## Transporte

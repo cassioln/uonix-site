@@ -24,7 +24,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * traz um Cart-Token, e o Cart-Token é entregue de graça por
  * `GET /wp-json/wc/store/v1/cart`.
  *
- * PROVA EMPÍRICA (DEV, test.uonix.ksio.dev, 2026-08-17): a sequência
+ * PROVA EMPÍRICA (ambiente remoto não produtivo, 2026-08-17): a sequência
  *   GET  /wp-json/wc/store/v1/cart            -> devolve Cart-Token
  *   POST /wp-json/wc/store/v1/cart/add-item   -> 201
  *   POST /wp-json/wc/store/v1/checkout        -> 200

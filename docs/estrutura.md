@@ -36,7 +36,6 @@ O diretório `local/wp-content/` fica fora do Git e serve apenas como runtime lo
 
 - Produção: `https://uonix.com.br/` na Locaweb.
 - QA: `https://uonix.ksio.dev/` na HostGator.
-- DEV: `https://test.uonix.ksio.dev/` na HostGator.
 - Local: `http://localhost:8080/` em Podman no Mac.
 
 Os detalhes de branch, document root, política de indexação, e-mail, analytics, Turnstile, deploy e clone estão no [contrato de ambientes](ambientes.md). Código versionado não inclui `wp-config.php`, credenciais, caches, backups, uploads ou runtime específico do host.
