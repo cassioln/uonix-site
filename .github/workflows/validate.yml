@@ -190,6 +190,9 @@ jobs:
       - name: Test admin cache security
         run: php scripts/tests/test-admin-cache-security.php
 
+      - name: Test admin dados globais write guards
+        run: php scripts/tests/test-admin-dados-globais-rfq.php
+
   shell-and-config:
     name: Shell, workflows, Node and Compose
     runs-on: ubuntu-latest
