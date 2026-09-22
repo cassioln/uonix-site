@@ -237,3 +237,154 @@ if ( ! function_exists( 'uonix_intelligence_seo_opportunities' ) ) {
 		);
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Destinatários do relatório executivo.
+//
+// E-mail de destinatário não é segredo, então `wp_options` é legítimo aqui — ao
+// contrário de token de API, que fica em constante no wp-config conforme o
+// contrato. Ver docs/uonix-insights-inteligencia.md.
+// ---------------------------------------------------------------------------
+
+if ( ! function_exists( 'uonix_intelligence_recipients_option' ) ) {
+	function uonix_intelligence_recipients_option() {
+		return 'uonix_executive_report_recipients';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_report_hook' ) ) {
+	/**
+	 * Nome do evento de cron do relatório executivo.
+	 *
+	 * Existe como acessor, e não como string solta, porque quem exibe o próximo
+	 * disparo e quem agenda o envio são arquivos diferentes. Se cada um escrevesse
+	 * o nome à mão, uma divergência faria o painel afirmar "não agendado" para
+	 * sempre, sem nada reprovar.
+	 */
+	function uonix_intelligence_report_hook() {
+		return 'uonix_intelligence_weekly_report';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_recipients_limit' ) ) {
+	/**
+	 * Teto de destinatários.
+	 *
+	 * Não é limitação técnica: é contenção de dano. Uma lista que cresce sem limite
+	 * transforma um relatório interno em lista de distribuição, e cada endereço a
+	 * mais é uma cópia de dado de desempenho comercial fora do controle.
+	 */
+	function uonix_intelligence_recipients_limit() {
+		return 10;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_sanitize_recipients' ) ) {
+	/**
+	 * Normaliza uma lista de destinatários.
+	 *
+	 * Aceita array ou texto com um endereço por linha (também tolera vírgula e
+	 * ponto-e-vírgula como separadores). Descarta o que não for e-mail válido,
+	 * deduplica sem diferenciar caixa e respeita o teto.
+	 *
+	 * @return array{recipients: array<int, string>, rejected: int}
+	 */
+	function uonix_intelligence_sanitize_recipients( $raw ) {
+		if ( is_string( $raw ) ) {
+			$partes = preg_split( '/[\r\n,;]+/', $raw );
+			$raw    = is_array( $partes ) ? $partes : array();
+		}
+		if ( ! is_array( $raw ) ) {
+			return array( 'recipients' => array(), 'rejected' => 0 );
+		}
+
+		$aceitos  = array();
+		$vistos   = array();
+		$recusados = 0;
+		$limite   = uonix_intelligence_recipients_limit();
+
+		foreach ( $raw as $item ) {
+			if ( ! is_scalar( $item ) ) {
+				++$recusados;
+				continue;
+			}
+			$email = trim( (string) $item );
+			if ( '' === $email ) {
+				continue;
+			}
+			$email = function_exists( 'sanitize_email' ) ? sanitize_email( $email ) : $email;
+			if ( '' === $email || ( function_exists( 'is_email' ) && ! is_email( $email ) ) ) {
+				++$recusados;
+				continue;
+			}
+			$chave = strtolower( $email );
+			if ( isset( $vistos[ $chave ] ) ) {
+				continue;
+			}
+			if ( count( $aceitos ) >= $limite ) {
+				++$recusados;
+				continue;
+			}
+			$vistos[ $chave ] = true;
+			$aceitos[]        = $email;
+		}
+
+		return array( 'recipients' => $aceitos, 'rejected' => $recusados );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_get_recipients' ) ) {
+	function uonix_intelligence_get_recipients() {
+		$saved = function_exists( 'get_option' ) ? get_option( uonix_intelligence_recipients_option(), array() ) : array();
+		$normalizado = uonix_intelligence_sanitize_recipients( is_array( $saved ) ? $saved : array() );
+		return $normalizado['recipients'];
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_save_recipients' ) ) {
+	/**
+	 * Persiste a lista de destinatários.
+	 *
+	 * Escrita exige `manage_options` e nonce, espelhando o refresh manual das
+	 * métricas em 53. A visualização do painel segue `edit_posts`, como o resto do
+	 * Insights: ler quem recebe é diferente de mudar quem recebe.
+	 */
+	function uonix_intelligence_save_recipients() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Sem permissão para alterar os destinatários do relatório.', 'uonix' ), '', array( 'response' => 403 ) );
+		}
+
+		check_admin_referer( 'uonix_intelligence_save_recipients' );
+
+		// Aceita texto (um por linha) e também array, que é o formato de um campo
+		// repetido. Tratar array como entrada inválida faria um POST legítimo
+		// `uonix_recipients[]=` apagar a lista inteira e reportar sucesso.
+		$raw = isset( $_POST['uonix_recipients'] ) ? wp_unslash( $_POST['uonix_recipients'] ) : '';
+		if ( is_array( $raw ) ) {
+			$entrada = $raw;
+		} elseif ( is_scalar( $raw ) ) {
+			$entrada = (string) $raw;
+		} else {
+			$entrada = '';
+		}
+		$normalizado = uonix_intelligence_sanitize_recipients( $entrada );
+
+		if ( function_exists( 'update_option' ) ) {
+			update_option( uonix_intelligence_recipients_option(), $normalizado['recipients'], false );
+		}
+
+		wp_safe_redirect(
+			add_query_arg(
+				array(
+					'page' => 'uonix-analytics',
+					'tab'  => 'settings',
+					'uonix_recipients_saved'    => count( $normalizado['recipients'] ),
+					'uonix_recipients_rejected' => $normalizado['rejected'],
+				),
+				admin_url( 'admin.php' )
+			)
+		);
+		exit;
+	}
+}
+add_action( 'admin_post_uonix_intelligence_save_recipients', 'uonix_intelligence_save_recipients' );

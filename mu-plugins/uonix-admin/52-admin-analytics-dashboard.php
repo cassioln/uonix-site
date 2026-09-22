@@ -210,7 +210,6 @@ function uonix_render_analytics_dashboard_page()
 	$metrics_status = is_array( $metrics_snapshot ) ? ( $metrics_snapshot['status'] ?? 'updated' ) : 'unavailable';
 	$metrics_is_fresh = function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ) && uonix_analytics_metrics_snapshot_is_fresh( $metrics_snapshot );
 	$metrics_refresh_attempted = isset( $_GET['uonix_metrics_refresh'] ) && '1' === (string) wp_unslash( $_GET['uonix_metrics_refresh'] );
-	$metrics_auto_refresh = current_user_can( 'manage_options' ) && ! $metrics_is_fresh && ! $metrics_refresh_attempted;
 	$metrics_updated_at = is_array( $metrics_snapshot ) && isset( $metrics_snapshot['updated_at'] ) && is_string( $metrics_snapshot['updated_at'] ) ? $metrics_snapshot['updated_at'] : '';
 	$metrics_updated_timestamp = '' !== $metrics_updated_at ? strtotime( $metrics_updated_at ) : false;
 	$metrics_updated_datetime = false !== $metrics_updated_timestamp ? gmdate( 'c', $metrics_updated_timestamp ) : '';
@@ -223,6 +222,15 @@ function uonix_render_analytics_dashboard_page()
 	$active_dashboard_tab = $dashboard_state['tab'];
 	$active_metrics_subtab = $dashboard_state['subtab'];
 	$active_catalog_tab = $dashboard_state['catalog_tab'];
+	// O auto-refresh só pode disparar na aba de métricas. O formulário e o script
+	// que o submetem vivem dentro do painel de métricas, que é renderizado em toda
+	// aba e apenas escondido; sem esta guarda, abrir outra aba dispara um sync de 8
+	// chamadas de API e um redirect que descarta os avisos daquela aba — o aviso de
+	// destinatários recusados, por exemplo, morria antes de ser lido.
+	$metrics_auto_refresh = current_user_can( 'manage_options' )
+		&& 'metrics' === $active_dashboard_tab
+		&& ! $metrics_is_fresh
+		&& ! $metrics_refresh_attempted;
 	$dashboard_tab_url = static function ( $tab, $subtab, $catalog_tab ) use ( $metrics_period_days ) {
 		$state = array(
 			'tab' => $tab,
@@ -249,6 +257,8 @@ function uonix_render_analytics_dashboard_page()
 		<nav class="uonix-primary-tabs" role="tablist" aria-label="Seções do painel">
 			<a id="uonix-tab-metrics" role="tab" aria-selected="<?php echo 'metrics' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-metrics" tabindex="<?php echo 'metrics' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-metrics" data-uonix-query-key="tab" data-uonix-query-value="metrics">Métricas</a>
 			<a id="uonix-tab-destinations" role="tab" aria-selected="<?php echo 'destinations' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-destinations" tabindex="<?php echo 'destinations' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'destinations', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-destinations" data-uonix-query-key="tab" data-uonix-query-value="destinations">Destinos de marketing configurados</a>
+			<a id="uonix-tab-intelligence" role="tab" aria-selected="<?php echo 'intelligence' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-intelligence" tabindex="<?php echo 'intelligence' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'intelligence', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-intelligence" data-uonix-query-key="tab" data-uonix-query-value="intelligence">Oportunidades SEO</a>
+			<a id="uonix-tab-settings" role="tab" aria-selected="<?php echo 'settings' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-settings" tabindex="<?php echo 'settings' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'settings', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-settings" data-uonix-query-key="tab" data-uonix-query-value="settings">Configurações</a>
 		</nav>
 
 		<section id="uonix-panel-metrics" role="tabpanel" aria-labelledby="uonix-tab-metrics"<?php echo 'metrics' === $active_dashboard_tab ? '' : ' hidden'; ?>>
@@ -713,6 +723,17 @@ function uonix_render_analytics_dashboard_page()
 				</div>
 			</div>
 		</section>
+
+		<?php
+		// Painéis da Central de Inteligência. O markup vive em
+		// 56-admin-intelligence-dashboard.php para não crescer este arquivo.
+		if ( function_exists( 'uonix_intelligence_render_panel' ) ) {
+			uonix_intelligence_render_panel( $active_dashboard_tab );
+		}
+		if ( function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
+			uonix_intelligence_render_settings_panel( $active_dashboard_tab );
+		}
+		?>
 	</div>
 
 	<!-- Estilos CSS do Dashboard -->

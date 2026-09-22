@@ -469,6 +469,8 @@ uonix_dashboard_assert( function_exists( 'uonix_analytics_metrics_requested_dash
 uonix_dashboard_assert( strpos( $output, 'role="tablist" aria-label="Seções do painel"' ) !== false, 'Abas principais expõem tablist com rótulo acessível' );
 uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-metrics")(?=[^>]*role="tab")(?=[^>]*aria-selected="true")(?=[^>]*aria-controls="uonix-panel-metrics")(?=[^>]*href="[^"]*tab=metrics[^"]*")[^>]*>#', $output ), 'Métricas é a aba principal padrão, selecionada e navegável sem JavaScript' );
 uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-destinations")(?=[^>]*role="tab")(?=[^>]*aria-selected="false")(?=[^>]*aria-controls="uonix-panel-destinations")(?=[^>]*href="[^"]*tab=destinations[^"]*")[^>]*>#', $output ), 'Destinos é a segunda aba principal disponível e navegável sem JavaScript' );
+uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-intelligence")(?=[^>]*role="tab")(?=[^>]*aria-selected="false")(?=[^>]*aria-controls="uonix-panel-intelligence")(?=[^>]*href="[^"]*tab=intelligence[^"]*")[^>]*>#', $output ), 'Oportunidades SEO é aba principal navegável sem JavaScript' );
+uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-settings")(?=[^>]*role="tab")(?=[^>]*aria-selected="false")(?=[^>]*aria-controls="uonix-panel-settings")(?=[^>]*href="[^"]*tab=settings[^"]*")[^>]*>#', $output ), 'Configurações é aba principal navegável sem JavaScript' );
 uonix_dashboard_assert( strpos( $output, 'id="uonix-panel-metrics" role="tabpanel" aria-labelledby="uonix-tab-metrics"' ) !== false, 'Painel de métricas é relacionado semanticamente à sua aba' );
 uonix_dashboard_assert( 1 === preg_match( '#<section(?=[^>]*id="uonix-panel-destinations")(?=[^>]*role="tabpanel")(?=[^>]*aria-labelledby="uonix-tab-destinations")[^>]*\bhidden\b[^>]*>#', $output ), 'Painel de destinos começa oculto fora da aba ativa' );
 uonix_dashboard_assert( strpos( $output, 'role="tablist" aria-label="Seções de métricas"' ) !== false, 'Métricas contém subabas acessíveis' );
@@ -486,6 +488,8 @@ uonix_dashboard_assert(
 // Asserções da Issue #209: remoção de emojis e hierarquia do painel
 uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-metrics"[^>]*>\s*Métricas\s*</a>#u', $output ), 'Aba principal Métricas não possui emoji' );
 uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-destinations"[^>]*>\s*Destinos de marketing configurados\s*</a>#u', $output ), 'Aba principal Destinos não possui emoji' );
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-intelligence"[^>]*>\s*Oportunidades SEO\s*</a>#u', $output ), 'Aba Oportunidades SEO não possui emoji' );
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-settings"[^>]*>\s*Configurações\s*</a>#u', $output ), 'Aba Configurações não possui emoji' );
 uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-aggregate"[^>]*>\s*Métricas agregadas\s*</a>#u', $output ), 'Subaba Métricas agregadas não possui emoji' );
 uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-catalog"[^>]*>\s*Catálogo &amp; conteúdo\s*</a>#u', $output ) || 1 === preg_match( '#<a[^>]*id="uonix-tab-catalog"[^>]*>\s*Catálogo & conteúdo\s*</a>#u', $output ), 'Subaba Catálogo & conteúdo não possui emoji' );
 
@@ -644,6 +648,31 @@ try {
 }
 uonix_dashboard_assert( $blocked, 'Usuário sem permissão edit_posts deveria ser bloqueado' );
 echo "ok   Acesso sem permissão é bloqueado com segurança via wp_die\n";
+
+// O auto-refresh de métricas vive dentro do painel de métricas, que é renderizado
+// em toda aba e apenas escondido. Sem guarda de aba, abrir outra aba dispara um
+// sync de 8 chamadas de API e um redirect que descarta os avisos daquela aba.
+$GLOBALS['uonix_test_can_edit'] = true;
+$GLOBALS['uonix_test_can_manage'] = true;
+// Snapshot vencido é a precondição do auto-refresh; com cache fresco ele nunca
+// dispararia e o teste passaria por motivo errado.
+$GLOBALS['uonix_test_snapshot_fresh'] = false;
+
+$_GET = array();
+ob_start();
+uonix_render_analytics_dashboard_page();
+$auto_metrics = (string) ob_get_clean();
+uonix_dashboard_assert( false !== strpos( $auto_metrics, 'data-uonix-auto-refresh="1"' ), 'Snapshot vencido na aba de métricas mantém o auto-refresh' );
+
+foreach ( array( 'destinations', 'intelligence', 'settings' ) as $outra_aba ) {
+	$_GET = array( 'tab' => $outra_aba );
+	ob_start();
+	uonix_render_analytics_dashboard_page();
+	$auto_outra = (string) ob_get_clean();
+	uonix_dashboard_assert( false === strpos( $auto_outra, 'data-uonix-auto-refresh="1"' ), 'Auto-refresh de métricas não dispara na aba ' . $outra_aba );
+}
+$_GET = array();
+echo "ok   Auto-refresh de métricas restrito à própria aba\n";
 
 if ( 0 !== $failures ) {
 	exit( 1 );
