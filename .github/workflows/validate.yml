@@ -356,6 +356,12 @@ jobs:
       - name: Test production rollback runtime
         run: python3 scripts/tests/test-production-rollback-runtime.py
 
+      - name: Test production rollback exit code without mutation
+        run: bash scripts/tests/test-production-rollback-no-mutation.sh
+
+      - name: Test deploy SSH retry coverage
+        run: bash scripts/tests/test-deploy-ssh-retry-coverage.sh
+
       - name: Test clone destination lock
         run: bash scripts/tests/test-clone-lock.sh
 

@@ -233,7 +233,29 @@ main() {
 
   printf 'Backup de banco: %s -> %s\n' "$canonical" "$dump_file"
 
-  if ! output="$(uonix_transport_ssh_once "$canonical" \
+  # `_retry`, não `_once`: a Locaweb corta sessões SSH em rajada e este dump é a
+  # décima conexão de um deploy típico — foi exatamente aqui que a publicação de
+  # 2026-09-22 caiu com `kex_exchange_identification: Connection reset by peer`,
+  # antes de qualquer mutação.
+  #
+  # Retentar é seguro porque o corpo remoto é idempotente por construção: escreve
+  # em "${dump_file}.partial" (removido no início de cada tentativa), valida gzip e
+  # contagem de tabelas, e só então publica com `mv` no nome final. Uma tentativa
+  # interrompida não deixa artefato com o nome definitivo.
+  #
+  # O critério de retry é o mesmo do resto do repositório — só exit 255 (transporte).
+  # Uma falha de dump real (mysqldump rc=2, gzip inválido, poucas tabelas) sai 1 e
+  # propaga na primeira tentativa, sem retry.
+  #
+  # A cadência vem de UONIX_TRANSPORT_MAX_ATTEMPTS/UONIX_TRANSPORT_RETRY_DELAY e é
+  # fixada pelo chamador; o deploy de produção usa 3 tentativas com 60s de base,
+  # porque o limite da Locaweb é por volume de conexões e acumula.
+  #
+  # Nota deliberada: envolver a CHAMADA deste script em scripts/lib/ssh-retry.sh no
+  # workflow não funcionaria. `main` normaliza qualquer falha de transporte para
+  # exit 1 (o `die` abaixo), e ssh-retry.sh só retenta 255 — o wrapper jamais
+  # retentaria. O retry tem de ficar onde o status 255 ainda existe: aqui.
+  if ! output="$(uonix_transport_ssh_retry "$canonical" \
       "bash -s -- $(printf '%q %q %q %q %q' \
         "$wp_root" "$wp_cli" "$OUTPUT_DIR" "$dump_file" "$MIN_TABLES") <<'UONIX_DB_BACKUP'
 $(remote_backup_script)
