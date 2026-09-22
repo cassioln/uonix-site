@@ -16,7 +16,16 @@
 # de restore_options(), não a preservação: num destino que nunca teve a opção não
 # existe linha para preservar, e o que impede a herança é a remoção da linha que
 # acabou de vir da origem. Estar no predicado garante os dois, porque o mesmo
-# predicado governa snapshot e DELETE.
+# predicado governa snapshot e DELETE — asserido no fim deste arquivo.
+#
+# LIMITE DESTA PROTEÇÃO, para não prometer mais do que ela entrega: o predicado
+# governa apenas `wp_options`. Os tokens OAuth POR USUÁRIO do Site Kit ficam em
+# `usermeta`, cobertos por outro mecanismo — snapshot_users/restore_users. Esse
+# mecanismo tem gate `PRESERVE_DESTINATION_USERS`, desligado por `--replace-users`.
+# Logo, um clone `--replace-users` de produção LEVA os tokens de usuário para o
+# destino, e esta guarda não cobre esse caminho. É pré-existente e explicitamente
+# opt-in, mas a meta "a conexão OAuth não repousa onde não precisa" só é atingida
+# no caminho padrão.
 
 set -uo pipefail
 
@@ -37,10 +46,21 @@ report() {
 }
 
 # Extrai o predicado SQL do próprio script, sem executá-lo.
+#
+# `grep -v '^[[:space:]]*--'` descarta comentário SQL, e não é zelo: sem ele, uma
+# cláusula comentada (`-- OR option_name LIKE ...`) satisfaz todas as asserções
+# abaixo enquanto a proteção está MORTA. `--` seguido de espaço é comentário de
+# linha no MySQL, e o resto do predicado continua válido.
 protected_sql="$(
   awk '/^protected_options_where\(\) \{/{flag=1; next} /^SQL$/{flag=0} flag' "$CLONE" |
-    grep -v "^  cat <<'SQL'$"
+    grep -v "^  cat <<'SQL'$" |
+    grep -v '^[[:space:]]*--'
 )"
+
+# Corpo de uma função do script, para asserir sobre o que ela chama.
+corpo_da_funcao() {
+  sed -n "/^$1() {/,/^}/p" "$CLONE"
+}
 
 [ -n "$protected_sql" ] || {
   echo 'FALHA: não foi possível extrair protected_options_where() do script.' >&2
@@ -81,8 +101,14 @@ nao_eh_exclusao() {
 # v2 também aparecem no arquivo (fallback em cascata), então uma busca ampla
 # continuaria achando um nome "parecido" depois de a opção corrente ser
 # renomeada para fora do padrão.
+# Extraído do `return` da função, e não do corpo delimitado por chave: o stop
+# anterior era `/^\t}$/`, um tab literal, então reformatar o arquivo para espaços
+# — ou tirar o wrapper `function_exists` — fazia o awk imprimir até o fim do
+# arquivo e a extração voltar ao comportamento amplo que esta asserção existe
+# para evitar. Ancorar no `return` não depende de indentação.
 php_option="$(
-  awk '/function uonix_analytics_metrics_snapshot_option\(/{f=1} f{print} f&&/^\t}$/{exit}' "$METRICS" |
+  awk '/function uonix_analytics_metrics_snapshot_option\(/{f=1}
+       f && /return/ {print; exit}' "$METRICS" |
     grep -oE "'uonix_[a-z0-9_]+'" |
     tr -d "'" |
     head -1
@@ -148,7 +174,10 @@ else
              googlesitekit_active_modules; do
     case "$opt" in
       "$sitekit_prefix"*) : ;;
-      *) report "o padrão protegido ('$sitekit_prefix%') não cobre '$opt'." ;;
+      # A mensagem diz "prefixo ancorado", e não "não cobre": um curinga inicial
+      # (`%googlesitekit%`) protegeria MAIS, não menos, e dizer "não cobre" nesse
+      # caso mandaria quem for corrigir para a direção errada.
+      *) report "o padrão protegido ('$sitekit_prefix%') não é um prefixo ancorado que cubra '$opt'; exija prefixo ancorado, sem curinga inicial." ;;
     esac
   done
 fi
@@ -177,12 +206,42 @@ if ! printf '%s' "$protected_sql" | grep -qE '^option_name '; then
   report 'protected_options_where() não começa com uma cláusula option_name; o SQL montado ficaria inválido.'
 fi
 
-# Exige os DOIS caminhos: restore_options() tem um DELETE para ambiente remoto e
-# outro para o local. Aceitar "existe algum" deixaria passar a remoção de um dos
-# dois — e aí o clone para aquele destino voltaria a herdar.
-delete_paths="$(grep -cE 'DELETE FROM .*\$\{?where' "$CLONE")"
-if [ "${delete_paths:-0}" -lt 2 ]; then
-  report "esperava 2 DELETE parametrizados pelo predicado em restore_options() (remoto e local), encontrei ${delete_paths:-0}; é o DELETE que impede a herança, e sem ele esta guarda não protege nada."
+# O MESMO predicado tem de governar snapshot E DELETE.
+#
+# Esta é a asserção mais importante do arquivo, e a que faltava. O cabeçalho
+# afirma que os dois usam o mesmo predicado, mas nada verificava. Se um refactor
+# futuro estreitar o predicado de `snapshot_options()` e deixar o `DELETE` de
+# `restore_options()` largo, o DELETE continua apagando tudo e o replay não traz
+# mais as linhas do destino: **um único clone destrói em definitivo** o SMTP, o
+# Turnstile, o captcha, o `admin_email`, o Site Kit e a lista de destinatários do
+# PRÓPRIO destino — inclusive com destino produção. É a única falha desta família
+# que destrói dado em vez de apenas deixar herdar.
+for fn in snapshot_options restore_options; do
+  corpo="$(corpo_da_funcao "$fn")"
+  if [ -z "$corpo" ]; then
+    report "não consegui extrair o corpo de $fn(); a asserção de predicado único não pode ser verificada."
+  elif ! printf '%s' "$corpo" | grep -q 'protected_options_where'; then
+    report "$fn() não chama protected_options_where(); snapshot e DELETE passariam a usar predicados diferentes, e um clone apagaria em definitivo os segredos do destino."
+  fi
+done
+
+# Exige os DOIS caminhos de DELETE, um POR BRANCH e não por contagem no arquivo.
+#
+# `grep -c` no arquivo inteiro deixa passar a troca "remove o DELETE local e
+# duplica o remoto": a contagem segue 2 e todo clone com destino local volta a
+# herdar em silêncio. Um terceiro DELETE legítimo adicionado depois mascararia a
+# remoção de um real pelo mesmo motivo.
+restore_body="$(corpo_da_funcao restore_options)"
+if [ -z "$restore_body" ]; then
+  report 'não consegui extrair o corpo de restore_options() para verificar os caminhos de DELETE.'
+else
+  # O caminho local passa por local_db_query; o remoto monta delete_sql e envia.
+  if ! printf '%s' "$restore_body" | grep -qE 'local_db_query "DELETE FROM .*\$\{?where'; then
+    report 'restore_options() não tem o DELETE do caminho LOCAL parametrizado pelo predicado; clone com destino local voltaria a herdar.'
+  fi
+  if ! printf '%s' "$restore_body" | grep -qE 'delete_sql=.*DELETE FROM .*\$\{?where'; then
+    report 'restore_options() não tem o DELETE do caminho REMOTO parametrizado pelo predicado; clone com destino remoto voltaria a herdar.'
+  fi
 fi
 
 if [ "$failures" -ne 0 ]; then
