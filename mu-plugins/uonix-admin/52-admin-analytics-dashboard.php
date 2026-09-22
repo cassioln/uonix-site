@@ -249,6 +249,8 @@ function uonix_render_analytics_dashboard_page()
 		<nav class="uonix-primary-tabs" role="tablist" aria-label="Seções do painel">
 			<a id="uonix-tab-metrics" role="tab" aria-selected="<?php echo 'metrics' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-metrics" tabindex="<?php echo 'metrics' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-metrics" data-uonix-query-key="tab" data-uonix-query-value="metrics">Métricas</a>
 			<a id="uonix-tab-destinations" role="tab" aria-selected="<?php echo 'destinations' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-destinations" tabindex="<?php echo 'destinations' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'destinations', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-destinations" data-uonix-query-key="tab" data-uonix-query-value="destinations">Destinos de marketing configurados</a>
+			<a id="uonix-tab-intelligence" role="tab" aria-selected="<?php echo 'intelligence' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-intelligence" tabindex="<?php echo 'intelligence' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'intelligence', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-intelligence" data-uonix-query-key="tab" data-uonix-query-value="intelligence">Oportunidades SEO</a>
+			<a id="uonix-tab-settings" role="tab" aria-selected="<?php echo 'settings' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-settings" tabindex="<?php echo 'settings' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'settings', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-settings" data-uonix-query-key="tab" data-uonix-query-value="settings">Configurações</a>
 		</nav>
 
 		<section id="uonix-panel-metrics" role="tabpanel" aria-labelledby="uonix-tab-metrics"<?php echo 'metrics' === $active_dashboard_tab ? '' : ' hidden'; ?>>
@@ -713,6 +715,17 @@ function uonix_render_analytics_dashboard_page()
 				</div>
 			</div>
 		</section>
+
+		<?php
+		// Painéis da Central de Inteligência. O markup vive em
+		// 56-admin-intelligence-dashboard.php para não crescer este arquivo.
+		if ( function_exists( 'uonix_intelligence_render_panel' ) ) {
+			uonix_intelligence_render_panel( $active_dashboard_tab );
+		}
+		if ( function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
+			uonix_intelligence_render_settings_panel( $active_dashboard_tab );
+		}
+		?>
 	</div>
 
 	<!-- Estilos CSS do Dashboard -->

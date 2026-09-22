@@ -724,7 +724,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_requested_dashboard_state' ) ) 
 		$subtab = is_scalar( $raw_subtab ) ? sanitize_key( (string) $raw_subtab ) : 'aggregate';
 		$catalog_tab = is_scalar( $raw_catalog_tab ) ? sanitize_key( (string) $raw_catalog_tab ) : 'products';
 
-		if ( ! in_array( $tab, array( 'metrics', 'destinations' ), true ) ) {
+		if ( ! in_array( $tab, array( 'metrics', 'destinations', 'intelligence', 'settings' ), true ) ) {
 			$tab = 'metrics';
 		}
 		if ( ! in_array( $subtab, array( 'aggregate', 'catalog' ), true ) ) {

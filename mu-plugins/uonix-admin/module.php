@@ -22,6 +22,7 @@ uonix_mu_require_files(
 		'51-login-turnstile.php',
 		'53-admin-analytics-metrics.php',
 		'55-admin-intelligence-metrics.php',
+		'56-admin-intelligence-dashboard.php',
 		'52-admin-analytics-dashboard.php',
 	),
 	'uonix-admin'
