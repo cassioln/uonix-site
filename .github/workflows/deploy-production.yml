@@ -97,6 +97,16 @@ jobs:
       DEPLOY_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
       DEPLOY_LOCK_ACQUIRED: 'false'
       UONIX_CONFIGURE_PAGE_CACHE: ${{ inputs.configure_page_cache }}
+      # Cadência de retry do transporte compartilhado (scripts/lib/ssh-transport.sh),
+      # que é o caminho dos DOIS checkpoints de banco deste job
+      # (scripts/backup-remote-database.sh). Fica no job, e não no step, porque os
+      # dois checkpoints precisam da MESMA política e um só lugar para revisá-la.
+      #
+      # 3 e 60 em vez do default 5 e 10 da lib: o limite da Locaweb é por VOLUME de
+      # conexões e ACUMULA. O default dispara cinco conexões em 40s e alimenta o
+      # contador; aqui são duas conexões extras, com esperas de 60s e 120s.
+      UONIX_TRANSPORT_MAX_ATTEMPTS: '3'
+      UONIX_TRANSPORT_RETRY_DELAY: '60'
 
     steps:
       - name: Validate canonical production target before credentials
@@ -153,7 +163,25 @@ jobs:
           SSHPASS: ${{ secrets.LOCAWEB_SSH_PASSWORD }}
         run: |
           set -euo pipefail
-          if ! sshpass -e ssh \
+          # Este passo é LEITURA PURA (test -d, command -v, test -x, test -f,
+          # core is-installed): nada aqui escreve no destino, então retentar é
+          # idempotente por construção. Sem retry, uma única conexão cortada
+          # reprovava o deploy inteiro antes de qualquer preparação.
+          #
+          # --replay-stdin NÃO é opcional aqui. O script remoto vem do heredoc, e
+          # sem replay a segunda tentativa receberia stdin vazio; `bash -s` sem
+          # entrada sai 0 e o preflight APROVARIA sem verificar nada (fail-open
+          # medido — ver o cabeçalho de scripts/lib/ssh-retry.sh).
+          #
+          # Espaçamento 3 60 (esperas de 60s e 120s), e não o 5 10 dos passos de
+          # publicação: o limite da Locaweb é por VOLUME de conexões e ACUMULA.
+          # Numa execução real nove conexões passaram e a décima caiu; quinze
+          # minutos depois nenhuma passou. Cinco tentativas em 40s alimentam o
+          # contador; três espaçadas somam duas conexões e dão ~3min para ele
+          # recuar. Retry aqui aumenta a chance de atravessar um corte no meio da
+          # rajada; não remove a causa, que é o número de sessões.
+          if ! bash scripts/lib/ssh-retry.sh --replay-stdin 3 60 -- \
+            sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
             -o PubkeyAuthentication=no \
@@ -424,7 +452,14 @@ jobs:
           # o marcador já presente. Nesse caso, se ele pertencer a este run_id,
           # é sucesso — não uma falha de "arquivo já existe". Só um marcador de
           # OUTRO run_id é rejeitado (lock legitimamente de outra execução).
-          bash scripts/lib/ssh-retry.sh 5 10 -- \
+          #
+          # --replay-stdin em TODA invocação de ssh-retry.sh que carrega heredoc
+          # (esta e as três abaixo). Sem a bandeira, a idempotência descrita acima
+          # nunca era exercitada: a segunda tentativa recebia stdin vazio, `bash -s`
+          # saía 0 e o passo seguia como se o marcador tivesse sido criado — mas ele
+          # podia não existir, e o rollback depois concluía "nenhuma mutação" com
+          # código já publicado. Medido em 2026-09-22; ver scripts/lib/ssh-retry.sh.
+          bash scripts/lib/ssh-retry.sh --replay-stdin 5 10 -- \
             sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
@@ -467,6 +502,9 @@ jobs:
           test "$(cat "$marker")" = "$run_id"
           REMOTE
 
+          # SEM --replay-stdin de propósito: rsync não lê o corpo da operação de
+          # stdin, e a bandeira faria ssh-retry.sh bloquear esperando um EOF que
+          # ninguém vai enviar. A bandeira é só para as invocações com heredoc.
           rsync_retry() {
             bash scripts/lib/ssh-retry.sh 5 10 -- rsync "$@"
           }
@@ -495,7 +533,7 @@ jobs:
             .deploy/mu-plugins/uonix-core.php \
             "$remote:$LOCAWEB_DOCUMENT_ROOT/wp-content/mu-plugins/uonix-core.php"
 
-          bash scripts/lib/ssh-retry.sh 5 10 -- \
+          bash scripts/lib/ssh-retry.sh --replay-stdin 5 10 -- \
             sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
@@ -553,7 +591,7 @@ jobs:
           # Reserva exclusiva do manifesto esperado, idempotente pelo mesmo motivo
           # do marcador de código: um retry pode encontrar o arquivo vazio já
           # reservado por uma tentativa anterior cuja resposta se perdeu.
-          bash scripts/lib/ssh-retry.sh 5 10 -- \
+          bash scripts/lib/ssh-retry.sh --replay-stdin 5 10 -- \
             sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
@@ -593,7 +631,7 @@ jobs:
             .deploy/manifest.sha256 \
             "$remote:$BACKUP_DIR/manifest.expected.sha256"
 
-          bash scripts/lib/ssh-retry.sh 5 10 -- \
+          bash scripts/lib/ssh-retry.sh --replay-stdin 5 10 -- \
             sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
@@ -1087,6 +1125,30 @@ jobs:
           backup_id="${BACKUP_DIR##*/}"
           operation_lock="$LOCAWEB_DOCUMENT_ROOT/.uonix-operation.lock"
 
+          # ROLLBACK_NOT_NEEDED=32 — contrato entre o bloco remoto abaixo e este
+          # runner. O bloco sai 32 quando houve PREPARAÇÃO (lock adquirido, backup
+          # de caminhos feito) e NENHUMA mutação foi iniciada: o estado correto de
+          # uma falha anterior à publicação.
+          #
+          # Antes, esse caso saía 0 do heredoc — o que só encerrava o script REMOTO.
+          # O runner seguia para a sondagem HTTP e para o heredoc de limpeza, que
+          # exige um marcador desta execução, não encontrava nenhum (porque nada foi
+          # publicado) e saía 1. Resultado: o passo ficava vermelho no caminho
+          # saudável, e o run exibia dois jobs falhos com produção intocada.
+          #
+          # NÃO é `|| true`: qualquer status diferente de 32 continua propagando,
+          # inclusive o rollback tentado e falhado — o único desfecho que deve ficar
+          # vermelho. O job segue `failure` pelo passo que realmente falhou; esta
+          # correção só deixa de somar um vermelho falso.
+          #
+          # `set +e` em volta de EXATAMENTE esta chamada, e nada mais entre ele e o
+          # `set -e`: precisamos do status real do bloco remoto, e um `|| var=$?` na
+          # linha do heredoc quebraria os extratores que esta suíte usa para rodar os
+          # blocos REMOTE de verdade (eles casam `<<'REMOTE'` no fim da linha).
+          # `if ! cmd` também não serve: dentro do `then`, `$?` é o status do `!`,
+          # sempre 0, e o código 32 se perderia.
+          rollback_status=0
+          set +e
           sshpass -e ssh \
             -p "$LOCAWEB_SSH_PORT" \
             -o PreferredAuthentications=password \
@@ -1175,7 +1237,12 @@ jobs:
           test "$(cat "$operation_lock/owner")" = "$run_id"
           if [ ! -e "$code_mutation_marker" ] && [ ! -L "$code_mutation_marker" ] && [ ! -e "$db_mutation_marker" ] && [ ! -L "$db_mutation_marker" ] && [ ! -e "$wpsc_mutation_marker" ] && [ ! -L "$wpsc_mutation_marker" ] && [ ! -e "$wpsc_reconfigure_marker" ] && [ ! -L "$wpsc_reconfigure_marker" ]; then
             printf 'rollback: nenhuma mutação foi iniciada; nada a restaurar\n'
-            exit 0
+            # 32 = ROLLBACK_NOT_NEEDED. Não é 0: sair 0 daqui dizia ao runner
+            # "rollback concluído", e ele seguia para a sondagem HTTP e para a
+            # limpeza de marcador, que reprovava por não achar marcador nenhum.
+            # O runner traduz 32 em sucesso e encerra o passo sem tocar em nada
+            # (ver o comentário ROLLBACK_NOT_NEEDED na parte não-remota do step).
+            exit 32
           fi
 
           for marker in "$code_mutation_marker" "$db_mutation_marker" "$wpsc_mutation_marker" "$wpsc_reconfigure_marker"; do
@@ -1382,6 +1449,25 @@ jobs:
           rollback_check 'política de indexação de produção indexável (UONIX_ALLOW_INDEXING, blog_public)'
           "$php_bin" -d disable_functions= "$wp_bin" --path="$document_root" eval 'if (!defined("UONIX_ALLOW_INDEXING") || true !== UONIX_ALLOW_INDEXING || !function_exists("uonix_environment_allows_indexing") || !uonix_environment_allows_indexing() || "1" !== (string) get_option("blog_public")) { exit(1); }'
           REMOTE
+          rollback_status=$?
+          set -e
+
+          # Desfecho "houve preparação, nenhuma mutação": sucesso explícito, e o
+          # passo termina AQUI. Não há por que sondar HTTP nem consumir marcador —
+          # nada foi publicado, e a limpeza reprovaria justamente por isso. Cada
+          # conexão SSH poupada também conta: o limite da Locaweb é por volume.
+          if [ "$rollback_status" -eq 32 ]; then
+            printf 'rollback dispensado: houve preparação (lock e backup a partir de %s), nenhuma mutação foi iniciada e produção está intocada. O job permanece vermelho pelo passo que falhou de fato.\n' "$backup_id"
+            exit 0
+          fi
+
+          # Qualquer outro status não-zero é rollback que precisava acontecer e não
+          # completou. Propaga, e o lock segue fail-closed com os marcadores.
+          if [ "$rollback_status" -ne 0 ]; then
+            printf 'rollback falhou com status %s; lock e marcadores preservados para intervenção\n' "$rollback_status" >&2
+            exit "$rollback_status"
+          fi
+
           printf 'rollback: %s\n' 'X-Robots-Tag sem noindex/nofollow/noarchive'
           headers="$(mktemp)"
           trap 'rm -f "$headers"' EXIT

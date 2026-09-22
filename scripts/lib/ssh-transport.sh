@@ -266,6 +266,12 @@ uonix_transport_ssh_retry() {
       return "$status"
     fi
 
+    # Sem esta linha o retry é MUDO: com a cadência espaçada que a Locaweb exige
+    # (60s, 120s), o log do deploy fica minutos parado e um operador lê isso como
+    # travamento. O aviso vai para stderr e não cita host, usuário nem comando.
+    printf 'uonix_transport_ssh_retry: tentativa %s/%s falhou com exit 255 (transporte); aguardando %ss\n' \
+      "$attempt" "$UONIX_TRANSPORT_MAX_ATTEMPTS" \
+      "$(( attempt * UONIX_TRANSPORT_RETRY_DELAY ))" >&2
     if [ "$UONIX_TRANSPORT_RETRY_DELAY" -gt 0 ]; then
       sleep "$(( attempt * UONIX_TRANSPORT_RETRY_DELAY ))"
     fi
