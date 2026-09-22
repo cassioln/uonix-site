@@ -98,6 +98,33 @@ WP-Cron `weekly`. O painel exibe o **próximo disparo real** lido do agendador (
 
 É proibido prometer horário ou período do dia na interface e no e-mail, incluindo formulações brandas como "às segundas pela manhã". WP-Cron dispara por tráfego, não por relógio, e o site não tem cronjob de servidor: a deriva pode atravessar o dia inteiro, o que torna "pela manhã" tão insustentável quanto "08:00". A única afirmação que o sistema consegue provar é a frequência somada ao próximo disparo agendado.
 
+#### Quem cria o evento: o invariante dos destinatários
+
+**Existe evento agendado se, e somente se, existe destinatário.** Um callback de `init` mantém esse invariante em toda requisição: agenda `weekly` quando há destinatário e nenhum evento, e remove o evento quando o último destinatário sai.
+
+A lista de destinatários é, portanto, a **chave de ativação** — não um campo a mais. Isso já estava implícito em `uonix_intelligence_send_report()`, que recusa lista vazia com o motivo `no_recipients`; o agendamento passou a respeitar a mesma regra.
+
+O que essa amarração compra, e que um `wp_schedule_event` manual por WP-CLI não dá:
+
+- **Reprodutibilidade.** Agendamento feito à mão vive só na opção `cron`. Uma restauração de banco anterior ao agendamento, ou uma limpeza de cron, o perde em silêncio e ninguém lembra de refazer. Com o invariante, ele se restabelece na requisição seguinte, porque a lista de destinatários sobrevive.
+- **Painel honesto.** Sem destinatário, o evento sai e o painel exibe "não agendado", em vez de prometer um envio que não aconteceria.
+
+**A contenção por ambiente NÃO é automática, e depende do clone.** Não vale dizer que "a opção vive no banco de cada ambiente, então o ambiente clonado não agenda": `scripts/clone-environment.sh` copia `wp_options` da origem. Ele preserva `cron` no destino — o evento não viaja —, mas os destinatários viajariam, e o callback de `init` recriaria o evento no destino na requisição seguinte. O ambiente clonado passaria a exibir um "próximo disparo" concreto que ninguém configurou ali.
+
+Por isso `uonix_executive_report_recipients` está em `protected_options_where()`, junto de `cron`, SMTP, Turnstile e captcha — todas configurações que ativam comportamento e não devem atravessar ambientes. `scripts/tests/test-clone-activation-options.sh` reprova o build se qualquer uma das duas sair da lista, ou se o invariante deixar de existir no módulo.
+
+**O que faz o trabalho é o `DELETE`, não a preservação** — e a distinção importa para a próxima opção de ativação que alguém acrescentar. `snapshot_options()` gera uma instrução de replay por linha **que existe no destino**; num ambiente que nunca cadastrou destinatário não existe linha, e o snapshot sai vazio para essa opção. Quem impede a herança é o `DELETE FROM ... WHERE <predicado>` que `restore_options()` roda **antes** do replay: ele remove do destino a linha que acabou de vir da origem. Ou seja, "preservar a opção do destino" e "impedir que a opção da origem seja herdada" são efeitos diferentes, e é o segundo que fecha o furo. Estar no predicado garante os dois, porque o mesmo predicado governa snapshot e `DELETE`.
+
+Sem essa proteção, o guard de e-mail de `49-email-environment-label.php` ainda conteria o **envio**, redirecionando para a caixa segura do ambiente. O que ele não conteria é a **afirmação** do painel. Contenção de envio não é contenção de ativação.
+
+Duas guardas de falha fechada, ambas cobertas por teste: o evento **não** é criado se a recorrência `weekly` não estiver registrada — agendar sem ela produziria um disparo único disfarçado de semanal —, e um evento já existente **não** é reagendado, porque mover a data a cada requisição empurraria o envio para nunca.
+
+Carregar o arquivo continua não escrevendo no agendador. Em mu-plugin o carregamento roda antes de `init` e antes dos plugins; quem agenda é o callback.
+
+O teste que afirma isso **semeia um destinatário antes de carregar os módulos**, de propósito. Sem a semente ele passava por motivo errado: com a lista vazia, o callback sairia no guard de destinatários antes de tocar no agendador, e uma chamada indevida no carregamento não seria detectada. A asserção só tem valor quando existe destinatário e o agendador, ainda assim, continua vazio.
+
+O horário do primeiro disparo — próxima segunda-feira, 08:00 no fuso do site — é **arbitrário de propósito**, pela mesma razão que a interface não pode prometê-lo.
+
 ## Módulo 3 — Oportunidades no Search Console
 
 Primeiro módulo a ser entregue, por ser o único cujo caminho de dados já existe. O snapshot atual já persiste posição, CTR e páginas do Search Console — e a interface não renderiza nenhum dos três.
@@ -168,6 +195,8 @@ Os testes do projeto são scripts autônomos com stubs do WordPress escritos à 
 O step no workflow é obrigatório: `scripts/tests/test-ci-covers-all-tests.sh` cruza o diretório de testes com o workflow e reprova o build quando um teste não tem step.
 
 Nenhum módulo é ativado — nem cron, nem envio automático — antes de o smoke passar. Cron registrado e inativo é estado válido e esperado.
+
+A porta de ativação do Módulo 3 foi atravessada em 2026-09-22 (ver *Registro da porta de ativação*), e é o que autoriza o agendamento automático descrito em *Agendamento*. A ativação continua sendo uma decisão humana: ela é expressa por **cadastrar um destinatário**, não por rodar um comando. Enquanto a lista está vazia, o módulo segue registrado e inativo — o mesmo estado válido de antes.
 
 ## Licenciamento
 

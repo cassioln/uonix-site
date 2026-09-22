@@ -3,12 +3,16 @@
  * Central de Inteligência — relatório executivo por e-mail.
  *
  * Monta e envia o relatório a partir do que 55-admin-intelligence-metrics.php
- * devolve. Não consulta API própria e não agenda nada por conta própria: o
- * handler do evento semanal é registrado, mas o evento NÃO é agendado aqui.
+ * devolve. Não consulta API própria.
  *
- * Ativar o envio automático é decisão operacional, condicionada ao smoke contra
- * a API real. Cron registrado e inativo é estado válido e esperado — ver
- * docs/uonix-insights-inteligencia.md.
+ * Mantém o invariante **existe evento agendado se, e somente se, existe
+ * destinatário**: o handler é registrado no carregamento, e um callback de `init`
+ * cria ou remove o evento semanal conforme a lista de destinatários. Carregar
+ * este arquivo não escreve no agendador.
+ *
+ * A ativação segue sendo decisão humana — ela é expressa por cadastrar um
+ * destinatário, não por rodar um comando. Lista vazia é o estado registrado e
+ * inativo, válido e esperado — ver docs/uonix-insights-inteligencia.md.
  *
  * O envio usa wp_mail(), portanto passa pelo guard de ambiente de
  * mu-plugins/uonix-integrations/49-email-environment-label.php, que bloqueia
@@ -204,12 +208,104 @@ if ( ! function_exists( 'uonix_intelligence_send_report' ) ) {
 	}
 }
 
-// O handler do evento semanal é registrado, mas o evento NÃO é agendado aqui.
-// Agendar é decisão operacional, condicionada ao smoke contra a API real; o painel
-// exibe "não agendado" enquanto isso, o que é a verdade.
+// O handler do evento semanal é registrado no carregamento. O evento NÃO é
+// agendado aqui: carregar um arquivo não deve escrever no agendador, e em
+// mu-plugin isso roda antes de `init`, antes dos plugins. Quem agenda é o
+// callback de `init` abaixo.
 if ( function_exists( 'uonix_intelligence_report_hook' ) ) {
 	add_action( uonix_intelligence_report_hook(), 'uonix_intelligence_send_report', 10, 0 );
 }
+
+if ( ! function_exists( 'uonix_intelligence_report_first_run' ) ) {
+	/**
+	 * Momento do primeiro disparo: próxima segunda-feira, 08:00 no fuso do site.
+	 *
+	 * O horário é arbitrário **de propósito**. Sem cronjob de servidor, WP-Cron
+	 * dispara por tráfego, não por relógio: a deriva pode atravessar o dia. Por
+	 * isso o contrato proíbe prometer horário na interface, e por isso não vale
+	 * gastar decisão escolhendo um. Segunda-feira é só a âncora semanal.
+	 *
+	 * @return int Timestamp Unix.
+	 */
+	function uonix_intelligence_report_first_run() {
+		$timezone = function_exists( 'wp_timezone' ) ? wp_timezone() : new DateTimeZone( 'UTC' );
+
+		return ( new DateTimeImmutable( 'now', $timezone ) )
+			->modify( 'next monday' )
+			->setTime( 8, 0, 0 )
+			->getTimestamp();
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_maybe_schedule_report' ) ) {
+	/**
+	 * Mantém o invariante: **existe evento agendado se, e somente se, existe
+	 * destinatário.**
+	 *
+	 * A lista de destinatários é a chave de ativação, e não um campo a mais: o
+	 * próprio `uonix_intelligence_send_report()` já recusa lista vazia com o
+	 * motivo `no_recipients`. Amarrar o agendamento a ela dá duas propriedades
+	 * que um agendamento manual por WP-CLI não tem:
+	 *
+	 * - **Reprodutível.** Agendamento feito à mão vive só na opção `cron`. Uma
+	 *   restauração de banco anterior a ele, ou uma limpeza de cron, o perde em
+	 *   silêncio. Aqui ele se restabelece na requisição seguinte, porque a lista
+	 *   de destinatários sobrevive.
+	 * - **Painel honesto.** Sem destinatário, o evento é removido, então o painel
+	 *   exibe "não agendado" em vez de prometer um envio que não aconteceria.
+	 *
+	 * **NÃO confunda isto com contenção por ambiente.** Não vale dizer que "a
+	 * opção vive no banco de cada ambiente, então o ambiente clonado não agenda":
+	 * `scripts/clone-environment.sh` copia `wp_options` da origem. A contenção
+	 * existe porque `uonix_executive_report_recipients` está em
+	 * `protected_options_where()` — e, mais precisamente, porque esse predicado
+	 * governa o `DELETE` de `restore_options()`, que remove do destino a linha
+	 * herdada. Sem essa proteção, o guard de e-mail de
+	 * 49-email-environment-label.php ainda conteria o ENVIO, mas não a AFIRMAÇÃO
+	 * do painel. Ver docs/uonix-insights-inteligencia.md.
+	 *
+	 * @return bool Verdadeiro apenas quando esta chamada criou o evento.
+	 */
+	function uonix_intelligence_maybe_schedule_report() {
+		if ( ! function_exists( 'uonix_intelligence_report_hook' ) || ! function_exists( 'uonix_intelligence_get_recipients' ) ) {
+			return false;
+		}
+
+		$hook      = uonix_intelligence_report_hook();
+		$agendado  = wp_next_scheduled( $hook );
+		$destinos  = uonix_intelligence_get_recipients();
+
+		if ( array() === $destinos ) {
+			if ( false !== $agendado ) {
+				// `wp_clear_scheduled_hook` remove todas as ocorrências, e não só a
+				// primeira: se um agendamento duplicado existir, some junto.
+				wp_clear_scheduled_hook( $hook );
+			}
+
+			return false;
+		}
+
+		if ( false !== $agendado ) {
+			// Já agendado: não duplicar nem mover a data. Reagendar a cada
+			// requisição empurraria o disparo para sempre adiante e o relatório
+			// nunca sairia.
+			return false;
+		}
+
+		$recorrencias = wp_get_schedules();
+		if ( ! isset( $recorrencias['weekly'] ) ) {
+			// Falha fechada: sem a recorrência registrada, `wp_schedule_event`
+			// criaria um disparo único disfarçado de semanal. Melhor não agendar e
+			// deixar o painel dizer "não agendado".
+			return false;
+		}
+
+		return (bool) wp_schedule_event( uonix_intelligence_report_first_run(), 'weekly', $hook );
+	}
+}
+// `accepted_args = 0` como o irmão de 53: o callback não usa argumento nenhum, e
+// declarar zero impede que um dia alguém injete dado pelo despacho do hook.
+add_action( 'init', 'uonix_intelligence_maybe_schedule_report', 10, 0 );
 
 if ( ! function_exists( 'uonix_intelligence_handle_test_send' ) ) {
 	/**
