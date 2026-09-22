@@ -113,6 +113,8 @@ O que essa amarração compra, e que um `wp_schedule_event` manual por WP-CLI n�
 
 Por isso `uonix_executive_report_recipients` está em `protected_options_where()`, junto de `cron`, SMTP, Turnstile e captcha — todas configurações que ativam comportamento e não devem atravessar ambientes. `scripts/tests/test-clone-activation-options.sh` reprova o build se qualquer uma das duas sair da lista, ou se o invariante deixar de existir no módulo.
 
+**O que faz o trabalho é o `DELETE`, não a preservação** — e a distinção importa para a próxima opção de ativação que alguém acrescentar. `snapshot_options()` gera uma instrução de replay por linha **que existe no destino**; num ambiente que nunca cadastrou destinatário não existe linha, e o snapshot sai vazio para essa opção. Quem impede a herança é o `DELETE FROM ... WHERE <predicado>` que `restore_options()` roda **antes** do replay: ele remove do destino a linha que acabou de vir da origem. Ou seja, "preservar a opção do destino" e "impedir que a opção da origem seja herdada" são efeitos diferentes, e é o segundo que fecha o furo. Estar no predicado garante os dois, porque o mesmo predicado governa snapshot e `DELETE`.
+
 Sem essa proteção, o guard de e-mail de `49-email-environment-label.php` ainda conteria o **envio**, redirecionando para a caixa segura do ambiente. O que ele não conteria é a **afirmação** do painel. Contenção de envio não é contenção de ativação.
 
 Duas guardas de falha fechada, ambas cobertas por teste: o evento **não** é criado se a recorrência `weekly` não estiver registrada — agendar sem ela produziria um disparo único disfarçado de semanal —, e um evento já existente **não** é reagendado, porque mover a data a cada requisição empurraria o envio para nunca.

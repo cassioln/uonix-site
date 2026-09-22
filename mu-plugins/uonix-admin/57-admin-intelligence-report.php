@@ -244,17 +244,25 @@ if ( ! function_exists( 'uonix_intelligence_maybe_schedule_report' ) ) {
 	 *
 	 * A lista de destinatários é a chave de ativação, e não um campo a mais: o
 	 * próprio `uonix_intelligence_send_report()` já recusa lista vazia com o
-	 * motivo `no_recipients`. Amarrar o agendamento a ela dá três propriedades
+	 * motivo `no_recipients`. Amarrar o agendamento a ela dá duas propriedades
 	 * que um agendamento manual por WP-CLI não tem:
 	 *
-	 * - **Reprodutível.** Agendamento feito à mão vive só no banco. Um clone de
-	 *   ambiente ou uma restauração o perde em silêncio, e ninguém lembra de
-	 *   refazer. Aqui ele se restabelece sozinho na requisição seguinte.
-	 * - **Contido por ambiente sem lógica de ambiente.** Um ambiente onde nunca
-	 *   se configurou destinatário não agenda nada, porque a opção vive no banco
-	 *   de cada ambiente. Não é preciso perguntar "sou produção?".
+	 * - **Reprodutível.** Agendamento feito à mão vive só na opção `cron`. Uma
+	 *   restauração de banco anterior a ele, ou uma limpeza de cron, o perde em
+	 *   silêncio. Aqui ele se restabelece na requisição seguinte, porque a lista
+	 *   de destinatários sobrevive.
 	 * - **Painel honesto.** Sem destinatário, o evento é removido, então o painel
 	 *   exibe "não agendado" em vez de prometer um envio que não aconteceria.
+	 *
+	 * **NÃO confunda isto com contenção por ambiente.** Não vale dizer que "a
+	 * opção vive no banco de cada ambiente, então o ambiente clonado não agenda":
+	 * `scripts/clone-environment.sh` copia `wp_options` da origem. A contenção
+	 * existe porque `uonix_executive_report_recipients` está em
+	 * `protected_options_where()` — e, mais precisamente, porque esse predicado
+	 * governa o `DELETE` de `restore_options()`, que remove do destino a linha
+	 * herdada. Sem essa proteção, o guard de e-mail de
+	 * 49-email-environment-label.php ainda conteria o ENVIO, mas não a AFIRMAÇÃO
+	 * do painel. Ver docs/uonix-insights-inteligencia.md.
 	 *
 	 * @return bool Verdadeiro apenas quando esta chamada criou o evento.
 	 */

@@ -200,7 +200,8 @@ uox_assert(
 // Invariante: existe evento agendado se, e somente se, existe destinatário.
 // ---------------------------------------------------------------------------
 
-// Sem destinatário, não agenda — e a lista vazia é o estado inicial.
+// Esvazia a lista aqui: o estado inicial do arquivo NÃO é vazio, porque a
+// semente lá no topo é o que dá dentes à asserção de carregamento.
 $GLOBALS['uox_options'][ uonix_intelligence_recipients_option() ] = array();
 uox_assert( false === uonix_intelligence_maybe_schedule_report(), 'Sem destinatário, não agenda' );
 uox_assert( false === wp_next_scheduled( uonix_intelligence_report_hook() ), 'Sem destinatário, o agendador segue vazio' );

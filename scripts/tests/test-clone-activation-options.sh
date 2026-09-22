@@ -58,15 +58,18 @@ activation_options=(
   'uonix_executive_report_recipients'
 )
 
+# O casamento é ancorado DENTRO da lista `IN (...)`, e não um grep solto pelo
+# nome: a opção pode aparecer no predicado numa cláusula que não protege — por
+# exemplo um `NOT LIKE` — e um grep solto daria por protegida o que não está.
 for option in "${activation_options[@]}"; do
-  if ! printf '%s' "$protected_sql" | grep -q "$option"; then
-    report "opção '$option' liga automação no destino e NÃO está em protected_options_where(); clonar ativaria o agendamento no ambiente clonado."
+  if ! printf '%s' "$protected_sql" | grep -qE "IN \([^)]*'$option'"; then
+    report "opção '$option' liga automação no destino e NÃO está na lista IN de protected_options_where(); clonar ativaria o agendamento no ambiente clonado."
   fi
 done
 
 # `cron` precisa continuar protegida junto: proteger o destinatário e deixar o
 # evento viajar traria de volta o mesmo problema pelo outro lado.
-if ! printf '%s' "$protected_sql" | grep -q "'cron'"; then
+if ! printf '%s' "$protected_sql" | grep -qE "IN \([^)]*'cron'"; then
   report "a opção 'cron' saiu de protected_options_where(); o evento agendado da origem passaria a viajar para o destino."
 fi
 
