@@ -317,6 +317,9 @@ jobs:
       - name: Test clone activation option protection
         run: bash scripts/tests/test-clone-activation-options.sh
 
+      - name: Test clone non-inheritable option protection
+        run: bash scripts/tests/test-clone-non-inheritable-options.sh
+
       - name: Test protected options charset is multibyte-safe
         run: bash scripts/tests/test-protected-options-charset.sh
 
