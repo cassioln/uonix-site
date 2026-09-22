@@ -98,6 +98,24 @@ WP-Cron `weekly`. O painel exibe o **próximo disparo real** lido do agendador (
 
 É proibido prometer horário ou período do dia na interface e no e-mail, incluindo formulações brandas como "às segundas pela manhã". WP-Cron dispara por tráfego, não por relógio, e o site não tem cronjob de servidor: a deriva pode atravessar o dia inteiro, o que torna "pela manhã" tão insustentável quanto "08:00". A única afirmação que o sistema consegue provar é a frequência somada ao próximo disparo agendado.
 
+#### Quem cria o evento: o invariante dos destinatários
+
+**Existe evento agendado se, e somente se, existe destinatário.** Um callback de `init` mantém esse invariante em toda requisição: agenda `weekly` quando há destinatário e nenhum evento, e remove o evento quando o último destinatário sai.
+
+A lista de destinatários é, portanto, a **chave de ativação** — não um campo a mais. Isso já estava implícito em `uonix_intelligence_send_report()`, que recusa lista vazia com o motivo `no_recipients`; o agendamento passou a respeitar a mesma regra.
+
+O que essa amarração compra, e que um `wp_schedule_event` manual por WP-CLI não dá:
+
+- **Reprodutibilidade.** Agendamento feito à mão vive só no banco. Um clone de ambiente ou uma restauração o perde em silêncio, e ninguém lembra de refazer. Com o invariante, ele se restabelece na requisição seguinte.
+- **Contenção por ambiente, sem lógica de ambiente.** A opção de destinatários vive no banco de cada ambiente. Onde nunca se configurou destinatário, nada é agendado — sem o módulo precisar perguntar "sou produção?".
+- **Painel honesto.** Sem destinatário, o evento sai e o painel exibe "não agendado", em vez de prometer um envio que não aconteceria.
+
+Duas guardas de falha fechada, ambas cobertas por teste: o evento **não** é criado se a recorrência `weekly` não estiver registrada — agendar sem ela produziria um disparo único disfarçado de semanal —, e um evento já existente **não** é reagendado, porque mover a data a cada requisição empurraria o envio para nunca.
+
+Carregar o arquivo continua não escrevendo no agendador. Em mu-plugin o carregamento roda antes de `init` e antes dos plugins; quem agenda é o callback, e há teste afirmando as duas coisas.
+
+O horário do primeiro disparo — próxima segunda-feira, 08:00 no fuso do site — é **arbitrário de propósito**, pela mesma razão que a interface não pode prometê-lo.
+
 ## Módulo 3 — Oportunidades no Search Console
 
 Primeiro módulo a ser entregue, por ser o único cujo caminho de dados já existe. O snapshot atual já persiste posição, CTR e páginas do Search Console — e a interface não renderiza nenhum dos três.
@@ -168,6 +186,8 @@ Os testes do projeto são scripts autônomos com stubs do WordPress escritos à 
 O step no workflow é obrigatório: `scripts/tests/test-ci-covers-all-tests.sh` cruza o diretório de testes com o workflow e reprova o build quando um teste não tem step.
 
 Nenhum módulo é ativado — nem cron, nem envio automático — antes de o smoke passar. Cron registrado e inativo é estado válido e esperado.
+
+A porta de ativação do Módulo 3 foi atravessada em 2026-09-22 (ver *Registro da porta de ativação*), e é o que autoriza o agendamento automático descrito em *Agendamento*. A ativação continua sendo uma decisão humana: ela é expressa por **cadastrar um destinatário**, não por rodar um comando. Enquanto a lista está vazia, o módulo segue registrado e inativo — o mesmo estado válido de antes.
 
 ## Licenciamento
 

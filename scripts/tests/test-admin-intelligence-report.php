@@ -22,6 +22,10 @@ $GLOBALS['uox_mail_calls'] = array();
 $GLOBALS['uox_mail_result'] = true;
 $GLOBALS['uox_referer_action'] = null;
 $GLOBALS['uox_nonce_actions'] = array();
+$GLOBALS['uox_cron_rec'] = array();
+$GLOBALS['uox_cron_cleared'] = array();
+$GLOBALS['uox_schedules'] = array( 'hourly' => array( 'interval' => 3600 ), 'weekly' => array( 'interval' => 604800 ) );
+$GLOBALS['uox_timezone'] = 'America/Sao_Paulo';
 
 function uox_assert( $condition, $message ) {
 	global $failures;
@@ -90,7 +94,20 @@ function esc_textarea( $text ) { return htmlspecialchars( (string) $text, ENT_QU
 function wp_nonce_field( $action = -1 ) { $GLOBALS['uox_nonce_actions'][] = $action; echo '<input type="hidden" name="_wpnonce" value="stub">'; }
 function number_format_i18n( $number, $decimals = 0 ) { return number_format( (float) $number, (int) $decimals, ',', '.' ); }
 function wp_next_scheduled( $hook ) { return $GLOBALS['uox_cron'][ $hook ] ?? false; }
-function wp_schedule_event( $ts, $rec, $hook ) { $GLOBALS['uox_cron'][ $hook ] = $ts; return true; }
+// A recorrência é GUARDADA, e não descartada: um stub que ignora o segundo
+// argumento faz qualquer asserção sobre "é semanal" passar sem verificar nada.
+function wp_schedule_event( $ts, $rec, $hook ) {
+	$GLOBALS['uox_cron'][ $hook ] = $ts;
+	$GLOBALS['uox_cron_rec'][ $hook ] = $rec;
+	return true;
+}
+// Conta as chamadas para distinguir "não reagendou" de "reagendou com a mesma data".
+function wp_clear_scheduled_hook( $hook ) {
+	$GLOBALS['uox_cron_cleared'][] = $hook;
+	unset( $GLOBALS['uox_cron'][ $hook ], $GLOBALS['uox_cron_rec'][ $hook ] );
+}
+function wp_get_schedules() { return $GLOBALS['uox_schedules']; }
+function wp_timezone() { return new DateTimeZone( $GLOBALS['uox_timezone'] ); }
 function wp_date( $format, $ts = null ) { return gmdate( $format, null === $ts ? time() : (int) $ts ); }
 function wp_remote_post( $url, $args = array() ) { return array(); }
 function wp_remote_get( $url, $args = array() ) { return array(); }
@@ -143,6 +160,64 @@ uox_assert( 0 === $GLOBALS['uox_actions'][ uonix_intelligence_report_hook() ]['a
 uox_assert( false === wp_next_scheduled( uonix_intelligence_report_hook() ), 'Carregar o módulo não agenda o envio automático' );
 uox_assert( array() === $GLOBALS['uox_cron'], 'Nenhum evento de cron é criado no carregamento' );
 uox_assert( isset( $GLOBALS['uox_actions']['admin_post_uonix_intelligence_send_test'] ), 'Handler do envio de teste está registrado' );
+uox_assert( isset( $GLOBALS['uox_actions']['init'] ), 'Quem agenda é um callback de init, não o carregamento do arquivo' );
+uox_assert( 'uonix_intelligence_maybe_schedule_report' === $GLOBALS['uox_actions']['init']['callback'], 'O callback de init é o que mantém o invariante do agendamento' );
+
+// ---------------------------------------------------------------------------
+// Invariante: existe evento agendado se, e somente se, existe destinatário.
+// ---------------------------------------------------------------------------
+
+// Sem destinatário, não agenda — e a lista vazia é o estado inicial.
+$GLOBALS['uox_options'][ uonix_intelligence_recipients_option() ] = array();
+uox_assert( false === uonix_intelligence_maybe_schedule_report(), 'Sem destinatário, não agenda' );
+uox_assert( false === wp_next_scheduled( uonix_intelligence_report_hook() ), 'Sem destinatário, o agendador segue vazio' );
+uox_assert( array() === $GLOBALS['uox_cron_cleared'], 'Sem destinatário e sem evento, não chama limpeza à toa' );
+
+// Com destinatário, agenda uma vez, semanal, no futuro.
+$GLOBALS['uox_options'][ uonix_intelligence_recipients_option() ] = array( 'operador@ksio.dev' );
+uox_assert( true === uonix_intelligence_maybe_schedule_report(), 'Com destinatário, agenda' );
+$primeiro = wp_next_scheduled( uonix_intelligence_report_hook() );
+uox_assert( is_int( $primeiro ) && $primeiro > time(), 'O primeiro disparo é no futuro, não no passado' );
+uox_assert(
+	'weekly' === ( $GLOBALS['uox_cron_rec'][ uonix_intelligence_report_hook() ] ?? null ),
+	'A recorrência gravada é weekly: disparo único disfarçado de semanal enviaria o relatório uma vez e nunca mais'
+);
+uox_assert(
+	'Mon' === ( new DateTimeImmutable( '@' . $primeiro ) )->setTimezone( wp_timezone() )->format( 'D' ),
+	'O primeiro disparo cai numa segunda-feira no fuso do site'
+);
+
+// Idempotência: chamar de novo não duplica nem move a data.
+uox_assert( false === uonix_intelligence_maybe_schedule_report(), 'Segunda chamada não reagenda' );
+uox_assert(
+	$primeiro === wp_next_scheduled( uonix_intelligence_report_hook() ),
+	'A data do disparo não se move a cada requisição: reagendar sempre empurraria o envio para nunca'
+);
+
+// Destinatário removido: o evento sai, para o painel não prometer envio que não ocorre.
+$GLOBALS['uox_options'][ uonix_intelligence_recipients_option() ] = array();
+uox_assert( false === uonix_intelligence_maybe_schedule_report(), 'Sem destinatário, a função não agenda' );
+uox_assert( false === wp_next_scheduled( uonix_intelligence_report_hook() ), 'Remover o último destinatário desagenda o evento' );
+uox_assert(
+	array( uonix_intelligence_report_hook() ) === $GLOBALS['uox_cron_cleared'],
+	'A limpeza usa wp_clear_scheduled_hook, que remove ocorrências duplicadas, e é chamada uma única vez'
+);
+
+// Falha fechada: sem a recorrência weekly registrada, não agenda nada.
+$GLOBALS['uox_options'][ uonix_intelligence_recipients_option() ] = array( 'operador@ksio.dev' );
+$GLOBALS['uox_schedules'] = array( 'hourly' => array( 'interval' => 3600 ) );
+uox_assert( false === uonix_intelligence_maybe_schedule_report(), 'Sem a recorrência weekly, não agenda' );
+uox_assert(
+	false === wp_next_scheduled( uonix_intelligence_report_hook() ),
+	'Falha fechada: é melhor o painel dizer "não agendado" que criar um disparo único achando que é semanal'
+);
+$GLOBALS['uox_schedules'] = array( 'hourly' => array( 'interval' => 3600 ), 'weekly' => array( 'interval' => 604800 ) );
+
+// Volta ao estado limpo para os testes seguintes deste arquivo.
+$GLOBALS['uox_options'][ uonix_intelligence_recipients_option() ] = array();
+$GLOBALS['uox_cron'] = array();
+$GLOBALS['uox_cron_rec'] = array();
+$GLOBALS['uox_cron_cleared'] = array();
 
 // ---------------------------------------------------------------------------
 // Rótulo de período: lido do snapshot, vazio quando não há como saber.

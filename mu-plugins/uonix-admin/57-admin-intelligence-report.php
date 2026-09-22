@@ -204,12 +204,94 @@ if ( ! function_exists( 'uonix_intelligence_send_report' ) ) {
 	}
 }
 
-// O handler do evento semanal é registrado, mas o evento NÃO é agendado aqui.
-// Agendar é decisão operacional, condicionada ao smoke contra a API real; o painel
-// exibe "não agendado" enquanto isso, o que é a verdade.
+// O handler do evento semanal é registrado no carregamento. O evento NÃO é
+// agendado aqui: carregar um arquivo não deve escrever no agendador, e em
+// mu-plugin isso roda antes de `init`, antes dos plugins. Quem agenda é o
+// callback de `init` abaixo.
 if ( function_exists( 'uonix_intelligence_report_hook' ) ) {
 	add_action( uonix_intelligence_report_hook(), 'uonix_intelligence_send_report', 10, 0 );
 }
+
+if ( ! function_exists( 'uonix_intelligence_report_first_run' ) ) {
+	/**
+	 * Momento do primeiro disparo: próxima segunda-feira, 08:00 no fuso do site.
+	 *
+	 * O horário é arbitrário **de propósito**. Sem cronjob de servidor, WP-Cron
+	 * dispara por tráfego, não por relógio: a deriva pode atravessar o dia. Por
+	 * isso o contrato proíbe prometer horário na interface, e por isso não vale
+	 * gastar decisão escolhendo um. Segunda-feira é só a âncora semanal.
+	 *
+	 * @return int Timestamp Unix.
+	 */
+	function uonix_intelligence_report_first_run() {
+		$timezone = function_exists( 'wp_timezone' ) ? wp_timezone() : new DateTimeZone( 'UTC' );
+
+		return ( new DateTimeImmutable( 'now', $timezone ) )
+			->modify( 'next monday' )
+			->setTime( 8, 0, 0 )
+			->getTimestamp();
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_maybe_schedule_report' ) ) {
+	/**
+	 * Mantém o invariante: **existe evento agendado se, e somente se, existe
+	 * destinatário.**
+	 *
+	 * A lista de destinatários é a chave de ativação, e não um campo a mais: o
+	 * próprio `uonix_intelligence_send_report()` já recusa lista vazia com o
+	 * motivo `no_recipients`. Amarrar o agendamento a ela dá três propriedades
+	 * que um agendamento manual por WP-CLI não tem:
+	 *
+	 * - **Reprodutível.** Agendamento feito à mão vive só no banco. Um clone de
+	 *   ambiente ou uma restauração o perde em silêncio, e ninguém lembra de
+	 *   refazer. Aqui ele se restabelece sozinho na requisição seguinte.
+	 * - **Contido por ambiente sem lógica de ambiente.** Um ambiente onde nunca
+	 *   se configurou destinatário não agenda nada, porque a opção vive no banco
+	 *   de cada ambiente. Não é preciso perguntar "sou produção?".
+	 * - **Painel honesto.** Sem destinatário, o evento é removido, então o painel
+	 *   exibe "não agendado" em vez de prometer um envio que não aconteceria.
+	 *
+	 * @return bool Verdadeiro apenas quando esta chamada criou o evento.
+	 */
+	function uonix_intelligence_maybe_schedule_report() {
+		if ( ! function_exists( 'uonix_intelligence_report_hook' ) || ! function_exists( 'uonix_intelligence_get_recipients' ) ) {
+			return false;
+		}
+
+		$hook      = uonix_intelligence_report_hook();
+		$agendado  = wp_next_scheduled( $hook );
+		$destinos  = uonix_intelligence_get_recipients();
+
+		if ( array() === $destinos ) {
+			if ( false !== $agendado ) {
+				// `wp_clear_scheduled_hook` remove todas as ocorrências, e não só a
+				// primeira: se um agendamento duplicado existir, some junto.
+				wp_clear_scheduled_hook( $hook );
+			}
+
+			return false;
+		}
+
+		if ( false !== $agendado ) {
+			// Já agendado: não duplicar nem mover a data. Reagendar a cada
+			// requisição empurraria o disparo para sempre adiante e o relatório
+			// nunca sairia.
+			return false;
+		}
+
+		$recorrencias = wp_get_schedules();
+		if ( ! isset( $recorrencias['weekly'] ) ) {
+			// Falha fechada: sem a recorrência registrada, `wp_schedule_event`
+			// criaria um disparo único disfarçado de semanal. Melhor não agendar e
+			// deixar o painel dizer "não agendado".
+			return false;
+		}
+
+		return (bool) wp_schedule_event( uonix_intelligence_report_first_run(), 'weekly', $hook );
+	}
+}
+add_action( 'init', 'uonix_intelligence_maybe_schedule_report' );
 
 if ( ! function_exists( 'uonix_intelligence_handle_test_send' ) ) {
 	/**
