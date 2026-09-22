@@ -116,7 +116,12 @@ Descartado o critério "CTR 50% menor que a média da indústria": não há font
 
 ### O volume é piso de ruído, não critério de relevância
 
-Quem separa oportunidade boa de ruim é a **ordenação**, não o piso. O piso existe apenas para não reportar consulta cujo CTR é estatisticamente sem sentido: abaixo de seis impressões no mês, um único clique já produz mais de 15% de taxa.
+Quem separa oportunidade boa de ruim é a **ordenação**, não o piso.
+
+O piso existe porque, neste volume, o critério de CTR já implica **zero clique**: para qualquer consulta com até 33 impressões, `cliques < 0,03 × impressões` só é satisfeito com nenhum clique. Toda linha admitida hoje tem zero clique — e abaixo de um punhado de impressões isso não é oportunidade perdida, é consulta que quase ninguém teve a chance de clicar. O piso descarta essa ausência de informação.
+
+> [!NOTE]
+> Consequência que vale saber ao ler o relatório: na escala atual do site, "taxa de clique abaixo de 3%" não está selecionando consultas com CTR ruim, e sim consultas **sem nenhum clique**. O critério continua defensável para distância de salto — ranquear e não receber clique é justamente o sintoma de título e descrição fracos —, mas a redação sugere uma gradação que o dado não tem. Revisar se o site crescer o suficiente para que o portão de CTR passe a admitir linhas com clique.
 
 O valor anterior era "mais de 100 impressões" e vinha da especificação de produto, não de medição. Medido em produção em 2026-09-22, após sincronização real: **a consulta de maior volume do site inteiro tem 106 impressões em 30 dias.** Das 111 consultas, 40 passavam na faixa de posição e 106 no CTR — e **zero** passavam em faixa mais volume. O módulo devolvia zero por construção.
 

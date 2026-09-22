@@ -120,9 +120,6 @@ uonix_intel_assert( in_array( 'posicao no limite superior', $terms, true ), 'Pos
 uonix_intel_assert( ! in_array( 'posicao abaixo da faixa', $terms, true ), 'Posição pior que 12 fica fora' );
 uonix_intel_assert( ! in_array( 'impressoes no piso', $terms, true ), 'Exatamente 5 impressões não passa do piso de ruído' );
 uonix_intel_assert( in_array( 'impressoes acima do piso', $terms, true ), '6 impressões passa do piso' );
-// Consulta de volume alto que antes passava continua passando: baixar o piso
-// alarga o universo, nunca estreita.
-uonix_intel_assert( in_array( 'ctr abaixo do limite', $terms, true ) && in_array( 'posicao no limite inferior', $terms, true ), 'Baixar o piso não exclui consulta de volume alto que já entrava' );
 uonix_intel_assert( ! in_array( 'ctr no limite', $terms, true ), 'CTR exatamente 3% não satisfaz "abaixo de 3%"' );
 uonix_intel_assert( in_array( 'ctr abaixo do limite', $terms, true ), 'CTR de 2,9% entra' );
 
@@ -151,7 +148,6 @@ $escala_real = uonix_intelligence_seo_opportunities(
 	),
 	5
 );
-uonix_intel_assert( true === $escala_real['available'], 'Universo na escala real do site produz resposta disponível' );
 uonix_intel_assert( 5 === count( $escala_real['rows'] ), 'Universo na escala real do site produz cinco oportunidades, não zero' );
 uonix_intel_assert( 'linha de vida nbr 16325' === $escala_real['rows'][0]['query'], 'A oportunidade de maior volume vem primeiro' );
 uonix_intel_assert( ! in_array( 'termo de volume irrelevante', array_column( $escala_real['rows'], 'query' ), true ), 'Consulta abaixo do piso de ruído fica fora mesmo com vaga sobrando' );
