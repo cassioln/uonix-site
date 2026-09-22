@@ -88,12 +88,13 @@ function uonix_intel_query( $query, $position, $impressions, $ctr, $clicks = 1 )
 }
 
 // ---------------------------------------------------------------------------
-// Limiares: posição 4 a 12, mais de 100 impressões, CTR abaixo de 3%.
+// Limiares: posição 4 a 12, CTR abaixo de 3%, e piso de ruído de 5 impressões.
+// O piso NÃO é critério de relevância — quem prioriza é a ordenação por volume.
 // ---------------------------------------------------------------------------
 $rules = uonix_intelligence_seo_rules();
 uonix_intel_assert(
-	4.0 === $rules['min_position'] && 12.0 === $rules['max_position'] && 100 === $rules['min_impressions'] && 0.03 === $rules['max_ctr'] && 30 === $rules['period_days'],
-	'Limiares seguem o contrato: posição 4 a 12, mais de 100 impressões, CTR abaixo de 3%, janela de 30 dias'
+	4.0 === $rules['min_position'] && 12.0 === $rules['max_position'] && 5 === $rules['min_impressions'] && 0.03 === $rules['max_ctr'] && 30 === $rules['period_days'],
+	'Limiares seguem o contrato: posição 4 a 12, CTR abaixo de 3%, piso de 5 impressões, janela de 30 dias'
 );
 
 $boundaries = uonix_intelligence_seo_opportunities(
@@ -103,8 +104,8 @@ $boundaries = uonix_intelligence_seo_opportunities(
 			uonix_intel_query( 'posicao no limite inferior', 4.0, 400, .01 ),
 			uonix_intel_query( 'posicao no limite superior', 12.0, 300, .01 ),
 			uonix_intel_query( 'posicao abaixo da faixa', 12.1, 600, .01 ),
-			uonix_intel_query( 'impressoes no limite', 6.0, 100, .01 ),
-			uonix_intel_query( 'impressoes acima do limite', 6.0, 101, .01 ),
+			uonix_intel_query( 'impressoes no piso', 6.0, 5, .01 ),
+			uonix_intel_query( 'impressoes acima do piso', 6.0, 6, .01 ),
 			uonix_intel_query( 'ctr no limite', 6.0, 200, .03 ),
 			uonix_intel_query( 'ctr abaixo do limite', 6.0, 199, .029 ),
 		)
@@ -117,10 +118,39 @@ uonix_intel_assert( ! in_array( 'posicao acima da faixa', $terms, true ), 'Posi�
 uonix_intel_assert( in_array( 'posicao no limite inferior', $terms, true ), 'Posição 4 entra na faixa' );
 uonix_intel_assert( in_array( 'posicao no limite superior', $terms, true ), 'Posição 12 entra na faixa' );
 uonix_intel_assert( ! in_array( 'posicao abaixo da faixa', $terms, true ), 'Posição pior que 12 fica fora' );
-uonix_intel_assert( ! in_array( 'impressoes no limite', $terms, true ), 'Exatamente 100 impressões não satisfaz "mais de 100"' );
-uonix_intel_assert( in_array( 'impressoes acima do limite', $terms, true ), '101 impressões satisfaz o volume mínimo' );
+uonix_intel_assert( ! in_array( 'impressoes no piso', $terms, true ), 'Exatamente 5 impressões não passa do piso de ruído' );
+uonix_intel_assert( in_array( 'impressoes acima do piso', $terms, true ), '6 impressões passa do piso' );
 uonix_intel_assert( ! in_array( 'ctr no limite', $terms, true ), 'CTR exatamente 3% não satisfaz "abaixo de 3%"' );
 uonix_intel_assert( in_array( 'ctr abaixo do limite', $terms, true ), 'CTR de 2,9% entra' );
+
+// ---------------------------------------------------------------------------
+// Regressão que os testes anteriores NÃO pegavam.
+//
+// Todas as fixtures acima usam centenas de impressões, volume que este site não
+// tem. Medido em produção em 2026-09-22: a consulta de maior volume do site
+// inteiro tem 106 impressões em 30 dias, e as que estão na faixa de posição têm
+// 53, 30, 28, 22, 10, 8... Com o limiar antigo de 100, o módulo devolvia zero por
+// construção — e passava em mais de cem testes, porque todos os dados sintéticos
+// eram de um site grande.
+//
+// Este caso fixa a escala real: um universo assim TEM que produzir resultado.
+// ---------------------------------------------------------------------------
+$escala_real = uonix_intelligence_seo_opportunities(
+	uonix_intel_snapshot(
+		array(
+			uonix_intel_query( 'linha de vida nbr 16325', 6.4, 53, .012 ),
+			uonix_intel_query( 'ensaio de arrancamento', 8.1, 30, .008 ),
+			uonix_intel_query( 'olhal de ancoragem inox', 5.2, 28, .015 ),
+			uonix_intel_query( 'laudo de ancoragem predial', 11.7, 22, .004 ),
+			uonix_intel_query( 'ancoragem nr 35', 9.3, 10, .020 ),
+			uonix_intel_query( 'termo de volume irrelevante', 7.0, 3, .010 ),
+		)
+	),
+	5
+);
+uonix_intel_assert( 5 === count( $escala_real['rows'] ), 'Universo na escala real do site produz cinco oportunidades, não zero' );
+uonix_intel_assert( 'linha de vida nbr 16325' === $escala_real['rows'][0]['query'], 'A oportunidade de maior volume vem primeiro' );
+uonix_intel_assert( ! in_array( 'termo de volume irrelevante', array_column( $escala_real['rows'], 'query' ), true ), 'Consulta abaixo do piso de ruído fica fora mesmo com vaga sobrando' );
 
 // ---------------------------------------------------------------------------
 // Ordenação por volume, com desempate estável, e respeito ao limite.

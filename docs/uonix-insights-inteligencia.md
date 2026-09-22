@@ -107,11 +107,27 @@ Parâmetros fixados. A #193 apresenta três faixas divergentes para "striking di
 | Regra | Valor |
 |---|---|
 | Faixa de posição | **4 a 12** |
-| Volume mínimo | **mais de 100 impressões em 30 dias** |
+| Piso de ruído de volume | **mais de 5 impressões em 30 dias** |
 | CTR | **abaixo de 3%** |
 | Período do snapshot que alimenta a regra | **30 dias** |
+| Priorização | **ordenação por impressões decrescentes**, e o relatório mostra as primeiras |
 
 Descartado o critério "CTR 50% menor que a média da indústria": não há fonte auditável para essa média, e um número sem procedência viola a regra de procedência acima.
+
+### O volume é piso de ruído, não critério de relevância
+
+Quem separa oportunidade boa de ruim é a **ordenação**, não o piso.
+
+O piso existe porque, neste volume, o critério de CTR já implica **zero clique**: para qualquer consulta com até 33 impressões, `cliques < 0,03 × impressões` só é satisfeito com nenhum clique. Toda linha admitida hoje tem zero clique — e abaixo de um punhado de impressões isso não é oportunidade perdida, é consulta que quase ninguém teve a chance de clicar. O piso descarta essa ausência de informação.
+
+> [!NOTE]
+> Consequência que vale saber ao ler o relatório: na escala atual do site, "taxa de clique abaixo de 3%" não está selecionando consultas com CTR ruim, e sim consultas **sem nenhum clique**. O critério continua defensável para distância de salto — ranquear e não receber clique é justamente o sintoma de título e descrição fracos —, mas a redação sugere uma gradação que o dado não tem. Revisar se o site crescer o suficiente para que o portão de CTR passe a admitir linhas com clique.
+
+O valor anterior era "mais de 100 impressões" e vinha da especificação de produto, não de medição. Medido em produção em 2026-09-22, após sincronização real: **a consulta de maior volume do site inteiro tem 106 impressões em 30 dias.** Das 111 consultas, 40 passavam na faixa de posição e 106 no CTR — e **zero** passavam em faixa mais volume. O módulo devolvia zero por construção.
+
+Isso passou por mais de cem testes no CI, 28 mutações detectadas e duas aprovações de revisão independente, porque todos verificavam a lógica contra dado sintético de um site grande. **É o caso concreto que justifica a porta de ativação existir separada da porta de merge**, e o motivo de o teste de fronteira agora incluir um universo na escala real deste site.
+
+Qualquer revisão futura deste piso deve ser feita contra a distribuição medida, não contra referência de mercado: um limiar absoluto calibrado para outro site volta a zerar o módulo em silêncio.
 
 A consulta por `query` do Search Console precisa sair do limite de 10 linhas usado hoje para a ordem de mil, para que a mineração tenha universo. A sanitização de query existente em `53:117-132` — que rejeita padrão de e-mail, telefone e URL — continua valendo integralmente: ampliar o volume amplia a superfície de PII na mesma proporção.
 

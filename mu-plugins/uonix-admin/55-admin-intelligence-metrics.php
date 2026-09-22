@@ -21,12 +21,28 @@ if ( ! function_exists( 'uonix_intelligence_seo_rules' ) ) {
 	 * A issue #193 apresenta três faixas divergentes para a posição (4-15, 4-12 e
 	 * 4-10). O contrato fixa 4 a 12. `max_ctr` está em fração, não em porcentagem,
 	 * porque é assim que a Search Console API devolve o CTR.
+	 *
+	 * `min_impressions` é PISO DE RUÍDO, não critério de relevância. A priorização
+	 * por volume é feita por ordenação: a função ordena os candidatos por impressões
+	 * decrescentes e devolve os primeiros. Quem separa oportunidade boa de ruim é o
+	 * ranking, não o piso.
+	 *
+	 * O valor anterior era 100 e vinha da especificação de produto, não de medição.
+	 * Medido em produção em 2026-09-22: a consulta de maior volume do site inteiro
+	 * tem 106 impressões em 30 dias, então o critério eliminava 110 das 111 consultas
+	 * e o módulo devolvia zero por construção.
+	 *
+	 * O piso existe porque, neste volume, `max_ctr` já implica ZERO clique: para
+	 * qualquer N até 33 impressões, `clicks < 0,03 * N` só é satisfeito com nenhum
+	 * clique. Então toda linha admitida tem zero clique, e abaixo de um punhado de
+	 * impressões isso não é oportunidade perdida — é consulta que quase ninguém
+	 * teve a chance de clicar. O piso descarta essa ausência de informação.
 	 */
 	function uonix_intelligence_seo_rules() {
 		return array(
 			'min_position'    => 4.0,
 			'max_position'    => 12.0,
-			'min_impressions' => 100,
+			'min_impressions' => 5,
 			'max_ctr'         => 0.03,
 			'period_days'     => 30,
 		);
