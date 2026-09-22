@@ -92,11 +92,15 @@ def named_step_run(document, step_name):
 for name in ('source', 'target', 'mode', 'replace_users', 'confirmation'):
     require(rf'^      {name}:\s*$', f'input ausente: {name}')
 
-require(r'      source:.*?options:\s*\n\s*- prod\s*\n\s*- qa\s*\n\s*- dev', 'source precisa oferecer prod/qa/dev')
-require(r'      target:.*?options:\s*\n\s*- prod\s*\n\s*- qa\s*\n\s*- dev', 'target precisa oferecer prod/qa/dev')
+require(r'      source:.*?options:\s*\n\s*- prod\s*\n\s*- qa', 'source precisa oferecer prod/qa')
+require(r'      target:.*?options:\s*\n\s*- prod\s*\n\s*- qa', 'target precisa oferecer prod/qa')
 require(r'      mode:.*?options:\s*\n\s*- dry-run\s*\n\s*- execute', 'mode precisa oferecer dry-run/execute')
 require(r'      replace_users:.*?type: boolean.*?default: false', 'replace_users precisa iniciar false')
 forbid(r'^\s*- local\s*$', 'local não pode aparecer no workflow remoto')
+# O ambiente remoto de desenvolvimento saiu da topologia. Oferecê-lo de novo no
+# choice colocaria de volta na UI um destino cujo docroot e URL já não são
+# declarados — o par seria rejeitado depois, mas só após o operador escolher.
+forbid(r'^\s*- dev\s*$', 'ambiente retirado não pode voltar ao choice do workflow')
 
 require(
     r'environment:\s*\$\{\{\s*needs\.validate-request\.outputs\.environment_name\s*\}\}',
@@ -203,7 +207,6 @@ clone_validation_script = named_step_run(
 canonical_clone_topology = {
     'PRODUCTION_URL': 'https://uonix.com.br',
     'QA_URL': 'https://uonix.ksio.dev',
-    'DEVELOPMENT_URL': 'https://test.uonix.ksio.dev',
     'LOCAWEB_SSH_HOST': 'ftp.uonix.com.br',
     'LOCAWEB_SSH_PORT': '22',
     'LOCAWEB_SSH_USER': 'siteuonix1',
@@ -215,7 +218,6 @@ canonical_clone_topology = {
     'HOSTGATOR_SSH_PORT': '22',
     'HOSTGATOR_SSH_USER': 'uonix',
     'HOSTGATOR_QA_ROOT': '/home2/uonix/public_html',
-    'HOSTGATOR_DEV_ROOT': '/home2/uonix/dev_uonix',
     'HOSTGATOR_CLONE_BACKUP_ROOT': '/home2/uonix/_uonix-clone-backups',
 }
 
@@ -251,7 +253,7 @@ def run_clone_validation(source, target, mode, replace_users, confirmation, enab
 
 canonical_clone_requests = (
     ('prod', 'qa', 'dry-run', 'false', '', 'false', 'clone-operations', ''),
-    ('qa', 'dev', 'execute', 'true', '', 'false', 'clone-operations', ''),
+    ('prod', 'qa', 'execute', 'true', '', 'false', 'clone-operations', ''),
     (
         'qa',
         'prod',
@@ -287,8 +289,12 @@ unsafe_clone_requests = (
     ('qa', 'prod', 'execute', 'false', f"CLONAR QA PARA PROD @ {'a' * 40}", 'false', 'refs/heads/master'),
     ('qa', 'prod', 'execute', 'false', 'CLONAR QA PARA PROD', 'true', 'refs/heads/master'),
     ('qa', 'qa', 'dry-run', 'false', '', 'false', 'refs/heads/master'),
-    ('qa', 'dev', 'execute', 'false', '', 'false', 'refs/heads/qa'),
-    ('qa;touch /tmp/uonix-clone-injection', 'dev', 'dry-run', 'false', '', 'false', 'refs/heads/master'),
+    ('prod', 'qa', 'execute', 'false', '', 'false', 'refs/heads/qa'),
+    ('qa;touch /tmp/uonix-clone-injection', 'prod', 'dry-run', 'false', '', 'false', 'refs/heads/master'),
+    # O ambiente retirado continua sendo entrada REJEITADA, não apenas ausente do
+    # choice: um dispatch montado à mão pela API não passa pela lista da UI.
+    ('qa', 'dev', 'dry-run', 'false', '', 'false', 'refs/heads/master'),
+    ('dev', 'prod', 'dry-run', 'false', '', 'false', 'refs/heads/master'),
 )
 for request in unsafe_clone_requests:
     result, exports = run_clone_validation(*request)
@@ -305,7 +311,7 @@ if pathlib.Path('/tmp/uonix-clone-injection').exists():
 for variable, canonical_value in canonical_clone_topology.items():
     divergent_value = canonical_value + '-divergent'
     result, exports = run_clone_validation(
-        'qa', 'dev', 'dry-run', 'false', '',
+        'prod', 'qa', 'dry-run', 'false', '',
         topology_overrides={variable: divergent_value},
     )
     if result.returncode == 0:

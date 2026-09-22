@@ -80,8 +80,8 @@ CRITICAL_POST_CLONE_PLUGINS=(
 usage() {
   cat <<'USAGE'
 Uso:
-  scripts/clone-environment.sh --source=prod|qa|dev|local --target=prod|qa|dev|local --dry-run
-  scripts/clone-environment.sh --source=prod|qa|dev|local --target=prod|qa|dev|local --execute [opções]
+  scripts/clone-environment.sh --source=prod|qa|local --target=prod|qa|local --dry-run
+  scripts/clone-environment.sh --source=prod|qa|local --target=prod|qa|local --execute [opções]
 
 Opções:
   --dry-run                       Executa somente preflight, sem alterar o destino.
@@ -1265,9 +1265,9 @@ set_target_identity() {
   # convertido. A ordem inversa também funcionaria aqui, mas esta é a que mantém
   # a invariante mesmo se um dos domínios for substring do outro.
   #
-  # Nunca substituir por HOST PURO (sem esquema): em QA→DEV a origem
-  # `uonix.ksio.dev` é substring do destino `test.uonix.ksio.dev`, e um segundo
-  # passe geraria `test.test.uonix.ksio.dev`.
+  # Nunca substituir por HOST PURO (sem esquema): quando a origem é substring do
+  # destino — por exemplo `uonix.com.br` dentro de `www.uonix.com.br` — um segundo
+  # passe reprocessa o resultado do primeiro e gera `www.www.uonix.com.br`.
   local source_url_escaped target_url_escaped
   source_url_escaped="$(json_escaped_url "$source_url")" || return $?
   target_url_escaped="$(json_escaped_url "$target_url")" || return $?
@@ -1945,7 +1945,7 @@ dry_run_clone() {
 
   log "Diretórios que seriam sincronizados em wp-content: ${dirs[*]}"
   log "Opções preservadas no destino: plugins gerenciados, active_plugins, cron, SMTP/captcha/Turnstile/CompressX/admin_email."
-  log "Política SMTP pós-clone: ativar fluent-smtp em produção/QA/DEV e manter desativado no local (Mailpit)."
+  log "Política SMTP pós-clone: ativar fluent-smtp em produção/QA e manter desativado no local (Mailpit)."
   log "Dry-run concluído sem alterações."
 }
 
@@ -2383,7 +2383,7 @@ validate_turnstile_policy() {
   local status
 
   case "$env" in
-    prod|qa|dev)
+    prod|qa)
       if wp_exec "$env" eval '
 /* UONIX_TURNSTILE_POLICY_VALIDATION */
 if (

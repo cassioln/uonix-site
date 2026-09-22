@@ -51,7 +51,7 @@ run_smoke() {
     # shellcheck disable=SC2329
     sleep() { printf '%s\n' "${1:-MISSING}" >> "${TMP_ROOT}/sleeps"; }
 
-    validate_http_endpoint 'wp-login' 'https://test.uonix.ksio.dev/wp-login.php' >/dev/null 2>&1
+    validate_http_endpoint 'wp-login' 'https://alvo.example.invalid/wp-login.php' >/dev/null 2>&1
     printf '%s' "$?" > "${TMP_ROOT}/exit"
   ) >/dev/null 2>&1
   # `die` encerra o subshell, então a linha do printf acima pode nunca rodar.

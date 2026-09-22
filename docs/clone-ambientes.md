@@ -56,11 +56,10 @@ workflows de deploy.
 | --- | --- | --- | --- | --- | --- |
 | `prod` | Produção | Locaweb — `/home/storage/f/34/12/siteuonix1/public_html` | `https://uonix.com.br` — `Uônix` | `production` | SSH com senha em arquivo privado |
 | `qa` | Homologação | HostGator — `/home2/uonix/public_html` | `https://uonix.ksio.dev` — `QA - UONIX` | `staging` | SSH com chave privada |
-| `dev` | Desenvolvimento remoto | HostGator — `/home2/uonix/dev_uonix` | `https://test.uonix.ksio.dev` — `DEV - UONIX` | `development` | SSH com chave privada |
 | `local` | Desenvolvimento local | Podman — `/var/www/html`, com `local/wp-content` montado do Mac | `http://localhost:8080` — `LOCAL - UONIX` | `local` | Podman no Mac |
 
-As branches de deploy continuam sendo `master` para `prod`, `qa` para QA, `dev`
-para DEV e `local` para o ambiente local. O workflow de clone roda em `master`
+As branches de deploy continuam sendo `master` para `prod`, `qa` para QA e
+`local` para o ambiente local. O workflow de clone roda em `master`
 para usar a implementação canônica da ferramenta, mas não publica `master` no
 destino nem troca sua branch de deploy.
 
@@ -70,27 +69,26 @@ recriação do ambiente está em [local/README.md](../local/README.md).
 
 ## Pares permitidos e executor
 
-Origem e destino iguais são sempre proibidos. Os 12 pares direcionais restantes
+Origem e destino iguais são sempre proibidos. Os 6 pares direcionais restantes
 são capacidade técnica:
 
 ```text
-prod  -> qa, dev, local
-qa    -> prod, dev, local
-dev   -> prod, qa, local
-local -> prod, qa, dev
+prod  -> qa, local
+qa    -> prod, local
+local -> prod, qa
 ```
 
 | Tipo de par | Pares | Executor |
 | --- | --- | --- |
-| Remoto para remoto | `prod ↔ qa`, `prod ↔ dev`, `qa ↔ dev` | GitHub Actions em `master` |
-| Qualquer par com `local` | `local ↔ prod`, `local ↔ qa`, `local ↔ dev` | Mac, usando `scripts/clone-environment.sh` |
+| Remoto para remoto | `prod ↔ qa` | GitHub Actions em `master` |
+| Qualquer par com `local` | `local ↔ prod`, `local ↔ qa` | Mac, usando `scripts/clone-environment.sh` |
 
 O workflow não aceita `local`. Também não existe cópia direta host a host: o
 runner do GitHub ou o Mac funciona como ponte privada, gera manifestos SHA-256 e
 verifica o payload antes e depois do envio.
 
 > [!CAUTION]
-> A CLI no Mac aceita **qualquer par**, inclusive `qa → prod` e `dev → prod`,
+> A CLI no Mac aceita **qualquer par**, inclusive `qa → prod`,
 > exigindo apenas `--confirmation='CLONAR X PARA PROD'`. Os gates
 > `ENABLE_CLONE_PRODUCTION`, Environment `production-clone` e confirmação
 > vinculada ao SHA **só existem no workflow**. Executar esses pares pelo Mac
@@ -120,9 +118,10 @@ Depois de importar o banco da origem, o script:
 6. remapeia autores quando os usuários do destino são preservados.
 
 As duas passagens de URL evitam URLs antigas em atributos JSON de blocos
-Gutenberg. O script nunca substitui apenas o hostname, pois `uonix.ksio.dev` é
-substring de `test.uonix.ksio.dev` e isso poderia produzir
-`test.test.uonix.ksio.dev`.
+Gutenberg. O script nunca substitui apenas o hostname: quando a origem é
+substring do destino — por exemplo o apex `uonix.com.br` dentro do alias
+`www.uonix.com.br` — um segundo passe reprocessaria o resultado do primeiro e
+produziria `www.www.uonix.com.br`.
 
 ### Pré-condição: mesmo prefixo de tabelas
 
@@ -182,7 +181,7 @@ conexão, sem essa opção, assume o default do servidor — medido como `latin1
 MySQL 5.7.44-48 da HostGator. Combinado com `--raw`, que desliga o escaping, um
 valor `utf8mb4` é convertido na saída e o serialize PHP chega cortado.
 
-O sintoma real (2026-08-10): `fluentmail-settings` chegou ao DEV com 283 dos
+O sintoma real (2026-08-10): `fluentmail-settings` chegou a um ambiente remoto com 283 dos
 1202 bytes, cortado entre os dois bytes do `Ô` de `SITE UÔNIX` (`0xC3 0x94`).
 Como `unserialize()` devolve `false` para serialize inválido, `get_option()`
 passou a retornar a string crua em vez do array, e o painel do Fluent SMTP ficou
@@ -210,7 +209,7 @@ falha se qualquer função que use `--raw` perder o charset explícito.
 ### Dados pessoais no banco
 
 O clone não anonimiza, mascara nem seleciona registros do banco. Um clone de
-produção pode levar para QA, DEV ou local pedidos, clientes, submissões de
+produção pode levar para QA ou local pedidos, clientes, submissões de
 formulários, logs armazenados em tabelas e outros dados pessoais. Preservar os
 usuários administrativos do destino não altera esse fato.
 
@@ -400,7 +399,6 @@ apenas do destino, porque é o destino que será alterado.
 | --- | --- |
 | `prod` | `/home/storage/f/34/12/siteuonix1/_uonix-clone-backups/prod` |
 | `qa` | `/home2/uonix/_uonix-clone-backups/qa` |
-| `dev` | `/home2/uonix/_uonix-clone-backups/dev` |
 | `local` | `<repositório>/backups/clone/local` |
 
 Cada execução usa um subdiretório identificado pelo run. Permanecem os cinco
@@ -475,8 +473,8 @@ para recuperação manual.
 
 ## Como executar pelo GitHub Actions
 
-Use esse caminho apenas quando origem e destino forem remotos (`prod`, `qa` ou
-`dev`). O workflow é manual, roda somente a implementação em `master` e faz
+Use esse caminho apenas quando origem e destino forem remotos (`prod` ou `qa`).
+O workflow é manual, roda somente a implementação em `master` e faz
 checkout do SHA canônico da solicitação.
 
 ### Pré-requisitos do GitHub
@@ -491,12 +489,12 @@ workflow:
 
 As Variables de topologia usadas e comparadas com a allowlist do workflow são:
 
-- `PRODUCTION_URL`, `QA_URL`, `DEVELOPMENT_URL`;
+- `PRODUCTION_URL`, `QA_URL`;
 - `LOCAWEB_SSH_HOST`, `LOCAWEB_SSH_PORT`, `LOCAWEB_SSH_USER`;
 - `LOCAWEB_DOCUMENT_ROOT`, `LOCAWEB_ACCOUNT_ROOT`, `LOCAWEB_PHP_BIN`,
   `LOCAWEB_WP_BIN`;
 - `HOSTGATOR_SSH_HOST`, `HOSTGATOR_SSH_PORT`, `HOSTGATOR_SSH_USER`;
-- `HOSTGATOR_QA_ROOT`, `HOSTGATOR_DEV_ROOT`, `HOSTGATOR_CLONE_BACKUP_ROOT`.
+- `HOSTGATOR_QA_ROOT`, `HOSTGATOR_CLONE_BACKUP_ROOT`.
 
 Nunca registre valores de Secret, senha, chave privada ou conteúdo de
 `wp-config.php` nesta documentação ou nos logs.
@@ -521,8 +519,8 @@ O mesmo dispatch pode ser feito pelo `gh`:
 gh workflow run clone-environment.yml \
   --repo cassioln/uonix-site \
   --ref master \
-  -f source=qa \
-  -f target=dev \
+  -f source=prod \
+  -f target=qa \
   -f mode=dry-run \
   -f replace_users=false
 ```
@@ -530,7 +528,7 @@ gh workflow run clone-environment.yml \
 Troque o par do exemplo pelo par aprovado. O dry-run para destino `prod` também
 usa `clone-operations`, não escreve no host e deve manter `confirmation` vazio.
 
-### Execução remota com destino QA ou DEV
+### Execução remota com destino QA
 
 1. conclua e revise um dry-run verde para o mesmo par;
 2. confirme que não há deploy ou clone em andamento para o destino;
@@ -540,14 +538,14 @@ usa `clone-operations`, não escreve no host e deve manter `confirmation` vazio.
 6. deixe `confirmation` vazio;
 7. acompanhe o run até o resumo final e verifique o destino.
 
-Exemplo QA para DEV:
+Exemplo produção para QA:
 
 ```bash
 gh workflow run clone-environment.yml \
   --repo cassioln/uonix-site \
   --ref master \
-  -f source=qa \
-  -f target=dev \
+  -f source=prod \
+  -f target=qa \
   -f mode=execute \
   -f replace_users=false
 ```
@@ -627,7 +625,6 @@ executar no Mac e nunca chama a API do GitHub.
 | --- | --- |
 | `local` | `local/compose.yml`: a env var `UONIX_GITHUB_TOKEN` é repassada aos serviços `wordpress` e `wpcli`, e o `WORDPRESS_CONFIG_EXTRA` faz o `define()` condicional. O valor vem do `.env` da raiz, que está no `.gitignore`. |
 | `qa` | `/home2/uonix/public_html/wp-config.php`, antes da linha `stop editing`. |
-| `dev` | `/home2/uonix/dev_uonix/wp-config.php`, antes da linha `stop editing`. |
 | `prod` | `/home/storage/f/34/12/siteuonix1/public_html/wp-config.php`. Só necessário se o painel for usado a partir de produção; `execute` com destino `prod` continua recusado. |
 
 No `local`, exporte o `.env` antes de subir os containers para a variável chegar
@@ -681,7 +678,7 @@ ambiente remoto que participa do par:
 
 | Ambiente | Variables não secretas |
 | --- | --- |
-| `qa` ou `dev` | `QA_URL`, `DEVELOPMENT_URL`, `HOSTGATOR_SSH_HOST`, `HOSTGATOR_SSH_PORT`, `HOSTGATOR_SSH_USER`, `HOSTGATOR_QA_ROOT`, `HOSTGATOR_DEV_ROOT`, `HOSTGATOR_CLONE_BACKUP_ROOT` |
+| `qa` | `QA_URL`, `HOSTGATOR_SSH_HOST`, `HOSTGATOR_SSH_PORT`, `HOSTGATOR_SSH_USER`, `HOSTGATOR_QA_ROOT`, `HOSTGATOR_CLONE_BACKUP_ROOT` |
 | `prod` | `PRODUCTION_URL`, `LOCAWEB_SSH_HOST`, `LOCAWEB_SSH_PORT`, `LOCAWEB_SSH_USER`, `LOCAWEB_DOCUMENT_ROOT`, `LOCAWEB_ACCOUNT_ROOT`, `LOCAWEB_PHP_BIN`, `LOCAWEB_WP_BIN` |
 
 Use os valores canônicos aprovados para o ambiente; não copie valores de logs ou
@@ -733,7 +730,7 @@ Para `local -> prod`, a CLI exige:
 
 > [!DANGER]
 > Essa execução no Mac não passa pelo Environment `production-clone` nem consulta
-> `ENABLE_CLONE_PRODUCTION`. A CLI também aceita `qa → prod` e `dev → prod` com
+> `ENABLE_CLONE_PRODUCTION`. A CLI também aceita `qa → prod` com
 > a mesma exigência de frase curta. A proteção técnica local é o preflight, o
 > backup, o lock e a frase exata — **nada disso substitui os gates do GitHub.**
 > Capacidade técnica não equivale a autorização: execute somente em janela
@@ -743,7 +740,7 @@ Para `local -> prod`, a CLI exige:
 
 O clone não termina logo após importar banco e arquivos. Ele também:
 
-- ativa `fluent-smtp` em `prod`, `qa` e `dev` e falha se o plugin não estiver
+- ativa `fluent-smtp` em `prod` e `qa` e falha se o plugin não estiver
   previamente instalado;
 - desativa `fluent-smtp` no `local` e valida o Mailpit sem autenticação ou TLS;
 - apaga transients e executa `wp cache flush` (best-effort: falhas não
@@ -753,7 +750,7 @@ O clone não termina logo após importar banco e arquivos. Ele também:
   reintroduzidos lá;
 - preserva a configuração Turnstile do destino e valida que ela está habilitada
   remotamente e desabilitada no local;
-- valida redirecionamento seguro de e-mail em QA/DEV;
+- valida redirecionamento seguro de e-mail em QA;
 - exige analytics desativado fora de produção;
 - valida coerência da política de indexação com `blog_public`.
 
@@ -767,7 +764,7 @@ O destino só é considerado saudável quando todas estas verificações passam:
 - `wp core is-installed`;
 - `home`, `siteurl`, `blogname` e `WP_ENVIRONMENT_TYPE` canônicos;
 - política Turnstile efetiva;
-- política de e-mail segura em QA/DEV;
+- política de e-mail segura em QA;
 - analytics desativado fora de produção;
 - política de indexação coerente;
 - `fluentform` ativo;

@@ -14,7 +14,6 @@ ENV aceita os nomes canônicos e seus aliases, conforme
 scripts/lib/environment-map.sh:
   prod | production
   qa   | staging
-  dev  | development
 
 O conteúdo do bundle não varia com o ambiente: uonix-local é sempre excluído e
 o módulo é reinserido pelo workflow quando include_local_module for true.
@@ -49,7 +48,7 @@ done
 # (scripts/lib/environment-map.sh). Os workflows de deploy passam o tipo de ambiente
 # WordPress — qa-hostgator resolve para 'staging' — e não o nome canônico curto.
 case "$ENVIRONMENT" in
-  prod|production|qa|staging|dev|development) ;;
+  prod|production|qa|staging) ;;
   '') fail '--environment é obrigatório' ;;
   *) fail "ambiente remoto inválido: ${ENVIRONMENT}" ;;
 esac
