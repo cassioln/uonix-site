@@ -77,6 +77,9 @@ jobs:
       - name: Test Uônix Insights intelligence dashboard
         run: php scripts/tests/test-admin-intelligence-dashboard.php
 
+      - name: Test Uônix Insights executive report
+        run: php scripts/tests/test-admin-intelligence-report.php
+
       - name: Test GTM conversions and AdOpt contract
         run: php scripts/tests/test-gtm-conversoes-e-adopt.php
 

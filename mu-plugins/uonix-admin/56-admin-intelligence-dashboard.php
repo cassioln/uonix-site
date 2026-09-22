@@ -36,6 +36,23 @@ if ( ! function_exists( 'uonix_intelligence_unavailable_message' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_test_send_message' ) ) {
+	/**
+	 * Explica por que o envio de teste não saiu.
+	 *
+	 * O caso `mail_failed` em QA e DEV é quase sempre o guard de ambiente fazendo o
+	 * trabalho dele. Dizer isso na tela poupa o operador de caçar no error log um
+	 * bloqueio que é intencional.
+	 */
+	function uonix_intelligence_test_send_message( $reason ) {
+		$mapa = array(
+			'no_recipients' => 'Nenhum destinatário cadastrado, então nada foi enviado. Salve ao menos um endereço acima.',
+			'mail_failed'   => 'O envio falhou. Em QA e DEV isso é esperado quando UONIX_NONPROD_EMAIL_TO não está configurado: o guard de ambiente bloqueia envio sem caixa segura.',
+		);
+		return isset( $mapa[ $reason ] ) ? $mapa[ $reason ] : 'O envio não foi concluído.';
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_render_provenance' ) ) {
 	/**
 	 * Selo de procedência do bloco: fonte, horário de sincronização e frescor.
@@ -217,6 +234,14 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 				<div class="notice notice-warning inline"><p><?php echo esc_html( sprintf( '%d entrada(s) recusada(s) por não serem e-mail válido ou por exceder o limite.', $recusados ) ); ?></p></div>
 			<?php endif; ?>
 
+			<?php if ( isset( $_GET['uonix_test_sent'] ) ) : ?>
+				<?php if ( '1' === (string) $_GET['uonix_test_sent'] ) : ?>
+					<div class="notice notice-success inline"><p><?php echo esc_html( sprintf( 'Relatório de teste enviado para %d destinatário(s).', isset( $_GET['uonix_test_recipients'] ) ? (int) $_GET['uonix_test_recipients'] : 0 ) ); ?></p></div>
+				<?php else : ?>
+					<div class="notice notice-error inline"><p><?php echo esc_html( uonix_intelligence_test_send_message( isset( $_GET['uonix_test_reason'] ) ? (string) $_GET['uonix_test_reason'] : '' ) ); ?></p></div>
+				<?php endif; ?>
+			<?php endif; ?>
+
 			<h3>Destinatários atuais</h3>
 			<?php if ( array() === $recipients ) : ?>
 				<p><em>Nenhum destinatário cadastrado. Sem destinatário, nenhum relatório é enviado.</em></p>
@@ -250,6 +275,16 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 				</form>
 			<?php else : ?>
 				<p class="description">Alterar a lista de destinatários exige permissão de administrador.</p>
+			<?php endif; ?>
+
+			<?php if ( $pode_editar ) : ?>
+				<h3>Envio de teste</h3>
+				<p class="description">Gera o relatório com os dados atuais e envia para a lista acima, imediatamente.</p>
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+					<input type="hidden" name="action" value="uonix_intelligence_send_test" />
+					<?php wp_nonce_field( 'uonix_intelligence_send_test' ); ?>
+					<p class="submit"><button type="submit" class="button">Enviar Teste Agora</button></p>
+				</form>
 			<?php endif; ?>
 
 			<h3>Agendamento</h3>
