@@ -86,7 +86,7 @@ if ( $forcar_sync ) {
 // 3. Snapshot.
 $snapshot = uonix_analytics_metrics_get_snapshot( 30 );
 if ( ! is_array( $snapshot ) ) {
-	echo "FALHA: não há snapshot de 30 dias. Rode novamente com --sync.\n";
+	echo "FALHA: não há snapshot de 30 dias. Rode novamente com o posicional `sync`.\n";
 	exit( 1 );
 }
 
