@@ -317,7 +317,7 @@ local_db_dump_options() {
 
 protected_options_where() {
   cat <<'SQL'
-option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron')
+option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron','uonix_executive_report_recipients')
 OR option_name = 'downloaded_font_files'
 OR option_name LIKE '%ai1wm%'
 OR option_name LIKE 'compressx%'

@@ -24,8 +24,17 @@ $GLOBALS['uox_referer_action'] = null;
 $GLOBALS['uox_nonce_actions'] = array();
 $GLOBALS['uox_cron_rec'] = array();
 $GLOBALS['uox_cron_cleared'] = array();
+$GLOBALS['uox_actions_all'] = array();
 $GLOBALS['uox_schedules'] = array( 'hourly' => array( 'interval' => 3600 ), 'weekly' => array( 'interval' => 604800 ) );
 $GLOBALS['uox_timezone'] = 'America/Sao_Paulo';
+
+// Semeia um destinatário ANTES de carregar os módulos, de propósito.
+//
+// Sem isso, a asserção "carregar o módulo não agenda" passa por motivo errado: o
+// callback sairia no guard de lista vazia antes de tocar no agendador, e uma
+// chamada indevida no carregamento do arquivo não seria detectada. Com a
+// semente, só o registro do hook explica o agendador vazio.
+$GLOBALS['uox_options']['uonix_executive_report_recipients'] = array( 'semente@ksio.dev' );
 
 function uox_assert( $condition, $message ) {
 	global $failures;
@@ -50,7 +59,23 @@ function is_wp_error( $value ) { return $value instanceof WP_Error; }
 
 // Registra também o accepted_args: é ele que impede um evento de cron agendado
 // com argumentos de injetar uma lista de destinatários arbitrária no envio.
-function add_action( $hook, $callback, $priority = 10, $args = 1 ) { $GLOBALS['uox_actions'][ $hook ] = array( 'callback' => $callback, 'accepted_args' => $args ); }
+//
+// `uox_actions` guarda UM callback por hook, então um hook registrado por dois
+// arquivos perde o primeiro. `uox_actions_all` acumula todos: sem ele, uma
+// asserção sobre `init` passaria por causa do registro de 53, que também usa
+// `init`, e não do registro que se quer verificar.
+function add_action( $hook, $callback, $priority = 10, $args = 1 ) {
+	$GLOBALS['uox_actions'][ $hook ] = array( 'callback' => $callback, 'accepted_args' => $args );
+	$GLOBALS['uox_actions_all'][ $hook ][] = array( 'callback' => $callback, 'accepted_args' => $args );
+}
+function uox_hook_args( $hook, $callback ) {
+	foreach ( $GLOBALS['uox_actions_all'][ $hook ] ?? array() as $registro ) {
+		if ( $callback === $registro['callback'] ) {
+			return $registro['accepted_args'];
+		}
+	}
+	return null;
+}
 function add_filter( $hook, $callback, $priority = 10, $args = 1 ) { return true; }
 function add_shortcode( $tag, $callback ) { return true; }
 function add_menu_page() { return ''; }
@@ -160,8 +185,16 @@ uox_assert( 0 === $GLOBALS['uox_actions'][ uonix_intelligence_report_hook() ]['a
 uox_assert( false === wp_next_scheduled( uonix_intelligence_report_hook() ), 'Carregar o módulo não agenda o envio automático' );
 uox_assert( array() === $GLOBALS['uox_cron'], 'Nenhum evento de cron é criado no carregamento' );
 uox_assert( isset( $GLOBALS['uox_actions']['admin_post_uonix_intelligence_send_test'] ), 'Handler do envio de teste está registrado' );
-uox_assert( isset( $GLOBALS['uox_actions']['init'] ), 'Quem agenda é um callback de init, não o carregamento do arquivo' );
-uox_assert( 'uonix_intelligence_maybe_schedule_report' === $GLOBALS['uox_actions']['init']['callback'], 'O callback de init é o que mantém o invariante do agendamento' );
+// Verificado pela coleta acumulada, e não por `uox_actions['init']`: 53 também
+// registra em `init`, então a checagem simples passaria sem este registro existir.
+uox_assert(
+	null !== uox_hook_args( 'init', 'uonix_intelligence_maybe_schedule_report' ),
+	'Quem agenda é um callback de init, e ele está registrado — verificado entre TODOS os registros de init, não só o último'
+);
+uox_assert(
+	0 === uox_hook_args( 'init', 'uonix_intelligence_maybe_schedule_report' ),
+	'O callback de agendamento declara accepted_args=0, como o irmão de 53'
+);
 
 // ---------------------------------------------------------------------------
 // Invariante: existe evento agendado se, e somente se, existe destinatário.
@@ -182,9 +215,12 @@ uox_assert(
 	'weekly' === ( $GLOBALS['uox_cron_rec'][ uonix_intelligence_report_hook() ] ?? null ),
 	'A recorrência gravada é weekly: disparo único disfarçado de semanal enviaria o relatório uma vez e nunca mais'
 );
+// Dia E hora, no fuso do site, na mesma asserção: verificar só o dia deixaria
+// passar tanto uma troca de horário quanto o uso de UTC em vez do fuso do site,
+// porque segunda 08:00 UTC continua sendo segunda em São Paulo.
 uox_assert(
-	'Mon' === ( new DateTimeImmutable( '@' . $primeiro ) )->setTimezone( wp_timezone() )->format( 'D' ),
-	'O primeiro disparo cai numa segunda-feira no fuso do site'
+	'Mon 08:00' === ( new DateTimeImmutable( '@' . $primeiro ) )->setTimezone( wp_timezone() )->format( 'D H:i' ),
+	'O primeiro disparo é segunda-feira às 08:00 no fuso do site, e não em UTC'
 );
 
 // Idempotência: chamar de novo não duplica nem move a data.

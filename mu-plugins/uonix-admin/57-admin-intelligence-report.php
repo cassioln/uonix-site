@@ -3,12 +3,16 @@
  * Central de Inteligência — relatório executivo por e-mail.
  *
  * Monta e envia o relatório a partir do que 55-admin-intelligence-metrics.php
- * devolve. Não consulta API própria e não agenda nada por conta própria: o
- * handler do evento semanal é registrado, mas o evento NÃO é agendado aqui.
+ * devolve. Não consulta API própria.
  *
- * Ativar o envio automático é decisão operacional, condicionada ao smoke contra
- * a API real. Cron registrado e inativo é estado válido e esperado — ver
- * docs/uonix-insights-inteligencia.md.
+ * Mantém o invariante **existe evento agendado se, e somente se, existe
+ * destinatário**: o handler é registrado no carregamento, e um callback de `init`
+ * cria ou remove o evento semanal conforme a lista de destinatários. Carregar
+ * este arquivo não escreve no agendador.
+ *
+ * A ativação segue sendo decisão humana — ela é expressa por cadastrar um
+ * destinatário, não por rodar um comando. Lista vazia é o estado registrado e
+ * inativo, válido e esperado — ver docs/uonix-insights-inteligencia.md.
  *
  * O envio usa wp_mail(), portanto passa pelo guard de ambiente de
  * mu-plugins/uonix-integrations/49-email-environment-label.php, que bloqueia
@@ -291,7 +295,9 @@ if ( ! function_exists( 'uonix_intelligence_maybe_schedule_report' ) ) {
 		return (bool) wp_schedule_event( uonix_intelligence_report_first_run(), 'weekly', $hook );
 	}
 }
-add_action( 'init', 'uonix_intelligence_maybe_schedule_report' );
+// `accepted_args = 0` como o irmão de 53: o callback não usa argumento nenhum, e
+// declarar zero impede que um dia alguém injete dado pelo despacho do hook.
+add_action( 'init', 'uonix_intelligence_maybe_schedule_report', 10, 0 );
 
 if ( ! function_exists( 'uonix_intelligence_handle_test_send' ) ) {
 	/**
