@@ -19,7 +19,6 @@
 | --- | --- | --- | --- |
 | Produção provisória (histórico) | `site.uonix.com.br` | Locaweb | `master` |
 | QA | `uonix.ksio.dev` | HostGator | `qa` |
-| DEV | `test.uonix.ksio.dev` | HostGator | `dev` |
 | Local | `localhost:8080` | Podman | `local` |
 
 **[Histórico, válido até 2026-08-15] `uonix.com.br` é o site antigo, em produção real, e
@@ -35,27 +34,26 @@ O cutover para `uonix.com.br` é operação separada, com runbook e aprovação 
 Convergência se afere por **tree hash**, nunca por contagem de commits:
 
 ```bash
-for b in master qa dev; do
+for b in master qa; do
   echo "$b: $(git rev-parse origin/$b^{tree})"
 done
 ```
 
-Os três devem exibir o mesmo hash. Divergência após merge em `master` é normal e se
+Os dois devem exibir o mesmo hash. Divergência após merge em `master` é normal e se
 resolve com PRs de alinhamento (`integration/<branch>-align-master-N`).
 
 ## 3. Guards de deploy
 
-Três Variables controlam a publicação, todas `false` por padrão:
+Duas Variables controlam a publicação, ambas `false` por padrão:
 
 | Variable | Ambiente |
 | --- | --- |
-| `ENABLE_DEPLOY_DEVELOPMENT` | DEV |
 | `ENABLE_DEPLOY_QA` | QA |
 | `ENABLE_DEPLOY_PRODUCTION` | produção provisória |
 
 **Regra fixa: ativar um guard por vez**, com dry-run, evidência e rollback
-documentado antes de passar ao próximo. Ordem de menor risco: DEVELOPMENT → QA →
-PRODUCTION. Ativação em cascata é proibida.
+documentado antes de passar ao próximo. Ordem de menor risco: QA → PRODUCTION.
+Ativação em cascata é proibida.
 
 Com o guard em `false`, o job `authorize` aborta antes de qualquer contato remoto —
 comprovado no run `30676363535`: zero ocorrências de `ssh`, `rsync` ou `sshpass` no
@@ -77,8 +75,7 @@ disso fez `secrets.HOSTGATOR_*` chegarem vazios e abortarem o primeiro deploy re
 
 | Environment | Secrets (nomes) |
 | --- | --- |
-| `development-hostgator` | `HOSTGATOR_SSH_PRIVATE_KEY`, `HOSTGATOR_SSH_KNOWN_HOSTS`, `UONIX_TURNSTILE_*` |
-| `qa-hostgator` | idem |
+| `qa-hostgator` | `HOSTGATOR_SSH_PRIVATE_KEY`, `HOSTGATOR_SSH_KNOWN_HOSTS`, `UONIX_TURNSTILE_*` |
 | `production-locaweb` | `LOCAWEB_SSH_PASSWORD`, `LOCAWEB_SSH_KNOWN_HOSTS`, `LOCAWEB_FTP_PASSWORD`, `UONIX_TURNSTILE_*` |
 | `clone-operations` | união dos acima |
 
@@ -114,24 +111,24 @@ rsync error: unexplained error (code 255)
 ```
 
 A mesma porta responde normalmente do IP local. É filtro por IP de origem — nenhuma
-mudança de workflow contorna. **Deploy automatizado para QA e DEV está bloqueado por
+mudança de workflow contorna. **Deploy automatizado para o HostGator está bloqueado por
 infraestrutura**, não por código. Resolver exige liberar os IPs de saída dos runners
 no cPanel ou usar runner self-hosted.
 
-> Atualização 2026-08-25: no dry-run `prod->dev` pelo CI (run `32889424957`) o passo
-> "Validando ambiente: dev" **passou** — o HostGator aceitou a conexão SSH do runner.
-> Isso sugere que o bloqueio acima pode ter mudado (IP do runner liberado, ou o
+> Atualização 2026-08-25: num dry-run do CI com destino HostGator (run `32889424957`)
+> o passo de validação de ambiente **passou** — o HostGator aceitou a conexão SSH do
+> runner. Isso sugere que o bloqueio acima pode ter mudado (IP do runner liberado, ou o
 > HostGator deixou de recusar). ATENÇÃO: o dry-run só faz SSH de validação; o
 > `--execute` faz `rsync` pesado para o HostGator. Antes de confiar em deploy/clone
-> automatizado com destino QA/DEV, rodar um `--execute` real e confirmar que o rsync
+> automatizado com destino HostGator, rodar um `--execute` real e confirmar que o rsync
 > não volta a dar `Connection refused`/`code 255`. Até essa confirmação, tratar o
 > deploy automatizado para HostGator como não comprovado.
 
 A Locaweb **não** filtra runners por IP: eles autenticam e publicam normalmente
 com a senha correta (comprovado nos runs `30679406274`, `30683187557` e, após a
 correção de 2026-08-25, no run `32889357016`, em que o runner Azure autenticou e
-executou `whoami` na Locaweb; e no dry-run `prod->dev` completo pelo CI, run
-`32889424957`, que validou prod E dev e concluiu sem alterações).
+executou `whoami` na Locaweb; e no dry-run completo pelo CI com destino HostGator,
+run `32889424957`, que validou origem e destino e concluiu sem alterações).
 
 > Armadilha diagnosticada em 2026-08-25 (não repetir o erro): o CI de clone
 > começou a falhar com `Permission denied (publickey,password)` ao validar `prod`.
@@ -177,7 +174,7 @@ Armazena o **caminho de disco absoluto** de cada ambiente:
 ```
 localhost:8080       /var/www/html/wp-content//fonts/...
 site.uonix.com.br    /home/storage/f/34/12/siteuonix1/public_html/wp-content//fonts/...
-QA e DEV             /home2/uonix/{public_html,dev_uonix}/wp-content//fonts/...
+QA                   /home2/uonix/public_html/wp-content//fonts/...
 ```
 
 A **barra dupla é intencional**: o Kadence faz
@@ -273,8 +270,8 @@ Descoberto em 2026-08-03, depois de aplicar o bloco em QA e o header não aparec
 | Cloudflare (borda) | fora do servidor | purga na conta, ou esperar expirar |
 | navegador/CDN cliente | — | `?query` para bypass |
 
-Todos os hosts do projeto passam por Cloudflare: `ksio.dev`, `uonix.ksio.dev`,
-`test.uonix.ksio.dev` resolvem para `172.67.209.181` / `104.21.45.49`, com origem
+Todos os hosts do projeto passam por Cloudflare: `ksio.dev` e `uonix.ksio.dev`
+resolvem para `172.67.209.181` / `104.21.45.49`, com origem
 real em `108.179.252.137`. **Limpar o cache do servidor não invalida a borda.**
 
 Sintoma típico: a correção funciona na origem e continua ausente na URL pública.
@@ -370,7 +367,7 @@ mkdir: cannot create directory '<docroot>/.uonix-operation.lock': File exists
 Environment is already locked
 ```
 
-Isso aconteceu em DEV entre 2026-08-01 e 2026-08-03 e foi diagnosticado
+Isso aconteceu num ambiente remoto não produtivo entre 2026-08-01 e 2026-08-03 e foi diagnosticado
 erradamente como bloqueio de rede — o log do step 7 é a única evidência que
 distingue os dois casos. Não há expiração automática nem comando de liberação.
 
@@ -578,18 +575,17 @@ uapi --output=json DomainInfo list_domains
 ```
 
 Isso torna dispensável guardar token de API do cPanel. **Vale só para o HostGator
-(QA/DEV)** — a Locaweb não usa cPanel, tem painel próprio, e é onde estão o site
+(QA)** — a Locaweb não usa cPanel, tem painel próprio, e é onde estão o site
 novo e as caixas de e-mail.
 
 Estrutura da conta `uonix` no HostGator, confirmada por `DomainInfo`:
 
 ```
 domínio principal: uonix.ksio.dev        (QA)
-subdomínio:        test.uonix.ksio.dev   (DEV)
 ```
 
-QA e DEV compartilham o mesmo cPanel, o que explica os dois `.htaccess` sob o mesmo
-home.
+A conta serviu historicamente mais de um document root sob o mesmo cPanel, o que
+explica encontrar mais de um `.htaccess` sob o mesmo home.
 
 ## 18. Limites permanentes
 

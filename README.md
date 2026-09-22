@@ -16,10 +16,9 @@ Plugins de terceiros, uploads e arquivos gerados pelo WordPress não são versio
 
 ## Branches
 
-- `dev`: promoção de código para DEV.
 - `qa`: promoção de código para QA.
 - `master`: branch da produção provisória.
-- `local`: recebe alterações de `dev`, sem merge automático de volta.
+- `local`: recebe alterações de `master`, sem merge automático de volta.
 
 Os workflows de deploy ficam fail-closed até a guarda explícita de cada ambiente ser aprovada. Produção não possui deploy automático autorizado.
 
@@ -27,7 +26,6 @@ Os workflows de deploy ficam fail-closed até a guarda explícita de cada ambien
 
 - Produção: `https://uonix.com.br/` (branch `master`, Locaweb).
 - QA: `https://uonix.ksio.dev/` (branch `qa`, HostGator).
-- DEV: `https://test.uonix.ksio.dev/` (branch `dev`, HostGator).
 - Local: `http://localhost:8080/` (branch `local`, Podman no Mac).
 - Tema principal: `themes/kadence-child`
 - Caminho QA do tema: `/home2/uonix/public_html/wp-content/themes/kadence-child`
@@ -51,6 +49,6 @@ O passo a passo para recriar o ambiente local apos apagar containers, imagens ou
 
 ## Clone de Ambientes
 
-A ferramenta `ksio.dev > Clone de Ambientes` somente solicita o workflow manual `.github/workflows/clone-environment.yml`; ela não escreve banco ou arquivos diretamente. A ferramenta suporta os quatro ambientes canônicos (`prod`, `qa`, `dev` e `local`); pares com `local` são executados pelo Mac como ponte privada.
+A ferramenta `ksio.dev > Clone de Ambientes` somente solicita o workflow manual `.github/workflows/clone-environment.yml`; ela não escreve banco ou arquivos diretamente. A ferramenta suporta os três ambientes canônicos (`prod`, `qa` e `local`); pares com `local` são executados pelo Mac como ponte privada.
 
 Leia [docs/clone-ambientes.md](docs/clone-ambientes.md) antes de qualquer clone. Destino `prod` exige aprovação explícita, confirmação dinâmica, backup validado e preflight/dry-run no mesmo processo.

@@ -383,7 +383,6 @@ for forbidden in (
 
 canonical_requests = {
     'qa-hostgator': ('/home2/uonix/public_html', 'https://uonix.ksio.dev', 'staging'),
-    'development-hostgator': ('/home2/uonix/dev_uonix', 'https://test.uonix.ksio.dev', 'development'),
 }
 
 def run_validation(environment_name, target_root, target_url, include_local_module):

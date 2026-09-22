@@ -533,7 +533,7 @@ uox_cache_security_assert(
  *
  * Os dublês acima definem wp_cache_clear_cache(), então o teste comportamental
  * passaria mesmo se a chamada fosse nua. Mas o WP Super Cache é instalado somente
- * pelo deploy de produção: em QA, DEV e local a função não existe, e uma chamada
+ * pelo deploy de produção: em QA e local a função não existe, e uma chamada
  * nua daria fatal no admin-post.php — justamente onde um editor clica.
  */
 $dashboard_source = file_get_contents( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/39-admin-editor-dashboard.php' );
@@ -549,7 +549,7 @@ uox_cache_security_assert(
 			$dashboard_source
 		),
 	'a purga de cache de página precisa estar guardada por function_exists( "wp_cache_clear_cache" ): '
-		. 'sem o guard, o botão dá fatal em QA, DEV e local, onde o WP Super Cache não é instalado'
+		. 'sem o guard, o botão dá fatal em QA e local, onde o WP Super Cache não é instalado'
 );
 
 if ( 0 !== $failures ) {

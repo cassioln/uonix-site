@@ -29,7 +29,14 @@ $cases = array(
 	array( 'production', false, 'www.uonix.com.br', 'production' ),
 	array( 'production', false, 'site.uonix.com.br', 'production' ),
 	array( 'production', false, 'uonix.ksio.dev', 'staging' ),
+	// O host do ambiente remoto de desenvolvimento segue mapeado enquanto ele for
+	// alvo de clone. Sem este caso, a remoção do mapa passaria no CI enquanto
+	// derrubaria as travas de indexação, analytics e redirecionamento de e-mail
+	// naquele host.
 	array( 'production', false, 'test.uonix.ksio.dev', 'development' ),
+	// Host remoto desconhecido cai no fallback de produção: o mapa não inventa
+	// ambiente não produtivo para hostname que não está no contrato.
+	array( 'production', false, 'host-fora-do-contrato.example', 'production' ),
 	array( 'production', false, 'localhost', 'local' ),
 );
 

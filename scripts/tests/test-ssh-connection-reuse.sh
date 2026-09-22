@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Garante que os deploys reutilizam UMA conexão SSH em vez de abrir uma por passo.
 #
-# MOTIVAÇÃO: o job de DEV/QA abre 14 conexões SSH/rsync em sequência rápida. O
+# MOTIVAÇÃO: o job de QA abre 14 conexões SSH/rsync em sequência rápida. O
 # firewall do HostGator (cPHulk/CSF) trata a rajada como abuso e passa a recusar
 # a porta 22 NO MEIO do deploy — o preflight passa e um passo posterior morre com
 # "Connection refused", deixando lock órfão no ambiente. Quatro runs falharam

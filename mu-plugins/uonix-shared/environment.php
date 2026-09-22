@@ -31,6 +31,18 @@ if ( ! function_exists( 'uonix_resolve_environment' ) ) {
 			return 'local';
 		}
 
+		// O ambiente remoto de desenvolvimento está sendo retirado da topologia, mas
+		// este mapeamento NÃO pode sair antes de o host deixar de ser alvo de clone.
+		// Enquanto clone-environment.yml ainda aceita esse destino, o clone copia
+		// mu-plugins para lá — então o código novo chega ao host sem passar por deploy.
+		//
+		// Sem este bloco, um host que não defina WP_ENVIRONMENT_TYPE cai no fallback de
+		// produção no fim da função, e três travas caem juntas: indexação, analytics/AdOpt
+		// e o redirecionamento de e-mail — 49-email-environment-label.php só protege
+		// staging|development, então um orçamento de teste sairia para o cliente real,
+		// sem prefixo de ambiente e com Cc/Bcc preservados.
+		//
+		// Remover somente junto com a limpeza do subsistema de clone.
 		if ( 'test.uonix.ksio.dev' === $host ) {
 			return 'development';
 		}

@@ -3,8 +3,8 @@
 # repassa esses secrets explicitamente.
 #
 # MOTIVAÇÃO (falha real, 2026-07-31, run 30670232135):
-# deploy-development.yml chamava ./.github/workflows/_deploy-hostgator.yml sem
-# `secrets: inherit`. GitHub Actions NÃO herda secrets em reusable workflows por
+# um workflow de deploy não produtivo chamava ./.github/workflows/_deploy-hostgator.yml
+# sem `secrets: inherit`. GitHub Actions NÃO herda secrets em reusable workflows por
 # padrão: sem `secrets: inherit` no chamador (ou um mapeamento explícito em
 # `secrets:`), toda referência a secrets dentro do reusable resolve para string
 # vazia. HOSTGATOR_SSH_PRIVATE_KEY chegou vazio e o step `test -n` abortou.

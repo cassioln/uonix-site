@@ -169,7 +169,7 @@ if ( ! function_exists( 'uonix_analytics_configuration' ) ) {
     /**
      * Retorna a configuração completa somente para produção explicitamente habilitada.
      *
-     * O GA4 é entregue pelo container GTM; não há ID de analytics em QA, DEV ou local.
+     * O GA4 é entregue pelo container GTM; não há ID de analytics em QA ou local.
      *
      * @param string|null $environment      Ambiente explícito ou UONIX_ENV.
      * @param bool|null   $enabled          Flag explícita ou UONIX_ANALYTICS_ENABLED.

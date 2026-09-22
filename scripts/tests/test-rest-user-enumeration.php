@@ -53,7 +53,7 @@ foreach ( array( 'uonix_security_rest_hides_users', 'uonix_security_filter_rest_
 
 /*
  * Um anônimo não pode listar usuários. É este o caso que estava aberto em
- * DEV, QA e produção, entregando slug, nome e id de três contas reais.
+ * QA e produção, entregando slug, nome e id de três contas reais.
  */
 $GLOBALS['uonix_test_logged_in'] = false;
 $GLOBALS['uonix_test_caps']      = array();

@@ -77,13 +77,13 @@ function assert_not_contains( $needle, $haystack, $message ) {
 	}
 }
 
-assert_same( array( 'prod', 'qa', 'dev', 'local' ), array_keys( uox_clone_env_labels() ), 'painel lista quatro ambientes' );
+assert_same( array( 'prod', 'qa', 'local' ), array_keys( uox_clone_env_labels() ), 'painel lista três ambientes' );
 assert_same( 'master', uox_clone_get_workflow_ref(), 'workflow ref canônico' );
-assert_same( 'github-runner', uox_clone_execution_mode( 'prod', 'dev' ), 'par remoto usa runner' );
+assert_same( 'github-runner', uox_clone_execution_mode( 'prod', 'qa' ), 'par remoto usa runner' );
 assert_same( 'mac', uox_clone_execution_mode( 'local', 'qa' ), 'par com local usa Mac' );
 assert_same( 'CLONAR QA PARA PROD', uox_clone_required_confirmation( 'qa', 'prod' ), 'frase de produção' );
 assert_same( true, uox_clone_pair_requires_ssh_window( 'prod', 'qa' ), 'produção exige janela SSH' );
-assert_same( false, uox_clone_pair_requires_ssh_window( 'qa', 'dev' ), 'QA para DEV não exige janela Locaweb' );
+assert_same( false, uox_clone_pair_requires_ssh_window( 'qa', 'local' ), 'par sem produção não exige janela Locaweb' );
 
 $dry_command = uox_clone_build_local_command( 'qa', 'local', 'dry-run', false, '' );
 assert_contains( '--source=', $dry_command, 'comando local inclui origem' );
@@ -98,7 +98,7 @@ assert_contains( '--execute', $execute_command, 'comando local usa execute' );
 assert_contains( '--replace-users', $execute_command, 'replace-users explícito' );
 assert_contains( '--confirmation=', $execute_command, 'confirmação encaminhada' );
 
-$dispatch = uox_clone_dispatch_workflow( 'qa', 'dev', 'dry-run', false, '' );
+$dispatch = uox_clone_dispatch_workflow( 'prod', 'qa', 'dry-run', false, '' );
 assert_same( true, $dispatch, 'dispatch remoto aceito' );
 $payload = json_decode( $GLOBALS['uonix_remote_request']['args']['body'], true );
 assert_same( 'master', $payload['ref'], 'dispatch usa master' );
@@ -161,4 +161,4 @@ if ( 0 !== $failures ) {
 	exit( 1 );
 }
 
-printf( "PASS: painel cobre quatro ambientes, runner/Mac, produção e token não exposto.\n" );
+printf( "PASS: painel cobre três ambientes, runner/Mac, produção e token não exposto.\n" );

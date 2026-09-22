@@ -2,7 +2,7 @@
 /**
  * Protege o escopo do CSS da tela de login.
  *
- * MOTIVAÇÃO (print de 2026-08-03, DEV): em `wp-login.php?action=confirm_admin_email`
+ * MOTIVAÇÃO (print de 2026-08-03, ambiente remoto não produtivo): em `wp-login.php?action=confirm_admin_email`
  * o card apareceu com o texto "PAINEL DE CONTROLE" grudado dentro dele e o título
  * "Verificação do e-mail de administração" desalinhado, fora do padrão visual.
  *

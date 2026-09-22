@@ -68,7 +68,7 @@ if ( ! function_exists( 'uonix_should_block_email_environment' ) ) {
 
 if ( ! function_exists( 'uonix_email_remove_copy_headers' ) ) {
 	/**
-	 * Remove Cc/Bcc em QA e DEV e preserva os demais cabeçalhos, incluindo Reply-To.
+	 * Remove Cc/Bcc em ambientes não produtivos e preserva os demais cabeçalhos, incluindo Reply-To.
 	 *
 	 * @param array|string $headers Cabeçalhos aceitos por wp_mail().
 	 * @return array|string
@@ -169,7 +169,7 @@ if ( ! function_exists( 'uonix_filter_email_environment_policy' ) ) {
 
 if ( ! function_exists( 'uonix_prevent_unsafe_nonprod_email' ) ) {
 	/**
-	 * Interrompe wp_mail() antes do transporte se QA/DEV não tiverem caixa segura válida.
+	 * Interrompe wp_mail() antes do transporte se um ambiente não produtivo não tiver caixa segura válida.
 	 *
 	 * @param mixed $short_circuit Valor de short-circuit anterior.
 	 * @param array $args          Argumentos já filtrados de wp_mail().
@@ -180,7 +180,7 @@ if ( ! function_exists( 'uonix_prevent_unsafe_nonprod_email' ) ) {
 			return $short_circuit;
 		}
 
-		$message = 'UONIX: envio bloqueado porque UONIX_NONPROD_EMAIL_TO está ausente ou inválido em QA/DEV.';
+		$message = 'UONIX: envio bloqueado porque UONIX_NONPROD_EMAIL_TO está ausente ou inválido em ambiente não produtivo.';
 		error_log( $message );
 
 		if ( class_exists( 'WP_Error' ) && function_exists( 'do_action' ) ) {
@@ -198,7 +198,7 @@ if ( ! function_exists( 'uonix_nonprod_email_admin_notice' ) ) {
 		}
 
 		echo '<div class="notice notice-error"><p>'
-			. esc_html( 'Envio de e-mail bloqueado: configure UONIX_NONPROD_EMAIL_TO com uma caixa segura para QA/DEV.' )
+			. esc_html( 'Envio de e-mail bloqueado: configure UONIX_NONPROD_EMAIL_TO com uma caixa segura para o ambiente não produtivo.' )
 			. '</p></div>';
 	}
 }

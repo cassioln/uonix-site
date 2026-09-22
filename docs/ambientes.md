@@ -1,6 +1,6 @@
 # Contrato de ambientes Uonix
 
-Este documento é o contrato canônico da topologia Uonix para produção, QA, DEV e local. Em caso de conflito com documentação operacional anterior, este contrato prevalece até a atualização coordenada dos documentos relacionados.
+Este documento é o contrato canônico da topologia Uonix para produção, QA e local. Em caso de conflito com documentação operacional anterior, este contrato prevalece até a atualização coordenada dos documentos relacionados.
 
 Não versionar neste documento `wp-config.php`, senhas, chaves, tokens, salts, valores de Secrets, destinatários de caixa segura, IDs de analytics ou licenças.
 
@@ -10,14 +10,13 @@ Não versionar neste documento `wp-config.php`, senhas, chaves, tokens, salts, v
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `master` | Produção | Locaweb | `https://uonix.com.br` | `/home/storage/f/34/12/siteuonix1/public_html` | `production` | **Indexação liberada** (`index, follow`; sem `X-Robots-Tag`) | Habilitado somente aqui; IDs e configuração ficam fora do Git | SMTP real conforme configuração exclusiva do ambiente | Chave própria, fora do Git | Runtime e opções próprios do destino; não presumir licença, ativação ou geração de mídia | Workflow de produção em `master`, mas fail-closed: `ENABLE_DEPLOY_PRODUCTION=false`; não há deploy automático | Pode ser origem ou destino somente em operação explicitamente aprovada; destino requer confirmação dinâmica, backup fresco e preflight/dry-run no mesmo processo |
 | `qa` | QA | HostGator | `https://uonix.ksio.dev` | `/home2/uonix/public_html` | `staging` | `noindex` | Desabilitado; não configurar IDs GTM/GA4/AdOpt | Apenas caixa segura configurada fora do Git, com identificação `[QA]` | Chave de teste configurada fora do Git | Runtime e opções próprios do destino; não copiar a licença/estado de outro ambiente | Workflow de QA, mantido bloqueado até validação: `ENABLE_DEPLOY_QA=false` | Pode ser origem ou destino, exceto identidade; execução depende dos gates de clone |
-| `dev` | DEV | HostGator | `https://test.uonix.ksio.dev` | `/home2/uonix/dev_uonix` | `development` | `noindex` | Desabilitado; não configurar IDs GTM/GA4/AdOpt | Apenas caixa segura configurada fora do Git, com identificação `[DEV]` | Chave de teste configurada fora do Git | Runtime e opções próprios do destino; não copiar a licença/estado de outro ambiente | Workflow de DEV, mantido bloqueado até validação: `ENABLE_DEPLOY_DEVELOPMENT=false` | Pode ser origem ou destino, exceto identidade; execução depende dos gates de clone |
 | `local` | Local | Podman no Mac | `http://localhost:8080` | Container WordPress (`/var/www/html`) | `local` | Privado; não expor a mecanismos de busca | Desabilitado; não configurar IDs GTM/GA4/AdOpt | Mailpit | Desabilitado | Runtime local independente; não copiar licença/estado de outro ambiente | Sem deploy remoto | Pode ser origem ou destino, exceto identidade; é executado no Mac e depende dos gates de clone |
 
 ## Promoção de código e isolamento
 
 - A branch de produção permanece `master`; ela não será renomeada para `main`.
-- O fluxo normal de promoção é `dev → qa → master` por revisão.
-- A branch `local` recebe alterações de `dev`, mas não faz merge automático de volta para `dev`.
+- A promoção de código é feita por pull request direto para `master`, sob revisão. A branch `qa` recebe código já mergeado, para validação com dado real, e não é etapa de promoção.
+- A branch `local` recebe alterações de `master`, mas não faz merge automático de volta.
 - O código versionado é separado do runtime WordPress. Não transportar `wp-config.php`, credenciais, caches, logs, backups, uploads de teste ou configurações específicas de host como se fossem código promovível.
 - Produção atende em `uonix.com.br` desde o cutover de 2026-08-15. O domínio de trânsito `site.uonix.com.br` foi removido do painel e não resolve mais. A indexação está liberada (`UONIX_ALLOW_INDEXING=true`, `blog_public=1`).
 
@@ -29,10 +28,9 @@ As constantes devem ser definidas na configuração privada de cada ambiente, nu
 |---|---|
 | Produção | `WP_ENVIRONMENT_TYPE=production`; `WP_HOME` e `WP_SITEURL` apontam para `https://uonix.com.br`; `UONIX_ALLOW_INDEXING=true`; `UONIX_ANALYTICS_ENABLED=true`. Somente este ambiente pode receber IDs de analytics e AdOpt (`UONIX_ADOPT_WEBSITE_ID` e `UONIX_ADOPT_CONSENT_TAG_IDS`). **`WP_HOME`/`WP_SITEURL` são constantes**: `wp option update home` NÃO tem efeito enquanto elas existirem — o valor da constante sempre vence sobre o banco. Em troca de domínio, editar `wp-config.php` primeiro e depois corrigir o banco com `UPDATE` SQL direto. |
 | QA | `WP_ENVIRONMENT_TYPE=staging`; URL canônica `https://uonix.ksio.dev`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; caixa segura não produtiva e Turnstile de teste definidos fora do repositório. |
-| DEV | `WP_ENVIRONMENT_TYPE=development`; URL canônica `https://test.uonix.ksio.dev`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; caixa segura não produtiva e Turnstile de teste definidos fora do repositório. |
 | Local | `WP_ENVIRONMENT_TYPE=local`; URL canônica `http://localhost:8080`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; Mailpit ativo e Turnstile desligado. |
 
-Não declarar IDs GTM, GA4 ou AdOpt em QA, DEV ou local. Os identificadores de analytics, a configuração SMTP e as chaves Turnstile são dados por ambiente e não pertencem a arquivos versionados.
+Não declarar IDs GTM, GA4 ou AdOpt em QA ou local. Os identificadores de analytics, a configuração SMTP e as chaves Turnstile são dados por ambiente e não pertencem a arquivos versionados.
 
 ### Provisionamento e Rotação: Tags AdOpt (`UONIX_ADOPT_CONSENT_TAG_IDS`)
 
@@ -51,11 +49,11 @@ Não declarar IDs GTM, GA4 ou AdOpt em QA, DEV ou local. Os identificadores de a
 
 ## Contrato de clone
 
-A ferramenta aceita os quatro nomes canônicos `prod`, `qa`, `dev` e `local`. Os quatro pares de identidade (`prod → prod`, `qa → qa`, `dev → dev` e `local → local`) são proibidos. Os 12 pares direcionais entre ambientes distintos são permitidos apenas como capacidade técnica, nunca como autorização operacional.
+A ferramenta aceita os três nomes canônicos `prod`, `qa` e `local`. Os três pares de identidade (`prod → prod`, `qa → qa` e `local → local`) são proibidos. Os 6 pares direcionais entre ambientes distintos são permitidos apenas como capacidade técnica, nunca como autorização operacional.
 
 | Categoria do par | Executor previsto | Requisitos antes de qualquer mutação |
 |---|---|---|
-| Remoto ↔ remoto (`prod`, `qa`, `dev`) | GitHub Actions a partir da referência canônica | Dry-run/preflight no mesmo processo, backup validado do destino, manifesto verificado e confirmação dinâmica. Para destino `prod`, exigir aprovação just-in-time além desses gates. |
+| Remoto ↔ remoto (`prod`, `qa`) | GitHub Actions a partir da referência canônica | Dry-run/preflight no mesmo processo, backup validado do destino, manifesto verificado e confirmação dinâmica. Para destino `prod`, exigir aprovação just-in-time além desses gates. |
 | Qualquer par com `local` | Mac como ponte privada | Dry-run/preflight no mesmo processo, backup validado do destino e confirmação dinâmica; não executar automaticamente por workflow remoto. |
 
 Por padrão, o clone preserva usuários, URL, título, configuração SMTP, analytics, Turnstile, licenças e configuração do host no destino. Substituir usuários exige opção explícita. Um clone não copia `wp-config.php`.
