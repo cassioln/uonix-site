@@ -181,6 +181,40 @@ O Search Console do domínio de produção só tem dados de produção. Em `loca
 
 O primeiro destinatário do relatório é o operador, por semanas, antes de qualquer envio a destinatário externo. Um número errado no primeiro e-mail externo custa mais que o atraso.
 
+## Registro da porta de ativação
+
+Executado à mão em produção em 2026-09-22, no commit `ba55b8e`.
+
+| Verificação | Resultado |
+|---|---|
+| Módulo carregado (funções de regra, painel e envio presentes em runtime) | sim |
+| Piso de impressões publicado | 5 |
+| Snapshot fresco | sim — sincronizado em `2026-09-22T03:40:41Z` |
+| Universo de consultas | 111 |
+| Oportunidades devolvidas | 5 |
+| Envio real do relatório | sim — 1 destinatário, sem motivo de falha |
+| Evento semanal agendado | **não** |
+
+As cinco oportunidades que o primeiro relatório levou:
+
+| # | Consulta | Posição | Impressões |
+|---|---|---|---|
+| 1 | olhal de ancoragem | 11,4 | 53 |
+| 2 | projeto de andaimes | 10,3 | 28 |
+| 3 | teste de ancoragem predial | 9,6 | 22 |
+| 4 | barra roscada de aço inox | 10,5 | 10 |
+| 5 | barra roscada aço inox | 10,3 | 8 |
+
+Este é o **baseline**. Um relatório futuro que chegue com zero linhas, sem que o site tenha perdido tráfego, é regressão — não ausência de oportunidade. Foi exatamente assim que o limiar antigo falhou em silêncio, e é contra estes números que a próxima revisão do piso deve ser conferida.
+
+O destinatário registrado é a caixa do operador. O controle de licença da Central ainda não existe no código; enquanto não existir, o destinatário não pode deixar de ser o operador — ver *Licenciamento*.
+
+### O que este registro não prova
+
+A sincronização com GA4 e Search Console **não foi disparada por esta execução**. A evidência de que o caminho até a API real funciona em produção é indireta: o snapshot estava fresco, com horário de sincronização do próprio dia. Uma execução que force a sincronização — `scripts/maintenance/smoke-intelligence-seo.php` com o argumento posicional `sync` — ainda não foi registrada aqui.
+
+Também não foi verificado o relatório renderizado: o envio reporta sucesso do `wp_mail`, não que o HTML tenha chegado legível. Isso depende de alguém abrir a caixa.
+
 ## Documentos relacionados
 
 - [ambientes.md](ambientes.md) — contrato canônico de ambientes, constantes e guards de deploy.
