@@ -152,7 +152,10 @@ if not retry_lines:
 
 with_heredoc = 0
 for line in retry_lines:
-    reads_stdin = "<<'REMOTE'" in line
+    # Qualquer tag de heredoc, não só a literal 'REMOTE': o repositório já usa
+    # outras (UONIX_DB_BACKUP em backup-remote-database.sh), e alguém que copie
+    # esse padrão para o workflow reintroduziria o fail-open com a suíte verde.
+    reads_stdin = re.search(r"<<'[A-Z_]+'\s*$", line) is not None
     replays = '--replay-stdin' in line
     if reads_stdin:
         with_heredoc += 1
@@ -198,7 +201,10 @@ deploy_end = production.index('- name: Validate canonical production target')
 deploy_header = production[deploy_start:deploy_end]
 cadence = {}
 for name in ('UONIX_TRANSPORT_MAX_ATTEMPTS', 'UONIX_TRANSPORT_RETRY_DELAY'):
-    match = re.search(rf"^\s+{name}:\s*'?(\d+)'?\s*$", deploy_header, re.M)
+    # `[1-9][0-9]*` e não `\d+`: um valor com zero à esquerda ('03') passaria
+    # aqui como 3 e a lib o rejeitaria em tempo de execução — suíte verde e
+    # backup de banco morto na primeira chamada.
+    match = re.search(rf"^\s+{name}:\s*'?([1-9][0-9]*)'?\s*$", deploy_header, re.M)
     if not match:
         fail(
             f'{name} não está no env do job deploy; os dois checkpoints de banco '
