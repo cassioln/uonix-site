@@ -132,7 +132,7 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 		$analysis  = function_exists( 'uonix_intelligence_seo_opportunities' )
 			? uonix_intelligence_seo_opportunities( null, 5 )
 			: array( 'available' => false, 'reason' => 'snapshot_missing', 'source' => 'search_console', 'synced_at' => '', 'stale' => true, 'universe' => 0, 'rows' => array() );
-		$rules = function_exists( 'uonix_intelligence_seo_rules' ) ? uonix_intelligence_seo_rules() : array( 'min_position' => 4, 'max_position' => 12, 'min_impressions' => 100, 'max_ctr' => 0.03 );
+		$rules = function_exists( 'uonix_intelligence_seo_rules' ) ? uonix_intelligence_seo_rules() : array( 'min_position' => 4, 'max_position' => 12, 'min_impressions' => 5, 'max_ctr' => 0.03 );
 		$rows  = isset( $analysis['rows'] ) && is_array( $analysis['rows'] ) ? $analysis['rows'] : array();
 		?>
 		<section id="uonix-panel-intelligence" role="tabpanel" aria-labelledby="uonix-tab-intelligence"<?php echo $is_active ? '' : ' hidden'; ?>>
@@ -141,11 +141,11 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 					<h2 id="uonix-intelligence-title">Oportunidades de busca a um passo do topo</h2>
 					<p><?php echo esc_html(
 						sprintf(
-							'Consultas em que o site aparece entre a %d.ª e a %d.ª posição, com mais de %d impressões em 30 dias e taxa de clique abaixo de %s.',
+							'As consultas de maior volume entre as que aparecem da %d.ª à %d.ª posição com taxa de clique abaixo de %s, nos últimos 30 dias. Consultas com %d impressões ou menos ficam de fora: nesse volume a taxa de clique é ruído, não sinal.',
 							(int) $rules['min_position'],
 							(int) $rules['max_position'],
-							(int) $rules['min_impressions'],
-							uonix_intelligence_format_ctr( $rules['max_ctr'] )
+							uonix_intelligence_format_ctr( $rules['max_ctr'] ),
+							(int) $rules['min_impressions']
 						)
 					); ?></p>
 					<?php uonix_intelligence_render_provenance( $analysis ); ?>

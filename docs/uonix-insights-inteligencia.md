@@ -107,11 +107,22 @@ Parâmetros fixados. A #193 apresenta três faixas divergentes para "striking di
 | Regra | Valor |
 |---|---|
 | Faixa de posição | **4 a 12** |
-| Volume mínimo | **mais de 100 impressões em 30 dias** |
+| Piso de ruído de volume | **mais de 5 impressões em 30 dias** |
 | CTR | **abaixo de 3%** |
 | Período do snapshot que alimenta a regra | **30 dias** |
+| Priorização | **ordenação por impressões decrescentes**, e o relatório mostra as primeiras |
 
 Descartado o critério "CTR 50% menor que a média da indústria": não há fonte auditável para essa média, e um número sem procedência viola a regra de procedência acima.
+
+### O volume é piso de ruído, não critério de relevância
+
+Quem separa oportunidade boa de ruim é a **ordenação**, não o piso. O piso existe apenas para não reportar consulta cujo CTR é estatisticamente sem sentido: abaixo de seis impressões no mês, um único clique já produz mais de 15% de taxa.
+
+O valor anterior era "mais de 100 impressões" e vinha da especificação de produto, não de medição. Medido em produção em 2026-09-22, após sincronização real: **a consulta de maior volume do site inteiro tem 106 impressões em 30 dias.** Das 111 consultas, 40 passavam na faixa de posição e 106 no CTR — e **zero** passavam em faixa mais volume. O módulo devolvia zero por construção.
+
+Isso passou por mais de cem testes no CI, 28 mutações detectadas e duas aprovações de revisão independente, porque todos verificavam a lógica contra dado sintético de um site grande. **É o caso concreto que justifica a porta de ativação existir separada da porta de merge**, e o motivo de o teste de fronteira agora incluir um universo na escala real deste site.
+
+Qualquer revisão futura deste piso deve ser feita contra a distribuição medida, não contra referência de mercado: um limiar absoluto calibrado para outro site volta a zerar o módulo em silêncio.
 
 A consulta por `query` do Search Console precisa sair do limite de 10 linhas usado hoje para a ordem de mil, para que a mineração tenha universo. A sanitização de query existente em `53:117-132` — que rejeita padrão de e-mail, telefone e URL — continua valendo integralmente: ampliar o volume amplia a superfície de PII na mesma proporção.
 
