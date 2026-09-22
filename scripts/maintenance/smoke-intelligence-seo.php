@@ -14,15 +14,30 @@
  * Uso, no ambiente que tem a service account configurada:
  *
  *   wp eval-file scripts/maintenance/smoke-intelligence-seo.php
- *   wp eval-file scripts/maintenance/smoke-intelligence-seo.php --sync
+ *   wp eval-file scripts/maintenance/smoke-intelligence-seo.php sync
+ *   UONIX_SMOKE_SYNC=1 wp eval-file scripts/maintenance/smoke-intelligence-seo.php
  *
- * Com `--sync` força uma sincronização nova antes de avaliar; sem ele, avalia o
- * snapshot que já existe. Não envia e-mail em nenhum caso: disparar é decisão
- * separada, feita pelo botão "Enviar Teste Agora" ou por `wp cron event run`.
+ * O argumento é posicional (`sync`), NÃO uma flag `--sync`. Dois motivos: o
+ * WP-CLI consome qualquer `--flag` como flag própria antes de chegar aqui, e o
+ * arquivo é incluído de dentro de um método do WP-CLI, onde `$argv` não está no
+ * escopo — o WP-CLI expõe os posicionais em `$args`. A variável de ambiente
+ * existe como alternativa para quem prefere não depender desse detalhe.
+ *
+ * Sincronizar força uma chamada nova à API antes de avaliar; sem isso, o script
+ * julga o snapshot que já existe — e avisa quando esse snapshot está vencido,
+ * para ninguém confundir "aprovado" com "verificado contra a API agora".
+ *
+ * Não envia e-mail em nenhum caso: disparar é decisão separada, feita pelo botão
+ * "Enviar Teste Agora" ou por `wp cron event run`.
  *
  * Saída: relatório legível e código de saída 0 quando o caminho de dados está
- * íntegro, 1 quando não está. Não imprime PII: as consultas vêm do snapshot, que
- * já passou pela sanitização, e ainda assim só as três primeiras são exibidas.
+ * íntegro, 1 quando não está.
+ *
+ * Sobre dado pessoal: as consultas exibidas passaram pela sanitização do projeto,
+ * que descarta e-mail, telefone e URL — mas NÃO descarta nome próprio. Só as três
+ * primeiras linhas são exibidas, e ainda assim a saída deste script deve ser
+ * tratada como potencialmente identificável: não colar em issue pública nem em
+ * canal compartilhado sem revisar.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -30,8 +45,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit( 1 );
 }
 
-$forcar_sync = in_array( '--sync', (array) ( $argv ?? array() ), true );
+// `$args` é o que o WP-CLI expõe para os posicionais de `eval-file`. `$argv` não
+// serve: o include acontece dentro de um método, onde ele não está no escopo.
+$smoke_args  = isset( $args ) && is_array( $args ) ? $args : array();
+$forcar_sync = in_array( 'sync', $smoke_args, true ) || '1' === (string) getenv( 'UONIX_SMOKE_SYNC' );
 $problemas   = array();
+
+if ( ! $forcar_sync ) {
+	echo "Modo: avaliando o snapshot existente, SEM chamar a API.\n";
+	echo "Para forçar sincronização: acrescente o posicional `sync` ou defina UONIX_SMOKE_SYNC=1.\n\n";
+}
 
 echo "=== Smoke da Central de Inteligência ===\n";
 echo 'Ambiente: ' . ( defined( 'UONIX_ENV' ) ? UONIX_ENV : 'indefinido' ) . "\n\n";
@@ -79,7 +102,13 @@ echo 'Consultas no universo de mineração: ' . ( -1 === $universo ? 'campo ause
 echo 'Tamanho serializado do snapshot: ' . number_format( strlen( serialize( $snapshot ) ) / 1024, 1 ) . " KB\n\n";
 
 if ( $versao < 3 ) {
-	$problemas[] = "Snapshot ainda é v{$versao}. Rode com --sync para gerar o v3.";
+	$problemas[] = "Snapshot ainda é v{$versao}. Rode com o posicional `sync` para gerar o v3.";
+}
+// Como porta de ativação, o smoke só pode aprovar dado que foi confirmado contra a
+// API: ou nesta execução, ou por uma sincronização recente. Aprovar em cima de
+// snapshot vencido sem sincronizar seria dar por verificado o que não foi.
+if ( ! $forcar_sync && ! $fresco ) {
+	$problemas[] = 'Snapshot vencido e nenhuma sincronização nesta execução. Rode com `sync` antes de tratar este resultado como aprovação.';
 }
 if ( -1 === $universo ) {
 	$problemas[] = 'O snapshot não tem `queries_extended`. A mineração não tem universo.';

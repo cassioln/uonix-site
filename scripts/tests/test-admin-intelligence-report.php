@@ -44,7 +44,9 @@ class WP_Error {
 }
 function is_wp_error( $value ) { return $value instanceof WP_Error; }
 
-function add_action( $hook, $callback, $priority = 10, $args = 1 ) { $GLOBALS['uox_actions'][ $hook ] = $callback; }
+// Registra também o accepted_args: é ele que impede um evento de cron agendado
+// com argumentos de injetar uma lista de destinatários arbitrária no envio.
+function add_action( $hook, $callback, $priority = 10, $args = 1 ) { $GLOBALS['uox_actions'][ $hook ] = array( 'callback' => $callback, 'accepted_args' => $args ); }
 function add_filter( $hook, $callback, $priority = 10, $args = 1 ) { return true; }
 function add_shortcode( $tag, $callback ) { return true; }
 function add_menu_page() { return ''; }
@@ -79,7 +81,9 @@ function add_query_arg( $args, $url ) { return $url . '?' . http_build_query( $a
 function esc_html__( $text, $domain = '' ) { return $text; }
 function esc_html( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_attr( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
-function esc_url( $url ) { return (string) $url; }
+// Stub que de fato escapa. Passa-tudo tornaria vazia qualquer asserção sobre
+// escape de URL: o teste passaria mesmo se o código concatenasse cru.
+function esc_url( $url ) { return str_replace( array( '"', "'", '<', '>' ), array( '&quot;', '&#039;', '&lt;', '&gt;' ), (string) $url ); }
 function esc_textarea( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 // Coleta TODAS as ações emitidas: o painel tem dois formulários, e guardar só a
 // última compararia formulários diferentes.
@@ -135,6 +139,7 @@ function uox_analysis( array $rows, $available = true, $reason = '', $stale = fa
 // O evento semanal tem handler registrado, mas NÃO é agendado.
 // ---------------------------------------------------------------------------
 uox_assert( isset( $GLOBALS['uox_actions'][ uonix_intelligence_report_hook() ] ), 'Handler do evento semanal está registrado' );
+uox_assert( 0 === $GLOBALS['uox_actions'][ uonix_intelligence_report_hook() ]['accepted_args'], 'Handler do cron não aceita argumentos: um evento agendado à mão não pode injetar destinatários' );
 uox_assert( false === wp_next_scheduled( uonix_intelligence_report_hook() ), 'Carregar o módulo não agenda o envio automático' );
 uox_assert( array() === $GLOBALS['uox_cron'], 'Nenhum evento de cron é criado no carregamento' );
 uox_assert( isset( $GLOBALS['uox_actions']['admin_post_uonix_intelligence_send_test'] ), 'Handler do envio de teste está registrado' );
@@ -178,6 +183,17 @@ uox_assert( false !== strpos( $html, 'sincronizado em' ), 'Bloco do e-mail decla
 uox_assert( false !== strpos( $html, '<table' ) && false !== strpos( $html, 'role="presentation"' ), 'Layout usa tabela, necessário para Outlook' );
 uox_assert( false === strpos( $html, 'display:flex' ), 'Layout não depende de flexbox, que Outlook ignora' );
 uox_assert( false === strpos( $html, 'Ambiente:' ), 'Em produção o e-mail não carrega aviso de ambiente' );
+
+// A URL do painel vai para um atributo href. Ela vem de admin_url(), mas o escape
+// precisa existir e ser exercitado, senão trocá-lo por concatenação crua fica verde.
+$html_url = uonix_intelligence_report_html( array(
+	'analysis' => uox_analysis( array() ),
+	'period_label' => '',
+	'environment' => 'production',
+	'panel_url' => 'https://uonix.com.br/wp-admin/admin.php?page=x"><script>alert(1)</script>',
+) );
+uox_assert( false === strpos( $html_url, '"><script>' ), 'URL do painel não escapa do atributo href' );
+uox_assert( false !== strpos( $html_url, 'href=' ), 'Link do painel continua sendo renderizado' );
 
 // Ambiente não produtivo é declarado no rodapé.
 $html_qa = uonix_intelligence_report_html( array(

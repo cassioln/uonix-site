@@ -73,7 +73,9 @@ function add_query_arg( $args, $url ) { return $url . '?' . http_build_query( $a
 function esc_html__( $text, $domain = '' ) { return $text; }
 function esc_html( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_attr( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
-function esc_url( $url ) { return (string) $url; }
+// Stub que de fato escapa. Passa-tudo tornaria vazia qualquer asserção sobre
+// escape de URL.
+function esc_url( $url ) { return str_replace( array( '"', "'", '<', '>' ), array( '&quot;', '&#039;', '&lt;', '&gt;' ), (string) $url ); }
 function esc_textarea( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 // Coleta TODAS as ações de nonce emitidas: o painel tem mais de um formulário, e
 // guardar só a última faria a comparação com o handler comparar formulários
