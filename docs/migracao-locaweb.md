@@ -44,6 +44,12 @@ resolve com PRs de alinhamento (`integration/<branch>-align-master-N`).
 
 ## 3. Guards de deploy
 
+> [!NOTE]
+> **Esta seção descreve o estado durante a migração, não o estado atual.** O cutover
+> foi concluído em 2026-08-15 e as guardas foram habilitadas depois disso, por
+> decisão do responsável. Para o estado corrente, consulte
+> [ambientes.md](ambientes.md) e confirme o valor real com `gh variable list`.
+
 Duas Variables controlam a publicação, ambas `false` por padrão:
 
 | Variable | Ambiente |
