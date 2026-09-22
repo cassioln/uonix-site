@@ -114,10 +114,8 @@ export HOSTGATOR_SSH_HOST='hostgator.example.invalid'
 export HOSTGATOR_SSH_PORT='22'
 export HOSTGATOR_SSH_USER='uonix'
 export HOSTGATOR_QA_ROOT="$TMP_DIR/remote"
-export HOSTGATOR_DEV_ROOT="$TMP_DIR/remote"
 export PRODUCTION_URL='https://prod.example.invalid'
 export QA_URL='https://qa.example.invalid'
-export DEVELOPMENT_URL='https://dev.example.invalid'
 
 # O PHP/PHAR da Locaweb é substituído por um wrapper que cai no `wp` falso,
 # preservando a forma real da invocação (`php -d disable_functions= phar`).

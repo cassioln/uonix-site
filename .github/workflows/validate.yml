@@ -329,6 +329,9 @@ jobs:
       - name: Test no references to discontinued plugins
         run: bash scripts/tests/test-no-dead-plugin-references.sh
 
+      - name: Test no references to the retired environment
+        run: bash scripts/tests/test-no-retired-environment-references.sh
+
       - name: Test clone author remapping
         run: bash scripts/tests/test-clone-author-remap.sh
 

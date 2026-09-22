@@ -13,7 +13,6 @@ fail() {
 
 export PRODUCTION_URL='https://uonix.com.br'
 export QA_URL='https://uonix.ksio.dev'
-export DEVELOPMENT_URL='https://test.uonix.ksio.dev'
 export LOCAWEB_SSH_HOST='ftp.uonix.com.br'
 export LOCAWEB_SSH_PORT='22'
 export LOCAWEB_SSH_USER='siteuonix1'
@@ -25,7 +24,6 @@ export HOSTGATOR_SSH_HOST='108.179.252.137'
 export HOSTGATOR_SSH_PORT='22'
 export HOSTGATOR_SSH_USER='uonix'
 export HOSTGATOR_QA_ROOT='/home2/uonix/public_html'
-export HOSTGATOR_DEV_ROOT='/home2/uonix/dev_uonix'
 export UONIX_CLONE_LIBRARY_ONLY=1
 # shellcheck source=scripts/clone-environment.sh
 source "$CLONE_SCRIPT"
@@ -403,8 +401,8 @@ clear_cache() { :; }
 validate_target_after_clone() { die 'falha pós-import simulada'; }
 validate_compressx_delivery() { :; }
 rollback_target() { printf 'rollback\n' >> "$rollback_log"; }
-SOURCE=qa
-TARGET=dev
+SOURCE=prod
+TARGET=qa
 CLONE_TMP_DIR="$TMP_DIR/execution"
 mkdir -p "$CLONE_TMP_DIR"
 TARGET_BACKUP_DIR=''
@@ -1504,7 +1502,7 @@ log() { :; }
 env_url() { printf 'https://%s.example.invalid\n' "$1"; }
 preflight_env() {
   printf 'preflight:%s\n' "$1" >> "$preflight_call_log"
-  if [ "$1" = qa ]; then
+  if [ "$1" = prod ]; then
     return 71
   fi
   return 0
@@ -1512,8 +1510,8 @@ preflight_env() {
 execute_clone_with_rollback() { printf 'mutation\n' >> "$preflight_call_log"; }
 write_clone_summary() { printf 'summary\n' >> "$preflight_call_log"; }
 
-SOURCE='qa'
-TARGET='dev'
+SOURCE='prod'
+TARGET='qa'
 CLONE_MODE='execute'
 INCLUDE_GIT_FILES='0'
 PRESERVE_DESTINATION_USERS='1'
@@ -1525,7 +1523,7 @@ else
 fi
 [ "$preflight_dry_run_status" -eq 71 ] || fail \
   "dry_run_clone mascarou falha do preflight de origem (esperado 71, obtido ${preflight_dry_run_status})"
-[ "$(tr '\n' ':' < "$preflight_call_log")" = 'preflight:qa:' ] || fail \
+[ "$(tr '\n' ':' < "$preflight_call_log")" = 'preflight:prod:' ] || fail \
   'dry_run_clone avançou após falha do preflight de origem'
 
 : > "$preflight_call_log"
@@ -1536,14 +1534,14 @@ else
 fi
 [ "$preflight_run_clone_status" -eq 71 ] || fail \
   "run_clone --execute mascarou falha do preflight de origem (esperado 71, obtido ${preflight_run_clone_status})"
-[ "$(tr '\n' ':' < "$preflight_call_log")" = 'preflight:qa:' ] || fail \
+[ "$(tr '\n' ':' < "$preflight_call_log")" = 'preflight:prod:' ] || fail \
   'run_clone --execute alcançou preflight posterior ou mutação após falha 71'
 
 # O segundo preflight é igualmente obrigatório e não pode ser convertido em
 # sucesso pelos logs finais de dry_run_clone.
 preflight_env() {
   printf 'preflight:%s\n' "$1" >> "$preflight_call_log"
-  if [ "$1" = dev ]; then
+  if [ "$1" = qa ]; then
     return 72
   fi
   return 0
@@ -1556,14 +1554,14 @@ else
 fi
 [ "$target_preflight_status" -eq 72 ] || fail \
   "dry_run_clone mascarou falha do preflight de destino (esperado 72, obtido ${target_preflight_status})"
-[ "$(tr '\n' ':' < "$preflight_call_log")" = 'preflight:qa:preflight:dev:' ] || fail \
+[ "$(tr '\n' ':' < "$preflight_call_log")" = 'preflight:prod:preflight:qa:' ] || fail \
   'dry_run_clone avançou após falha do preflight de destino'
 
 # A URL da origem é configuração obrigatória do dry-run. A substituição de
 # comando dentro de log não pode esconder sua falha nem abrir preflight remoto.
 env_url() {
   printf 'url:%s\n' "$1" >> "$preflight_call_log"
-  if [ "$1" = qa ]; then
+  if [ "$1" = prod ]; then
     return 67
   fi
   printf 'https://%s.example.invalid\n' "$1"
@@ -1577,13 +1575,13 @@ else
 fi
 [ "$source_url_status" -eq 67 ] || fail \
   "dry_run_clone mascarou falha da URL de origem (esperado 67, obtido ${source_url_status})"
-[ "$(tr '\n' ':' < "$preflight_call_log")" = 'url:qa:' ] || fail \
+[ "$(tr '\n' ':' < "$preflight_call_log")" = 'url:prod:' ] || fail \
   'dry_run_clone avançou após falha da URL de origem'
 
 # A URL do destino tem o mesmo contrato fail-closed.
 env_url() {
   printf 'url:%s\n' "$1" >> "$preflight_call_log"
-  if [ "$1" = dev ]; then
+  if [ "$1" = qa ]; then
     return 68
   fi
   printf 'https://%s.example.invalid\n' "$1"
@@ -1596,7 +1594,7 @@ else
 fi
 [ "$target_url_status" -eq 68 ] || fail \
   "dry_run_clone mascarou falha da URL de destino (esperado 68, obtido ${target_url_status})"
-[ "$(tr '\n' ':' < "$preflight_call_log")" = 'url:qa:url:dev:' ] || fail \
+[ "$(tr '\n' ':' < "$preflight_call_log")" = 'url:prod:url:qa:' ] || fail \
   'dry_run_clone abriu preflight após falha da URL de destino'
 
 # 10. O próprio preflight também pode rodar sob contexto condicional. Resolver
@@ -2268,8 +2266,8 @@ wp_cli_shell() { printf 'rollback-wp-cli\n' >> "$c3r9_boundary_log"; printf 'wp\
 # shellcheck disable=SC2329
 remote_run_idempotent() { printf 'rollback-transport\n' >> "$c3r9_boundary_log"; }
 
-SOURCE=qa
-TARGET=dev
+SOURCE=prod
+TARGET=qa
 CLONE_TMP_DIR="$TMP_DIR/c3r9-real-boundary"
 mkdir -p "$CLONE_TMP_DIR"
 TARGET_BACKUP_DIR=''
@@ -2481,8 +2479,8 @@ if grep -Eq '^remote-(run|read)$' "$c3r10_backup_log"; then
   record_c3r10_backup_failure 'preflight_env abriu remoto após falha de backup_root'
 fi
 
-SOURCE=qa
-TARGET=dev
+SOURCE=prod
+TARGET=qa
 CLONE_MODE=execute
 MUTATION_STARTED=0
 TARGET_BACKUP_DIR=''
@@ -2606,7 +2604,7 @@ for c3r10_bridge_case in \
   CLONE_RUNTIME_DIRECTORY_COUNT=0
   CLONE_RUNTIME_FILE_COUNT=0
   : "$CLONE_RUNTIME_DIRECTORY_COUNT" "$CLONE_RUNTIME_FILE_COUNT"
-  if bridge_runtime_directory qa dev uploads "$c3r10_bridge_root" >/dev/null 2>&1; then
+  if bridge_runtime_directory prod qa uploads "$c3r10_bridge_root" >/dev/null 2>&1; then
     c3r10_bridge_status=0
   else
     c3r10_bridge_status=$?
@@ -2692,7 +2690,7 @@ sync_one_dir() {
   return 0
 }
 INCLUDE_GIT_FILES=0
-if sync_runtime_files qa dev >/dev/null 2>&1; then
+if sync_runtime_files prod qa >/dev/null 2>&1; then
   c3r10_sync_status=0
 else
   c3r10_sync_status=$?
@@ -2739,8 +2737,8 @@ write_clone_summary() { printf 'summary-after-failure\n' >> "$c3r10_bridge_bound
 rollback_target() { printf 'rollback\n' >> "$c3r10_bridge_boundary_log"; }
 env_url() { printf 'https://%s.example.invalid\n' "$1"; }
 env_title() { printf 'Synthetic %s\n' "$1"; }
-SOURCE=qa
-TARGET=dev
+SOURCE=prod
+TARGET=qa
 CLONE_TMP_DIR="$TMP_DIR/c3r10-bridge-boundary"
 mkdir -p "$CLONE_TMP_DIR"
 TARGET_BACKUP_DIR=''
@@ -2883,8 +2881,8 @@ wp_exec() {
   [ "$operation" = "$C3R10_IDENTITY_FAIL_OPERATION" ] && return "$C3R10_IDENTITY_FAIL_STATUS"
   return 0
 }
-SOURCE=qa
-TARGET=dev
+SOURCE=prod
+TARGET=qa
 CLONE_TMP_DIR="$TMP_DIR/c3r10-identity-boundary"
 mkdir -p "$CLONE_TMP_DIR"
 TARGET_BACKUP_DIR=''
