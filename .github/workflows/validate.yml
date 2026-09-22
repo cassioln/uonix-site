@@ -253,6 +253,9 @@ jobs:
       - name: Test shell environment map
         run: bash scripts/tests/test-environment-map.sh
 
+      - name: Test shell environment map fails closed
+        run: bash scripts/tests/test-environment-map-fail-closed.sh
+
       - name: Test SSH transport
         run: bash scripts/tests/test-ssh-transport.sh
 
