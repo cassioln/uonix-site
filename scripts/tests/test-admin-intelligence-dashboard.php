@@ -17,7 +17,7 @@ $GLOBALS['uox_can'] = true;
 $GLOBALS['uox_referer_ok'] = true;
 $GLOBALS['uox_cron'] = array();
 $GLOBALS['uox_referer_action'] = null;
-$GLOBALS['uox_nonce_field_action'] = null;
+$GLOBALS['uox_nonce_actions'] = array();
 
 function uox_assert( $condition, $message ) {
 	global $failures;
@@ -73,9 +73,14 @@ function add_query_arg( $args, $url ) { return $url . '?' . http_build_query( $a
 function esc_html__( $text, $domain = '' ) { return $text; }
 function esc_html( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_attr( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
-function esc_url( $url ) { return (string) $url; }
+// Stub que de fato escapa. Passa-tudo tornaria vazia qualquer asserção sobre
+// escape de URL.
+function esc_url( $url ) { return str_replace( array( '"', "'", '<', '>' ), array( '&quot;', '&#039;', '&lt;', '&gt;' ), (string) $url ); }
 function esc_textarea( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
-function wp_nonce_field( $action = -1 ) { $GLOBALS['uox_nonce_field_action'] = $action; echo '<input type="hidden" name="_wpnonce" value="stub">'; }
+// Coleta TODAS as ações de nonce emitidas: o painel tem mais de um formulário, e
+// guardar só a última faria a comparação com o handler comparar formulários
+// diferentes.
+function wp_nonce_field( $action = -1 ) { $GLOBALS['uox_nonce_actions'][] = $action; echo '<input type="hidden" name="_wpnonce" value="stub">'; }
 function number_format_i18n( $number, $decimals = 0 ) { return number_format( (float) $number, (int) $decimals, ',', '.' ); }
 function wp_next_scheduled( $hook ) { return $GLOBALS['uox_cron'][ $hook ] ?? false; }
 function wp_schedule_event( $ts, $rec, $hook ) { $GLOBALS['uox_cron'][ $hook ] = $ts; return true; }
@@ -249,7 +254,9 @@ uox_assert( 1 === preg_match( '#<section(?=[^>]*id="uonix-panel-settings")[^>]*>
 
 // A ação do nonce tem que ser a mesma nas duas pontas, senão nenhuma gravação
 // legítima passa e a tela recusa tudo em silêncio.
-uox_assert( null !== $GLOBALS['uox_nonce_field_action'] && $GLOBALS['uox_nonce_field_action'] === $GLOBALS['uox_referer_action'], 'A ação do nonce emitida pelo formulário é a mesma verificada pelo handler' );
+uox_assert( array() !== $GLOBALS['uox_nonce_actions'], 'O painel emitiu pelo menos uma ação de nonce' );
+uox_assert( null !== $GLOBALS['uox_referer_action'], 'O handler verificou o nonce com uma ação' );
+uox_assert( in_array( $GLOBALS['uox_referer_action'], $GLOBALS['uox_nonce_actions'], true ), 'A ação verificada pelo handler de destinatários é uma das emitidas pelo painel' );
 
 // Fora da aba ativa, o painel de configurações também precisa vir oculto — senão a
 // lista de destinatários aparece visível em qualquer outra aba.
