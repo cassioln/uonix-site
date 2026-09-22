@@ -649,6 +649,31 @@ try {
 uonix_dashboard_assert( $blocked, 'Usuário sem permissão edit_posts deveria ser bloqueado' );
 echo "ok   Acesso sem permissão é bloqueado com segurança via wp_die\n";
 
+// O auto-refresh de métricas vive dentro do painel de métricas, que é renderizado
+// em toda aba e apenas escondido. Sem guarda de aba, abrir outra aba dispara um
+// sync de 8 chamadas de API e um redirect que descarta os avisos daquela aba.
+$GLOBALS['uonix_test_can_edit'] = true;
+$GLOBALS['uonix_test_can_manage'] = true;
+// Snapshot vencido é a precondição do auto-refresh; com cache fresco ele nunca
+// dispararia e o teste passaria por motivo errado.
+$GLOBALS['uonix_test_snapshot_fresh'] = false;
+
+$_GET = array();
+ob_start();
+uonix_render_analytics_dashboard_page();
+$auto_metrics = (string) ob_get_clean();
+uonix_dashboard_assert( false !== strpos( $auto_metrics, 'data-uonix-auto-refresh="1"' ), 'Snapshot vencido na aba de métricas mantém o auto-refresh' );
+
+foreach ( array( 'destinations', 'intelligence', 'settings' ) as $outra_aba ) {
+	$_GET = array( 'tab' => $outra_aba );
+	ob_start();
+	uonix_render_analytics_dashboard_page();
+	$auto_outra = (string) ob_get_clean();
+	uonix_dashboard_assert( false === strpos( $auto_outra, 'data-uonix-auto-refresh="1"' ), 'Auto-refresh de métricas não dispara na aba ' . $outra_aba );
+}
+$_GET = array();
+echo "ok   Auto-refresh de métricas restrito à própria aba\n";
+
 if ( 0 !== $failures ) {
 	exit( 1 );
 }

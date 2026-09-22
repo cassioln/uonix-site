@@ -210,7 +210,6 @@ function uonix_render_analytics_dashboard_page()
 	$metrics_status = is_array( $metrics_snapshot ) ? ( $metrics_snapshot['status'] ?? 'updated' ) : 'unavailable';
 	$metrics_is_fresh = function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ) && uonix_analytics_metrics_snapshot_is_fresh( $metrics_snapshot );
 	$metrics_refresh_attempted = isset( $_GET['uonix_metrics_refresh'] ) && '1' === (string) wp_unslash( $_GET['uonix_metrics_refresh'] );
-	$metrics_auto_refresh = current_user_can( 'manage_options' ) && ! $metrics_is_fresh && ! $metrics_refresh_attempted;
 	$metrics_updated_at = is_array( $metrics_snapshot ) && isset( $metrics_snapshot['updated_at'] ) && is_string( $metrics_snapshot['updated_at'] ) ? $metrics_snapshot['updated_at'] : '';
 	$metrics_updated_timestamp = '' !== $metrics_updated_at ? strtotime( $metrics_updated_at ) : false;
 	$metrics_updated_datetime = false !== $metrics_updated_timestamp ? gmdate( 'c', $metrics_updated_timestamp ) : '';
@@ -223,6 +222,15 @@ function uonix_render_analytics_dashboard_page()
 	$active_dashboard_tab = $dashboard_state['tab'];
 	$active_metrics_subtab = $dashboard_state['subtab'];
 	$active_catalog_tab = $dashboard_state['catalog_tab'];
+	// O auto-refresh só pode disparar na aba de métricas. O formulário e o script
+	// que o submetem vivem dentro do painel de métricas, que é renderizado em toda
+	// aba e apenas escondido; sem esta guarda, abrir outra aba dispara um sync de 8
+	// chamadas de API e um redirect que descarta os avisos daquela aba — o aviso de
+	// destinatários recusados, por exemplo, morria antes de ser lido.
+	$metrics_auto_refresh = current_user_can( 'manage_options' )
+		&& 'metrics' === $active_dashboard_tab
+		&& ! $metrics_is_fresh
+		&& ! $metrics_refresh_attempted;
 	$dashboard_tab_url = static function ( $tab, $subtab, $catalog_tab ) use ( $metrics_period_days ) {
 		$state = array(
 			'tab' => $tab,

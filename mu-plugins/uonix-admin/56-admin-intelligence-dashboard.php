@@ -68,10 +68,41 @@ if ( ! function_exists( 'uonix_intelligence_render_provenance' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_number' ) ) {
+	/**
+	 * Formata número usando o separador do locale, como o painel vizinho já faz.
+	 *
+	 * Fixar os separadores à mão faria os dois painéis divergirem por construção no
+	 * dia em que o locale mudasse.
+	 */
+	function uonix_intelligence_number( $value, $decimals = 0 ) {
+		return function_exists( 'number_format_i18n' )
+			? number_format_i18n( (float) $value, $decimals )
+			: number_format( (float) $value, $decimals, ',', '.' );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_format_ctr' ) ) {
 	function uonix_intelligence_format_ctr( $ctr ) {
-		$percentual = (float) $ctr * 100;
-		return number_format( $percentual, 2, ',', '.' ) . '%';
+		return uonix_intelligence_number( (float) $ctr * 100, 2 ) . '%';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_mask_email' ) ) {
+	/**
+	 * Mascara um endereço preservando a inicial e o domínio.
+	 *
+	 * A lista de destinatários é impressa em toda carga do painel, porque os painéis
+	 * são renderizados sempre e apenas escondidos. Quem não pode alterar a lista não
+	 * precisa ver os endereços completos da diretoria no código-fonte da página.
+	 */
+	function uonix_intelligence_mask_email( $email ) {
+		$partes = explode( '@', (string) $email, 2 );
+		if ( 2 !== count( $partes ) || '' === $partes[0] ) {
+			return '***';
+		}
+		$oculto = str_repeat( '*', max( 1, strlen( $partes[0] ) - 1 ) );
+		return substr( $partes[0], 0, 1 ) . $oculto . '@' . $partes[1];
 	}
 }
 
@@ -137,8 +168,8 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 							<?php foreach ( $rows as $row ) : ?>
 								<tr>
 									<td><strong><?php echo esc_html( (string) $row['query'] ); ?></strong></td>
-									<td><?php echo esc_html( number_format( (float) $row['position'], 1, ',', '.' ) ); ?></td>
-									<td><?php echo esc_html( number_format( (float) $row['impressions'], 0, ',', '.' ) ); ?></td>
+									<td><?php echo esc_html( uonix_intelligence_number( $row['position'], 1 ) ); ?></td>
+									<td><?php echo esc_html( uonix_intelligence_number( $row['impressions'], 0 ) ); ?></td>
 									<td><?php echo esc_html( uonix_intelligence_format_ctr( $row['ctr'] ) ); ?></td>
 									<td>
 										<?php if ( empty( $row['suggestion'] ) ) : ?>
@@ -168,7 +199,8 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 		$pode_editar = current_user_can( 'manage_options' );
 		$salvos      = isset( $_GET['uonix_recipients_saved'] ) ? (int) $_GET['uonix_recipients_saved'] : -1;
 		$recusados   = isset( $_GET['uonix_recipients_rejected'] ) ? (int) $_GET['uonix_recipients_rejected'] : 0;
-		$proximo     = function_exists( 'wp_next_scheduled' ) ? wp_next_scheduled( 'uonix_intelligence_weekly_report' ) : false;
+		$hook        = function_exists( 'uonix_intelligence_report_hook' ) ? uonix_intelligence_report_hook() : '';
+		$proximo     = ( '' !== $hook && function_exists( 'wp_next_scheduled' ) ) ? wp_next_scheduled( $hook ) : false;
 		?>
 		<section id="uonix-panel-settings" role="tabpanel" aria-labelledby="uonix-tab-settings"<?php echo $is_active ? '' : ' hidden'; ?>>
 			<div class="uonix-panel-header">
@@ -191,9 +223,12 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 			<?php else : ?>
 				<ul>
 					<?php foreach ( $recipients as $email ) : ?>
-						<li><code><?php echo esc_html( $email ); ?></code></li>
+						<li><code><?php echo esc_html( $pode_editar ? $email : uonix_intelligence_mask_email( $email ) ); ?></code></li>
 					<?php endforeach; ?>
 				</ul>
+				<?php if ( ! $pode_editar ) : ?>
+					<p class="description">Endereços parcialmente ocultos: só quem pode alterar a lista vê os endereços completos.</p>
+				<?php endif; ?>
 			<?php endif; ?>
 
 			<?php if ( $pode_editar ) : ?>

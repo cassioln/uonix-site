@@ -16,6 +16,8 @@ $GLOBALS['uox_options'] = array();
 $GLOBALS['uox_can'] = true;
 $GLOBALS['uox_referer_ok'] = true;
 $GLOBALS['uox_cron'] = array();
+$GLOBALS['uox_referer_action'] = null;
+$GLOBALS['uox_nonce_field_action'] = null;
 
 function uox_assert( $condition, $message ) {
 	global $failures;
@@ -52,7 +54,10 @@ function set_transient( $key, $value ) { return true; }
 function delete_transient( $key ) { return true; }
 
 function current_user_can( $capability ) { return (bool) $GLOBALS['uox_can']; }
-function check_admin_referer( $action = -1 ) { if ( ! $GLOBALS['uox_referer_ok'] ) { throw new Uox_Die_Exception( 'nonce' ); } return true; }
+// Registra a ação verificada para o teste confrontá-la com a emitida pelo
+// formulário. Stub que ignora o argumento deixaria passar uma divergência que
+// recusaria 100% das gravações legítimas em produção, em silêncio.
+function check_admin_referer( $action = -1 ) { $GLOBALS['uox_referer_action'] = $action; if ( ! $GLOBALS['uox_referer_ok'] ) { throw new Uox_Die_Exception( 'nonce' ); } return true; }
 function wp_die( $message = '', $title = '', $args = array() ) { throw new Uox_Die_Exception( (string) $message ); }
 function wp_safe_redirect( $url ) { throw new Uox_Redirect_Exception( $url ); }
 
@@ -70,7 +75,8 @@ function esc_html( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES
 function esc_attr( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_url( $url ) { return (string) $url; }
 function esc_textarea( $text ) { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
-function wp_nonce_field( $action = -1 ) { echo '<input type="hidden" name="_wpnonce" value="stub">'; }
+function wp_nonce_field( $action = -1 ) { $GLOBALS['uox_nonce_field_action'] = $action; echo '<input type="hidden" name="_wpnonce" value="stub">'; }
+function number_format_i18n( $number, $decimals = 0 ) { return number_format( (float) $number, (int) $decimals, ',', '.' ); }
 function wp_next_scheduled( $hook ) { return $GLOBALS['uox_cron'][ $hook ] ?? false; }
 function wp_schedule_event( $ts, $rec, $hook ) { $GLOBALS['uox_cron'][ $hook ] = $ts; return true; }
 function wp_date( $format, $ts = null ) { return gmdate( $format, null === $ts ? time() : (int) $ts ); }
@@ -237,7 +243,20 @@ uox_assert( false !== strpos( $cfg, 'cassio@uonix.com.br' ), 'Destinatário salv
 uox_assert( false !== strpos( $cfg, '2 destinatário(s) salvo(s).' ), 'Aviso de salvos é exibido a partir da query' );
 uox_assert( false !== strpos( $cfg, '1 entrada(s) recusada(s)' ), 'Aviso de recusados é exibido a partir da query' );
 uox_assert( false !== strpos( $cfg, 'Não agendado' ), 'Sem cron registrado, o painel diz que não há disparo agendado' );
-uox_assert( false === strpos( $cfg, '08:00' ), 'Painel não promete horário fixo de envio' );
+uox_assert( false !== strpos( $cfg, 'Semanal' ), 'Painel declara a frequência' );
+uox_assert( false === strpos( $cfg, 'manhã' ) && false === strpos( $cfg, 'segunda-feira às' ), 'Painel não promete período do dia nem dia fixo, apenas a frequência' );
+uox_assert( 1 === preg_match( '#<section(?=[^>]*id="uonix-panel-settings")[^>]*>#', $cfg ), 'Painel de configurações usa o id que a aba referencia' );
+
+// A ação do nonce tem que ser a mesma nas duas pontas, senão nenhuma gravação
+// legítima passa e a tela recusa tudo em silêncio.
+uox_assert( null !== $GLOBALS['uox_nonce_field_action'] && $GLOBALS['uox_nonce_field_action'] === $GLOBALS['uox_referer_action'], 'A ação do nonce emitida pelo formulário é a mesma verificada pelo handler' );
+
+// Fora da aba ativa, o painel de configurações também precisa vir oculto — senão a
+// lista de destinatários aparece visível em qualquer outra aba.
+ob_start();
+uonix_intelligence_render_settings_panel( 'metrics' );
+$cfg_oculto = (string) ob_get_clean();
+uox_assert( 1 === preg_match( '#<section(?=[^>]*id="uonix-panel-settings")[^>]*\bhidden\b[^>]*>#', $cfg_oculto ), 'Painel de configurações fora da aba ativa vem com hidden' );
 
 $GLOBALS['uox_cron']['uonix_intelligence_weekly_report'] = time() + 3600;
 ob_start();
@@ -252,7 +271,33 @@ uonix_intelligence_render_settings_panel( 'settings' );
 $cfg_ro = (string) ob_get_clean();
 uox_assert( false === strpos( $cfg_ro, '<form' ), 'Sem manage_options o formulário não é renderizado' );
 uox_assert( false !== strpos( $cfg_ro, 'exige permissão de administrador' ), 'Sem manage_options a tela explica por que não há formulário' );
-uox_assert( false !== strpos( $cfg_ro, 'cassio@uonix.com.br' ), 'Leitura da lista continua disponível sem manage_options' );
+uox_assert( false === strpos( $cfg_ro, 'cassio@uonix.com.br' ), 'Sem manage_options o endereço completo não vai para o HTML' );
+uox_assert( false !== strpos( $cfg_ro, 'c*****@uonix.com.br' ), 'Sem manage_options o endereço é mascarado preservando inicial e domínio' );
+uox_assert( false !== strpos( $cfg_ro, 'parcialmente ocultos' ), 'A tela avisa que os endereços estão mascarados' );
+
+// ---------------------------------------------------------------------------
+// Nome do evento de cron vem de acessor, não de string solta em dois arquivos.
+// ---------------------------------------------------------------------------
+$GLOBALS['uox_can'] = true;
+$GLOBALS['uox_cron'] = array( uonix_intelligence_report_hook() => time() + 7200 );
+ob_start();
+uonix_intelligence_render_settings_panel( 'settings' );
+$cfg_hook = (string) ob_get_clean();
+uox_assert( false === strpos( $cfg_hook, 'Não agendado' ), 'O painel lê o próximo disparo pelo mesmo acessor que agenda o envio' );
+
+// ---------------------------------------------------------------------------
+// POST em array é entrada legítima de campo repetido, não motivo para apagar tudo.
+// ---------------------------------------------------------------------------
+$GLOBALS['uox_can'] = true;
+$GLOBALS['uox_referer_ok'] = true;
+$GLOBALS['uox_options'] = array( uonix_intelligence_recipients_option() => array( 'antigo@uonix.com.br' ) );
+$_POST = array( 'uonix_recipients' => array( 'novo@uonix.com.br', 'invalido' ) );
+try {
+	uonix_intelligence_save_recipients();
+} catch ( Uox_Redirect_Exception $e ) {
+	// esperado
+}
+uox_assert( array( 'novo@uonix.com.br' ) === get_option( uonix_intelligence_recipients_option() ), 'POST em array é aceito e não apaga a lista silenciosamente' );
 
 if ( $failures > 0 ) {
 	fwrite( STDERR, "FALHAS: {$failures}\n" );

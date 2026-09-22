@@ -252,6 +252,20 @@ if ( ! function_exists( 'uonix_intelligence_recipients_option' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_report_hook' ) ) {
+	/**
+	 * Nome do evento de cron do relatório executivo.
+	 *
+	 * Existe como acessor, e não como string solta, porque quem exibe o próximo
+	 * disparo e quem agenda o envio são arquivos diferentes. Se cada um escrevesse
+	 * o nome à mão, uma divergência faria o painel afirmar "não agendado" para
+	 * sempre, sem nada reprovar.
+	 */
+	function uonix_intelligence_report_hook() {
+		return 'uonix_intelligence_weekly_report';
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_recipients_limit' ) ) {
 	/**
 	 * Teto de destinatários.
@@ -342,8 +356,18 @@ if ( ! function_exists( 'uonix_intelligence_save_recipients' ) ) {
 
 		check_admin_referer( 'uonix_intelligence_save_recipients' );
 
+		// Aceita texto (um por linha) e também array, que é o formato de um campo
+		// repetido. Tratar array como entrada inválida faria um POST legítimo
+		// `uonix_recipients[]=` apagar a lista inteira e reportar sucesso.
 		$raw = isset( $_POST['uonix_recipients'] ) ? wp_unslash( $_POST['uonix_recipients'] ) : '';
-		$normalizado = uonix_intelligence_sanitize_recipients( is_scalar( $raw ) ? (string) $raw : '' );
+		if ( is_array( $raw ) ) {
+			$entrada = $raw;
+		} elseif ( is_scalar( $raw ) ) {
+			$entrada = (string) $raw;
+		} else {
+			$entrada = '';
+		}
+		$normalizado = uonix_intelligence_sanitize_recipients( $entrada );
 
 		if ( function_exists( 'update_option' ) ) {
 			update_option( uonix_intelligence_recipients_option(), $normalizado['recipients'], false );
