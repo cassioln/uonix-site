@@ -621,3 +621,423 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_organic_drop' ) ) {
 		);
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Estado, deduplicação e agregação.
+// ---------------------------------------------------------------------------
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_state_option' ) ) {
+	/**
+	 * Opção que guarda, por gatilho, se ele estava anômalo na última verificação.
+	 *
+	 * Acessor, e não string solta, pelo mesmo motivo de
+	 * `uonix_intelligence_report_hook()`: quem grava e quem lê estão em arquivos
+	 * diferentes, e uma divergência de nome faria todo alerta parecer novo — o
+	 * módulo reenviaria e-mail em cada verificação, sem nada reprovar.
+	 *
+	 * Precisa entrar na lista protegida de `scripts/clone-environment.sh`. Sem isso
+	 * o ambiente clonado herda o estado da produção e o badge do painel passa a
+	 * afirmar, em QA, uma anomalia que é da produção.
+	 */
+	function uonix_intelligence_anomaly_state_option() {
+		return 'uonix_intelligence_anomaly_state';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_get_state' ) ) {
+	/**
+	 * Estado da última verificação: `array<string, bool>` por gatilho.
+	 */
+	function uonix_intelligence_anomaly_get_state() {
+		$salvo = function_exists( 'get_option' ) ? get_option( uonix_intelligence_anomaly_state_option(), array() ) : array();
+		if ( ! is_array( $salvo ) ) {
+			return array();
+		}
+		$estado = array();
+		foreach ( $salvo as $gatilho => $ativo ) {
+			if ( is_string( $gatilho ) && '' !== $gatilho ) {
+				$estado[ $gatilho ] = (bool) $ativo;
+			}
+		}
+
+		return $estado;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_state_from_findings' ) ) {
+	/**
+	 * Novo estado a persistir, a partir dos achados desta verificação.
+	 *
+	 * Função pura. A regra que importa: gatilho **indisponível preserva o estado
+	 * anterior**, em vez de virar "normal".
+	 *
+	 * Sem isso, uma falha de um dia na Search Console limparia o estado, e no dia
+	 * seguinte a mesma anomalia — que nunca acabou — voltaria a ser classificada
+	 * como nova e geraria um segundo e-mail. A deduplicação existe justamente para
+	 * isso não acontecer, e seria derrotada pelo caminho mais silencioso possível.
+	 *
+	 * @param array<int, array>    $findings Achados da verificação.
+	 * @param array<string, bool>  $previous Estado anterior.
+	 * @return array<string, bool>
+	 */
+	function uonix_intelligence_anomaly_state_from_findings( $findings, $previous = array() ) {
+		$previous = is_array( $previous ) ? $previous : array();
+		$estado   = array();
+
+		foreach ( is_array( $findings ) ? $findings : array() as $achado ) {
+			if ( ! is_array( $achado ) || ! isset( $achado['trigger'] ) || ! is_string( $achado['trigger'] ) || '' === $achado['trigger'] ) {
+				continue;
+			}
+			$gatilho = $achado['trigger'];
+			if ( empty( $achado['available'] ) ) {
+				$estado[ $gatilho ] = isset( $previous[ $gatilho ] ) ? (bool) $previous[ $gatilho ] : false;
+				continue;
+			}
+			$estado[ $gatilho ] = ! empty( $achado['anomalous'] );
+		}
+
+		return $estado;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_transitions' ) ) {
+	/**
+	 * Gatilhos que passaram de normal para anômalo nesta verificação.
+	 *
+	 * Função pura, e é ela que garante um e-mail por episódio. Anomalia que persiste
+	 * não reaparece aqui; se ela limpar e voltar, reaparece — porque é outro
+	 * episódio, e merece aviso novo.
+	 *
+	 * Exige `available`: achado que não pôde ser verificado nunca dispara e-mail,
+	 * porque não há o que afirmar.
+	 *
+	 * @return array<int, array> Os próprios achados em transição.
+	 */
+	function uonix_intelligence_anomaly_transitions( $findings, $previous = array() ) {
+		$previous   = is_array( $previous ) ? $previous : array();
+		$transicoes = array();
+
+		foreach ( is_array( $findings ) ? $findings : array() as $achado ) {
+			if ( ! is_array( $achado ) || empty( $achado['available'] ) || empty( $achado['anomalous'] ) ) {
+				continue;
+			}
+			if ( ! isset( $achado['trigger'] ) || ! is_string( $achado['trigger'] ) || '' === $achado['trigger'] ) {
+				continue;
+			}
+			$estava = isset( $previous[ $achado['trigger'] ] ) ? (bool) $previous[ $achado['trigger'] ] : false;
+			if ( ! $estava ) {
+				$transicoes[] = $achado;
+			}
+		}
+
+		return $transicoes;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_detect' ) ) {
+	/**
+	 * Roda os gatilhos e resume o resultado.
+	 *
+	 * Aceita achados prontos para o teste poder exercitar agregação e badge sem
+	 * banco nem rede, do mesmo jeito que `uonix_analytics_metrics_sync()` aceita um
+	 * fetcher.
+	 *
+	 * @return array{findings: array, anomalous: int, unavailable: int, checked_at: string}
+	 */
+	function uonix_intelligence_anomaly_detect( $findings = null ) {
+		if ( ! is_array( $findings ) ) {
+			$findings = array(
+				uonix_intelligence_anomaly_lead_silence(),
+				uonix_intelligence_anomaly_organic_drop(),
+			);
+		}
+
+		$anomalos      = 0;
+		$indisponiveis = 0;
+		foreach ( $findings as $achado ) {
+			if ( ! is_array( $achado ) ) {
+				continue;
+			}
+			if ( empty( $achado['available'] ) ) {
+				++$indisponiveis;
+				continue;
+			}
+			if ( ! empty( $achado['anomalous'] ) ) {
+				++$anomalos;
+			}
+		}
+
+		return array(
+			'findings'    => $findings,
+			'anomalous'   => $anomalos,
+			'unavailable' => $indisponiveis,
+			'checked_at'  => uonix_intelligence_anomaly_now()->format( 'c' ),
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_badge' ) ) {
+	/**
+	 * Rótulo de status, conforme a especificação do Módulo 5.
+	 *
+	 * Três estados, não dois. A especificação prevê "Sistema Normal" e "N Anomalia
+	 * Crítica Detectada", mas calar sobre gatilho indisponível faria uma fonte
+	 * quebrada aparecer como sistema saudável — exatamente o silêncio que este
+	 * módulo existe para eliminar. Então há um terceiro estado para "não consegui
+	 * verificar".
+	 *
+	 * @return array{state: string, label: string}
+	 */
+	function uonix_intelligence_anomaly_badge( $summary ) {
+		$anomalos      = isset( $summary['anomalous'] ) ? (int) $summary['anomalous'] : 0;
+		$indisponiveis = isset( $summary['unavailable'] ) ? (int) $summary['unavailable'] : 0;
+
+		if ( $anomalos > 0 ) {
+			return array(
+				'state' => 'critical',
+				'label' => sprintf(
+					1 === $anomalos ? '%d anomalia crítica detectada' : '%d anomalias críticas detectadas',
+					$anomalos
+				),
+			);
+		}
+		if ( $indisponiveis > 0 ) {
+			return array(
+				'state' => 'unknown',
+				'label' => sprintf(
+					1 === $indisponiveis ? '%d verificação indisponível' : '%d verificações indisponíveis',
+					$indisponiveis
+				),
+			);
+		}
+
+		return array( 'state' => 'normal', 'label' => 'Sistema normal' );
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Alerta por e-mail.
+// ---------------------------------------------------------------------------
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_alert_subject' ) ) {
+	function uonix_intelligence_anomaly_alert_subject( $transitions ) {
+		$total = is_array( $transitions ) ? count( $transitions ) : 0;
+		$nome  = function_exists( 'get_bloginfo' ) ? (string) get_bloginfo( 'name' ) : 'Uônix';
+
+		return sprintf(
+			1 === $total ? '[%s] Anomalia detectada: %s' : '[%s] %d anomalias detectadas',
+			'' !== $nome ? $nome : 'Uônix',
+			1 === $total && isset( $transitions[0]['headline'] ) ? (string) $transitions[0]['headline'] : $total
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_alert_html' ) ) {
+	/**
+	 * Corpo do alerta, no formato de detalhe de incidente que a especificação pede:
+	 * o que aconteceu, quando começou, causa provável, ação recomendada.
+	 *
+	 * Reusa a estrutura de tabelas de 600px de `uonix_intelligence_report_html()`, e
+	 * o mesmo aviso de ambiente não produtivo — cuja AUSÊNCIA no e-mail recebido em
+	 * 23/09/2026 foi a prova de que a detecção de ambiente funciona em produção.
+	 */
+	function uonix_intelligence_anomaly_alert_html( $transitions ) {
+		$transitions = is_array( $transitions ) ? $transitions : array();
+		// Constante, como em 57: não existe função de ambiente neste código. Ler por
+		// `function_exists()` de uma função inexistente deixaria `$ambiente` vazio e o
+		// aviso de ambiente não produtivo NUNCA apareceria — um alerta de QA passaria
+		// por alerta de produção, que é o inverso da proteção pretendida.
+		$ambiente    = defined( 'UONIX_ENV' ) ? (string) UONIX_ENV : '';
+		$painel      = function_exists( 'admin_url' ) ? admin_url( 'admin.php?page=uonix-analytics&tab=anomalies' ) : '';
+
+		$html  = '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">';
+		$html .= '<meta name="viewport" content="width=device-width, initial-scale=1">';
+		$html .= '<title>' . esc_html( uonix_intelligence_anomaly_alert_subject( $transitions ) ) . '</title></head>';
+		$html .= '<body style="margin:0;padding:0;background-color:#f1f5f9;">';
+		$html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:24px 12px;">';
+		$html .= '<tr><td align="center">';
+		$html .= '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background-color:#ffffff;border-radius:8px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;">';
+
+		$html .= '<tr><td style="background-color:#7f1d1d;padding:24px 28px;">';
+		$html .= '<div style="color:#ffffff;font-size:20px;font-weight:bold;line-height:1.3;">Uônix</div>';
+		$html .= '<div style="color:#fecaca;font-size:13px;padding-top:4px;">Alerta de anomalia operacional</div>';
+		$html .= '</td></tr>';
+
+		foreach ( $transitions as $achado ) {
+			if ( ! is_array( $achado ) ) {
+				continue;
+			}
+			$html .= '<tr><td style="padding:22px 28px 6px 28px;border-top:1px solid #f1f5f9;">';
+			$html .= '<div style="color:#7f1d1d;font-size:16px;font-weight:bold;line-height:1.4;">' . esc_html( isset( $achado['headline'] ) ? (string) $achado['headline'] : '' ) . '</div>';
+			$html .= '</td></tr>';
+			$html .= '<tr><td style="padding:0 28px 20px 28px;font-size:13px;color:#1e293b;line-height:1.6;">';
+			foreach ( array(
+				'Quando começou'    => isset( $achado['started_at'] ) ? (string) $achado['started_at'] : '',
+				'Causa provável'    => isset( $achado['likely_cause'] ) ? (string) $achado['likely_cause'] : '',
+				'Ação recomendada'  => isset( $achado['action'] ) ? (string) $achado['action'] : '',
+				'Verificado em'     => isset( $achado['observed_on'] ) ? (string) $achado['observed_on'] : '',
+			) as $rotulo => $valor ) {
+				if ( '' === $valor ) {
+					continue;
+				}
+				$html .= '<div style="padding-top:8px;"><strong style="color:#475569;">' . esc_html( $rotulo ) . ':</strong> ' . esc_html( $valor ) . '</div>';
+			}
+			$html .= '</td></tr>';
+		}
+
+		$html .= '<tr><td style="background-color:#f8fafc;padding:18px 28px;border-top:1px solid #e2e8f0;color:#64748b;font-size:11px;line-height:1.6;">';
+		if ( '' !== $painel ) {
+			$html .= '<div><a href="' . esc_url( $painel ) . '" style="color:#0e3780;">Abrir a aba de Anomalias no painel</a></div>';
+		}
+		$html .= '<div style="padding-top:6px;">Este aviso sai uma vez por episódio. Enquanto a anomalia persistir, não há reenvio; se ela se resolver e voltar, um novo aviso é emitido.</div>';
+		if ( '' !== $ambiente && 'production' !== $ambiente ) {
+			$html .= '<div style="padding-top:6px;color:#b45309;"><strong>Ambiente: ' . esc_html( strtoupper( $ambiente ) ) . '</strong> — mensagem não produtiva.</div>';
+		}
+		$html .= '</td></tr>';
+
+		$html .= '</table></td></tr></table></body></html>';
+
+		return $html;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_send_alert' ) ) {
+	/**
+	 * Envia o alerta para a lista do relatório executivo.
+	 *
+	 * Reusa `uonix_intelligence_get_recipients()` de propósito: uma segunda lista
+	 * seria um segundo invariante a manter, e o portão de ativação do módulo já
+	 * exige que o destinatário seja o operador.
+	 *
+	 * @return array{sent: bool, reason: string, recipients: int}
+	 */
+	function uonix_intelligence_anomaly_send_alert( $transitions, $recipients = null ) {
+		$transitions = is_array( $transitions ) ? $transitions : array();
+		if ( array() === $transitions ) {
+			return array( 'sent' => false, 'reason' => 'no_transition', 'recipients' => 0 );
+		}
+
+		$lista = null === $recipients && function_exists( 'uonix_intelligence_get_recipients' )
+			? uonix_intelligence_get_recipients()
+			: $recipients;
+		$lista = is_array( $lista ) ? $lista : array();
+
+		if ( array() === $lista ) {
+			return array( 'sent' => false, 'reason' => 'no_recipients', 'recipients' => 0 );
+		}
+
+		$enviado = wp_mail(
+			$lista,
+			uonix_intelligence_anomaly_alert_subject( $transitions ),
+			uonix_intelligence_anomaly_alert_html( $transitions ),
+			array( 'Content-Type: text/html; charset=UTF-8' )
+		);
+
+		return array(
+			'sent'       => (bool) $enviado,
+			'reason'     => $enviado ? '' : 'mail_failed',
+			'recipients' => count( $lista ),
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Verificação periódica.
+// ---------------------------------------------------------------------------
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_run_check' ) ) {
+	/**
+	 * Verifica, alerta na transição, e persiste o estado.
+	 *
+	 * A ordem importa, e a regra de persistência é a parte não óbvia: **o estado só
+	 * avança quando o aviso saiu, ou quando não havia aviso a dar.**
+	 *
+	 * Se o envio falhar — transporte quebrado, ou lista de destinatários ainda
+	 * vazia — a transição NÃO é persistida, e a verificação seguinte tenta de novo.
+	 * Persistir ali silenciaria o episódio para sempre: o estado diria "já avisei"
+	 * sobre um aviso que nunca chegou. E deixar de persistir não gera enxurrada,
+	 * porque nos dois casos nada é entregue.
+	 *
+	 * Consequência desejada: se o operador cadastrar o próprio endereço com uma
+	 * anomalia em curso, ele recebe o aviso na verificação seguinte, em vez de
+	 * descobrir que perdeu o episódio.
+	 */
+	function uonix_intelligence_anomaly_run_check() {
+		$resumo     = uonix_intelligence_anomaly_detect();
+		$anterior   = uonix_intelligence_anomaly_get_state();
+		$transicoes = uonix_intelligence_anomaly_transitions( $resumo['findings'], $anterior );
+		$novo       = uonix_intelligence_anomaly_state_from_findings( $resumo['findings'], $anterior );
+
+		$envio = array( 'sent' => false, 'reason' => 'no_transition', 'recipients' => 0 );
+		if ( array() !== $transicoes ) {
+			$envio = uonix_intelligence_anomaly_send_alert( $transicoes );
+			if ( empty( $envio['sent'] ) ) {
+				foreach ( $transicoes as $achado ) {
+					$gatilho = (string) $achado['trigger'];
+					$novo[ $gatilho ] = isset( $anterior[ $gatilho ] ) ? (bool) $anterior[ $gatilho ] : false;
+				}
+			}
+		}
+
+		if ( function_exists( 'update_option' ) ) {
+			update_option( uonix_intelligence_anomaly_state_option(), $novo, false );
+		}
+
+		return array( 'summary' => $resumo, 'transitions' => count( $transicoes ), 'send' => $envio );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_hook' ) ) {
+	function uonix_intelligence_anomaly_hook() {
+		return 'uonix_intelligence_anomaly_check';
+	}
+}
+
+// O handler é registrado no carregamento; o evento NÃO é agendado aqui. Mesmo
+// motivo de 57: carregar arquivo não deve escrever no agendador, e em mu-plugin
+// isso roda antes de `init` e antes dos plugins.
+if ( function_exists( 'uonix_intelligence_anomaly_hook' ) ) {
+	add_action( uonix_intelligence_anomaly_hook(), 'uonix_intelligence_anomaly_run_check', 10, 0 );
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_maybe_schedule' ) ) {
+	/**
+	 * Agenda a verificação diária.
+	 *
+	 * **Diferença deliberada em relação ao relatório executivo, que NÃO deve ser
+	 * "corrigida" para ficar igual:** `uonix_intelligence_maybe_schedule_report()`
+	 * mantém o invariante "existe evento agendado se, e somente se, existe
+	 * destinatário", porque um relatório sem destinatário não tem o que fazer.
+	 *
+	 * Aqui o evento é agendado SEMPRE. A verificação alimenta o badge do painel, que
+	 * é útil sem e-mail nenhum: quem abre a tela quer saber se há anomalia, tenha ou
+	 * não cadastrado endereço. Só o ENVIO depende de destinatário, e essa condição
+	 * vive em `uonix_intelligence_anomaly_send_alert()`.
+	 *
+	 * @return bool Verdadeiro apenas quando esta chamada criou o evento.
+	 */
+	function uonix_intelligence_anomaly_maybe_schedule() {
+		if ( ! function_exists( 'uonix_intelligence_anomaly_hook' ) || ! function_exists( 'wp_next_scheduled' ) ) {
+			return false;
+		}
+
+		$hook = uonix_intelligence_anomaly_hook();
+		if ( false !== wp_next_scheduled( $hook ) ) {
+			// Já agendado: não duplicar nem mover a data. Reagendar a cada requisição
+			// empurraria o disparo para sempre adiante e a verificação nunca rodaria.
+			return false;
+		}
+
+		$recorrencias = wp_get_schedules();
+		if ( ! isset( $recorrencias['daily'] ) ) {
+			// Falha fechada, como em 57: sem a recorrência registrada,
+			// `wp_schedule_event` criaria um disparo único disfarçado de diário.
+			return false;
+		}
+
+		return (bool) wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', $hook );
+	}
+}
+// `accepted_args = 0` como os irmãos de 53 e 57: o callback não usa argumento, e
+// declarar zero impede que alguém injete dado pelo despacho do hook.
+add_action( 'init', 'uonix_intelligence_anomaly_maybe_schedule', 10, 0 );
