@@ -52,6 +52,37 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_rules' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_anomaly_unavailable' ) ) {
+	/**
+	 * Resposta padronizada quando não há base para afirmar nada sobre um gatilho.
+	 *
+	 * `anomalous` é FALSO aqui, mas `available` também: quem consome precisa
+	 * distinguir "verifiquei e está normal" de "não consegui verificar". Tratar as
+	 * duas como iguais faria uma fonte quebrada parecer sistema saudável, que é
+	 * exatamente o silêncio que este módulo existe para eliminar.
+	 */
+	function uonix_intelligence_anomaly_unavailable( $trigger, $reason, $extra = array() ) {
+		return array_merge(
+			array(
+				'trigger'      => (string) $trigger,
+				'available'    => false,
+				'reason'       => (string) $reason,
+				'anomalous'    => false,
+				'source'       => '',
+				'synced_at'    => '',
+				'stale'        => true,
+				'measured'     => array(),
+				'started_at'   => '',
+				'headline'     => '',
+				'likely_cause' => '',
+				'action'       => '',
+				'observed_on'  => '',
+			),
+			is_array( $extra ) ? $extra : array()
+		);
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_anomaly_lead_form_ids' ) ) {
 	/**
 	 * Formulários que contam como lead.
@@ -329,33 +360,264 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_silence' ) ) {
 	}
 }
 
-if ( ! function_exists( 'uonix_intelligence_anomaly_unavailable' ) ) {
+if ( ! function_exists( 'uonix_intelligence_anomaly_organic_windows' ) ) {
 	/**
-	 * Resposta padronizada quando não há base para afirmar nada sobre um gatilho.
+	 * Monta as duas janelas de comparação a partir das datas que a API DEVOLVEU.
 	 *
-	 * `anomalous` é FALSO aqui, mas `available` também: quem consome precisa
-	 * distinguir "verifiquei e está normal" de "não consegui verificar". Tratar as
-	 * duas como iguais faria uma fonte quebrada parecer sistema saudável, que é
-	 * exatamente o silêncio que este módulo existe para eliminar.
+	 * Função pura, e o coração do gatilho 2. Existe separada porque o caminho óbvio
+	 * — reusar `uonix_analytics_metrics_periods( null, 7 )` — produz falso positivo
+	 * estrutural, e isso foi MEDIDO em 2026-09-23.
+	 *
+	 * Aquela função define a janela atual como `[hoje−7, hoje−1]`, mas o Search
+	 * Console não publica os últimos ~3 dias: naquela data a série terminava em
+	 * 20/09 e os dias 21, 22 e 23 não voltavam nem como zero. Resultado: a janela
+	 * atual perde sempre 2 de 7 dias enquanto a anterior está completa. Com o
+	 * tráfego real do site a projeção para 24/09 dava 496 contra 1.030 impressões,
+	 * ou seja **−51,8% sem nenhuma mudança real** — "queda crítica" todo dia. E a
+	 * sazonalidade agrava: fim de semana rende ~65 impressões contra 140–244 em dia
+	 * útil, então quando os dias faltantes são úteis o erro é maior.
+	 *
+	 * A correção tem três partes, e cada uma responde a um modo de falha:
+	 *
+	 * 1. **Ancorar as duas janelas na última data COM dado**, não em ontem. Isso
+	 *    exclui a cauda não consolidada por construção, e não por subtração de uma
+	 *    constante.
+	 * 2. **Derivar a defasagem do próprio dado.** Fixar "3 dias" em constante
+	 *    transformaria uma mudança do lado do Google em falso positivo silencioso.
+	 * 3. **Deslocar a janela anterior em exatamente `$window_days`**, o que preserva
+	 *    a composição de dias da semana entre as duas — sem isso, comparar 7 dias
+	 *    que contêm dois fins de semana com 7 que contêm um já acusaria queda.
+	 *
+	 * Ausência de uma data NO INTERIOR de uma janela é zero legítimo: a API omite
+	 * linha para dia sem impressão. Só a cauda é "ainda não publicado", e ancorar em
+	 * `$last` já a exclui — por isso não há, e não deve haver, exigência de que
+	 * todas as datas estejam presentes.
+	 *
+	 * @param array<int, string> $dates_present   Datas 'Y-m-d' devolvidas pela API.
+	 * @param int                $window_days     Tamanho de cada janela.
+	 * @param string             $requested_start Data inicial que foi PEDIDA.
+	 * @param string             $today           Hoje, no fuso do site.
+	 * @return array Janelas e defasagem, ou `array( 'reason' => ... )`.
 	 */
-	function uonix_intelligence_anomaly_unavailable( $trigger, $reason, $extra = array() ) {
-		return array_merge(
-			array(
-				'trigger'      => (string) $trigger,
-				'available'    => false,
-				'reason'       => (string) $reason,
-				'anomalous'    => false,
-				'source'       => '',
-				'synced_at'    => '',
-				'stale'        => true,
-				'measured'     => array(),
-				'started_at'   => '',
-				'headline'     => '',
-				'likely_cause' => '',
-				'action'       => '',
-				'observed_on'  => '',
+	function uonix_intelligence_anomaly_organic_windows( $dates_present, $window_days, $requested_start, $today ) {
+		$regras  = uonix_intelligence_anomaly_rules();
+		$janela  = is_int( $window_days ) && $window_days > 0 ? $window_days : (int) $regras['organic_window_days'];
+		$max_lag = (int) $regras['organic_max_lag_days'];
+		$fuso    = new DateTimeZone( 'UTC' );
+
+		$validas = array();
+		foreach ( is_array( $dates_present ) ? $dates_present : array() as $data ) {
+			if ( is_string( $data ) && 1 === preg_match( '/^\d{4}-\d{2}-\d{2}$/D', $data ) ) {
+				$validas[] = $data;
+			}
+		}
+		if ( array() === $validas ) {
+			return array( 'reason' => 'series_empty' );
+		}
+
+		// Comparação lexicográfica serve para 'Y-m-d': a ordem de string coincide com
+		// a cronológica nesse formato, e evita construir um objeto por linha.
+		$ultima  = max( $validas );
+		$fim     = DateTimeImmutable::createFromFormat( '!Y-m-d', $ultima, $fuso );
+		$agora   = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $today, $fuso );
+		$pedido  = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $requested_start, $fuso );
+		if ( false === $fim || false === $agora || false === $pedido ) {
+			return array( 'reason' => 'series_dates_invalid' );
+		}
+
+		$defasagem = (int) $agora->diff( $fim )->days;
+		if ( $fim > $agora ) {
+			// Data futura na resposta não é defasagem pequena: é dado inconsistente, e
+			// tratá-la como atual ancoraria as janelas num dia que não terminou.
+			return array( 'reason' => 'series_dates_invalid' );
+		}
+		if ( $defasagem > $max_lag ) {
+			// Série velha demais para responder "o que mudou nesta semana". Pode ser
+			// integração quebrada ou site desindexado — nos dois casos a comparação
+			// semana-a-semana afirmaria algo que o dado não sustenta.
+			return array( 'reason' => 'series_stale' );
+		}
+
+		$atual_inicio    = $fim->modify( '-' . ( $janela - 1 ) . ' days' );
+		$anterior_fim    = $atual_inicio->modify( '-1 day' );
+		$anterior_inicio = $anterior_fim->modify( '-' . ( $janela - 1 ) . ' days' );
+
+		if ( $anterior_inicio < $pedido ) {
+			// Não pedimos histórico suficiente. Comparar contra janela anterior truncada
+			// seria o mesmo defeito que esta função existe para evitar, só do outro lado.
+			return array( 'reason' => 'series_too_short' );
+		}
+
+		return array(
+			'current'      => array( 'start' => $atual_inicio->format( 'Y-m-d' ), 'end' => $fim->format( 'Y-m-d' ) ),
+			'previous'     => array( 'start' => $anterior_inicio->format( 'Y-m-d' ), 'end' => $anterior_fim->format( 'Y-m-d' ) ),
+			'lag_days'     => $defasagem,
+			'last_settled' => $ultima,
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_sum_impressions' ) ) {
+	/**
+	 * Soma impressões das linhas cuja data cai dentro da janela, inclusive.
+	 *
+	 * @param array<int, array> $rows   Linhas decodificadas, com `keys[0]` = data.
+	 * @param array             $window `array( 'start' => 'Y-m-d', 'end' => 'Y-m-d' )`.
+	 */
+	function uonix_intelligence_anomaly_sum_impressions( $rows, $window ) {
+		if ( ! is_array( $rows ) || ! isset( $window['start'], $window['end'] ) ) {
+			return 0.0;
+		}
+		$total = 0.0;
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) || ! isset( $row['keys'][0], $row['impressions'] ) || ! is_string( $row['keys'][0] ) ) {
+				continue;
+			}
+			$data = $row['keys'][0];
+			if ( $data >= (string) $window['start'] && $data <= (string) $window['end'] ) {
+				$total += (float) $row['impressions'];
+			}
+		}
+
+		return $total;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_fetch_organic_series' ) ) {
+	/**
+	 * Busca a série diária de impressões no Search Console.
+	 *
+	 * Reusa `uonix_analytics_metrics_search_console_rows()` com a dimensão `date`, e
+	 * `uonix_analytics_metrics_decode_search_console_report()` para desempacotar.
+	 * Nenhum buscador novo: aquela função já aceita período e dimensão arbitrários.
+	 *
+	 * @return array<int, array>|WP_Error Linhas decodificadas.
+	 */
+	function uonix_intelligence_anomaly_fetch_organic_series( $config, $period ) {
+		if ( ! function_exists( 'uonix_analytics_metrics_get_access_token' ) || ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
+			return uonix_analytics_metrics_error( 'analytics_layer_missing' );
+		}
+
+		$token = uonix_analytics_metrics_get_access_token( $config );
+		if ( is_wp_error( $token ) ) {
+			return $token;
+		}
+
+		$bruto = uonix_analytics_metrics_search_console_rows(
+			$token,
+			isset( $config['search_console_site_url'] ) ? (string) $config['search_console_site_url'] : '',
+			$period,
+			'date',
+			100
+		);
+		if ( is_wp_error( $bruto ) ) {
+			return $bruto;
+		}
+
+		$decodificado = uonix_analytics_metrics_decode_search_console_report( $bruto, true );
+		if ( is_wp_error( $decodificado ) ) {
+			return $decodificado;
+		}
+
+		return isset( $decodificado['rows'] ) && is_array( $decodificado['rows'] ) ? $decodificado['rows'] : array();
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_organic_drop' ) ) {
+	/**
+	 * Gatilho 2: queda de tráfego orgânico semana-a-semana.
+	 *
+	 * O período pedido é derivado das regras, não escrito à mão: no pior caso a
+	 * última data publicada está `organic_max_lag_days` atrás, e a janela anterior
+	 * começa `2 * organic_window_days − 1` dias antes dela. Pedir menos que isso
+	 * produziria `series_too_short` justamente nos dias em que o Google atrasa mais.
+	 */
+	function uonix_intelligence_anomaly_organic_drop( $series_fetcher = null, $config = null, $today = null ) {
+		$regras = uonix_intelligence_anomaly_rules();
+		$janela = (int) $regras['organic_window_days'];
+		$agora  = uonix_intelligence_anomaly_now( $today );
+		$hoje   = $agora->format( 'Y-m-d' );
+
+		$config = is_array( $config ) ? $config : ( function_exists( 'uonix_analytics_metrics_get_config' ) ? uonix_analytics_metrics_get_config() : null );
+		if ( ! is_array( $config ) ) {
+			return uonix_intelligence_anomaly_unavailable( 'organic_drop', 'config_missing' );
+		}
+
+		$recuo  = (int) $regras['organic_max_lag_days'] + ( 2 * $janela );
+		$inicio = $agora->modify( '-' . $recuo . ' days' )->format( 'Y-m-d' );
+		$period = array( 'start' => $inicio, 'end' => $hoje );
+
+		$fetcher = is_callable( $series_fetcher ) ? $series_fetcher : 'uonix_intelligence_anomaly_fetch_organic_series';
+		$rows    = call_user_func( $fetcher, $config, $period );
+		if ( is_wp_error( $rows ) ) {
+			return uonix_intelligence_anomaly_unavailable( 'organic_drop', 'series_fetch_failed' );
+		}
+		if ( ! is_array( $rows ) ) {
+			return uonix_intelligence_anomaly_unavailable( 'organic_drop', 'series_invalid' );
+		}
+
+		$datas = array();
+		foreach ( $rows as $row ) {
+			if ( is_array( $row ) && isset( $row['keys'][0] ) && is_string( $row['keys'][0] ) ) {
+				$datas[] = $row['keys'][0];
+			}
+		}
+
+		$janelas = uonix_intelligence_anomaly_organic_windows( $datas, $janela, $inicio, $hoje );
+		if ( isset( $janelas['reason'] ) ) {
+			return uonix_intelligence_anomaly_unavailable( 'organic_drop', (string) $janelas['reason'] );
+		}
+
+		$atual    = uonix_intelligence_anomaly_sum_impressions( $rows, $janelas['current'] );
+		$anterior = uonix_intelligence_anomaly_sum_impressions( $rows, $janelas['previous'] );
+
+		// Piso de ruído: com pouquíssima impressão, variação percentual é aleatória. Um
+		// site que saiu de 4 para 2 impressões caiu 50% sem que isso signifique nada.
+		if ( $anterior < (float) $regras['organic_min_impressions'] ) {
+			return uonix_intelligence_anomaly_unavailable(
+				'organic_drop',
+				'baseline_too_small',
+				array( 'measured' => array( 'current' => $atual, 'previous' => $anterior, 'windows' => $janelas ) )
+			);
+		}
+
+		$comparacao = function_exists( 'uonix_analytics_metrics_compare' )
+			? uonix_analytics_metrics_compare( $atual, $anterior )
+			: null;
+		if ( ! is_array( $comparacao ) || ! isset( $comparacao['delta_percent'] ) ) {
+			return uonix_intelligence_anomaly_unavailable( 'organic_drop', 'comparison_failed' );
+		}
+
+		$variacao = (float) $comparacao['delta_percent'];
+		$limiar   = (float) $regras['organic_drop_percent'];
+		$anomalo  = $variacao <= -$limiar;
+
+		return array(
+			'trigger'      => 'organic_drop',
+			'available'    => true,
+			'reason'       => '',
+			'anomalous'    => $anomalo,
+			'source'       => 'search_console',
+			'synced_at'    => $agora->format( 'c' ),
+			'stale'        => false,
+			'measured'     => array(
+				'current'       => $atual,
+				'previous'      => $anterior,
+				'delta_percent' => $variacao,
+				'threshold'     => $limiar,
+				'windows'       => $janelas,
 			),
-			is_array( $extra ) ? $extra : array()
+			'started_at'   => $anomalo ? (string) $janelas['current']['start'] : '',
+			'headline'     => $anomalo
+				? sprintf( 'Impressões orgânicas caíram %s%% em relação à semana anterior.', number_format( abs( $variacao ), 1, ',', '.' ) )
+				: sprintf( 'Impressões orgânicas em %s%% na comparação semanal, dentro do normal.', number_format( $variacao, 1, ',', '.' ) ),
+			'likely_cause' => $anomalo
+				? 'Possível penalização manual, erro de indexação, bloqueio no robots.txt ou perda de posição em consultas de volume.'
+				: '',
+			'action'       => $anomalo
+				? 'Conferir Ações Manuais e Cobertura no Search Console, e comparar as páginas que perderam impressão entre as duas janelas.'
+				: '',
+			'observed_on'  => (string) $janelas['last_settled'],
 		);
 	}
 }
