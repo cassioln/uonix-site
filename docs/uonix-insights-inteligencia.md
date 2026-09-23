@@ -21,7 +21,7 @@ Specs que governam código pertencem a `docs/`, versionadas e revisadas.
 | Painel e menu | `mu-plugins/uonix-admin/52-admin-analytics-dashboard.php:21-33` | Menu **top-level**, slug `uonix-analytics`, capability `edit_posts`, **sem submenus** |
 | Abas | `52` (tablist) + allowlist em `53-admin-analytics-metrics.php:673-708` | Três níveis: `?tab=` → `?subtab=` → `?catalog_tab=`, validados por `sanitize_key` contra listas fechadas |
 | Camada de dados GA4/GSC | `mu-plugins/uonix-admin/53-admin-analytics-metrics.php` | OAuth2 JWT RS256 escrito à mão, sem bibliotecas; escopos read-only; 8 chamadas por sync |
-| Cache | `53:272-296` | Snapshot em `wp_options`, **sem TTL**; validade por frescor de 24h; snapshot velho é preservado como `stale` (fail-soft) |
+| Cache | `53`, `uonix_analytics_metrics_snapshot_option()` e `…_get_snapshot()` | Snapshot em `wp_options`, **sem TTL sobre a geração corrente**, por desenho; validade por frescor de 24h; snapshot velho é preservado como `stale` (fail-soft). Gerações **inalcançáveis** pela cascata de leitura são coletadas — ver *Coleta das gerações mortas de snapshot* |
 | Concorrência | `53:619` | Lock por `add_option`, reivindicado após 600s |
 | Sync agendada | `53:655-663` | WP-Cron `daily`, mais refresh manual via `admin_post` |
 | Write-path autenticado | `53:736-748` | `admin-post` + `check_admin_referer` + `current_user_can('manage_options')` |
@@ -160,6 +160,59 @@ A consulta por `query` do Search Console precisa sair do limite de 10 linhas usa
 
 A sugestão de Title/Description é **determinística por regra** na primeira entrega. Integração com LLM é escopo separado.
 
+### Minimização de PII no universo de mineração
+
+Postura decidida na issue #253, a partir de medição em produção em 2026-09-22.
+
+**O que a medição mostrou.** O universo real é de **111 consultas em 30 dias**, e o teto de `uonix_analytics_metrics_extended_query_limit()` (1000) **não trunca nada**. A mudança do #243 não foi "de 10 para 1000": foi de **amostra do topo para censo completo**. Sob o corte antigo de 10 linhas, com o topo do site em 106 impressões, uma consulta de 1 a 3 impressões praticamente não entrava — e é nessa cauda que a consulta identificável mora. Aquela proteção nunca foi projetada como filtro; era efeito colateral do truncamento, e removê-lo a removeu.
+
+O filtro de `uonix_analytics_metrics_sanitize_query()` continua valendo e continua **insuficiente por construção**: das 18 classes de PII testadas na análise da issue, 14 escapam — nome próprio completo, razão social, CPF com barra, CEP curto, placa, e-mail escrito com "arroba", telefone com separador fora da classe permitida, entre outras. Ampliar o filtro com heurística de nome foi **rejeitado**: ele já produz falso positivo verificável no corpus técnico deste site (`nbr 16325 2014` e `nbr 5410 2004` são descartados hoje pela regra de 8 dígitos), e num universo de 111 consultas que devolve 5 oportunidades não há folga estatística — um descarte indevido é 20% do resultado.
+
+**O que é persistido, e em que forma.**
+
+| Campo | Texto da consulta | Métrica | Quem lê |
+|---|---|---|---|
+| `search_console.queries` (lista curta, 10 linhas) | **sim**, sempre | sim | gráfico "Principais consultas orgânicas" no `52` |
+| `search_console.queries_extended` (universo), linha **dentro** da faixa de retenção | **sim** | sim | `uonix_intelligence_seo_opportunities()` no `55` |
+| `search_console.queries_extended`, linha **fora** da faixa | **não** — a chave `query` é omitida | sim | ninguém lê o texto; a métrica alimenta a recalibração |
+
+A forma de "texto ausente" é **omitir a chave**, não gravá-la vazia. `uonix_intelligence_seo_opportunities()` já abre com `isset( $row['query'], … )` e pula a linha quando falha — o mesmo guard que trata linha de snapshot v2 —, então a ausência entra por um caminho que já existia e já tinha teste. Omitir é também o que reduz bytes no `wp_options`, que é o objetivo, e o que faz `array_column( …, 'query' )` pular a linha. String vazia manteria `isset()` verdadeiro: um consumidor futuro que checasse só `isset` renderizaria linha fantasma em silêncio, enquanto a chave ausente falha alto.
+
+**Por que a métrica fica.** A recalibração do piso tem de ser feita contra a **distribuição medida** (ver acima) — e distribuição é de impressões e posição, não de texto. Preservar a distribuição é, portanto, obrigatório, e preservar o texto não é. É isso que permite responder "quantas linhas entrariam se o piso caísse de 5 para 3" sem guardar uma única string a mais, e sem nova chamada de API. O que se perde é saber **quais** consultas entrariam: a recalibração passa a ter duas etapas — escolher o limiar pela distribuição, depois uma sincronização nova para ver os termos.
+
+**O acoplamento entre retenção e regra é verificado, não presumido.** Quem decide o que é oportunidade é `uonix_intelligence_seo_rules()`, no `55`. Quem decide o que guarda texto é `uonix_analytics_metrics_query_text_retention()`, no `53`. O `53` **não pode** chamar o `55`: carrega antes dele, e inverter a dependência seria pior que o problema. Em vez disso:
+
+| Limiar | Retenção (`53`) | Seleção (`55`) |
+|---|---|---|
+| Posição mínima | 3,0 | 4,0 |
+| Posição máxima | 15,0 | 12,0 |
+| Impressões | 3 ou mais (inclusivo) | mais de 5 (exclusivo) |
+
+A faixa de retenção é **deliberadamente mais frouxa, com margem**, e `scripts/tests/test-query-text-retention-superset.php` reprova o build se ela deixar de conter a faixa de seleção — por comparação numérica, por exigência de margem estrita, por implicação rodando as duas funções reais sobre uma grade que cruza as duas fronteiras, e por equivalência de ponta a ponta: as oportunidades derivadas do universo minimizado têm de ser **idênticas** às derivadas do universo íntegro, com a distribuição de posição e impressões intacta. Sem esse teste, alargar a regra do `55` faria a oportunidade aparecer sem termo — ou desaparecer em silêncio, que é pior.
+
+A mensagem de falha diz o que fazer: **alargar a retenção no `53`**, nunca estreitar a regra do `55` para caber nela. A regra é o produto; a retenção é a política de dado.
+
+### Coleta das gerações mortas de snapshot
+
+Gerações antigas de snapshot nunca foram apagadas. Medido em produção em 2026-09-22, quatro conviviam em `wp_options`: `…_snapshot_v1` (5.121 bytes), `…_v2_7` (7.207), `…_v2_30` (7.820) e `…_v3_30` (22.542). As legadas foram produzidas **antes** da minimização de texto e guardam o universo inteiro com o termo cru de cada linha.
+
+`uonix_analytics_metrics_collect_legacy_snapshots()` apaga o que a cascata de leitura **não alcança mais**. O critério não é padrão de nome: é posição em `uonix_analytics_metrics_snapshot_option_cascade()`, que passou a ser a fonte única consultada tanto pela leitura quanto pela coleta. Apaga-se exatamente o que vem **depois da primeira entrada presente** — e como `uonix_analytics_metrics_get_snapshot()` para na primeira presente, o resto é inalcançável e a coleta é **no-op de leitura por construção**, não por coincidência de estado. O teste enumera as oito combinações de presença das três gerações de 30 dias e afere que a leitura devolve o mesmo antes e depois.
+
+Consequências deliberadas:
+
+- **O fallback em cascata continua sendo caminho válido, e é respeitado.** Se a geração corrente de uma janela ainda não existe, a legada que a substitui é o que o painel mostra hoje, e fica onde está. Em produção é o caso de `…_v2_7`: enquanto ninguém sincronizar a janela de 7 dias, é ele que responde. A coleta remove apenas o que está **estritamente abaixo** da geração de que o fallback depende naquele momento.
+- **A coleta roda por janela, no sucesso da sincronização daquela janela** — o evento que torna o legado dela inalcançável. Uma janela que nunca é sincronizada mantém seu legado, o que é a escolha conservadora.
+- **Não roda no caminho de falha.** `mark_stale()` promove o payload legado para a chave corrente; apagar dado numa sincronização que falhou trocaria "dado velho com aviso" por "sem dado" na primeira falha de rede.
+- **O padrão continua valendo quando a geração corrente virar v4**, sem alteração no coletor: basta a cascata declarar a nova ordem.
+
+### O que NÃO foi feito, e por quê
+
+**Não há TTL sobre o snapshot corrente, e não deve haver.** `uonix_analytics_metrics_snapshot_is_fresh()` decide **exibição**, não validade: o módulo mostra dado velho com aviso de "desatualizado", e isso é comportamento documentado e desejado (fail-soft, ver a linha *Cache* na tabela de base factual). Um TTL no corrente trocaria "dado velho com aviso" por "indisponível" — regressão, não minimização. O que a coleta remove é geração **inalcançável**, que é outra coisa.
+
+**O snapshot não foi excluído do backup, e a tentativa seria mecanicamente impossível.** `scripts/backup-remote-database.sh` faz `mysqldump` do banco inteiro, e `--ignore-table` exclui **tabela**, não **linha** — o snapshot é uma linha em `wp_options`. Partir o dump para contornar isso mexeria no caminho de backup, que é a última coisa que se quer frágil, por um ganho que a minimização de texto já entrega: cada backup passa a carregar o texto de ~5 consultas em vez de 111, na mesma proporção.
+
+**O filtro de PII não foi ampliado** — ver a rejeição da heurística de nome próprio acima.
+
 ## Ordem de entrega dos módulos
 
 Credencial faltante crescente:
@@ -182,6 +235,9 @@ O Módulo 4 não entrega Custo por Lead enquanto não houver fonte de gasto de a
 - Não contornar o guard de e-mail por ambiente.
 - Não inferir origem de lead cujo consentimento de marketing foi negado.
 - Não escrever spec de arquitetura em `docs/superpowers/`.
+- Não criar TTL que apague o snapshot **corrente**: dado velho com aviso é comportamento desejado, "indisponível" é regressão.
+- Não persistir texto de consulta fora da faixa de `uonix_analytics_metrics_query_text_retention()`, e não descartar **métrica** junto com o texto.
+- Não fazer o `53` chamar o `55`: ele carrega antes. O acoplamento entre retenção e regra é declarado em teste, não em `require`.
 
 ## Portas de qualidade
 

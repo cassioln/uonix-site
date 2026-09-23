@@ -95,6 +95,11 @@ uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_fetch_ga4_page_v
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_normalize_page_views' ), 'Agregador de visualizações por caminho existe' );
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_requested_period' ), 'Leitor seguro do período solicitado existe' );
 uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_refresh_redirect_url' ), 'Construtor do retorno ao período atualizado existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_query_text_retention' ), 'Faixa de retenção de texto de consulta existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_query_text_is_retained' ), 'Predicado de retenção de texto existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_minimize_query_row' ), 'Minimizador de linha do universo existe' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_snapshot_option_cascade' ), 'Cascata de leitura do snapshot existe como fonte única' );
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_collect_legacy_snapshots' ), 'Coletor de gerações mortas de snapshot existe' );
 
 if ( function_exists( 'uonix_analytics_metrics_allowed_period_days' ) && function_exists( 'uonix_analytics_metrics_sanitize_period_days' ) ) {
 	uonix_metrics_assert( array( 7, 30, 90, 365 ) === uonix_analytics_metrics_allowed_period_days(), 'Períodos permitidos permanecem fechados em 7, 30, 90 e 365 dias' );
@@ -144,6 +149,105 @@ if ( function_exists( 'uonix_analytics_metrics_get_snapshot' ) ) {
 	$legacy_snapshot = uonix_analytics_metrics_get_snapshot( 30 );
 	uonix_metrics_assert( is_array( $legacy_snapshot ) && 1 === $legacy_snapshot['version'], 'Snapshot legado é fallback somente de 30 dias' );
 	uonix_metrics_assert( false === uonix_analytics_metrics_get_snapshot( 90 ), 'Período sem cache não herda snapshot de 30 dias' );
+	$GLOBALS['uonix_metrics_options'] = array();
+}
+
+// ---------------------------------------------------------------------------
+// Coleta das gerações mortas de snapshot (issue #253).
+//
+// O critério não é padrão de nome: é a posição na cascata de leitura. Apaga-se o
+// que vem DEPOIS da primeira entrada presente, porque `get_snapshot()` para na
+// primeira presente e nunca alcança o resto. Por isso a coleta é no-op de LEITURA
+// por construção, e é exatamente isso que o laço exaustivo abaixo afere.
+// ---------------------------------------------------------------------------
+
+if ( function_exists( 'uonix_analytics_metrics_collect_legacy_snapshots' ) && function_exists( 'uonix_analytics_metrics_snapshot_option_cascade' ) ) {
+	uonix_metrics_assert(
+		array( 'uonix_analytics_metrics_snapshot_v3_30', 'uonix_analytics_metrics_snapshot_v2_30', 'uonix_analytics_metrics_snapshot_v1' ) === uonix_analytics_metrics_snapshot_option_cascade( 30 ),
+		'Cascata de 30 dias vai de v3 a v1, na ordem de leitura'
+	);
+	uonix_metrics_assert(
+		array( 'uonix_analytics_metrics_snapshot_v3_7', 'uonix_analytics_metrics_snapshot_v2_7' ) === uonix_analytics_metrics_snapshot_option_cascade( 7 ),
+		'Cascata de 7 dias não inclui o v1, que só existiu para 30 dias'
+	);
+
+	$uonix_gen = static function ( $version, $days = 30 ) {
+		return array( 'version' => $version, 'period_days' => $days, 'status' => 'updated', 'updated_at' => '2026-09-20T00:00:00+00:00' );
+	};
+
+	// CASO DE PRODUÇÃO 1 — a geração corrente existe: o legado dela é inalcançável e
+	// vai embora. É este caso que remove o dado pré-minimização do banco.
+	$GLOBALS['uonix_metrics_options'] = array(
+		'uonix_analytics_metrics_snapshot_v3_30' => $uonix_gen( 3 ),
+		'uonix_analytics_metrics_snapshot_v2_30' => $uonix_gen( 2 ),
+		'uonix_analytics_metrics_snapshot_v1' => $uonix_gen( 1 ),
+	);
+	$coletado = uonix_analytics_metrics_collect_legacy_snapshots( 30 );
+	uonix_metrics_assert(
+		array( 'uonix_analytics_metrics_snapshot_v2_30', 'uonix_analytics_metrics_snapshot_v1' ) === $coletado,
+		'Com o v3 presente, a coleta apaga v2 e v1 da mesma janela'
+	);
+	uonix_metrics_assert(
+		array_key_exists( 'uonix_analytics_metrics_snapshot_v3_30', $GLOBALS['uonix_metrics_options'] ),
+		'A coleta NUNCA apaga o snapshot corrente: o módulo exibe dado velho com aviso de desatualizado, e trocar isso por indisponível seria regressão'
+	);
+
+	// CASO DE PRODUÇÃO 2 — a geração corrente da janela de 7 dias ainda não existe, e
+	// medido em 2026-09-22 é exatamente o estado do banco. O v2_7 é o caminho de
+	// leitura VÁLIDO de hoje; apagá-lo trocaria "dado velho com aviso" por "sem dado".
+	$GLOBALS['uonix_metrics_options'] = array(
+		'uonix_analytics_metrics_snapshot_v2_7' => $uonix_gen( 2, 7 ),
+	);
+	$coletado_sete = uonix_analytics_metrics_collect_legacy_snapshots( 7 );
+	uonix_metrics_assert( array() === $coletado_sete, 'Sem a geração corrente da janela, a coleta não apaga o legado de que o fallback depende' );
+	uonix_metrics_assert(
+		array_key_exists( 'uonix_analytics_metrics_snapshot_v2_7', $GLOBALS['uonix_metrics_options'] )
+		&& is_array( uonix_analytics_metrics_get_snapshot( 7 ) )
+		&& 2 === uonix_analytics_metrics_get_snapshot( 7 )['version'],
+		'A janela de 7 dias continua lendo o v2 depois da coleta'
+	);
+
+	// CASO INTERMEDIÁRIO — sem v3, o v2 assume o topo da cascata e só o v1 cai.
+	$GLOBALS['uonix_metrics_options'] = array(
+		'uonix_analytics_metrics_snapshot_v2_30' => $uonix_gen( 2 ),
+		'uonix_analytics_metrics_snapshot_v1' => $uonix_gen( 1 ),
+	);
+	$coletado_intermediario = uonix_analytics_metrics_collect_legacy_snapshots( 30 );
+	uonix_metrics_assert(
+		array( 'uonix_analytics_metrics_snapshot_v1' ) === $coletado_intermediario
+		&& array_key_exists( 'uonix_analytics_metrics_snapshot_v2_30', $GLOBALS['uonix_metrics_options'] ),
+		'Sem o v3, a coleta remove só o que está estritamente abaixo da geração de que o fallback depende'
+	);
+
+	// INVARIANTE UNIVERSAL — para TODA combinação de presença das três gerações de 30
+	// dias, a coleta não muda o que a leitura devolve. Enumerado, e não amostrado: uma
+	// asserção sobre um estado só provaria aquele estado.
+	$combinacoes_verificadas = 0;
+	$leitura_alterada = array();
+	$corrente_apagada = array();
+	for ( $mascara = 0; $mascara < 8; ++$mascara ) {
+		$estado = array();
+		if ( $mascara & 1 ) $estado['uonix_analytics_metrics_snapshot_v3_30'] = $uonix_gen( 3 );
+		if ( $mascara & 2 ) $estado['uonix_analytics_metrics_snapshot_v2_30'] = $uonix_gen( 2 );
+		if ( $mascara & 4 ) $estado['uonix_analytics_metrics_snapshot_v1'] = $uonix_gen( 1 );
+
+		$GLOBALS['uonix_metrics_options'] = $estado;
+		$antes_da_coleta = uonix_analytics_metrics_get_snapshot( 30 );
+		uonix_analytics_metrics_collect_legacy_snapshots( 30 );
+		$depois_da_coleta = uonix_analytics_metrics_get_snapshot( 30 );
+
+		if ( $antes_da_coleta !== $depois_da_coleta ) {
+			$leitura_alterada[] = (string) $mascara;
+		}
+		if ( ( $mascara & 1 ) && ! array_key_exists( 'uonix_analytics_metrics_snapshot_v3_30', $GLOBALS['uonix_metrics_options'] ) ) {
+			$corrente_apagada[] = (string) $mascara;
+		}
+		++$combinacoes_verificadas;
+	}
+	uonix_metrics_assert( 8 === $combinacoes_verificadas, 'As oito combinações de presença das gerações de 30 dias foram enumeradas' );
+	uonix_metrics_assert( array() === $leitura_alterada, 'A coleta é no-op de leitura em toda combinação de presença (falhou em: ' . implode( ',', $leitura_alterada ) . ')' );
+	uonix_metrics_assert( array() === $corrente_apagada, 'A coleta nunca apaga a geração corrente em nenhuma combinação (falhou em: ' . implode( ',', $corrente_apagada ) . ')' );
+
 	$GLOBALS['uonix_metrics_options'] = array();
 }
 
@@ -458,9 +562,84 @@ if ( function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 	);
 	uonix_metrics_assert( is_array( $gsc_many ) && 10 === count( $gsc_many['queries'] ), 'Lista de exibição do Search Console continua limitada a 10 consultas' );
 	uonix_metrics_assert( is_array( $gsc_many ) && 12 === count( $gsc_many['queries_extended'] ), 'Universo de mineração preserva as consultas válidas além das 10 exibidas' );
-	uonix_metrics_assert( is_array( $gsc_many ) && $gsc_many['queries'] === array_slice( $gsc_many['queries_extended'], 0, 10 ), 'Lista de exibição é prefixo do universo de mineração' );
+	// Continua valendo, mas por uma razão que precisa estar escrita: TODA linha desta
+	// fixture está dentro da faixa de retenção de texto (posição 5, mais de 3
+	// impressões), então nenhuma sofre minimização e o prefixo é idêntico. A divergência
+	// legítima entre os dois campos é exercitada logo abaixo, com fixture própria.
+	uonix_metrics_assert( is_array( $gsc_many ) && $gsc_many['queries'] === array_slice( $gsc_many['queries_extended'], 0, 10 ), 'Lista de exibição é prefixo do universo de mineração quando toda linha está na faixa de retenção' );
 	$extended_terms = implode( ' ', array_column( $gsc_many['queries_extended'], 'query' ) );
 	uonix_metrics_assert( false === strpos( $extended_terms, '@' ), 'Universo ampliado aplica a mesma remoção de PII da lista curta' );
+
+	// -----------------------------------------------------------------------
+	// Minimização de PII no universo de mineração (issue #253).
+	//
+	// Regra: MÉTRICA de toda linha fica; TEXTO só das linhas que podem qualificar
+	// como oportunidade. A relação entre a faixa de retenção de 53 e a regra de
+	// seleção de 55 é verificada em scripts/tests/test-query-text-retention-superset.php.
+	//
+	// A fixture cobre as duas causas de descarte e as duas de retenção, para que
+	// nenhuma asserção fique de pé por ordem de aparição no array.
+	// -----------------------------------------------------------------------
+	$mixed_queries = array(
+		// Fora da faixa por POSIÇÃO (topo absoluto: nunca é distância de salto).
+		array( 'query' => 'linha de vida', 'clicks' => 30, 'impressions' => 400, 'ctr' => .075, 'position' => 1.4 ),
+		// Dentro da faixa: é candidata a oportunidade e mantém o texto.
+		array( 'query' => 'olhal de ancoragem', 'clicks' => 0, 'impressions' => 53, 'ctr' => .0, 'position' => 11.4 ),
+		// Fora da faixa por IMPRESSÕES: a cauda de 1 impressão é onde a consulta
+		// identificável mora, e é justamente ela que perde o texto.
+		array( 'query' => 'joao carlos da silva pereira', 'clicks' => 0, 'impressions' => 1, 'ctr' => .0, 'position' => 9.0 ),
+		// Dentro da faixa, com a menor impressão que a retenção admite.
+		array( 'query' => 'barra roscada aco inox', 'clicks' => 0, 'impressions' => 3, 'ctr' => .0, 'position' => 10.3 ),
+		// Fora da faixa por posição, na outra ponta (posição irrecuperável).
+		array( 'query' => 'guincho de coluna', 'clicks' => 0, 'impressions' => 90, 'ctr' => .0, 'position' => 31.0 ),
+	);
+	$gsc_mixed = uonix_analytics_metrics_normalize_search_console(
+		array(
+			'summary_current' => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ),
+			'summary_previous' => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ),
+			'queries' => $mixed_queries,
+			'pages' => array(),
+		)
+	);
+	$mixed_extended = is_array( $gsc_mixed ) ? $gsc_mixed['queries_extended'] : array();
+
+	uonix_metrics_assert( 5 === count( $mixed_extended ), 'Minimização de texto não remove linha do universo: as métricas das 5 linhas continuam lá' );
+	uonix_metrics_assert(
+		array( 400.0, 53.0, 1.0, 3.0, 90.0 ) === array_column( $mixed_extended, 'impressions' )
+		&& array( 1.4, 11.4, 9.0, 10.3, 31.0 ) === array_column( $mixed_extended, 'position' )
+		&& array( 30.0, 0.0, 0.0, 0.0, 0.0 ) === array_column( $mixed_extended, 'clicks' )
+		&& array( .075, .0, .0, .0, .0 ) === array_column( $mixed_extended, 'ctr' ),
+		'Universo preserva clicks, impressions, ctr e position de TODA linha, na ordem — é essa distribuição que a recalibração do piso usa'
+	);
+	// `?? array()` em vez de indexação direta: uma regressão que REMOVA linha do
+	// universo faria a indexação estourar aviso e erro fatal, e o build reprovaria
+	// pelo motivo errado, com mensagem que não ajuda quem depura.
+	uonix_metrics_assert(
+		! array_key_exists( 'query', $mixed_extended[0] ?? array() )
+		&& ! array_key_exists( 'query', $mixed_extended[2] ?? array() )
+		&& ! array_key_exists( 'query', $mixed_extended[4] ?? array() ),
+		'Linha fora da faixa de retenção perde o texto da consulta, por posição no topo, por cauda de impressão e por posição irrecuperável'
+	);
+	uonix_metrics_assert(
+		'olhal de ancoragem' === ( $mixed_extended[1]['query'] ?? null )
+		&& 'barra roscada aco inox' === ( $mixed_extended[3]['query'] ?? null ),
+		'Linha que pode qualificar como oportunidade mantém o texto íntegro'
+	);
+	// A forma escolhida para "texto ausente" é OMITIR a chave, não gravá-la vazia. A
+	// asserção fixa a escolha: `isset()` em 55 já trata ausência como linha a pular,
+	// e string vazia manteria `isset()` verdadeiro, abrindo caminho para linha
+	// fantasma num consumidor futuro.
+	uonix_metrics_assert(
+		array( 'clicks', 'impressions', 'ctr', 'position' ) === array_keys( $mixed_extended[2] ?? array() ),
+		'Texto ausente é chave OMITIDA, não string vazia'
+	);
+	// A lista curta de exibição é outro campo e outro propósito: o painel renderiza o
+	// termo, então ela não é minimizada. Sem esta asserção, minimizar `queries` por
+	// engano apagaria o gráfico de consultas e nada reprovaria.
+	uonix_metrics_assert(
+		array( 'linha de vida', 'olhal de ancoragem', 'joao carlos da silva pereira', 'barra roscada aco inox', 'guincho de coluna' ) === array_column( is_array( $gsc_mixed ) ? $gsc_mixed['queries'] : array(), 'query' ),
+		'Lista curta de exibição mantém o texto de todas as suas linhas: ela alimenta o gráfico do painel'
+	);
 
 	// O teto do universo precisa ser exercitado de fato: sem isso, o `break` que o
 	// impõe nunca roda em teste e um limite quebrado passaria despercebido.
@@ -527,6 +706,35 @@ if ( function_exists( 'uonix_analytics_metrics_sync' ) ) {
 	uonix_metrics_assert( is_wp_error( $seven_locked ) && 'sync_locked' === $seven_locked->get_error_code(), 'Trava de 7 dias bloqueia o mesmo período' );
 	uonix_metrics_assert( is_array( $ninety_unlocked ) && 'updated' === $ninety_unlocked['status'], 'Trava de 7 dias não bloqueia 90 dias' );
 	unset( $GLOBALS['uonix_metrics_options']['uonix_analytics_metrics_sync_lock_7'] );
+
+	// A coleta está LIGADA ao caminho de sucesso da sincronização. Sem esta asserção o
+	// coletor poderia existir, ter teste próprio e nunca ser chamado em produção.
+	$GLOBALS['uonix_metrics_options'] = array(
+		'uonix_analytics_metrics_snapshot_v2_30' => array( 'version' => 2, 'period_days' => 30, 'status' => 'updated', 'updated_at' => '2026-09-20T00:00:00+00:00' ),
+		'uonix_analytics_metrics_snapshot_v1' => array( 'version' => 1, 'status' => 'updated', 'updated_at' => '2026-09-19T00:00:00+00:00' ),
+	);
+	$sync_coleta = uonix_analytics_metrics_sync( $fixture_fetcher, $test_config );
+	uonix_metrics_assert( is_array( $sync_coleta ) && 'updated' === $sync_coleta['status'], 'Sincronização de controle da coleta concluiu com sucesso' );
+	uonix_metrics_assert(
+		! array_key_exists( 'uonix_analytics_metrics_snapshot_v2_30', $GLOBALS['uonix_metrics_options'] )
+		&& ! array_key_exists( 'uonix_analytics_metrics_snapshot_v1', $GLOBALS['uonix_metrics_options'] ),
+		'Sincronização bem-sucedida coleta as gerações mortas da janela sincronizada'
+	);
+	uonix_metrics_assert( array_key_exists( 'uonix_analytics_metrics_snapshot_v3_30', $GLOBALS['uonix_metrics_options'] ), 'Sincronização com coleta preserva o snapshot corrente' );
+
+	// E está DESLIGADA do caminho de falha: `mark_stale()` promove o payload legado
+	// para a chave corrente, e apagar dado numa sincronização que falhou seria trocar
+	// "dado velho com aviso" por "sem dado" na primeira falha de rede.
+	$GLOBALS['uonix_metrics_options'] = array(
+		'uonix_analytics_metrics_snapshot_v2_30' => array( 'version' => 2, 'period_days' => 30, 'status' => 'updated', 'updated_at' => '2026-09-20T00:00:00+00:00' ),
+	);
+	$sync_falha = uonix_analytics_metrics_sync( static function () { throw new RuntimeException( 'transport failure' ); }, $test_config );
+	uonix_metrics_assert( is_array( $sync_falha ) && 'stale' === $sync_falha['status'], 'Sincronização de controle da falha marcou o snapshot como desatualizado' );
+	uonix_metrics_assert(
+		array_key_exists( 'uonix_analytics_metrics_snapshot_v2_30', $GLOBALS['uonix_metrics_options'] ),
+		'Sincronização que falhou NÃO coleta: o legado promovido continua no banco'
+	);
+	$GLOBALS['uonix_metrics_options'] = array();
 }
 
 if ( 0 !== $failures ) {
