@@ -135,12 +135,11 @@ No relatório executivo a situação é outra: sem destinatário ele não tem o 
 
 A Search Console **omite a linha** de um dia tanto quando ele ainda não foi publicado quanto quando ele teve zero impressão. Os dois casos são o mesmo byte na resposta, e essa ambiguidade é a fonte dos defeitos mais sérios deste módulo — dois deles chegaram a ser mergeados como desenho antes de a revisão do PR #293 medi-los.
 
-Duas consequências que qualquer alteração aqui precisa respeitar:
+Três consequências que qualquer alteração aqui precisa respeitar:
 
 - **O que separa "não publicado" de "zero" é o NÚMERO DE DIAS PRESENTES na janela, não a última data com dado.** Ancorar as janelas na última data devolvida parece resolver a defasagem e na verdade esconde o colapso: num site desindexado a ancoragem recua para o último dia saudável, as duas janelas caem em período bom, e o módulo afirma `0,0%` e "dentro do normal" durante um apagão total de tráfego.
-- **Janela incompleta é INDISPONÍVEL, nunca "normal".** Tratar dia ausente como zero legítimo produz queda artificial — medido em −42,9% com o tráfego real do site, contra um limiar de −35%. Recusar é a única resposta honesta quando o dado não diz qual dos dois casos é.
-
-Semana atual **vazia** contra semana anterior **completa** é o caso do colapso, e é anomalia com manchete própria. Semana atual parcialmente incompleta é indisponibilidade com motivo.
+- **Dia ausente é resolvido por IMPUTAÇÃO OTIMISTA, não por recusa.** Tratá-lo como zero produz queda artificial — medido em −42,9% com o tráfego real do site. Mas recusar silencia colapso severo: a mesma queda de ~94% alertava com 1 impressão/dia e ficava calada com zero absoluto, ou seja, **aumentar a severidade desligava o alerta**. Dia ausente é ≥ 0, então imputa-se o valor mais favorável à hipótese "nada aconteceu" — média por dia observado da janela anterior, na janela atual; zero, na anterior — e só se conclui se a conclusão sobrevive. Isso é um limite, não um palpite.
+- **A precedência do bloco de colapso é carga estrutural.** Semana atual **vazia** contra semana anterior com volume observado é colapso, e tem de ser avaliada **antes** de qualquer portão de completude da base. Com ela depois, um apagão total era detectável em **um único dia de 26** — a interseção "atual exatamente vazia E anterior exatamente completa" —, e um dia de deriva do WP-Cron perdia o episódio para sempre. O piso de ruído continua vindo antes de tudo: sem volume de referência, nem o colapso tem significado.
 
 #### Limiares medidos, e por que o painel os audita
 
@@ -148,10 +147,20 @@ Semana atual **vazia** contra semana anterior **completa** é o caso do colapso,
 
 `lead_silence_days` é o limiar que a especificação da issue #193 propunha derivar de "3-5 leads/dia", número nunca medido. O painel exibe a medição ao lado do limiar em uso e avisa quando o limiar não é maior que o maior silêncio já observado.
 
-A medição considera apenas intervalos **encerrados** — do primeiro ao último orçamento do período. Os dois recortes são obrigatórios:
+A medição considera apenas intervalos **encerrados**. Dois recortes, e o segundo é condicional:
 
 - **Terminar no último orçamento** exclui o silêncio em curso. Incluí-lo tornava o aviso matematicamente garantido sempre que o gatilho acertava: `longest_gap >= silêncio_em_curso >= limiar` implica `limiar > longest_gap` falso, e o painel exibia "1 anomalia crítica detectada" com a instrução de desconsiderá-la logo abaixo.
-- **Começar no primeiro orçamento** exclui o vazio inicial da janela, que não é intervalo entre leads e sim a janela de observação sendo maior que a história disponível. Num site novo, contá-lo declararia o limiar inseguro sem evidência.
+- **Onde COMEÇAR depende de existir orçamento antes da janela**, e uma consulta resolve. O vazio inicial tem dois significados que a contagem dentro da janela não distingue: pode ser a janela de observação sendo maior que a história (site novo), ou um intervalo real cujo orçamento anterior ficou de fora. Tratá-los como um só produzia verdictos opostos para o mesmo site — medido: leads até 20/06, silêncio de três meses, retomada em 19/09 dava `longest_gap = 0` e "seguro" numa janela de 90 dias, e 90 com "inseguro" numa de 120.
+
+Havendo orçamento antes da janela, a medição começa na **borda** e o valor é um **piso** do real, porque a consulta não enxerga além dela — o painel declara isso com "dias ou MAIS". Não havendo, começa no primeiro orçamento. Portanto `longest_gap` significa "o maior intervalo encerrado observável nesta janela", e **não** o maior intervalo absoluto entre dois orçamentos consecutivos.
+
+### Anomalia não reverificada tem prazo
+
+Quando a fonte falha, uma anomalia já observada continua na tela — apagá-la esconderia um incidente ativo. O que a sustenta é o `observed`, **não** o sinalizador de "já avisei": a contabilidade de aviso não pode governar o que a tela afirma, e conflacionar os dois deixava a proteção inerte e permanentemente na configuração sem destinatário, que é a que esta seção declara suportada.
+
+São **três** fatos distintos, e cada conflação entre eles produziu um defeito: `observed` (o último achado disponível foi anômalo), `triggers` (já avisei sobre este episódio) e `meta.attempts` (já tentei, quantas vezes).
+
+E há prazo: passados `stale_anomaly_max_days` sem reverificação, o badge cai para "indisponível" e a tela nomeia a última observação. Sem prazo, uma credencial revogada mantinha o badge crítico indefinidamente — medido em 400 dias afirmando "ainda não resolvida". Alarme permanente treina a pessoa a ignorar a tela tão bem quanto alarme semanal.
 
 #### "Já avisei" e "já tentei" são estados diferentes
 

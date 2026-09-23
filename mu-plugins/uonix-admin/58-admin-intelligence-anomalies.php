@@ -69,6 +69,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_rules' ) ) {
 			'organic_settle_lag_days' => 4,
 			'baseline_days'           => 90,
 			'alert_max_attempts'      => 3,
+			'stale_anomaly_max_days'  => 7,
 		);
 	}
 }
@@ -211,6 +212,53 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_daily_counts' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_anomaly_has_lead_before' ) ) {
+	/**
+	 * Existe orçamento ANTES do início da janela medida?
+	 *
+	 * Distingue os dois significados do vazio inicial, que a contagem dentro da janela
+	 * não consegue separar — defeito medido na segunda revisão do PR #293:
+	 *
+	 * - **Não existe lead antes** → história curta (site novo, base limpa). O vazio
+	 *   inicial é a janela de observação sendo maior que a história, e não conta como
+	 *   intervalo.
+	 * - **Existe lead antes** → o vazio inicial É um intervalo encerrado, e ignorá-lo
+	 *   suprime o aviso exatamente onde ele importa. Medido: site com leads até 20/06,
+	 *   silêncio de três meses, retomada em 19/09. Numa janela de 90 dias o painel
+	 *   dizia `longest_gap = 0` e declarava o limiar de 10 dias seguro — num site que
+	 *   demonstravelmente passa três meses sem orçamento. A mesma história numa janela
+	 *   de 120 dias dava 90 e `false`. Verdictos opostos para o mesmo site.
+	 *
+	 * Um `SELECT MAX` indexado é mais barato que o `GROUP BY` que esta tela já paga.
+	 *
+	 * @return bool|null Null quando a tabela não existe.
+	 */
+	function uonix_intelligence_anomaly_has_lead_before( $desde ) {
+		global $wpdb;
+		$tabela = uonix_intelligence_anomaly_submissions_table();
+		if ( '' === $tabela ) {
+			return null;
+		}
+
+		$ids    = uonix_intelligence_anomaly_lead_form_ids();
+		$marcas = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+
+		$sql = $wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			"SELECT MAX( created_at )
+			 FROM {$tabela}
+			 WHERE form_id IN ( {$marcas} )
+			   AND " . uonix_intelligence_anomaly_lead_status_clause() . "
+			   AND created_at < %s",
+			array_merge( $ids, array( (string) $desde ) )
+		);
+
+		$anterior = $wpdb->get_var( $sql );
+
+		return null !== $anterior && '' !== (string) $anterior;
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_anomaly_now' ) ) {
 	/**
 	 * Agora, no fuso do site.
@@ -292,9 +340,18 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_baseline' ) ) {
 	 * junto de acertos treina a pessoa a ignorar a tela, que é o modo de falha que
 	 * `rules()` declara querer evitar.
 	 *
-	 * Agora a medição vai de `$inicio` até o ÚLTIMO DIA COM LEAD: só intervalos
-	 * FECHADOS, que de fato terminaram e portanto pertencem à normalidade observada.
-	 * O silêncio em curso sai em `current_silence`, como número separado.
+	 * Agora a medição termina no ÚLTIMO DIA COM LEAD: só intervalos FECHADOS, que de
+	 * fato terminaram e portanto pertencem à normalidade observada. O silêncio em curso
+	 * sai em `current_silence`, como número separado.
+	 *
+	 * ## Onde a medição COMEÇA depende de haver lead antes da janela
+	 *
+	 * O vazio inicial tem dois significados que a contagem dentro da janela não separa,
+	 * e a segunda revisão do PR #293 mediu o dano de tratá-los como um só.
+	 * `uonix_intelligence_anomaly_has_lead_before()` resolve com uma consulta: havendo
+	 * orçamento antes da janela, o vazio inicial é intervalo encerrado e a medição
+	 * começa na BORDA (piso do valor real, porque a consulta não vê além dela);
+	 * não havendo, é história curta e a medição começa no primeiro lead.
 	 *
 	 * Sem nenhum lead na janela não há normalidade a medir, e a resposta é
 	 * indisponível — não um `longest_gap` igual à janela inteira, que produziria o
@@ -314,6 +371,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_baseline' ) ) {
 			'leads'             => 0,
 			'per_day'           => 0.0,
 			'longest_gap'       => null,
+			'gap_from_edge'     => false,
 			'current_silence'   => null,
 			'threshold_days'    => $limiar,
 			'threshold_is_safe' => false,
@@ -351,18 +409,24 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_baseline' ) ) {
 		$base['leads']           = $total;
 		$base['per_day']         = round( $total / $days, 2 );
 		$base['current_silence'] = $silencio;
-		// A medição vai do PRIMEIRO ao ÚLTIMO lead, e não da borda da janela até hoje.
+
+		// Terminar no último lead exclui o silêncio em curso (correção do ALTO 4). Onde
+		// COMEÇAR depende de existir lead antes da janela: se existe, o vazio inicial é
+		// intervalo encerrado e conta a partir da borda; se não, é história curta e a
+		// medição começa no primeiro lead.
 		//
-		// Os dois recortes importam. Terminar no último lead exclui o silêncio em curso,
-		// que é a correção do ALTO 4. Começar no primeiro lead exclui o vazio inicial,
-		// que não é intervalo entre leads — é a janela de observação sendo maior que a
-		// história disponível. Num site novo, ou depois de uma limpeza de submissões,
-		// contá-lo produziria um "maior silêncio" do tamanho do vazio e o painel
-		// declararia o limiar inseguro sem nenhuma evidência real.
-		//
-		// Com os dois recortes, `longest_gap` significa exatamente o que a tela afirma:
-		// o maior intervalo entre dois orçamentos consecutivos.
-		$base['longest_gap']     = uonix_intelligence_anomaly_longest_gap( $por_dia, $primeiroLead, $ultimoLead );
+		// `longest_gap` significa, portanto, "o maior intervalo encerrado entre
+		// orçamentos observável nesta janela" — e no caso da borda é um PISO do valor
+		// real, porque a consulta não enxerga além dela. Não é "o maior intervalo entre
+		// dois orçamentos consecutivos" em termos absolutos, e essa distinção importa:
+		// afirmar o absoluto era falso quando o lead anterior ficava de fora.
+		$temAntes                 = uonix_intelligence_anomaly_has_lead_before( $inicio );
+		$base['gap_from_edge']    = (bool) $temAntes;
+		$base['longest_gap']      = uonix_intelligence_anomaly_longest_gap(
+			$por_dia,
+			$temAntes ? $inicio : $primeiroLead,
+			$ultimoLead
+		);
 		// Limiar seguro é limiar ESTRITAMENTE maior que o maior silêncio normal. Igual
 		// não serve: o intervalo que já aconteceu sem nada de errado voltaria a
 		// acontecer, e o alerta dispararia descrevendo normalidade.
@@ -385,7 +449,17 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_silence' ) ) {
 	function uonix_intelligence_anomaly_lead_silence( $today = null ) {
 		$regras = uonix_intelligence_anomaly_rules();
 		$limiar = (int) $regras['lead_silence_days'];
-		$janela = max( $limiar * 2, 30 );
+		// A janela de contagem é a mesma da linha de base (90 dias), e não `limiar * 2`.
+		//
+		// Com 30 dias o contador saturava ali: no 40º dia de colapso a tela dizia "há 30
+		// dias" e `started_at` andava um dia por dia, fazendo um incidente único parecer
+		// episódios novos a cada visita. Era o MÉDIO 1 da primeira revisão reaparecendo
+		// trinta dias depois — o teto tinha ido de 11 para 30, não sido removido.
+		//
+		// Ainda satura em 90, e isso é limite da consulta, não do laço. Um colapso de
+		// mais de três meses é cenário em que o número exato deixou de ser a informação
+		// relevante.
+		$janela = max( $limiar * 2, (int) $regras['baseline_days'] );
 
 		$por_dia = uonix_intelligence_anomaly_lead_daily_counts( $janela, $today );
 		if ( null === $por_dia ) {
@@ -675,20 +749,27 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_organic_drop' ) ) {
 		$anterior = uonix_intelligence_anomaly_sum_impressions( $rows, $janelas['previous'] );
 		$medido   = array( 'current' => $atual, 'previous' => $anterior, 'windows' => $janelas );
 
-		// Sem linha de base não há o que comparar, e "sem dado" nunca é "sem anomalia".
-		if ( (int) $janelas['previous_days'] < $janela ) {
-			return uonix_intelligence_anomaly_unavailable( 'organic_drop', 'baseline_incomplete', array( 'measured' => $medido ) );
-		}
+		// Piso de ruído sobre o que foi OBSERVADO na semana anterior. Com pouquíssima
+		// impressão a variação percentual é aleatória: um site que saiu de 4 para 2
+		// caiu 50% sem que isso signifique nada. Vem primeiro porque sem volume de
+		// referência nada do que vier depois tem significado — nem o colapso.
 		if ( $anterior < (float) $regras['organic_min_impressions'] ) {
-			// Piso de ruído: com pouquíssima impressão a variação percentual é aleatória.
-			// Um site que saiu de 4 para 2 impressões caiu 50% sem significar nada.
 			return uonix_intelligence_anomaly_unavailable( 'organic_drop', 'baseline_too_small', array( 'measured' => $medido ) );
 		}
 
-		// COLAPSO: a semana inteira sem uma única linha, contra uma semana anterior
-		// cheia. A API omite dia sem impressão, então zero e ausente são o mesmo byte —
-		// e é por isso que este caso precisa de tratamento próprio em vez de virar uma
-		// comparação de 0,0%.
+		// COLAPSO: a semana inteira sem uma única linha, contra uma semana anterior com
+		// volume observado. A API omite dia sem impressão, então zero e ausente são o
+		// mesmo byte — e é por isso que este caso precisa de tratamento próprio em vez
+		// de virar uma comparação de 0,0%.
+		//
+		// **A PRECEDÊNCIA AQUI É CARGA ESTRUTURAL.** Na primeira versão da correção este
+		// bloco vinha DEPOIS de um portão que recusava janela anterior incompleta, e a
+		// segunda revisão do PR #293 mediu o custo: o colapso só era alcançável na
+		// interseção "atual exatamente vazia E anterior exatamente completa", o que dá
+		// **um único dia** de detecção num apagão total. Um dia de deriva do WP-Cron —
+		// que o próprio painel avisa depender de tráfego — ou uma falha de busca naquele
+		// dia perdia o episódio para sempre, porque o estado seguinte era terminal.
+		// `test-admin-intelligence-anomalies.php` fixa esta ordem.
 		if ( 0 === (int) $janelas['current_days'] ) {
 			return array(
 				'trigger'      => 'organic_drop',
@@ -707,15 +788,36 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_organic_drop' ) ) {
 			);
 		}
 
-		if ( (int) $janelas['current_days'] < $janela ) {
-			// Incompleta sem estar vazia: pode ser atraso do Google ou dia de zero real, e
-			// o dado não diz qual. Recusar é a única resposta honesta — comparar produziria
-			// a queda artificial de −42,9% que a revisão do PR #293 mediu.
-			return uonix_intelligence_anomaly_unavailable( 'organic_drop', 'series_incomplete', array( 'measured' => $medido ) );
-		}
+		// IMPUTAÇÃO OTIMISTA para os dias ausentes, em vez de recusar.
+		//
+		// Recusar parecia a única resposta honesta e não era. Dia ausente tem valor
+		// desconhecido, mas **não arbitrário**: ele é ≥ 0. Então dá para imputar o valor
+		// mais favorável à hipótese "nada aconteceu" e só concluir se a conclusão
+		// sobreviver — o que é um LIMITE, não um palpite.
+		//
+		// A segunda revisão do PR #293 mediu o custo de recusar, e ele era grave em duas
+		// direções. Um colapso parcial severo ficava calado porque os dias fracos
+		// chegavam a zero absoluto e somiam da resposta: a MESMA queda de ~94% gerava
+		// alerta com 1 impressão/dia e silêncio com 0. **Aumentar a severidade desligava
+		// o alerta.** E o texto que o operador lia dizia que a queda "talvez não exista".
+		//
+		// - **Janela atual incompleta** → imputa a média por dia OBSERVADO da janela
+		//   anterior. É literalmente "esses dias se comportaram como na semana passada",
+		//   a hipótese mais favorável a não alertar.
+		// - **Janela anterior incompleta** → imputa 0, ou seja, usa o observado. Base
+		//   menor produz queda menor, logo também é conservador.
+		//
+		// Conferido contra os três casos medidos: o falso positivo de −42,9% vira 0,0% e
+		// não alerta; o colapso parcial vira −51,4% e alerta; o colapso total vira −100%
+		// e alerta. A imputação é monotônica na direção segura — janela anterior mais
+		// esparsa produz média por dia mais alta, imputação maior e queda menor.
+		$dias_atual    = (int) $janelas['current_days'];
+		$dias_anterior = (int) $janelas['previous_days'];
+		$media_dia     = $anterior / max( 1, $dias_anterior );
+		$limite_atual  = $atual + ( max( 0, $janela - $dias_atual ) * $media_dia );
 
 		$comparacao = function_exists( 'uonix_analytics_metrics_compare' )
-			? uonix_analytics_metrics_compare( $atual, $anterior )
+			? uonix_analytics_metrics_compare( $limite_atual, $anterior )
 			: null;
 		if ( ! is_array( $comparacao ) || ! isset( $comparacao['delta_percent'] ) ) {
 			return uonix_intelligence_anomaly_unavailable( 'organic_drop', 'comparison_failed' );
@@ -724,8 +826,10 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_organic_drop' ) ) {
 		$variacao = (float) $comparacao['delta_percent'];
 		$limiar   = (float) $regras['organic_drop_percent'];
 		$anomalo  = $variacao <= -$limiar;
-		$medido['delta_percent'] = $variacao;
-		$medido['threshold']     = $limiar;
+		$medido['current_bound']  = $limite_atual;
+		$medido['imputed_days']   = max( 0, $janela - $dias_atual );
+		$medido['delta_percent']  = $variacao;
+		$medido['threshold']      = $limiar;
 
 		return array(
 			'trigger'      => 'organic_drop',
@@ -811,6 +915,48 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_get_state' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_anomaly_get_observed' ) ) {
+	/**
+	 * O que a última verificação OBSERVOU, por gatilho — independente de aviso.
+	 *
+	 * Terceiro fato distinto, e a segunda revisão do PR #293 mostrou por que ele tem
+	 * de existir separado:
+	 *
+	 * - `observed` — o último achado disponível deste gatilho foi anômalo?
+	 * - `triggers` — já avisei sobre este episódio?
+	 * - `meta.attempts` — já tentei avisar, quantas vezes?
+	 *
+	 * O ALTO 3 separou o segundo do terceiro. A conflação sobreviveu entre o primeiro
+	 * e o segundo, e o dano era silencioso: `detect()` lia `triggers` para decidir se
+	 * uma anomalia não reverificada continuava na tela, e `triggers` **não avança
+	 * quando o aviso não sai** — por desenho correto do ALTO 3.
+	 *
+	 * Consequência medida: **sem destinatário cadastrado, a proteção era inerte e
+	 * permanentemente.** Dia 1 badge crítico; dia 2 com a fonte falhando, badge
+	 * "indisponível" e o incidente apagado. E lista vazia não é configuração
+	 * degradada: é a que o módulo declara suportar, e o contrato dedica uma seção a
+	 * justificar o agendamento incondicional justamente porque "o badge é útil sem
+	 * e-mail nenhum".
+	 *
+	 * Agora a contabilidade de aviso não governa mais o que a tela afirma.
+	 *
+	 * @return array<string, bool>
+	 */
+	function uonix_intelligence_anomaly_get_observed() {
+		$salvo = uonix_intelligence_anomaly_read_option();
+		$bruto = isset( $salvo['observed'] ) && is_array( $salvo['observed'] ) ? $salvo['observed'] : array();
+
+		$observado = array();
+		foreach ( $bruto as $gatilho => $ativo ) {
+			if ( is_string( $gatilho ) && '' !== $gatilho ) {
+				$observado[ $gatilho ] = (bool) $ativo;
+			}
+		}
+
+		return $observado;
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_anomaly_get_alert_meta' ) ) {
 	/**
 	 * Contabilidade de aviso por gatilho: desde quando, quantas tentativas, e se o
@@ -839,6 +985,9 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_get_alert_meta' ) ) {
 				'since'       => isset( $dados['since'] ) ? (string) $dados['since'] : '',
 				'attempts'    => isset( $dados['attempts'] ) ? (int) $dados['attempts'] : 0,
 				'undelivered' => ! empty( $dados['undelivered'] ),
+				// Data da última verificação que de fato observou este gatilho. É ela que dá
+				// idade à anomalia não reverificada, e sem ela o badge crítico não tem prazo.
+				'observed_at' => isset( $dados['observed_at'] ) ? (string) $dados['observed_at'] : '',
 			);
 		}
 
@@ -962,8 +1111,13 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_detect' ) ) {
 				uonix_intelligence_anomaly_organic_drop( null, null, $today ),
 			);
 		}
-		$anterior = is_array( $previous_state ) ? $previous_state : uonix_intelligence_anomaly_get_state();
+		// Lê `observed`, NUNCA `triggers`. Ver `uonix_intelligence_anomaly_get_observed()`:
+		// a contabilidade de aviso não pode governar o que a tela afirma, senão a
+		// proteção fica inerte na configuração sem destinatário.
+		$anterior = is_array( $previous_state ) ? $previous_state : uonix_intelligence_anomaly_get_observed();
 		$meta     = uonix_intelligence_anomaly_get_alert_meta();
+		$regras   = uonix_intelligence_anomaly_rules();
+		$hoje     = uonix_intelligence_anomaly_now( $today );
 
 		$anomalos      = 0;
 		$indisponiveis = 0;
@@ -977,21 +1131,42 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_detect' ) ) {
 
 			if ( empty( $achado['available'] ) ) {
 				// **Anomalia ativa não pode desaparecer da tela porque a fonte falhou hoje.**
-				// `state_from_findings()` já preserva o sinalizador, mas o badge lê o resumo:
-				// sem isto, uma queda de tráfego em curso e já notificada era rebaixada de
-				// "1 anomalia crítica" para "1 verificação indisponível", e o detalhe do
-				// incidente sumia — por todos os dias que a falha de fonte durasse.
+				// Sem isto, uma queda de tráfego em curso era rebaixada de "1 anomalia
+				// crítica" para "1 verificação indisponível", e o detalhe do incidente sumia
+				// por todos os dias que a falha de fonte durasse.
 				//
 				// `stale_anomaly` diz ao painel que a anomalia foi detectada antes e não foi
 				// reverificada hoje, o que é diferente tanto de "está acontecendo agora"
 				// quanto de "não sei nada".
-				if ( '' !== $gatilho && ! empty( $anterior[ $gatilho ] ) ) {
+				//
+				// **Mas ela tem PRAZO.** Sem prazo, uma credencial revogada mantinha o badge
+				// crítico indefinidamente — medido em 400 dias, com "detectada em 01/09 e
+				// ainda não resolvida" um ano depois. Um alarme permanente treina a pessoa a
+				// ignorar a tela tão bem quanto um alarme semanal, e é o modo de falha que
+				// `rules()` declara querer evitar. Passado o prazo, a afirmação honesta é
+				// "não sei", com a data da última observação.
+				$idade = null;
+				if ( '' !== $gatilho && isset( $meta[ $gatilho ]['observed_at'] ) && '' !== $meta[ $gatilho ]['observed_at'] ) {
+					$obs = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $meta[ $gatilho ]['observed_at'], new DateTimeZone( 'UTC' ) );
+					if ( false !== $obs ) {
+						$idade = (int) $obs->diff( DateTimeImmutable::createFromFormat( '!Y-m-d', $hoje->format( 'Y-m-d' ), new DateTimeZone( 'UTC' ) ) )->days;
+					}
+				}
+				$expirou = null !== $idade && $idade > (int) $regras['stale_anomaly_max_days'];
+
+				if ( '' !== $gatilho && ! empty( $anterior[ $gatilho ] ) && ! $expirou ) {
 					$achado['stale_anomaly'] = true;
 					$achado['stale']         = true;
 					$achado['started_at']    = isset( $meta[ $gatilho ]['since'] ) ? (string) $meta[ $gatilho ]['since'] : '';
+					$achado['stale_days']    = $idade;
 					++$anomalos;
 					$saida[] = $achado;
 					continue;
+				}
+				if ( $expirou ) {
+					$achado['stale_expired']  = true;
+					$achado['last_observed']  = (string) $meta[ $gatilho ]['observed_at'];
+					$achado['stale_days']     = $idade;
 				}
 				++$indisponiveis;
 				$saida[] = $achado;
@@ -1214,13 +1389,36 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_run_check' ) ) {
 	 *   saber qual.
 	 */
 	function uonix_intelligence_anomaly_run_check( $findings = null, $today = null ) {
-		$anterior   = uonix_intelligence_anomaly_get_state();
+		$avisado    = uonix_intelligence_anomaly_get_state();
+		$observado  = uonix_intelligence_anomaly_get_observed();
 		$meta       = uonix_intelligence_anomaly_get_alert_meta();
-		$resumo     = uonix_intelligence_anomaly_detect( $findings, $today, $anterior );
-		$transicoes = uonix_intelligence_anomaly_transitions( $resumo['findings'], $anterior );
-		$novo       = uonix_intelligence_anomaly_state_from_findings( $resumo['findings'], $anterior );
+		$resumo     = uonix_intelligence_anomaly_detect( $findings, $today, $observado );
+		$transicoes = uonix_intelligence_anomaly_transitions( $resumo['findings'], $avisado );
+		$anterior   = $avisado;
 		$teto       = (int) uonix_intelligence_anomaly_rules()['alert_max_attempts'];
 		$hoje       = uonix_intelligence_anomaly_now( $today )->format( 'Y-m-d' );
+
+		// Duas leituras da MESMA função pura, e a diferença é só o que o envio pode
+		// alterar depois. `$observado_novo` é o que a verificação viu, e nada além de uma
+		// nova verificação o muda. `$novo` é "já avisei", e o resultado do envio o
+		// retém. Conflacionar os dois foi o ALTO 2 da segunda revisão.
+		$observado_novo = uonix_intelligence_anomaly_state_from_findings( $resumo['findings'], $observado );
+		$novo           = uonix_intelligence_anomaly_state_from_findings( $resumo['findings'], $avisado );
+
+		// Registra QUANDO cada gatilho foi observado por último. É o relógio do prazo de
+		// `stale_anomaly`, e precisa ser escrito na detecção, não no envio.
+		foreach ( $resumo['findings'] as $achado ) {
+			if ( ! is_array( $achado ) || empty( $achado['available'] ) || ! isset( $achado['trigger'] ) ) {
+				continue;
+			}
+			$g = (string) $achado['trigger'];
+			if ( ! empty( $achado['anomalous'] ) ) {
+				$meta[ $g ] = array_merge(
+					isset( $meta[ $g ] ) ? $meta[ $g ] : array( 'since' => $hoje, 'attempts' => 0, 'undelivered' => false ),
+					array( 'observed_at' => $hoje )
+				);
+			}
+		}
 
 		$envio = array( 'sent' => false, 'reason' => 'no_transition', 'recipients' => 0 );
 		if ( array() !== $transicoes ) {
@@ -1231,7 +1429,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_run_check' ) ) {
 				$desde   = isset( $achado['started_at'] ) && '' !== $achado['started_at'] ? (string) $achado['started_at'] : $hoje;
 
 				if ( ! empty( $envio['sent'] ) ) {
-					$meta[ $gatilho ] = array( 'since' => $desde, 'attempts' => 0, 'undelivered' => false );
+					$meta[ $gatilho ] = array( 'since' => $desde, 'attempts' => 0, 'undelivered' => false, 'observed_at' => $hoje );
 					continue;
 				}
 
@@ -1247,6 +1445,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_run_check' ) ) {
 					'since'       => $desde,
 					'attempts'    => $tentativas,
 					'undelivered' => $esgotou,
+					'observed_at' => $hoje,
 				);
 				if ( ! $esgotou ) {
 					$novo[ $gatilho ] = isset( $anterior[ $gatilho ] ) ? (bool) $anterior[ $gatilho ] : false;
@@ -1278,12 +1477,12 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_run_check' ) ) {
 			// Só `triggers` carrega a semântica de "já avisei".
 			update_option(
 				uonix_intelligence_anomaly_state_option(),
-				array( 'triggers' => $novo, 'meta' => $meta, 'summary' => $resumo ),
+				array( 'triggers' => $novo, 'observed' => $observado_novo, 'meta' => $meta, 'summary' => $resumo ),
 				false
 			);
 		}
 
-		return array( 'summary' => $resumo, 'transitions' => count( $transicoes ), 'send' => $envio, 'meta' => $meta );
+		return array( 'summary' => $resumo, 'transitions' => count( $transicoes ), 'send' => $envio, 'meta' => $meta, 'observed' => $observado_novo );
 	}
 }
 

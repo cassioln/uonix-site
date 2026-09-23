@@ -27,6 +27,7 @@ $GLOBALS['uox_schedules']    = array( 'daily' => array( 'interval' => 86400 ), '
 $GLOBALS['uox_timezone']     = 'America/Sao_Paulo';
 $GLOBALS['uox_table_exists'] = true;
 $GLOBALS['uox_lead_rows']    = array();
+$GLOBALS['uox_lead_before']  = null;
 
 function uox_assert( $condition, $message ) {
 	global $failures;
@@ -48,6 +49,9 @@ class Uox_WPDB {
 	public $prefix = 'wp_';
 	public function prepare( $query, ...$args ) { return $query; }
 	public function get_var( $query ) {
+		if ( false !== strpos( $query, 'MAX( created_at )' ) ) {
+			return $GLOBALS['uox_lead_before'];
+		}
 		return ( false !== strpos( $query, 'SHOW TABLES LIKE' ) && $GLOBALS['uox_table_exists'] ) ? 'wp_fluentform_submissions' : '';
 	}
 	public function get_results( $query ) {
@@ -224,10 +228,25 @@ foreach ( array( 'Quando começou', 'Causa provável', 'Ação recomendada' ) as
 uox_semear( array( uox_finding( array( 'anomalous' => false, 'headline' => 'Último orçamento há 1 dia(s), dentro do normal.' ) ) ), 0, 0 );
 uox_assert( false !== strpos( uox_render(), 'Sistema normal' ), 'sem anomalia o painel deve dizer que o sistema está normal' );
 
-uox_semear( array( uox_finding( array( 'available' => false, 'anomalous' => false, 'reason' => 'series_incomplete' ) ) ), 0, 1 );
+uox_semear( array( uox_finding( array( 'available' => false, 'anomalous' => false, 'reason' => 'baseline_too_small' ) ) ), 0, 1 );
 $html = uox_render();
 uox_assert( false !== strpos( $html, 'verificação indisponível' ), 'gatilho indisponível não pode aparecer como sistema saudável' );
-uox_assert( false !== strpos( $html, 'não distingue' ), 'o motivo series_incomplete deve ser explicado em linguagem de operador' );
+uox_assert( false !== strpos( $html, 'ruído, não sinal' ), 'o motivo deve ser explicado em linguagem de operador' );
+
+// Todo motivo que o `58` produz precisa de tradução no `56`. Sem esta guarda, um
+// motivo novo cai no texto genérico e o operador perde a explicação exatamente quando
+// precisa dela.
+$MOD58 = (string) file_get_contents( $RAIZ . '/mu-plugins/uonix-admin/58-admin-intelligence-anomalies.php' );
+preg_match_all( "/anomaly_unavailable\(\s*'[a-z_]+',\s*'([a-z_]+)'/", $MOD58, $m );
+preg_match_all( "/\\\$base\['reason'\] = '([a-z_]+)'/", $MOD58, $m2 );
+$motivos = array_unique( array_merge( $m[1], $m2[1] ) );
+uox_assert( count( $motivos ) >= 5, 'a extração de motivos do 58 não pode vir vazia, senão o laço abaixo é vácuo; achou ' . count( $motivos ) );
+foreach ( $motivos as $motivo ) {
+	uox_assert(
+		'Este gatilho não pôde ser verificado nesta rodada.' !== uonix_intelligence_anomaly_reason_message( $motivo ),
+		"o motivo '{$motivo}' é produzido pelo 58 e cai no texto genérico do 56"
+	);
+}
 
 // ---------------------------------------------------------------------------
 // 5. Anomalia não reverificada: o painel mostra, em vez de apagar (MÉDIO 2).
@@ -246,6 +265,28 @@ uox_assert( false !== strpos( $html, '2026-09-10' ), 'e deve nomear desde quando
 uox_semear( array( uox_finding() ), 1, 0, array( 'lead_silence' => array( 'since' => '2026-09-12', 'attempts' => 3, 'undelivered' => true ) ) );
 $html = uox_render();
 uox_assert( false !== strpos( $html, 'NÃO foi entregue' ), 'o painel deve avisar quando o e-mail do alerta não foi entregue' );
+
+// ---------------------------------------------------------------------------
+// 6b. Anomalia expirada: a tela declara a idade em vez de afirmar o presente.
+// ---------------------------------------------------------------------------
+
+uox_semear( array( uox_finding( array( 'available' => false, 'anomalous' => false, 'reason' => 'config_missing', 'stale_expired' => true, 'last_observed' => '2026-08-01', 'stale_days' => 53 ) ) ), 0, 1 );
+$html = uox_render();
+uox_assert( false !== strpos( $html, 'Última observação anômala em 2026-08-01' ), 'anomalia expirada deve nomear a última observação, não afirmar o presente' );
+uox_assert( false !== strpos( $html, '53 dias' ), 'e declarar há quantos dias não foi reverificada' );
+uox_assert( false === strpos( $html, 'ainda não resolvida' ), 'expirada NÃO pode usar o texto de anomalia ativa' );
+
+// ---------------------------------------------------------------------------
+// 6c. Intervalo medido da borda da janela é declarado como PISO, não como exato.
+// ---------------------------------------------------------------------------
+
+$GLOBALS['uox_table_exists'] = true;
+$GLOBALS['uox_lead_rows']    = array( '2026-09-22' => 1, '2026-09-21' => 1 );
+$GLOBALS['uox_lead_before']  = '2026-06-20 10:00:00';
+uox_semear( array( uox_finding( array( 'anomalous' => false ) ) ), 0, 0 );
+$html = uox_render();
+uox_assert( false !== strpos( $html, 'ou MAIS' ), 'quando a medição começa na borda da janela, a tela deve declarar o valor como piso, não como exato' );
+$GLOBALS['uox_lead_before'] = null;
 
 // ---------------------------------------------------------------------------
 // 7. Nunca verificado é estado distinto de verificado e normal.
@@ -293,6 +334,12 @@ uox_assert( false !== strpos( $RENDER, 'uonix_intelligence_anomaly_get_summary' 
 uox_semear( array( uox_finding() ), 1, 0 );
 uox_assert( false !== strpos( uox_render( 'anomalies' ), '<section id="uonix-panel-anomalies"' ), 'o painel deve ter o id que o link da aba referencia' );
 uox_assert( false !== strpos( uox_render( 'metrics' ), 'hidden' ), 'em outra aba o painel deve ser renderizado escondido, como os irmãos' );
+
+// O PAR da asserção acima, e ele custa uma linha. Sem ele, `$is_active = false`
+// sobrevive à suíte e a aba "Anomalias" abre EM BRANCO em produção: o `<section>`
+// sai sempre com `hidden` e o módulo inteiro fica invisível. Propriedade afirmada em
+// prosa e asserida pela metade — mesma classe do grep por nome solto no 52.
+uox_assert( false === strpos( uox_render( 'anomalies' ), ' hidden>' ), 'na aba DELE o painel não pode sair escondido, senão a aba abre em branco' );
 
 // ---------------------------------------------------------------------------
 

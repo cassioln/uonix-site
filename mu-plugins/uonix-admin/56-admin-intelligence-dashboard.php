@@ -225,11 +225,11 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_reason_message' ) ) {
 			'series_invalid'            => 'A Search Console respondeu num formato inesperado.',
 			'series_too_short'          => 'A série devolvida não cobre as duas semanas necessárias para comparar.',
 			'series_dates_invalid'      => 'A Search Console devolveu datas inconsistentes.',
-			// A API omite linha para dia sem impressão, então dia ausente pode ser zero real
-			// ou atraso do Google — e o dado não diz qual. Comparar janela furada produziria
-			// queda artificial, então recusar é a resposta honesta.
-			'series_incomplete'         => 'A semana mais recente está com dias faltando na Search Console. Como a API não distingue "zero impressões" de "ainda não publicado", comparar produziria uma queda que talvez não exista.',
-			'baseline_incomplete'       => 'A semana usada como referência está com dias faltando na Search Console, então não há linha de base confiável para comparar.',
+			// Não existem mais `series_incomplete` nem `baseline_incomplete`: janela com dias
+			// faltando deixou de ser recusada e passou a ser resolvida por imputação
+			// otimista, em `uonix_intelligence_anomaly_organic_drop()`. Recusar silenciava
+			// colapso severo — a mesma queda de 94% alertava com 1 impressão/dia e ficava
+			// calada com zero.
 			'baseline_too_small'        => 'A semana anterior teve impressões insuficientes: nesse volume a variação percentual é ruído, não sinal.',
 			'comparison_failed'         => 'A comparação entre as duas semanas não produziu número finito.',
 		);
@@ -305,7 +305,18 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 				$titulo  = isset( $rotulos[ $gatilho ] ) ? $rotulos[ $gatilho ] : $gatilho;
 				?>
 				<h3><?php echo esc_html( $titulo ); ?></h3>
-				<?php if ( ! empty( $achado['stale_anomaly'] ) ) : ?>
+				<?php if ( ! empty( $achado['stale_expired'] ) ) : ?>
+					<?php // Anomalia antiga demais para ser afirmada no presente. Manter o badge
+					// crítico com dado velho treinaria o operador a ignorar a tela. ?>
+					<div class="notice notice-warning inline">
+						<p><strong><?php echo esc_html( sprintf(
+							'Última observação anômala em %s, não reverificada há %d dias.',
+							isset( $achado['last_observed'] ) ? (string) $achado['last_observed'] : '(sem data)',
+							isset( $achado['stale_days'] ) ? (int) $achado['stale_days'] : 0
+						) ); ?></strong></p>
+						<p><?php echo esc_html( uonix_intelligence_anomaly_reason_message( isset( $achado['reason'] ) ? (string) $achado['reason'] : '' ) ); ?></p>
+					</div>
+				<?php elseif ( ! empty( $achado['stale_anomaly'] ) ) : ?>
 					<?php // Anomalia detectada antes e não reverificada hoje. Nem "acontecendo
 					// agora", nem "não sei nada": a fonte falhou, mas o que já foi medido continua
 					// valendo, e apagar da tela esconderia um incidente ativo. ?>
@@ -386,7 +397,11 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 					<div class="uonix-kpi-card">
 						<div class="uonix-kpi-title">Maior silêncio encerrado</div>
 						<div class="uonix-kpi-value"><?php echo esc_html( null === $baseline['longest_gap'] ? '—' : uonix_intelligence_number( $baseline['longest_gap'], 0 ) ); ?></div>
-						<div class="uonix-kpi-sub"><?php echo esc_html( sprintf( 'dias, nos últimos %d', (int) $baseline['days'] ) ); ?></div>
+						<div class="uonix-kpi-sub"><?php echo esc_html(
+							! empty( $baseline['gap_from_edge'] )
+								? sprintf( 'dias ou MAIS: o intervalo começou antes dos %d dias medidos', (int) $baseline['days'] )
+								: sprintf( 'dias, nos últimos %d', (int) $baseline['days'] )
+						); ?></div>
 					</div>
 					<div class="uonix-kpi-card">
 						<div class="uonix-kpi-title">Silêncio em curso</div>

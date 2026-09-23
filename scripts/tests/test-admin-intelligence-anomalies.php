@@ -25,6 +25,7 @@ $GLOBALS['uox_timezone']      = 'America/Sao_Paulo';
 $GLOBALS['uox_table_exists']  = true;
 $GLOBALS['uox_lead_rows']     = array();
 $GLOBALS['uox_last_sql']      = '';
+$GLOBALS['uox_lead_before']   = null;
 
 // Semeia um destinatário ANTES de carregar os módulos, de propósito: a asserção
 // "carregar o arquivo não agenda" precisa que nenhum guard de lista vazia possa
@@ -90,6 +91,11 @@ class Uox_WPDB {
 	public function get_var( $query ) {
 		if ( false !== strpos( $query, 'SHOW TABLES LIKE' ) ) {
 			return $GLOBALS['uox_table_exists'] ? 'wp_fluentform_submissions' : '';
+		}
+		// `has_lead_before()`: existe orçamento antes da janela medida?
+		if ( false !== strpos( $query, 'MAX( created_at )' ) ) {
+			$GLOBALS['uox_last_sql'] = $query;
+			return $GLOBALS['uox_lead_before'];
 		}
 		return null;
 	}
@@ -368,20 +374,48 @@ uox_assert( ! empty( $colapso['anomalous'] ), 'semana sem nenhuma impressão con
 uox_assert( false !== strpos( (string) ( $colapso['headline'] ?? '' ), 'parou de aparecer' ), 'a manchete do colapso deve nomear o desaparecimento da busca, obteve: ' . ( $colapso['headline'] ?? '' ) );
 uox_assert( false === strpos( (string) ( $colapso['headline'] ?? '' ), 'dentro do normal' ), 'colapso NUNCA pode ser descrito como dentro do normal' );
 
-// INCOMPLETA sem estar vazia: recusar é a única resposta honesta, porque a API não
-// distingue zero de ausente. Comparar produziria a queda artificial de −42,9%
-// medida na revisão (achado ALTO 2).
-function uox_fetcher_incompleta( $config, $period ) {
-	$atual = array_values( array_filter( uox_serie( '2026-09-19', 7, 100 ), static function ( $l ) {
+// IMPUTAÇÃO OTIMISTA em vez de recusa.
+//
+// Recusar matava o falso positivo e criava dois pontos cegos, medidos na segunda
+// revisão do PR #293. Dia ausente é ≥ 0, então imputa-se o valor mais favorável a
+// "nada aconteceu" e só se conclui se a conclusão sobrevive.
+
+// Caso A — o falso positivo que motivou tudo: 3 dias ausentes, tráfego NORMAL.
+// Tratando ausente como zero dava −42,9% e alerta errado. Com imputação: 0,0%.
+function uox_fetcher_buraco_normal( $config, $period ) {
+	$atual = array_values( array_filter( uox_serie( '2026-09-19', 7, 147 ), static function ( $l ) {
 		return ! in_array( $l['keys'][0], array( '2026-09-15', '2026-09-16', '2026-09-17' ), true );
 	} ) );
 	return array_merge( uox_serie( '2026-09-12', 7, 147 ), $atual );
 }
-$incompleta = uonix_intelligence_anomaly_organic_drop( 'uox_fetcher_incompleta', $CFG, $hoje );
-uox_assert( empty( $incompleta['available'] ), 'janela atual incompleta deveria ser indisponível' );
-uox_assert( 'series_incomplete' === ( $incompleta['reason'] ?? '' ), 'o motivo deveria ser series_incomplete, obteve ' . ( $incompleta['reason'] ?? '' ) );
-uox_assert( empty( $incompleta['anomalous'] ), 'janela furada NÃO pode gerar alerta de queda' );
+$buracoNormal = uonix_intelligence_anomaly_organic_drop( 'uox_fetcher_buraco_normal', $CFG, $hoje );
+uox_assert( ! empty( $buracoNormal['available'] ), 'janela com buraco deve ser verificável por imputação, não recusada' );
+uox_assert( 0.0 === ( $buracoNormal['measured']['delta_percent'] ?? -1.0 ), 'tráfego normal com 3 dias ausentes deve dar 0,0%, obteve ' . ( $buracoNormal['measured']['delta_percent'] ?? 'nada' ) );
+uox_assert( empty( $buracoNormal['anomalous'] ), 'buraco em tráfego normal NÃO pode gerar alerta: é o falso positivo de −42,9% que este desenho existe para matar' );
+uox_assert( 3 === ( $buracoNormal['measured']['imputed_days'] ?? -1 ), 'os três dias ausentes devem ser declarados como imputados' );
 
+// Caso B — colapso PARCIAL severo. Antes ficava calado, e o detector era
+// não-monotônico: aumentar a severidade DESLIGAVA o alerta.
+function uox_fetcher_colapso_parcial( $config, $period ) {
+	// Atual: 4 dias somando 40, 3 dias em zero absoluto (linha omitida). Anterior: 700.
+	return array_merge( uox_serie( '2026-09-12', 7, 100 ), uox_serie_valores( '2026-09-16', array( 10, 10, 10, 10 ) ) );
+}
+$parcial = uonix_intelligence_anomaly_organic_drop( 'uox_fetcher_colapso_parcial', $CFG, $hoje );
+uox_assert( ! empty( $parcial['available'] ), 'colapso parcial deve ser verificável' );
+uox_assert( ! empty( $parcial['anomalous'] ), 'colapso parcial severo DEVE alertar: antes ficava calado porque os dias fracos chegavam a zero e somiam da resposta' );
+uox_assert( -51.4 === ( $parcial['measured']['delta_percent'] ?? 0.0 ), 'a imputação otimista deveria dar −51,4%, obteve ' . ( $parcial['measured']['delta_percent'] ?? 'nada' ) );
+
+// MONOTONICIDADE: a mesma queda com 1 impressão nos dias fracos, em vez de zero,
+// também alerta — e mais forte. Aumentar a severidade não pode reduzir o alarme.
+function uox_fetcher_colapso_parcial_um( $config, $period ) {
+	return array_merge( uox_serie( '2026-09-12', 7, 100 ), uox_serie_valores( '2026-09-19', array( 10, 10, 10, 10, 1, 1, 1 ) ) );
+}
+$parcialUm = uonix_intelligence_anomaly_organic_drop( 'uox_fetcher_colapso_parcial_um', $CFG, $hoje );
+uox_assert( ! empty( $parcialUm['anomalous'] ), 'a variante com 1 impressão também deve alertar' );
+uox_assert( (float) $parcialUm['measured']['delta_percent'] <= (float) $parcial['measured']['delta_percent'], 'severidade MAIOR (zeros) não pode produzir queda medida menor que a variante com 1 impressão: o detector tem de ser monotônico' );
+
+// Janela ANTERIOR incompleta: o dia ausente é imputado como zero, o que reduz a base
+// e portanto a queda. Conservador, e segue comparável em vez de recusar.
 function uox_fetcher_base_incompleta( $config, $period ) {
 	$anterior = array_values( array_filter( uox_serie( '2026-09-12', 7, 100 ), static function ( $l ) {
 		return '2026-09-09' !== $l['keys'][0];
@@ -389,7 +423,35 @@ function uox_fetcher_base_incompleta( $config, $period ) {
 	return array_merge( $anterior, uox_serie( '2026-09-19', 7, 100 ) );
 }
 $baseIncompleta = uonix_intelligence_anomaly_organic_drop( 'uox_fetcher_base_incompleta', $CFG, $hoje );
-uox_assert( 'baseline_incomplete' === ( $baseIncompleta['reason'] ?? '' ), 'janela anterior incompleta deveria recusar com baseline_incomplete, obteve ' . ( $baseIncompleta['reason'] ?? '' ) );
+uox_assert( ! empty( $baseIncompleta['available'] ), 'janela anterior incompleta segue comparável: o dia ausente vale zero e isso é conservador' );
+uox_assert( empty( $baseIncompleta['anomalous'] ), 'base menor produz queda menor, então não pode alertar aqui' );
+uox_assert( 6 === ( $baseIncompleta['measured']['windows']['previous_days'] ?? -1 ), 'a contagem de dias da janela anterior deve refletir a ausência' );
+
+// PRECEDÊNCIA: colapso é avaliado ANTES dos portões de linha de base.
+//
+// A segunda revisão do PR #293 mediu que, com o colapso depois do portão de janela
+// anterior incompleta, um apagão total era detectável em UM único dia de 26 — e que
+// mover o bloco não reprovava nenhuma asserção. Este é o caso que fixa a ordem:
+// atual vazia E anterior incompleta, mas com volume observado suficiente.
+function uox_fetcher_colapso_base_parcial( $config, $period ) {
+	$anterior = array_values( array_filter( uox_serie( '2026-09-12', 7, 100 ), static function ( $l ) {
+		return '2026-09-12' !== $l['keys'][0];
+	} ) );
+	return $anterior; // nada na janela atual
+}
+$colapsoBaseParcial = uonix_intelligence_anomaly_organic_drop( 'uox_fetcher_colapso_base_parcial', $CFG, $hoje );
+uox_assert( ! empty( $colapsoBaseParcial['available'] ), 'colapso com base parcial deve ser verificável' );
+uox_assert( ! empty( $colapsoBaseParcial['anomalous'] ), 'colapso DEVE ser avaliado antes dos portões de completude da base: senão o apagão total é detectável em um único dia' );
+uox_assert( false !== strpos( (string) ( $colapsoBaseParcial['headline'] ?? '' ), 'parou de aparecer' ), 'e deve usar a manchete de colapso' );
+
+// O piso de ruído CONTINUA vindo antes do colapso: sem volume de referência, nem o
+// colapso tem significado.
+function uox_fetcher_colapso_sem_base( $config, $period ) {
+	return uox_serie( '2026-09-12', 7, 5 ); // 35 impressões, abaixo do piso de 50
+}
+$colapsoSemBase = uonix_intelligence_anomaly_organic_drop( 'uox_fetcher_colapso_sem_base', $CFG, $hoje );
+uox_assert( empty( $colapsoSemBase['available'] ), 'sem volume de referência o colapso não pode ser afirmado' );
+uox_assert( 'baseline_too_small' === ( $colapsoSemBase['reason'] ?? '' ), 'o motivo deveria ser baseline_too_small, obteve ' . ( $colapsoSemBase['reason'] ?? '' ) );
 
 // FRONTEIRA EXATA do piso de ruído: `$anterior < 50` recusa, então 50 passa e 49 não.
 function uox_fetcher_piso_exato( $config, $period ) {
@@ -537,10 +599,28 @@ uox_assert( empty( $baseInsegura['threshold_is_safe'] ), 'limiar IGUAL a um sil�
 $GLOBALS['uox_lead_rows'] = array();
 $cursor = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-1 day' );
 for ( $i = 0; $i < 5; $i++ ) { $GLOBALS['uox_lead_rows'][ $cursor->format( 'Y-m-d' ) ] = 1; $cursor = $cursor->modify( '-1 day' ); }
+$GLOBALS['uox_lead_before'] = null; // nada antes da janela: história curta
 $baseNova = uonix_intelligence_anomaly_lead_baseline( 90, $hoje );
 uox_assert( ! empty( $baseNova['available'] ), 'cinco dias de histórico numa janela de 90 dias ainda dá linha de base' );
 uox_assert( 0 === (int) $baseNova['longest_gap'], 'os 85 dias sem histórico ANTES do primeiro lead não são intervalo entre leads, obteve ' . $baseNova['longest_gap'] );
 uox_assert( ! empty( $baseNova['threshold_is_safe'] ), 'histórico curto não pode declarar o limiar inseguro' );
+uox_assert( empty( $baseNova['gap_from_edge'] ), 'sem lead antes da janela, a medição não começa na borda' );
+
+// MESMO fixture, mas COM orçamento antes da janela: agora o vazio inicial É um
+// intervalo encerrado, e ignorá-lo suprimia o aviso onde ele mais importa.
+//
+// Medido na segunda revisão do PR #293: site com leads até 20/06, silêncio de três
+// meses, retomada em 19/09. Na janela de 90 dias o painel dizia `longest_gap = 0` e
+// declarava seguro um limiar de 10 dias — num site que demonstravelmente passa três
+// meses sem orçamento. A mesma história em 120 dias dava 90 e `false`: verdictos
+// opostos para o mesmo site, porque a contagem dentro da janela não distingue
+// "história curta" de "o lead anterior ficou de fora".
+$GLOBALS['uox_lead_before'] = '2026-06-20 10:00:00';
+$baseComAntes = uonix_intelligence_anomaly_lead_baseline( 90, $hoje );
+uox_assert( ! empty( $baseComAntes['gap_from_edge'] ), 'havendo lead antes da janela, a medição deve começar na borda' );
+uox_assert( (int) $baseComAntes['longest_gap'] > (int) $baseNova['longest_gap'], 'o vazio inicial deve contar como intervalo quando existe lead antes dele, obteve ' . $baseComAntes['longest_gap'] );
+uox_assert( empty( $baseComAntes['threshold_is_safe'] ), 'e aí o limiar de ' . $limiar . ' dias NÃO pode ser declarado seguro' );
+$GLOBALS['uox_lead_before'] = null;
 
 // ---------------------------------------------------------------------------
 // 5b. Saturação do contador e o dia que "Quando começou" nomeia (MÉDIO 1).
@@ -560,6 +640,18 @@ uox_assert( false !== strpos( (string) ( $longo['headline'] ?? '' ), '15' ), 'a 
 $esperado_inicio = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-14 days' )->format( 'Y-m-d' );
 uox_assert( $esperado_inicio === ( $longo['started_at'] ?? '' ), '"Quando começou" deve ser o primeiro dia silencioso (' . $esperado_inicio . '), não o dia do último orçamento; obteve ' . ( $longo['started_at'] ?? '(nada)' ) );
 
+// E o teto da contagem tem de ser a janela da linha de base, não 30.
+//
+// Na primeira revisão o teto era `limiar + 1` e a tela dizia "há 11 dias" no 40º dia
+// de colapso. A correção levou o teto a 30, e a segunda revisão mediu que o MESMO
+// defeito reaparecia no 31º dia: "há 30 dias", com `started_at` andando um dia por
+// dia e fazendo um incidente único parecer episódios novos a cada visita.
+$GLOBALS['uox_lead_rows'] = array( ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-40 days' )->format( 'Y-m-d' ) => 1 );
+$muitoLongo = uonix_intelligence_anomaly_lead_silence( $hoje );
+uox_assert( 40 === ( $muitoLongo['measured']['silent_days'] ?? -1 ), 'silêncio de 40 dias deve reportar 40, não saturar em 30, obteve ' . ( $muitoLongo['measured']['silent_days'] ?? -1 ) );
+$inicio40 = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-39 days' )->format( 'Y-m-d' );
+uox_assert( $inicio40 === ( $muitoLongo['started_at'] ?? '' ), 'e "Quando começou" deve ficar FIXO no primeiro dia silencioso real (' . $inicio40 . '), obteve ' . ( $muitoLongo['started_at'] ?? '(nada)' ) );
+
 // ---------------------------------------------------------------------------
 // 5c. Anomalia ativa não pode desaparecer porque a fonte falhou (MÉDIO 2).
 // ---------------------------------------------------------------------------
@@ -578,6 +670,50 @@ uox_assert( 'critical' === uonix_intelligence_anomaly_badge( $resumoStale )['sta
 // Sem estado anterior anômalo, indisponível continua sendo só indisponível.
 $resumoLimpo = uonix_intelligence_anomaly_detect( array( uox_achado( 'organic_drop', false, false ) ), $hoje, array() );
 uox_assert( 0 === $resumoLimpo['anomalous'] && 1 === $resumoLimpo['unavailable'], 'indisponível sem anomalia prévia não pode inventar anomalia' );
+
+// ---------------------------------------------------------------------------
+// 5d. A proteção acima NÃO pode depender da entrega do e-mail (ALTO 2 da 2a revisão).
+// ---------------------------------------------------------------------------
+
+// `detect()` lê `observed`, não `triggers`. Sem essa separação a proteção ficava
+// inerte e PERMANENTEMENTE na configuração sem destinatário — que é justamente a que
+// o contrato dedica uma seção a declarar suportada, porque "o badge é útil sem e-mail
+// nenhum". Medido antes da correção: dia 1 crítico, dia 2 com a fonte falhando o
+// incidente desaparecia e o badge virava "1 verificação indisponível".
+$GLOBALS['uox_options']['uonix_executive_report_recipients'] = array();
+unset( $GLOBALS['uox_options']['uonix_intelligence_anomaly_state'] );
+$GLOBALS['uox_mail_calls'] = array();
+
+$d1 = uonix_intelligence_anomaly_run_check( array( uox_achado( 'organic_drop', true, true ) ), $hoje );
+uox_assert( 1 === $d1['summary']['anomalous'], 'dia 1 sem destinatário deve contar a anomalia' );
+uox_assert( true === ( $d1['observed']['organic_drop'] ?? null ), 'o que foi OBSERVADO avança mesmo sem destinatário' );
+uox_assert( false === ( uonix_intelligence_anomaly_get_state()['organic_drop'] ?? null ), 'e "já avisei" corretamente NÃO avança, porque nada foi enviado' );
+
+$amanha = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '+1 day' )->format( 'Y-m-d' );
+$d2 = uonix_intelligence_anomaly_run_check( array( uox_achado( 'organic_drop', false, false ) ), $amanha );
+uox_assert( 1 === $d2['summary']['anomalous'], 'dia 2 com a fonte falhando: a anomalia NÃO pode desaparecer só porque não há destinatário' );
+uox_assert( 0 === $d2['summary']['unavailable'], 'e não pode ser rebaixada a simples indisponibilidade' );
+uox_assert( 'critical' === uonix_intelligence_anomaly_badge( $d2['summary'] )['state'], 'o badge deve seguir crítico sem destinatário cadastrado' );
+
+// ---------------------------------------------------------------------------
+// 5e. E a anomalia não reverificada tem PRAZO (MÉDIO 2 da 2a revisão).
+// ---------------------------------------------------------------------------
+
+// Sem prazo, uma credencial revogada mantinha o badge crítico por 400 dias afirmando
+// "detectada em <data> e ainda não resolvida". Alarme permanente treina a pessoa a
+// ignorar a tela tão bem quanto alarme semanal.
+$prazo    = (int) $regras['stale_anomaly_max_days'];
+$noPrazo  = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '+' . $prazo . ' days' )->format( 'Y-m-d' );
+$expirado = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '+' . ( $prazo + 1 ) . ' days' )->format( 'Y-m-d' );
+
+$dPrazo = uonix_intelligence_anomaly_run_check( array( uox_achado( 'organic_drop', false, false ) ), $noPrazo );
+uox_assert( 1 === $dPrazo['summary']['anomalous'], 'dentro do prazo a anomalia não reverificada segue visível' );
+
+$dExp = uonix_intelligence_anomaly_run_check( array( uox_achado( 'organic_drop', false, false ) ), $expirado );
+uox_assert( 0 === $dExp['summary']['anomalous'], 'passado o prazo, a anomalia não reverificada não pode ser afirmada no presente' );
+uox_assert( 1 === $dExp['summary']['unavailable'], 'ela vira indisponibilidade declarada' );
+uox_assert( ! empty( $dExp['summary']['findings'][0]['stale_expired'] ), 'e o achado deve dizer que expirou, para o painel nomear a última observação' );
+uox_assert( 'unknown' === uonix_intelligence_anomaly_badge( $dExp['summary'] )['state'], 'o badge deve cair para indisponível, não ficar crítico com dado de um ano' );
 
 // ---------------------------------------------------------------------------
 // 6. Estado e deduplicação (funções puras).

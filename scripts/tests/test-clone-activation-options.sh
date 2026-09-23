@@ -110,4 +110,4 @@ if [ "$failures" -ne 0 ]; then
   exit 1
 fi
 
-printf 'PASS: %s opção(ões) de ativação protegida(s) no clone, e o invariante segue no lugar.\n' "${#activation_options[@]}"
+printf 'PASS: %s opção(ões) de ativação e %s de estado protegida(s) no clone, e o invariante segue no lugar.\n' "${#activation_options[@]}" "${#state_options[@]}"
