@@ -281,14 +281,220 @@ if ($idsFromUuid !== array('6332f834-41df-4cc5-a3bf-dffe359112c5')) {
 }
 unset($GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids']);
 
+// CENÁRIO B6: o ID REAL da conta AdOpt é aceito.
+// Regressão direta da issue #264: as cinco tags desta conta têm 10 caracteres, e o mínimo
+// histórico de 12 rejeitava todas, mantendo o módulo inativo sem emitir sinal nenhum.
+// Fixture fictícia não cobre isto — o valor abaixo é o ID real de `uonix.com.br`.
+$realFilter = function() { return array('9BxuTvI1_q'); };
+$GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids'] = array($realFilter);
+$idsReais = uonix_adopt_get_consent_tag_ids();
+if ($idsReais !== array('9bxutvi1_q')) {
+    echo "ERRO #264: o ID real da AdOpt ('9BxuTvI1_q', 10 caracteres) foi rejeitado pelo validador. "
+        . "Retornado: " . var_export($idsReais, true) . "\n";
+    exit(1);
+}
+unset($GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids']);
+
+// CENÁRIO B7: nome de categoria é rejeitado — verificado contra uma lista INDEPENDENTE.
+//
+// A lista abaixo NÃO é cópia da denylist do módulo, e isso é deliberado: uma lista copiada
+// vira tautologia, capaz de detectar um nome removido do módulo mas nunca um nome que nenhum
+// dos dois cobre. Ela é derivada do namespace real de categorias da AdOpt — Required(1),
+// Marketing(2), Statistics(3), Performance(4), Functional(5), medido na configuração pública
+// da conta — mais os rótulos que o banner renderiza em português e variações plausíveis de
+// quem for preencher a constante à mão.
+//
+// **A DIMENSÃO DE CAIXA É OBRIGATÓRIA AQUI.** O painel da AdOpt renderiza os rótulos
+// CAPITALIZADOS, e uma versão anterior deste guard os aceitava por isso: a regra exigia "ao
+// menos um caractere que não seja letra minúscula", e a maiúscula inicial satisfazia. Resultado
+// medido: `statistics` caía e `Statistics` passava. Cada nome abaixo é testado nas duas formas.
+//
+// Inclui também a família de strings inventadas mais longas, que morrem no comprimento exato de 10.
+//
+// LIMITE DELIBERADO deste cenário: ele cobre **rótulos do painel**, não qualquer palavra. Uma
+// palavra arbitrária de exatamente 10 caracteres e com maiúscula — `Habilitado`, por exemplo —
+// é indistinguível de um ID real (`Lc-8ztRDYp` tem o mesmo formato), e nenhuma regra de string
+// os separa. A guarda é um detector de engano plausível, e o engano plausível é colar um rótulo
+// do painel. Se algum dia aparecer um rótulo novo na AdOpt, ele entra nas duas listas.
+$nomesBase = array(
+    // namespace em inglês da AdOpt, medido na configuração pública
+    'required', 'marketing', 'statistics', 'performance', 'functional',
+    'necessary', 'essential', 'preferences', 'analytics',
+    // rótulos e variações em português
+    'necessario', 'necessarios', 'necessarias', 'estatisticas', 'funcional',
+    'funcionais', 'desempenho', 'preferencias', 'publicidade', 'essenciais',
+    'analiticos',
+    // família inventada com underscore e sufixo
+    'uonix_cookies', 'uonix_funcional', 'cookies_funcionais', 'funcional_1', 'preferences_v2',
+);
+$nomesDeCategoria = array();
+foreach ($nomesBase as $base) {
+    $nomesDeCategoria[] = $base;              // como alguém digitaria à mão
+    $nomesDeCategoria[] = ucfirst($base);     // como o painel exibe
+    $nomesDeCategoria[] = strtoupper($base);  // como alguém colaria de um título
+}
+$nomesDeCategoria = array_values(array_unique($nomesDeCategoria));
+
+foreach ($nomesDeCategoria as $nomeGenerico) {
+    $filtroNome = function() use ($nomeGenerico) { return array($nomeGenerico); };
+    $GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids'] = array($filtroNome);
+    $resultado = uonix_adopt_get_consent_tag_ids();
+    if (!empty($resultado)) {
+        echo "ERRO FAIL-CLOSED: o rótulo '{$nomeGenerico}' (" . strlen($nomeGenerico)
+            . " caracteres) foi aceito como ID de tag. Rótulo do painel deve cair na lista de "
+            . "rótulos, que compara em minúsculas justamente porque o painel exibe capitalizado; "
+            . "e strings de outro comprimento devem cair no comprimento exato de 10.\n";
+        exit(1);
+    }
+    unset($GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids']);
+}
+
+// CENÁRIO B7b: a validação não pode ser tão estrita que rejeite ID legítimo.
+// Sem isto, "rejeitar tudo" passaria o B7 e o módulo ficaria inativo — o defeito de #264.
+//
+// Somente valores MEDIDOS. Uma versão anterior usava fixtures inventadas (`abcdefghij_`,
+// `AbCdEfGhIjKl`) que prendiam a regra mais frouxa que a realidade: os cinco IDs da conta têm
+// exatamente 10 caracteres, e fixture de 11 ou 12 impedia exigir esse comprimento.
+$idsLegitimos = array(
+    '9BxuTvI1_q'                            => 'id real: uonix.com.br',
+    'BiAMEDoi-V'                            => 'id real: AdOpt (com hífen)',
+    'ExClwcP566'                            => 'id real: Google Analytics',
+    'Lc-8ztRDYp'                            => 'id real: Google Ads',
+    'uXT4q-bT28'                            => 'id real: Facebook',
+    '9bxutvi1_q'                            => 'id real em minúsculas (normalização)',
+    '6332f834-41df-4cc5-a3bf-dffe359112c5'  => 'UUID de outra conta AdOpt',
+);
+foreach ($idsLegitimos as $idLegitimo => $descricao) {
+    $filtroId = function() use ($idLegitimo) { return array($idLegitimo); };
+    $GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids'] = array($filtroId);
+    $resultado = uonix_adopt_get_consent_tag_ids();
+    if ($resultado !== array(strtolower($idLegitimo))) {
+        echo "ERRO #264: o ID legítimo '{$idLegitimo}' ({$descricao}) foi rejeitado. "
+            . "A regra estrutural está estrita demais e o módulo ficaria inativo.\n";
+        exit(1);
+    }
+    unset($GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids']);
+}
+
+// CENÁRIO B8: sem a constante de ambiente, o padrão embutido já autoriza.
+// É o que dispensa provisionamento por SSH e o que impede a inatividade silenciosa de #264.
+$idsPadrao = uonix_adopt_get_consent_tag_ids();
+if (count($idsPadrao) < 1) {
+    echo "ERRO #264: sem UONIX_ADOPT_CONSENT_TAG_IDS definida, o padrão embutido deveria "
+        . "autorizar ao menos uma tag. O módulo voltaria a ficar inativo em silêncio.\n";
+    exit(1);
+}
+if (!defined('UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO') || '' === trim((string) UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO)) {
+    echo "ERRO: UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO deve existir e não pode ser vazia.\n";
+    exit(1);
+}
+
+// CENÁRIO B9: a constante de ambiente tem precedência sobre o padrão embutido.
+// Subprocesso porque a precedência só é observável se a constante existir ANTES do require,
+// e este processo já carregou o módulo sem ela (cenário B8).
+$harnessPrecedencia = <<<'PHP_HARNESS'
+<?php
+define('ABSPATH', __DIR__ . '/');
+define('UONIX_ADOPT_CONSENT_TAG_IDS', 'Lc-8ztRDYp');
+function add_action($h, $c, $p = 10, $a = 1) {}
+function add_filter($h, $c, $p = 10, $a = 1) {}
+function apply_filters($h, $v, ...$rest) { return $v; }
+function is_admin() { return false; }
+require MODULO;
+$ids = uonix_adopt_get_consent_tag_ids();
+echo implode(',', $ids);
+PHP_HARNESS;
+
+$harnessPrecedencia = str_replace(
+    'MODULO',
+    var_export($rootDir . '/mu-plugins/uonix-forms/49-forms-global-autofill.php', true),
+    $harnessPrecedencia
+);
+$tempPrecedencia = tempnam(sys_get_temp_dir(), 'uonix_precedencia_') . '.php';
+file_put_contents($tempPrecedencia, $harnessPrecedencia);
+$saidaPrecedencia = trim((string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($tempPrecedencia) . ' 2>&1'));
+unlink($tempPrecedencia);
+
+if ($saidaPrecedencia !== 'lc-8ztrdyp') {
+    echo "ERRO: UONIX_ADOPT_CONSENT_TAG_IDS deveria ter precedência sobre o padrão embutido "
+        . "(rotação emergencial sem deploy). Esperado 'lc-8ztrdyp', obtido: '{$saidaPrecedencia}'\n";
+    exit(1);
+}
+
+// CENÁRIO B10: o stub de adoptCB roda ANTES do GTM.
+// A AdOpt captura window.adoptCB uma única vez, na montagem, com `??`. Se ela montar antes
+// deste módulo registrar o global, guarda um no-op em definitivo e o consentimento nunca
+// chega ao avaliador. O GTM (que injeta a AdOpt) entra em wp_head; o stub tem que vir antes.
+if (!preg_match('/add_action\(\s*[\'"]wp_head[\'"]\s*,\s*[\'"]uonix_autofill_registra_adopt_cb_antecipado[\'"]\s*,\s*(\d+)/', $globalAutofill, $mStub)) {
+    echo "ERRO: o stub antecipado de adoptCB não está registrado em wp_head com prioridade explícita.\n";
+    exit(1);
+}
+$prioridadeStub = (int) $mStub[1];
+
+$analyticsLgpd = file_get_contents($rootDir . '/mu-plugins/uonix-integrations/38-integracoes-analytics-lgpd.php');
+if (!preg_match('/add_action\(\s*[\'"]wp_head[\'"]\s*,\s*[\'"]uonix_render_analytics_head[\'"]\s*,\s*(\d+)/', $analyticsLgpd, $mGtm)) {
+    echo "ERRO: não foi possível ler a prioridade de wp_head de uonix_render_analytics_head "
+        . "(injeção do GTM). A asserção de ordem não pode ser verificada.\n";
+    exit(1);
+}
+$prioridadeGtm = (int) $mGtm[1];
+
+if ($prioridadeStub >= $prioridadeGtm) {
+    echo "ERRO DE ORDEM: o stub de adoptCB está na prioridade {$prioridadeStub} e o GTM na "
+        . "{$prioridadeGtm}. A AdOpt pode montar antes do stub e capturar um no-op, deixando o "
+        . "autopreenchimento morto de forma intermitente.\n";
+    exit(1);
+}
+
+// Asserções sobre a LIGAÇÃO entre stub e rodapé, não sobre a mera presença dos nomes.
+// A simples menção a __uonixAvaliaConsentAdopt aparece também no stub e no docblock, então
+// buscar a substring passaria mesmo com a atribuição removida.
+if (!preg_match('/window\.__uonixAvaliaConsentAdopt\s*=\s*evaluateAdoptConsent\s*;/', $globalAutofill)) {
+    echo "ERRO: o rodapé precisa ATRIBUIR window.__uonixAvaliaConsentAdopt = evaluateAdoptConsent. "
+        . "Sem isso o stub antecipado guarda o consentimento e ninguém o lê, e o autopreenchimento "
+        . "nunca é armado.\n";
+    exit(1);
+}
+
+if (!preg_match('/if\s*\(\s*window\.__uonixAdoptConsentPendente\s*\)\s*\{\s*evaluateAdoptConsent\s*\(\s*window\.__uonixAdoptConsentPendente\s*\)/', $globalAutofill)) {
+    echo "ERRO: o rodapé precisa CONSUMIR window.__uonixAdoptConsentPendente. Sem isso, um "
+        . "consentimento entregue pela AdOpt antes do rodapé é perdido em silêncio.\n";
+    exit(1);
+}
+
+if (!preg_match('/window\.adoptCB\.__uonixStub\s*=\s*true\s*;/', $globalAutofill)) {
+    echo "ERRO: o stub antecipado precisa marcar a própria IDENTIDADE (window.adoptCB.__uonixStub). "
+        . "Um booleano global do tipo 'alguém registrou' não distingue 'stub intacto' de 'terceiro "
+        . "sobrescreveu o callback', e no segundo caso o autopreenchimento morre em silêncio.\n";
+    exit(1);
+}
+
+if (!preg_match('/true\s*===\s*cbAtual\.__uonixStub/', $globalAutofill)) {
+    echo "ERRO: o rodapé precisa verificar a identidade do stub antes de decidir não registrar. "
+        . "Sem isso, um terceiro que sobrescreva window.adoptCB depois de wp_head mata o "
+        . "autopreenchimento sem emitir sinal.\n";
+    exit(1);
+}
+
+// O stub antecipado vive em OUTRO bloco <script>, e o teste comportamental abaixo precisa dele.
+preg_match('/<script id="uonix-autofill-adopt-cb-antecipado"[^>]*>(.*?)<\/script>/s', $globalAutofill, $stubMatch);
+if (empty($stubMatch[1])) {
+    echo "ERRO: bloco JavaScript 'uonix-autofill-adopt-cb-antecipado' não encontrado.\n";
+    exit(1);
+}
+$stubJs = $stubMatch[1];
+$encodedStubJs = json_encode($stubJs);
+
 // ==============================================================================
 // 3. VALIDAÇÃO COMPORTAMENTAL DO FRONTEND VIA NODE.JS (SIMULAÇÃO DOM & ADOPT)
 // ==============================================================================
 
-// Extrai o conteúdo do script JS de 49-forms-global-autofill.php
-preg_match('/<script[^>]*>(.*?)<\/script>/s', $globalAutofill, $jsMatch);
+// Extrai o conteúdo do script JS de 49-forms-global-autofill.php.
+// Alvo explícito pelo id: o arquivo tem DOIS blocos <script> (o stub antecipado de wp_head
+// e este), e uma regex de primeira ocorrência pegaria o bloco errado silenciosamente.
+preg_match('/<script id="uonix-global-autofill-js"[^>]*>(.*?)<\/script>/s', $globalAutofill, $jsMatch);
 if (empty($jsMatch[1])) {
-    echo "ERRO: Bloco JavaScript não encontrado em 49-forms-global-autofill.php\n";
+    echo "ERRO: Bloco JavaScript 'uonix-global-autofill-js' não encontrado em 49-forms-global-autofill.php\n";
     exit(1);
 }
 
@@ -300,9 +506,14 @@ $nodeTestScript = <<<NODE_JS
 const vm = require('vm');
 const assert = require('assert');
 const CODE_PAYLOAD = $encodedJs;
+const STUB_PAYLOAD = $encodedStubJs;
 const FIXTURE_TAG_ID = '6332f834-41df-4cc5-a3bf-dffe359112c5';
+// ID real desta conta AdOpt, com maiúsculas. A caixa importa: o PHP normaliza para minúsculas
+// e o JS precisa normalizar o que chega da AdOpt, senão nada casa em produção.
+const ID_REAL_ADOPT = '9BxuTvI1_q';
+const ID_REAL_NORMALIZADO = '9bxutvi1_q';
 
-function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagIds = [FIXTURE_TAG_ID]) {
+function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagIds = [FIXTURE_TAG_ID], opcoes = {}) {
     let cookieStr = initialCookie;
     const storage = Object.assign({}, initialStorage);
     const eventListeners = {};
@@ -378,7 +589,18 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
     win.__TEST_ALLOWED_TAG_IDS__ = allowedTagIds;
 
     const context = vm.createContext(win);
-    vm.runInContext(CODE_PAYLOAD, context);
+
+    // Reproduz a ordem real da página quando pedido: o stub de wp_head roda primeiro, a AdOpt
+    // pode entregar consentimento no meio, e só então o rodapé é avaliado.
+    if (opcoes.rodaStubAntes) {
+        vm.runInContext(STUB_PAYLOAD, context);
+    }
+    if (typeof opcoes.entreStubERodape === 'function') {
+        opcoes.entreStubERodape(win);
+    }
+    if (opcoes.pularRodape !== true) {
+        vm.runInContext(CODE_PAYLOAD, context);
+    }
 
     function triggerSubmit(form) {
         const handlers = eventListeners['submit'] || [];
@@ -448,6 +670,104 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
 {
     const { win } = runTestEnvironment('AdoptConsent={"choices":"all"}', { 'AdoptConsent': 'true' });
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F6: AdoptConsent isolado NÃO deve autorizar persistência');
+}
+
+// F7: SIMETRIA DE CAIXA — o passo que faz a correção da #264 funcionar em produção.
+// O PHP grava o ID em minúsculas; a AdOpt entrega em caixa original ('9BxuTvI1_q'). Se o JS
+// deixar de normalizar o que chega, nada casa e o autopreenchimento morre sem sinal. Nenhuma
+// fixture anterior exercitava isso, porque todas eram minúsculas.
+{
+    const { win, doc } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO]);
+    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true,
+        'F7a: ID em caixa original da AdOpt deve casar com a lista normalizada em minúsculas');
+    assert.notStrictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1,
+        'F7b: consentimento deve ser gravado com ID em caixa mista');
+}
+
+// F7c: a simetria vale também na recusa — e para ser OBSERVÁVEL o teste precisa do caso em que
+// o opt-out tem de VENCER o opt-in. Com a tag só em optOutTags, reconhecer a recusa e cair no
+// fail-closed final produzem o mesmo resultado, então a asserção passaria sem provar nada.
+{
+    const { win } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO]);
+    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [ID_REAL_ADOPT] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false,
+        'F7c: com a tag em optInTags E optOutTags, a recusa deve vencer — o que só acontece se o '
+        + 'lado optOutTags também for normalizado para minúsculas');
+}
+
+// F7d: opt-out sozinho, em caixa original, também nega e expurga dados já salvos.
+{
+    const { win, doc, storage } = runTestEnvironment(
+        'uonix_consent_granted=1',
+        { uonix_consent_granted: '1', uonix_user_lead: JSON.stringify({ nome: 'Teste' }) },
+        [ID_REAL_NORMALIZADO]
+    );
+    win.adoptCB({ optInTags: [], optOutTags: [ID_REAL_ADOPT] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F7d1: recusa deve negar');
+    assert.strictEqual('uonix_user_lead' in storage, false,
+        'F7d2: dados previamente salvos devem ser expurgados na recusa');
+    assert.strictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1,
+        'F7d3: cookie de consentimento deve ser removido na recusa');
+}
+
+// F8: o stub de wp_head entrega ao rodapé um consentimento que chegou ANTES dele.
+// É o cenário em que a AdOpt monta primeiro — a corrida que o stub existe para neutralizar.
+{
+    const { win, doc } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO], {
+        rodaStubAntes: true,
+        entreStubERodape: (w) => {
+            assert.strictEqual(typeof w.adoptCB, 'function', 'F8a: stub deve registrar adoptCB antes do rodapé');
+            assert.strictEqual(w.adoptCB.__uonixStub, true, 'F8b: stub deve marcar a própria identidade');
+            w.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [] });
+            assert.strictEqual(w.__uonixAdoptConsentPendente !== null, true, 'F8c: stub deve guardar o consentimento');
+        }
+    });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true,
+        'F8d: rodapé deve consumir o consentimento guardado pelo stub');
+    assert.notStrictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1,
+        'F8e: consentimento entregue antes do rodapé deve produzir o cookie');
+}
+
+// F9: consentimento que chega DEPOIS do rodapé continua funcionando pelo stub.
+{
+    const { win } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO], { rodaStubAntes: true });
+    assert.strictEqual(win.adoptCB.__uonixStub, true, 'F9a: com stub intacto, o rodapé não deve substituí-lo');
+    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F9b: consentimento posterior deve ser avaliado');
+}
+
+// F10: terceiro sobrescreve window.adoptCB entre o stub e o rodapé.
+// Antes da marcação de identidade, o rodapé confiava num booleano e não reassumia — o
+// autopreenchimento morria em silêncio. O terceiro também precisa continuar recebendo.
+{
+    let recebidoPeloTerceiro = null;
+    const { win } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO], {
+        rodaStubAntes: true,
+        entreStubERodape: (w) => {
+            w.adoptCB = function(consent) { recebidoPeloTerceiro = consent; };
+        }
+    });
+    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true,
+        'F10a: rodapé deve reassumir quando um terceiro sobrescreve o stub');
+    assert.notStrictEqual(recebidoPeloTerceiro, null,
+        'F10b: o callback do terceiro deve continuar sendo chamado (encadeamento preservado)');
+}
+
+// F11: o stub encadeia um adoptCB que já existia antes dele.
+{
+    let recebidoPeloAnterior = null;
+    const { win } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO], {
+        rodaStubAntes: false,
+        pularRodape: true
+    });
+    win.adoptCB = function(consent) { recebidoPeloAnterior = consent; };
+    const vm2 = require('vm');
+    vm2.runInContext(STUB_PAYLOAD, vm2.createContext(win));
+    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [] });
+    assert.notStrictEqual(recebidoPeloAnterior, null,
+        'F11: o stub deve encadear um adoptCB preexistente, não descartá-lo');
 }
 
 console.log('NODE_JS_PASS');
