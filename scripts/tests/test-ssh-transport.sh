@@ -513,7 +513,9 @@ MOCK_SSH_MODE=stdin-retry uonix_stream_to prod '/remote/alvo' < "$TMP_DIR/upload
   fail "stream_to variou o payload entre tentativas: $(tr '\n' ' ' < "$MOCK_STDIN_SIZES")"
 [ "$(head -1 "$MOCK_STDIN_SIZES")" = "$UPLOAD_BYTES" ] || \
   fail "stream_to entregou payload de tamanho errado: $(head -1 "$MOCK_STDIN_SIZES") != $UPLOAD_BYTES"
-grep -qv '^0$' "$MOCK_STDIN_SIZES" || fail 'stream_to entregou payload vazio em alguma tentativa'
+# `! grep -q`, e NÃO `grep -qv`: `grep -v` sai 0 se ALGUMA linha não casar, então
+# com tamanhos 16,0,0 ele passaria — exatamente o cenário que esta linha diz pegar.
+! grep -q '^0$' "$MOCK_STDIN_SIZES" || fail 'stream_to entregou payload vazio em alguma tentativa'
 
 # Payload vazio é recusado, não retentado: não há o que replicar, e retentar
 # aprovaria a escrita remota sem transferir nada.
@@ -523,6 +525,31 @@ if MOCK_SSH_MODE=stdin-retry uonix_stream_to prod '/remote/vazio' < /dev/null 2>
   fail 'stream_to aceitou payload vazio como sucesso'
 fi
 [ ! -s "$MOCK_TRANSPORT_COUNT" ] || fail 'stream_to abriu SSH com payload vazio'
+
+# Config inválida não pode virar sucesso. Esta função pré-inicializa `status=0`,
+# que a irmã uonix_transport_ssh_retry não faz: sem a guarda de configuração, um
+# laço que nunca roda devolveria 0 com zero conexões abertas. Mesmo eixo já
+# coberto para ssh_retry e para o rsync.
+: > "$MOCK_TRANSPORT_COUNT"
+: > "$MOCK_STDIN_SIZES"
+UONIX_TRANSPORT_MAX_ATTEMPTS=0
+if MOCK_SSH_MODE=stdin-retry uonix_stream_to prod '/remote/alvo' < "$TMP_DIR/upload-payload" 2>/dev/null; then
+  fail 'stream_to aceitou zero tentativas como sucesso'
+fi
+[ ! -s "$MOCK_TRANSPORT_COUNT" ] || fail 'configuração inválida abriu SSH em stream_to'
+UONIX_TRANSPORT_MAX_ATTEMPTS=5
+
+# Payload truncado não pode passar por bom. A guarda de vazio não cobre isto: um
+# `cat` que falha no meio deixa arquivo parcial e NÃO vazio.
+: > "$MOCK_TRANSPORT_COUNT"
+(
+  cat() { command cat "$@" | head -c 4; return 1; }
+  if MOCK_SSH_MODE=stdin-retry uonix_stream_to prod '/remote/alvo' \
+      < "$TMP_DIR/upload-payload" 2>/dev/null; then
+    fail 'stream_to aceitou payload truncado como sucesso'
+  fi
+) || exit 1
+[ ! -s "$MOCK_TRANSPORT_COUNT" ] || fail 'stream_to abriu SSH com payload truncado'
 
 # Status não transitório propaga na primeira tentativa: não é falha de conexão.
 : > "$MOCK_TRANSPORT_COUNT"
@@ -534,6 +561,19 @@ else
 fi
 [ "$stream_to_status" -eq 2 ] || fail "stream_to alterou status não transitório: ${stream_to_status}"
 [ "$(cat "$MOCK_TRANSPORT_COUNT")" = 1 ] || fail 'stream_to repetiu status não transitório'
+
+# --- uonix_exec permanece em uma única tentativa ------------------------------
+# A issue #272 recomendava "trocar uma palavra aqui": ssh_once por ssh_retry. A
+# recomendação está errada — uonix_exec herda o stdin do chamador, e retry ali
+# repetiria o comando com o descritor já consumido. Isso estava justificado em 13
+# linhas de comentário e em NENHUMA asserção, então a troca passava a suíte
+# inteira verde. Comentário não é contrato; esta linha é.
+: > "$MOCK_TRANSPORT_COUNT"
+if MOCK_SSH_MODE=retry uonix_exec qa -- printf x >/dev/null 2>&1; then
+  fail 'uonix_exec retentou: o stdin do chamador seria reenviado já consumido'
+fi
+[ "$(cat "$MOCK_TRANSPORT_COUNT")" = 1 ] || \
+  fail "uonix_exec abriu mais de uma tentativa: $(cat "$MOCK_TRANSPORT_COUNT")"
 
 # --- Leitura remota ----------------------------------------------------------
 # Retry de leitura que escreve direto no stdout concatenaria bytes parciais com a

@@ -554,7 +554,28 @@ uonix_transport_stream_from_stdin() {
     return 1
   }
   chmod 600 "$payload" 2>/dev/null || :
-  cat > "$payload"
+
+  # O status do `cat` é VERIFICADO, e a distinção importa: a guarda de `-s`
+  # abaixo pega payload vazio, não pega payload TRUNCADO. Se a materialização
+  # falhar no meio — TMPDIR cheio, erro de leitura no descritor de origem —, o
+  # arquivo fica parcial e não-vazio, e ignorar o status aceitaria isso com exit
+  # 0. Medido em revisão: 4 de 9 bytes transferidos, chamador vendo sucesso.
+  #
+  # O caso concreto é o manifest de verify_payload_at_target truncado em
+  # fronteira de linha: `sha256sum -c` remoto valida as linhas presentes e sai 0,
+  # e o clone reporta ponte verificada tendo conferido só um prefixo dos
+  # arquivos. O checksum, que é a razão de existir daquele caminho, é contornado.
+  #
+  # `scripts/lib/ssh-retry.sh` tem a mesma linha e é fail-closed por ser script
+  # standalone com `set -euo pipefail`. Aqui essa proteção NÃO existe: a
+  # biblioteca é sourced, e chamadores que usam `|| return $?` suspendem o
+  # errexit do corpo inteiro. Trazer o algoritmo para dentro da lib exige
+  # verificar o status à mão.
+  if ! cat > "$payload"; then
+    rm -f -- "$payload"
+    uonix_transport_error 'falha ao materializar o payload de stdin; nada foi enviado.'
+    return 1
+  fi
 
   # Limpeza explícita, com um único ponto de saída, como fazem
   # uonix_transport_stream_to_file e uonix_transport_import_gzip. Um `trap ...
