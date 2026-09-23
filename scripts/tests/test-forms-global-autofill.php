@@ -304,44 +304,64 @@ unset($GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids']);
 // da conta — mais os rótulos que o banner renderiza em português e variações plausíveis de
 // quem for preencher a constante à mão.
 //
-// Vários destes NÃO estão na denylist do módulo (`statistics`, `performance`, `necessarios`,
-// `desempenho`, `publicidade`, `essenciais`, `analiticos`, `funcionais`, `preferencias`).
-// Eles passam a ser rejeitados pela regra estrutural — 10+ caracteres em [A-Za-z0-9_-] com ao
-// menos um caractere que não seja letra minúscula. Se alguém trocar essa regra por enumeração
-// outra vez, este cenário falha.
-$nomesDeCategoria = array(
-    // namespace em inglês da AdOpt
+// **A DIMENSÃO DE CAIXA É OBRIGATÓRIA AQUI.** O painel da AdOpt renderiza os rótulos
+// CAPITALIZADOS, e uma versão anterior deste guard os aceitava por isso: a regra exigia "ao
+// menos um caractere que não seja letra minúscula", e a maiúscula inicial satisfazia. Resultado
+// medido: `statistics` caía e `Statistics` passava. Cada nome abaixo é testado nas duas formas.
+//
+// Inclui também a família de strings inventadas mais longas, que morrem no comprimento exato de 10.
+//
+// LIMITE DELIBERADO deste cenário: ele cobre **rótulos do painel**, não qualquer palavra. Uma
+// palavra arbitrária de exatamente 10 caracteres e com maiúscula — `Habilitado`, por exemplo —
+// é indistinguível de um ID real (`Lc-8ztRDYp` tem o mesmo formato), e nenhuma regra de string
+// os separa. A guarda é um detector de engano plausível, e o engano plausível é colar um rótulo
+// do painel. Se algum dia aparecer um rótulo novo na AdOpt, ele entra nas duas listas.
+$nomesBase = array(
+    // namespace em inglês da AdOpt, medido na configuração pública
     'required', 'marketing', 'statistics', 'performance', 'functional',
     'necessary', 'essential', 'preferences', 'analytics',
     // rótulos e variações em português
     'necessario', 'necessarios', 'necessarias', 'estatisticas', 'funcional',
     'funcionais', 'desempenho', 'preferencias', 'publicidade', 'essenciais',
-    'analiticos', 'habilitado',
-    // nome interno herdado
-    'uonix_cookies',
+    'analiticos',
+    // família inventada com underscore e sufixo
+    'uonix_cookies', 'uonix_funcional', 'cookies_funcionais', 'funcional_1', 'preferences_v2',
 );
+$nomesDeCategoria = array();
+foreach ($nomesBase as $base) {
+    $nomesDeCategoria[] = $base;              // como alguém digitaria à mão
+    $nomesDeCategoria[] = ucfirst($base);     // como o painel exibe
+    $nomesDeCategoria[] = strtoupper($base);  // como alguém colaria de um título
+}
+$nomesDeCategoria = array_values(array_unique($nomesDeCategoria));
+
 foreach ($nomesDeCategoria as $nomeGenerico) {
     $filtroNome = function() use ($nomeGenerico) { return array($nomeGenerico); };
     $GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids'] = array($filtroNome);
     $resultado = uonix_adopt_get_consent_tag_ids();
     if (!empty($resultado)) {
-        echo "ERRO FAIL-CLOSED: o nome de categoria '{$nomeGenerico}' (" . strlen($nomeGenerico)
-            . " caracteres) foi aceito como ID de tag. Nome de categoria é palavra minúscula e "
-            . "deve cair na regra estrutural (10+ caracteres com ao menos um caractere que não "
-            . "seja letra minúscula), independentemente da lista explícita de nomes.\n";
+        echo "ERRO FAIL-CLOSED: o rótulo '{$nomeGenerico}' (" . strlen($nomeGenerico)
+            . " caracteres) foi aceito como ID de tag. Rótulo do painel deve cair na lista de "
+            . "rótulos, que compara em minúsculas justamente porque o painel exibe capitalizado; "
+            . "e strings de outro comprimento devem cair no comprimento exato de 10.\n";
         exit(1);
     }
     unset($GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids']);
 }
 
-// CENÁRIO B7b: a regra estrutural não pode ser tão estrita que rejeite IDs legítimos.
+// CENÁRIO B7b: a validação não pode ser tão estrita que rejeite ID legítimo.
 // Sem isto, "rejeitar tudo" passaria o B7 e o módulo ficaria inativo — o defeito de #264.
+//
+// Somente valores MEDIDOS. Uma versão anterior usava fixtures inventadas (`abcdefghij_`,
+// `AbCdEfGhIjKl`) que prendiam a regra mais frouxa que a realidade: os cinco IDs da conta têm
+// exatamente 10 caracteres, e fixture de 11 ou 12 impedia exigir esse comprimento.
 $idsLegitimos = array(
-    '9BxuTvI1_q'                            => 'id real desta conta (maiúsculas + dígito)',
-    'BiAMEDoi-V'                            => 'id real com hífen',
-    'ExClwcP566'                            => 'id real com dígitos',
-    '9bxutvi1_q'                            => 'id real em minúsculas (dígito o salva)',
-    'abcdefghij_'                           => 'minúsculas com underscore',
+    '9BxuTvI1_q'                            => 'id real: uonix.com.br',
+    'BiAMEDoi-V'                            => 'id real: AdOpt (com hífen)',
+    'ExClwcP566'                            => 'id real: Google Analytics',
+    'Lc-8ztRDYp'                            => 'id real: Google Ads',
+    'uXT4q-bT28'                            => 'id real: Facebook',
+    '9bxutvi1_q'                            => 'id real em minúsculas (normalização)',
     '6332f834-41df-4cc5-a3bf-dffe359112c5'  => 'UUID de outra conta AdOpt',
 );
 foreach ($idsLegitimos as $idLegitimo => $descricao) {
@@ -375,7 +395,7 @@ if (!defined('UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO') || '' === trim((string) UONIX
 $harnessPrecedencia = <<<'PHP_HARNESS'
 <?php
 define('ABSPATH', __DIR__ . '/');
-define('UONIX_ADOPT_CONSENT_TAG_IDS', 'AbCdEfGhIjKl');
+define('UONIX_ADOPT_CONSENT_TAG_IDS', 'Lc-8ztRDYp');
 function add_action($h, $c, $p = 10, $a = 1) {}
 function add_filter($h, $c, $p = 10, $a = 1) {}
 function apply_filters($h, $v, ...$rest) { return $v; }
@@ -395,9 +415,9 @@ file_put_contents($tempPrecedencia, $harnessPrecedencia);
 $saidaPrecedencia = trim((string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($tempPrecedencia) . ' 2>&1'));
 unlink($tempPrecedencia);
 
-if ($saidaPrecedencia !== 'abcdefghijkl') {
+if ($saidaPrecedencia !== 'lc-8ztrdyp') {
     echo "ERRO: UONIX_ADOPT_CONSENT_TAG_IDS deveria ter precedência sobre o padrão embutido "
-        . "(rotação emergencial sem deploy). Esperado 'abcdefghijkl', obtido: '{$saidaPrecedencia}'\n";
+        . "(rotação emergencial sem deploy). Esperado 'lc-8ztrdyp', obtido: '{$saidaPrecedencia}'\n";
     exit(1);
 }
 

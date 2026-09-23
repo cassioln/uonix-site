@@ -51,14 +51,17 @@ O procedimento descrito rotacionava algo que nunca havia sido provisionado.
   somente em produção. A ausência silenciosa da constante manteve o módulo inativo por
   meses sem emitir sinal algum; embutir o padrão remove essa classe de falha.
 - **Formato:** string separada por vírgula com o `id` de cada tag da AdOpt. São
-  identificadores curtos de **10 caracteres** no alfabeto `[A-Za-z0-9_-]` — por exemplo
-  `9BxuTvI1_q`. **Não são UUIDs.**
-- **Nome de categoria nunca funciona como ID**, e a garantia vem de duas barreiras
-  complementares: uma exigência estrutural (o identificador curto precisa conter ao menos um
-  caractere que não seja letra minúscula, o que derruba `statistics`, `desempenho`,
-  `necessarios` e qualquer rótulo em minúsculas, em qualquer idioma) e uma lista explícita de
-  nomes conhecidos, que é o que barra rótulos com underscore ou dígito, como `uonix_cookies`.
-  Uma barreira sozinha não fecha — foi medido por mutação.
+  identificadores de **exatamente 10 caracteres** no alfabeto `[A-Za-z0-9_-]` — por exemplo
+  `9BxuTvI1_q`. **Não são UUIDs.** O comprimento foi medido nas cinco tags da conta.
+- **Colar um rótulo do painel não funciona**, e a proteção tem duas barreiras: uma lista dos
+  rótulos conhecidos nos dois idiomas, comparada **em minúsculas** porque o painel os exibe
+  capitalizados (`Statistics`, `Desempenho`); e o comprimento exato de 10, que elimina sem
+  enumerar toda a família mais longa (`uonix_funcional`, `preferences_v2`, `Estatisticas`).
+- **O que a validação não garante:** ela não separa palavra arbitrária de token. `Habilitado`
+  tem o mesmo formato de `Lc-8ztRDYp` — 10 caracteres com maiúscula. É aceitável porque a AdOpt
+  só entrega `id` de tag no callback, nunca nome de categoria: um valor indevido jamais casa e o
+  módulo simplesmente não arma. A validação é detector de engano plausível, não fronteira de
+  segurança, e o engano plausível é colar um rótulo — que é o que as duas barreiras cobrem.
 - **Categoria importa, e é pré-requisito:** a tag precisa estar em uma categoria
   **recusável** no painel. A categoria `Necessárias` (id 1) é aceita incondicionalmente
   pela AdOpt mesmo quando o visitante clica em "Rejeitar tudo", então uma tag ali
