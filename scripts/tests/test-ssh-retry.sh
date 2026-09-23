@@ -6,11 +6,17 @@ LIBRARY="${ROOT_DIR}/scripts/lib/ssh-retry.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
-# O spool de --replay-stdin é criado em `${TMPDIR:-/tmp}`. Apontar TMPDIR para o
-# diretório deste teste é o que permite a asserção 10 varrer só o próprio
-# território: sem isto, o spool cairia no TMPDIR do sistema, e escopar a varredura
-# tornaria aquela asserção VACUOSA — ela nunca acharia o vazamento que existe para
-# detectar. As duas mudanças andam juntas; uma sem a outra é pior que nenhuma.
+# O spool de --replay-stdin é criado em `${TMPDIR:-/tmp}`. Apontá-lo para o diretório
+# deste teste é o que dá isolamento: antes, um spool vazado por OUTRA execução fazia
+# a asserção 10 reprovar sem nada errado no código — FAIL falso, que em teste de
+# guarda ensina a ignorar vermelho.
+#
+# É esta linha que carrega o peso, medido numa matriz 2×2 com o defeito injetado. O
+# escopo do `find` na asserção 10 é documentação de intenção e, dado o export,
+# comportamentalmente neutro: com o export, `${TMPDIR:-/tmp}` e `$TMP_DIR` são o
+# mesmo diretório. O que NÃO funciona é o inverso — escopar o `find` sem o export
+# deixa a asserção vacuosa, porque o vazamento cai fora do escopo varrido. Era
+# exatamente o que a issue #277 recomendava como único passo.
 export TMPDIR="$TMP_DIR"
 
 fail() {
@@ -184,7 +190,12 @@ exit 255
 MOCK
 chmod 755 "$TMP_DIR/sempre-255.sh"
 
-printf 'carga\n' | bash "$LIBRARY" --replay-stdin 3 5 -- "$TMP_DIR/sempre-255.sh" 2> "$sinal_log" &
+# Cadência de 4s: grande o bastante para o SIGTERM cair durante a espera, pequena o
+# bastante para o teste não custar caro. O que se mede é a LATÊNCIA entre o kill e a
+# saída — sem ela, a asserção certifica apenas o código de saída, e um trap que
+# limpa mas adia o encerramento até o fim do sleep passaria igual. Foi o que
+# aconteceu: a primeira versão desta asserção era verde com o atraso inteiro.
+printf 'carga\n' | bash "$LIBRARY" --replay-stdin 3 4 -- "$TMP_DIR/sempre-255.sh" 2> "$sinal_log" &
 sinal_pid=$!
 
 sinal_esperou=0
@@ -195,16 +206,32 @@ while [ "$sinal_esperou" -lt 100 ]; do
   sleep 0.1
   sinal_esperou=$((sinal_esperou + 1))
 done
-grep -q 'aguardando' "$sinal_log" 2>/dev/null \
-  || fail 'o wrapper não chegou à espera do retry; não há como testar o sinal'
+grep -q 'aguardando' "$sinal_log" 2>/dev/null || {
+  # Não deixar o wrapper órfão ao abortar: ele ficaria vivo até o fim da cadência.
+  kill -KILL "$sinal_pid" 2>/dev/null || :
+  wait "$sinal_pid" 2>/dev/null || :
+  fail 'o wrapper não chegou à espera do retry; não há como testar o sinal'
+}
 
-kill -TERM "$sinal_pid" 2>/dev/null || fail 'não consegui enviar SIGTERM ao wrapper'
+sinal_antes="$(date +%s)"
+kill -TERM "$sinal_pid" 2>/dev/null || {
+  kill -KILL "$sinal_pid" 2>/dev/null || :
+  fail 'não consegui enviar SIGTERM ao wrapper'
+}
 set +e
 wait "$sinal_pid"
 sinal_status=$?
 set -e
+sinal_depois="$(date +%s)"
+sinal_latencia=$(( sinal_depois - sinal_antes ))
+
 [ "$sinal_status" -eq 143 ] \
   || fail "SIGTERM deveria encerrar com 143 (128+15), obteve $sinal_status"
+# Atender o sinal DEPOIS de terminar a espera não é atender: o cancelamento do
+# Actions escala para SIGKILL muito antes. Com cadência de 4s, uma latência de 2s ou
+# mais significa que o handler esperou o sleep em vez de matá-lo.
+[ "$sinal_latencia" -lt 2 ] \
+  || fail "SIGTERM levou ${sinal_latencia}s para encerrar; o handler não interrompeu a espera da cadência"
 
 leaked="$(find "$TMP_DIR" -maxdepth 1 -name 'uonix-ssh-retry-stdin.*' 2>/dev/null | head -1)"
 [ -z "$leaked" ] || fail "cópia de stdin vazou em $leaked"
