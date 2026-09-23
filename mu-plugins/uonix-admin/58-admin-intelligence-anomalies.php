@@ -628,7 +628,15 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_organic_drop' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_anomaly_state_option' ) ) {
 	/**
-	 * Opção que guarda, por gatilho, se ele estava anômalo na última verificação.
+	 * Opção única com o resultado da última verificação.
+	 *
+	 * Guarda duas coisas sob o mesmo nome: `triggers`, o estado por gatilho que
+	 * alimenta a deduplicação, e `summary`, o resultado completo que o painel
+	 * renderiza.
+	 *
+	 * **Uma opção e não duas**, porque as duas são escritas juntas pela mesma
+	 * verificação e precisam da mesma proteção de clone. Separá-las criaria a
+	 * possibilidade de uma ser protegida e a outra não, e de divergirem.
 	 *
 	 * Acessor, e não string solta, pelo mesmo motivo de
 	 * `uonix_intelligence_report_hook()`: quem grava e quem lê estão em arquivos
@@ -644,23 +652,62 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_state_option' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_anomaly_read_option' ) ) {
+	/**
+	 * Conteúdo bruto da opção, sempre como array.
+	 */
+	function uonix_intelligence_anomaly_read_option() {
+		$salvo = function_exists( 'get_option' ) ? get_option( uonix_intelligence_anomaly_state_option(), array() ) : array();
+
+		return is_array( $salvo ) ? $salvo : array();
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_anomaly_get_state' ) ) {
 	/**
 	 * Estado da última verificação: `array<string, bool>` por gatilho.
 	 */
 	function uonix_intelligence_anomaly_get_state() {
-		$salvo = function_exists( 'get_option' ) ? get_option( uonix_intelligence_anomaly_state_option(), array() ) : array();
-		if ( ! is_array( $salvo ) ) {
-			return array();
-		}
+		$salvo    = uonix_intelligence_anomaly_read_option();
+		$gatilhos = isset( $salvo['triggers'] ) && is_array( $salvo['triggers'] ) ? $salvo['triggers'] : array();
+
 		$estado = array();
-		foreach ( $salvo as $gatilho => $ativo ) {
+		foreach ( $gatilhos as $gatilho => $ativo ) {
 			if ( is_string( $gatilho ) && '' !== $gatilho ) {
 				$estado[ $gatilho ] = (bool) $ativo;
 			}
 		}
 
 		return $estado;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_get_summary' ) ) {
+	/**
+	 * Resultado da última verificação, para o painel renderizar SEM recomputar.
+	 *
+	 * O painel não pode chamar `uonix_intelligence_anomaly_detect()`: ele faz uma
+	 * consulta ao banco e uma chamada à API da Search Console, e o badge aparece no
+	 * rótulo da aba, que é renderizado em TODA carga da tela. Recomputar ali
+	 * significaria uma chamada de API por pageview, e um painel que fica lento
+	 * exatamente quando o Google está lento.
+	 *
+	 * É o mesmo princípio que o painel de métricas já segue: renderizar do snapshot,
+	 * nunca da API. Quem computa é o evento diário.
+	 *
+	 * `checked_at` vazio significa "nunca verificado", que é estado diferente de
+	 * "verificado e normal" — e o painel precisa dizer qual dos dois é.
+	 */
+	function uonix_intelligence_anomaly_get_summary() {
+		$salvo   = uonix_intelligence_anomaly_read_option();
+		$resumo  = isset( $salvo['summary'] ) && is_array( $salvo['summary'] ) ? $salvo['summary'] : array();
+
+		return array(
+			'findings'    => isset( $resumo['findings'] ) && is_array( $resumo['findings'] ) ? $resumo['findings'] : array(),
+			'anomalous'   => isset( $resumo['anomalous'] ) ? (int) $resumo['anomalous'] : 0,
+			'unavailable' => isset( $resumo['unavailable'] ) ? (int) $resumo['unavailable'] : 0,
+			'checked_at'  => isset( $resumo['checked_at'] ) ? (string) $resumo['checked_at'] : '',
+		);
 	}
 }
 
@@ -980,7 +1027,14 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_run_check' ) ) {
 		}
 
 		if ( function_exists( 'update_option' ) ) {
-			update_option( uonix_intelligence_anomaly_state_option(), $novo, false );
+			// `summary` é gravado sempre, inclusive quando o envio falhou: o painel deve
+			// mostrar o que foi medido agora, independentemente de o e-mail ter saído.
+			// Só `triggers` carrega a semântica de "já avisei".
+			update_option(
+				uonix_intelligence_anomaly_state_option(),
+				array( 'triggers' => $novo, 'summary' => $resumo ),
+				false
+			);
 		}
 
 		return array( 'summary' => $resumo, 'transitions' => count( $transicoes ), 'send' => $envio );
