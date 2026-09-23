@@ -61,7 +61,25 @@ if [ "$replay_stdin" = true ]; then
   stdin_copy="$(mktemp "${TMPDIR:-/tmp}/uonix-ssh-retry-stdin.XXXXXX")" || exit 64
   # Trap em aspas SIMPLES de propósito: expandir o caminho aqui quebraria com
   # qualquer metacaractere no valor. A expansão acontece na hora da limpeza.
-  trap 'rm -f -- "$stdin_copy"' EXIT HUP INT TERM
+  # Trap APENAS em EXIT, e os sinais deixados no comportamento padrão. O antigo
+  # `trap '...' EXIT HUP INT TERM` era o defeito: um handler de sinal sem `exit`
+  # limpa e RETOMA. Medido: com SIGTERM durante a espera do retry, o processo seguia
+  # vivo, a tentativa seguinte falhava ao abrir o spool já removido, e o wrapper
+  # saía 1 depois de esperar a cadência inteira — com `3 60`, até 120 segundos
+  # ignorando o cancelamento.
+  #
+  # A correção NÃO é acrescentar `exit 143` ao handler, que era o caminho óbvio e o
+  # que a issue #277 recomendava. Medido: com o sinal no padrão, o bash morre na
+  # hora, roda este trap de EXIT e limpa o spool, e o status observado é 143 de todo
+  # modo — latência 0,00s contra 4,00s do handler explícito, porque o bash ADIA
+  # qualquer handler até o comando em primeiro plano terminar. Handler explícito
+  # ficava mais lento e mais complicado para chegar ao mesmo lugar, e ainda tornava
+  # `WIFSIGNALED` falso.
+  #
+  # A propriedade que importa — encerrar de imediato, sem abrir outra sessão SSH
+  # depois do cancelamento — é asserida por latência em test-ssh-retry.sh, não por
+  # este comentário. Reintroduzir um handler sem `exit` reprova lá.
+  trap 'rm -f -- "$stdin_copy"' EXIT
   chmod 600 "$stdin_copy"
   cat > "$stdin_copy"
   if [ ! -s "$stdin_copy" ]; then

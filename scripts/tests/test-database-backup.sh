@@ -355,4 +355,38 @@ printf '%s' "$backup_step" | grep -q 'LOCAWEB_SSH_KNOWN_HOSTS_FILE' \
 printf '%s' "$backup_step" | grep -q 'LOCAWEB_SSH_PASSWORD_FILE' \
   || fail 'passo de backup não define LOCAWEB_SSH_PASSWORD_FILE'
 
-printf 'PASS: backup de banco valida integridade, precede a publicação e fica reservado à contingência manual; rollback automático é seletivo e fail-closed.\n'
+# O caminho do dump é extraído da saída do script, e com retry essa saída ACUMULA
+# stdout de tentativas parciais. A linha autoritativa é a ÚLTIMA: quem a imprime é
+# `main()` de backup-remote-database.sh, a partir da variável local `$dump_file`, e o
+# faz depois de ecoar a saída remota. O que se repete são as linhas do remoto
+# (`mechanism=`, `tables=`, `bytes=`), que vêm antes.
+#
+# Pegar a primeira selecionaria um caminho do namespace do host remoto vindo de uma
+# tentativa parcial, e esse valor vai para o GITHUB_ENV como DB_BACKUP_FILE, de onde
+# o rollback e o checkpoint de migração o consomem — apontando para um dump que não
+# existe. Hoje há uma ocorrência só e as duas formas coincidem; esta guarda existe
+# porque a coincidência não é garantida.
+#
+# `head -1` é banido explicitamente, e não só ausente: era a forma que este
+# repositório usou por um PR, e a revisão mediu que ela escolhe a ocorrência errada.
+todas_extracoes="$(grep -n "sed -n 's/\^DB_BACKUP_FILE=//p'" "$workflow" || true)"
+[ -n "$todas_extracoes" ] \
+  || fail 'não encontrei nenhuma extração de DB_BACKUP_FILE no workflow; a guarda de direção ficaria vazia'
+
+while IFS= read -r extracao; do
+  [ -n "$extracao" ] || continue
+  case "$extracao" in
+    *'| tail -1'*) : ;;
+    *'| head -1'*)
+      fail "extração de DB_BACKUP_FILE usa head -1, que pega a ocorrência de tentativa parcial: ${extracao}"
+      ;;
+    *)
+      fail "extração de DB_BACKUP_FILE sem seleção explícita da última ocorrência: ${extracao}"
+      ;;
+  esac
+done <<EOF
+$todas_extracoes
+EOF
+
+printf 'PASS: backup de banco valida integridade, precede a publicação, fica reservado à contingência manual, extrai o caminho da ÚLTIMA ocorrência (%s ponto[s]); rollback automático é seletivo e fail-closed.\n' \
+  "$(printf '%s\n' "$todas_extracoes" | grep -c '[^[:space:]]' || true)"

@@ -6,6 +6,19 @@ LIBRARY="${ROOT_DIR}/scripts/lib/ssh-retry.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
+# O spool de --replay-stdin é criado em `${TMPDIR:-/tmp}`. Apontá-lo para o diretório
+# deste teste é o que dá isolamento: antes, um spool vazado por OUTRA execução fazia
+# a asserção 10 reprovar sem nada errado no código — FAIL falso, que em teste de
+# guarda ensina a ignorar vermelho.
+#
+# É esta linha que carrega o peso, medido numa matriz 2×2 com o defeito injetado. O
+# escopo do `find` na asserção 10 é documentação de intenção e, dado o export,
+# comportamentalmente neutro: com o export, `${TMPDIR:-/tmp}` e `$TMP_DIR` são o
+# mesmo diretório. O que NÃO funciona é o inverso — escopar o `find` sem o export
+# deixa a asserção vacuosa, porque o vazamento cai fora do escopo varrido. Era
+# exatamente o que a issue #277 recomendava como único passo.
+export TMPDIR="$TMP_DIR"
+
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
   exit 1
@@ -156,7 +169,71 @@ done
 
 # 10) A cópia de stdin não pode sobreviver ao processo: o script remoto pode
 #     conter caminhos e nomes de arquivo do destino.
-leaked="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'uonix-ssh-retry-stdin.*' 2>/dev/null | head -1)"
+# Escopado ao TMP_DIR deste teste, e não ao TMPDIR do sistema. Varrendo o diretório
+# do sistema, um arquivo vazado por OUTRA execução — uma rodada de mutação anterior,
+# por exemplo — fazia este teste reprovar sem nada errado no código sob teste.
+# Observado. Em runner efêmero do Actions o TMPDIR é por job e o efeito não aparece;
+# localmente tornava o teste dependente de ordem de execução, e FAIL falso em teste
+# de guarda é o pior tipo de ruído, porque ensina a ignorar vermelho.
+# 10b) SIGTERM tem de ENCERRAR, não só limpar. Um trap de sinal sem `exit` roda o
+#      handler e RETOMA: o processo sobrevive, a tentativa seguinte falha ao abrir o
+#      spool já removido, e o wrapper sai 1. Fail-closed, mas ignora o cancelamento
+#      do Actions até o SIGKILL e converte estado retentável em erro duro.
+#
+#      Sem espera de tempo fixo: aguarda a mensagem de retry aparecer, que é a prova
+#      de que o processo já está no `sleep` da cadência. Assim o teste não depende de
+#      velocidade de máquina.
+sinal_log="$TMP_DIR/sinal.err"
+cat > "$TMP_DIR/sempre-255.sh" <<'MOCK'
+#!/usr/bin/env bash
+exit 255
+MOCK
+chmod 755 "$TMP_DIR/sempre-255.sh"
+
+# Cadência de 4s: grande o bastante para o SIGTERM cair durante a espera, pequena o
+# bastante para o teste não custar caro. O que se mede é a LATÊNCIA entre o kill e a
+# saída — sem ela, a asserção certifica apenas o código de saída, e um trap que
+# limpa mas adia o encerramento até o fim do sleep passaria igual. Foi o que
+# aconteceu: a primeira versão desta asserção era verde com o atraso inteiro.
+printf 'carga\n' | bash "$LIBRARY" --replay-stdin 3 4 -- "$TMP_DIR/sempre-255.sh" 2> "$sinal_log" &
+sinal_pid=$!
+
+sinal_esperou=0
+while [ "$sinal_esperou" -lt 100 ]; do
+  if grep -q 'aguardando' "$sinal_log" 2>/dev/null; then
+    break
+  fi
+  sleep 0.1
+  sinal_esperou=$((sinal_esperou + 1))
+done
+grep -q 'aguardando' "$sinal_log" 2>/dev/null || {
+  # Não deixar o wrapper órfão ao abortar: ele ficaria vivo até o fim da cadência.
+  kill -KILL "$sinal_pid" 2>/dev/null || :
+  wait "$sinal_pid" 2>/dev/null || :
+  fail 'o wrapper não chegou à espera do retry; não há como testar o sinal'
+}
+
+sinal_antes="$(date +%s)"
+kill -TERM "$sinal_pid" 2>/dev/null || {
+  kill -KILL "$sinal_pid" 2>/dev/null || :
+  fail 'não consegui enviar SIGTERM ao wrapper'
+}
+set +e
+wait "$sinal_pid"
+sinal_status=$?
+set -e
+sinal_depois="$(date +%s)"
+sinal_latencia=$(( sinal_depois - sinal_antes ))
+
+[ "$sinal_status" -eq 143 ] \
+  || fail "SIGTERM deveria encerrar com 143 (128+15), obteve $sinal_status"
+# Atender o sinal DEPOIS de terminar a espera não é atender: o cancelamento do
+# Actions escala para SIGKILL muito antes. Com cadência de 4s, uma latência de 2s ou
+# mais significa que o handler esperou o sleep em vez de matá-lo.
+[ "$sinal_latencia" -lt 2 ] \
+  || fail "SIGTERM levou ${sinal_latencia}s para encerrar; o handler não interrompeu a espera da cadência"
+
+leaked="$(find "$TMP_DIR" -maxdepth 1 -name 'uonix-ssh-retry-stdin.*' 2>/dev/null | head -1)"
 [ -z "$leaked" ] || fail "cópia de stdin vazou em $leaked"
 
 echo 'PASS: uonix_ssh_retry retenta só em falha de transporte (255), converge, propaga outros exit codes imediatamente, e --replay-stdin reenvia o payload em toda tentativa sem afrouxar o critério.'
