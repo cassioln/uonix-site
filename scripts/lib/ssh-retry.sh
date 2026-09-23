@@ -61,7 +61,19 @@ if [ "$replay_stdin" = true ]; then
   stdin_copy="$(mktemp "${TMPDIR:-/tmp}/uonix-ssh-retry-stdin.XXXXXX")" || exit 64
   # Trap em aspas SIMPLES de propósito: expandir o caminho aqui quebraria com
   # qualquer metacaractere no valor. A expansão acontece na hora da limpeza.
-  trap 'rm -f -- "$stdin_copy"' EXIT HUP INT TERM
+  # Um trap de sinal SEM `exit` limpa e RETOMA. Medido: enviando SIGTERM durante a
+  # espera do retry, o processo seguia vivo, a tentativa seguinte falhava ao abrir o
+  # spool já removido, e o wrapper saía 1. Fail-closed, então não havia risco de
+  # aprovação indevida — mas o passo ignorava SIGTERM e atrasava o cancelamento do
+  # Actions até o SIGKILL, além de converter estado retentável em exit 1 duro.
+  #
+  # Os sinais agora encerram com 128+N, a convenção de shell para morte por sinal,
+  # e o EXIT continua cobrindo a saída normal. O `rm` roda duas vezes no caminho de
+  # sinal (handler e depois EXIT), o que é inofensivo com `rm -f`.
+  trap 'rm -f -- "$stdin_copy"' EXIT
+  trap 'rm -f -- "$stdin_copy"; exit 129' HUP
+  trap 'rm -f -- "$stdin_copy"; exit 130' INT
+  trap 'rm -f -- "$stdin_copy"; exit 143' TERM
   chmod 600 "$stdin_copy"
   cat > "$stdin_copy"
   if [ ! -s "$stdin_copy" ]; then

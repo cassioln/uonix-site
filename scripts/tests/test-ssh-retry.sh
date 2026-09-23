@@ -6,6 +6,13 @@ LIBRARY="${ROOT_DIR}/scripts/lib/ssh-retry.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
+# O spool de --replay-stdin é criado em `${TMPDIR:-/tmp}`. Apontar TMPDIR para o
+# diretório deste teste é o que permite a asserção 10 varrer só o próprio
+# território: sem isto, o spool cairia no TMPDIR do sistema, e escopar a varredura
+# tornaria aquela asserção VACUOSA — ela nunca acharia o vazamento que existe para
+# detectar. As duas mudanças andam juntas; uma sem a outra é pior que nenhuma.
+export TMPDIR="$TMP_DIR"
+
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
   exit 1
@@ -156,7 +163,50 @@ done
 
 # 10) A cópia de stdin não pode sobreviver ao processo: o script remoto pode
 #     conter caminhos e nomes de arquivo do destino.
-leaked="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'uonix-ssh-retry-stdin.*' 2>/dev/null | head -1)"
+# Escopado ao TMP_DIR deste teste, e não ao TMPDIR do sistema. Varrendo o diretório
+# do sistema, um arquivo vazado por OUTRA execução — uma rodada de mutação anterior,
+# por exemplo — fazia este teste reprovar sem nada errado no código sob teste.
+# Observado. Em runner efêmero do Actions o TMPDIR é por job e o efeito não aparece;
+# localmente tornava o teste dependente de ordem de execução, e FAIL falso em teste
+# de guarda é o pior tipo de ruído, porque ensina a ignorar vermelho.
+# 10b) SIGTERM tem de ENCERRAR, não só limpar. Um trap de sinal sem `exit` roda o
+#      handler e RETOMA: o processo sobrevive, a tentativa seguinte falha ao abrir o
+#      spool já removido, e o wrapper sai 1. Fail-closed, mas ignora o cancelamento
+#      do Actions até o SIGKILL e converte estado retentável em erro duro.
+#
+#      Sem espera de tempo fixo: aguarda a mensagem de retry aparecer, que é a prova
+#      de que o processo já está no `sleep` da cadência. Assim o teste não depende de
+#      velocidade de máquina.
+sinal_log="$TMP_DIR/sinal.err"
+cat > "$TMP_DIR/sempre-255.sh" <<'MOCK'
+#!/usr/bin/env bash
+exit 255
+MOCK
+chmod 755 "$TMP_DIR/sempre-255.sh"
+
+printf 'carga\n' | bash "$LIBRARY" --replay-stdin 3 5 -- "$TMP_DIR/sempre-255.sh" 2> "$sinal_log" &
+sinal_pid=$!
+
+sinal_esperou=0
+while [ "$sinal_esperou" -lt 100 ]; do
+  if grep -q 'aguardando' "$sinal_log" 2>/dev/null; then
+    break
+  fi
+  sleep 0.1
+  sinal_esperou=$((sinal_esperou + 1))
+done
+grep -q 'aguardando' "$sinal_log" 2>/dev/null \
+  || fail 'o wrapper não chegou à espera do retry; não há como testar o sinal'
+
+kill -TERM "$sinal_pid" 2>/dev/null || fail 'não consegui enviar SIGTERM ao wrapper'
+set +e
+wait "$sinal_pid"
+sinal_status=$?
+set -e
+[ "$sinal_status" -eq 143 ] \
+  || fail "SIGTERM deveria encerrar com 143 (128+15), obteve $sinal_status"
+
+leaked="$(find "$TMP_DIR" -maxdepth 1 -name 'uonix-ssh-retry-stdin.*' 2>/dev/null | head -1)"
 [ -z "$leaked" ] || fail "cópia de stdin vazou em $leaked"
 
 echo 'PASS: uonix_ssh_retry retenta só em falha de transporte (255), converge, propaga outros exit codes imediatamente, e --replay-stdin reenvia o payload em toda tentativa sem afrouxar o critério.'

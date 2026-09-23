@@ -403,7 +403,20 @@ jobs:
             --output-dir="$BACKUP_DIR" \
             --backup-id="$BACKUP_ID" | tee "$RUNNER_TEMP/db-backup.out"
 
-          db_backup_file="$(sed -n 's/^DB_BACKUP_FILE=//p' "$RUNNER_TEMP/db-backup.out")"
+          # `head -1` pega explicitamente a PRIMEIRA ocorrência. Com retry,
+          # `output="$(...)"` acumula stdout de tentativas parciais: `mechanism=` e
+          # `tables=` já aparecem duas vezes hoje. `DB_BACKUP_FILE=` continua com uma
+          # ocorrência só porque quem a imprime é o script local, a partir de variável
+          # local, e o remoto emite apenas mechanism/tables/bytes — funciona por sorte
+          # de camadas, e nada fixava isso. Com duas ocorrências, o valor viraria
+          # multi-linha e iria assim para o GITHUB_ENV.
+          #
+          # NÃO usar `sed -n 's/.../p;q'`: o `q` sai na primeira linha PROCESSADA, não
+          # na primeira que casa, então devolve vazio quando a linha não é a primeira
+          # do arquivo — medido. E `sed -n '/pat/{s///p;q}'`, que seria o idioma
+          # correto no GNU, é recusado pelo sed do BSD ("extra characters at the end
+          # of q command"), o que quebraria validação local no macOS.
+          db_backup_file="$(sed -n 's/^DB_BACKUP_FILE=//p' "$RUNNER_TEMP/db-backup.out" | head -1)"
           test -n "$db_backup_file"
           printf 'DB_BACKUP_FILE=%s\n' "$db_backup_file" >> "$GITHUB_ENV"
           printf 'Backup de banco criado: %s\n' "${db_backup_file##*/}"
@@ -1029,7 +1042,9 @@ jobs:
             --environment=production \
             --output-dir="$BACKUP_DIR" \
             --backup-id="zz-migration-${BACKUP_ID}" | tee "$RUNNER_TEMP/db-migration-backup.out"
-          migration_backup_file="$(sed -n 's/^DB_BACKUP_FILE=//p' "$RUNNER_TEMP/db-migration-backup.out")"
+          # Mesma razão do passo de backup de banco: primeira ocorrência, explícita.
+          # A issue #277 citava só a outra chamada; esta tem o mesmo padrão.
+          migration_backup_file="$(sed -n 's/^DB_BACKUP_FILE=//p' "$RUNNER_TEMP/db-migration-backup.out" | head -1)"
           test -n "$migration_backup_file"
           printf 'DB_BACKUP_FILE=%s\n' "$migration_backup_file" >> "$GITHUB_ENV"
           printf 'Checkpoint de banco pré-migração: %s\n' "${migration_backup_file##*/}"

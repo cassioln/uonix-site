@@ -273,4 +273,34 @@ printf '%s' "$remote_output" | grep -q 'nenhuma mutação foi iniciada' \
 [ -f "$lock/owner" ] \
   || fail 'bloco remoto removeu o owner do lock no caminho sem mutação'
 
-printf 'PASS: o rollback distingue os quatro desfechos — nada preparado, preparado sem mutação (32 -> 0), revertido, e reversão falhada (!= 0) — sem colapsar em || true.\n'
+# --- Precedência: a verificação de DONO vem antes do exit 32 -------------------
+# O `exit 32` significa "preparado, nada mutado, nada a restaurar", e o runner o
+# traduz em sucesso. Se ele viesse ANTES da verificação de dono, um rollback
+# disparado por uma execução que NÃO é dona do lock sairia 32 e seria reportado
+# como sucesso — violação de posse convertida em "nada a fazer".
+#
+# Asserção COMPORTAMENTAL, e não de ordem de linha: mover o `exit 32` para antes
+# do `test "$(cat owner)" = "$run_id"` sobrevive a qualquer checagem estática de
+# presença, e sobrevivia às duas asserções do #276.
+alien_root="$TMP_DIR/remote-root-alheio"
+alien_backup="$alien_root/.uonix-deploy-backups/run-1"
+alien_lock="$alien_root/.uonix-operation.lock"
+mkdir -p "$alien_lock" "$alien_backup"
+printf 'outra-execucao-99\n' > "$alien_lock/owner"
+chmod 600 "$alien_lock/owner"
+
+set +e
+alien_output="$(
+  bash "$REMOTE_BLOCK" \
+    "$alien_root" "$alien_backup" \
+    "$TMP_DIR/bin/php-fake" "$TMP_DIR/bin/wp-fake" \
+    "$TARGET_URL" "$DEPLOY_RUN_ID" 2>&1
+)"
+alien_status=$?
+set -e
+[ "$alien_status" -ne 32 ] \
+  || fail 'bloco remoto saiu 32 com lock de OUTRA execução: violação de posse virou "nada a restaurar"'
+[ "$alien_status" -ne 0 ] \
+  || fail "bloco remoto aceitou lock de outra execução como sucesso ($alien_output)"
+
+printf 'PASS: o rollback distingue os quatro desfechos — nada preparado, preparado sem mutação (32 -> 0), revertido, e reversão falhada (!= 0) — sem colapsar em || true, e a verificação de dono precede o 32.\n'
