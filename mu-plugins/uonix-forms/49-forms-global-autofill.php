@@ -80,10 +80,13 @@ if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
                 continue;
             }
 
-            // Primeira barreira: lista explícita de nomes de categoria conhecidos.
-            // Defesa em profundidade — a barreira que de fato garante a invariante é a estrutural,
-            // logo abaixo. Enumerar nomes nunca fecha: o painel os exibe em português e em inglês,
-            // e uma lista sempre fica atrás de um nome novo.
+            // Primeira barreira: lista explícita de nomes conhecidos que não são IDs.
+            //
+            // Ela NÃO é redundante com a regra estrutural abaixo. Nomes compostos só de letras
+            // minúsculas ('statistics', 'desempenho') caem na regra estrutural; nomes que contêm
+            // underscore, dígito ou maiúscula — como 'uonix_cookies' — passam por ela e só são
+            // barrados aqui. Medido por mutação: esvaziar esta lista faz 'uonix_cookies' ser
+            // aceito como ID.
             if ( in_array( strtolower( $id ), array( 'funcional', 'preferences', 'functional', 'uonix_cookies', 'marketing', 'analytics', 'necessario', 'essential' ), true ) ) {
                 continue;
             }
@@ -92,10 +95,13 @@ if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
             // AdOpt) ou o identificador curto desta conta — 10+ caracteres em [A-Za-z0-9_-] que
             // contenham ao menos um caractere que NÃO seja letra minúscula.
             //
-            // É essa última exigência que torna a invariante verdadeira por construção: nome de
-            // categoria é palavra minúscula em qualquer idioma ('statistics', 'performance',
-            // 'necessarios', 'desempenho', 'publicidade'), então é rejeitado sem depender da lista.
-            // Nomes acentuados ('estatísticas') já falham no conjunto de caracteres.
+            // Essa última exigência cobre, por construção, todo nome de categoria composto só de
+            // letras minúsculas em qualquer idioma — 'statistics', 'performance', 'necessarios',
+            // 'desempenho', 'publicidade' —, sem depender de uma lista estar completa. Nomes
+            // acentuados ('estatísticas') já falham no conjunto de caracteres.
+            //
+            // O que ela NÃO cobre: rótulos com underscore, dígito ou maiúscula. Para esses a
+            // barreira é a lista explícita acima. As duas juntas é que fecham.
             //
             // Custo assumido: um identificador da AdOpt composto só de letras minúsculas seria
             // rejeitado. Com alfabeto de 64 caracteres isso tem ordem de 1 em 7.700 por tag, e o
