@@ -139,14 +139,59 @@ else
   # legadas como LITERAIS entre aspas. Por isso extrair os literais devolve
   # exatamente os legados: a corrente já é conferida acima, por `$php_option`.
   #
-  # Ancorado em `function ...cascade(` e no `return`, como a extração de
-  # `$php_option` acima, e pelo mesmo motivo: não depender de indentação. Trocar
-  # tabs por espaços no PHP não pode alterar o que este teste cobre.
+  # A janela é o corpo da função, delimitado por PROFUNDIDADE DE CHAVES — não pelo
+  # primeiro `return`. Parar no primeiro `return` truncava a janela, e o efeito era
+  # fail-open, não fail-closed: reescrever o `if ( 30 === $days )` como guard clause
+  # (`if ( 30 !== $days ) { return $cascade; }`) faz o `return` aparecer ANTES das
+  # atribuições, e uma geração acrescentada depois dele nunca entra na lista. A lista
+  # ficaria com uma entrada — **não vazia**, então o gate de lista vazia não dispara —
+  # e o teste passaria com a geração nova viajando no clone.
+  #
+  # Profundidade de chaves também não depende de indentação, que era a única
+  # restrição que justificava ancorar no `return`. Trocar tabs por espaços continua
+  # não alterando o que este teste cobre; há mutação de controle para isso.
+  #
+  # A âncora de início exige `function` no começo da linha: uma MENÇÃO ao nome da
+  # função num comentário anterior sequestrava a janela, e o resultado era pior que
+  # truncar — a lista virava o nome da função de opção corrente, que por construção
+  # começa com o prefixo protegido, tornando o laço incapaz de falhar.
+  corpo_da_cascata="$(
+    awk '/^[[:space:]]*function[[:space:]].*_snapshot_option_cascade[[:space:]]*\(/ { f = 1 }
+         f {
+           print
+           abertas = gsub(/\{/, "{")
+           fechadas = gsub(/\}/, "}")
+           profundidade += abertas - fechadas
+           if (dentro && profundidade <= 0) { exit }
+           if (profundidade > 0) { dentro = 1 }
+         }' "$METRICS"
+  )"
+
+  # Sanidade da janela: sem o `array(` da cascata, o que foi capturado não é o corpo
+  # dela, e derivar dali daria lista plausível e errada.
+  # Aspas simples deliberadas nas duas linhas: `$cascade` é nome de variável PHP,
+  # num padrão de grep e numa mensagem. Expandir no shell daria string vazia.
+  # shellcheck disable=SC2016
+  if ! printf '%s' "$corpo_da_cascata" | grep -q '\$cascade[[:space:]]*=[[:space:]]*array('; then
+    # shellcheck disable=SC2016
+    report 'a janela extraída não contém a atribuição de $cascade; não é o corpo de uonix_analytics_metrics_snapshot_option_cascade() e derivar dali daria lista errada.'
+    corpo_da_cascata=''
+  fi
+
+  # O hífen está na classe de propósito: este repositório já tem nome de option com
+  # hífen (`googlesitekit_analytics-4_settings`, no próprio predicado protegido), e
+  # sem ele um legado assim nomeado ficaria invisível com a lista seguindo não vazia.
+  #
+  # LIMITE DECLARADO: só LITERAIS são derivados. Um legado que deixe de ser literal
+  # e vire chamada — `$cascade[] = uonix_legado_v1_option();` — sai da lista em
+  # silêncio, e a lista continua não vazia, então o gate não dispara. Medido: cai de
+  # dois para um legado. Fechar isso exigiria resolver chamada de função PHP a partir
+  # de shell, desproporcional ao risco. O sinal disponível é a contagem impressa na
+  # linha de PASS. Um nome de option que não comece por `uonix_` tem o mesmo limite,
+  # herdado da extração de `$php_option` acima.
   legados="$(
-    awk '/function uonix_analytics_metrics_snapshot_option_cascade\(/{f=1}
-         f && /return/ {exit}
-         f {print}' "$METRICS" |
-      grep -oE "'uonix_[a-z0-9_]+'" |
+    printf '%s' "$corpo_da_cascata" |
+      grep -oE "'uonix_[a-z0-9_-]+'" |
       tr -d "'" |
       sort -u
   )"
@@ -282,11 +327,13 @@ if [ "$failures" -ne 0 ]; then
   exit 1
 fi
 
-# O número de legados derivados vai na saída de propósito. A lista não é mais
-# escrita à mão, então não há como uma asserção fixar a contagem sem reintroduzir
-# o número à mão que este teste acabou de remover. Imprimir torna visível um
-# estreitamento silencioso da extração — de dois legados para um, por exemplo —
-# sem transformar o número em contrato.
+# O número de legados derivados vai na saída porque é informação útil no log do CI,
+# e NÃO porque seja a única proteção contra estreitamento — uma versão anterior deste
+# comentário afirmava que "não há como fixar a contagem sem reintroduzir o número à
+# mão", e isso era falso. O estreitamento que preocupava é barrado por construção: a
+# janela é o corpo inteiro da função, delimitado por profundidade de chaves, com
+# sanidade exigindo o `array(` da cascata. Fixar uma contagem seria proxy fraco de
+# uma propriedade que a extração já garante.
 printf 'PASS: snapshot de métricas (prefixo derivado: %s) e Site Kit (%s) protegidos no clone; %s legado(s) derivado(s) da cascata e cobertos; 2 DELETE no lugar.\n' \
   "${snapshot_prefix:-?}" "${sitekit_prefix:-?}" \
   "$(printf '%s\n' "${legados:-}" | grep -c '[^[:space:]]' || true)"
