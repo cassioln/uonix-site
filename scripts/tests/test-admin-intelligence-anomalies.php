@@ -686,6 +686,15 @@ uox_assert( 'no_recipients' === $semDestino['send']['reason'], 'o motivo deveria
 uox_assert( 1 === uonix_intelligence_anomaly_get_summary()['anomalous'], 'o badge deve funcionar sem destinatário: o resumo continua contando a anomalia' );
 uox_assert( false === ( uonix_intelligence_anomaly_get_state()['lead_silence'] ?? null ), 'sem destinatário o estado não avança, para o aviso sair quando alguém se cadastrar' );
 
+// Lista vazia NÃO consome tentativa. Sem esta asserção, tratar o caso como falha de
+// envio passava despercebido — e aí um episódio que nasce sem destinatário gastaria o
+// teto em dias de espera e nunca avisaria, mesmo depois do cadastro.
+// Ausência da chave e zero são a mesma coisa aqui: nada foi tentado.
+uox_assert( 0 === (int) ( $semDestino['meta']['lead_silence']['attempts'] ?? 0 ), 'lista vazia não pode contar como tentativa de envio, obteve ' . ( $semDestino['meta']['lead_silence']['attempts'] ?? '(ausente)' ) );
+$semDestino2 = uonix_intelligence_anomaly_run_check( $anomalia, $hoje );
+uox_assert( 0 === (int) ( $semDestino2['meta']['lead_silence']['attempts'] ?? 0 ), 'nem depois de várias rodadas sem destinatário as tentativas podem acumular, obteve ' . ( $semDestino2['meta']['lead_silence']['attempts'] ?? '(ausente)' ) );
+uox_assert( empty( $semDestino2['meta']['lead_silence']['undelivered'] ), 'sem destinatário o episódio nunca pode ser marcado como aviso não entregue: nada foi tentado' );
+
 $GLOBALS['uox_options']['uonix_executive_report_recipients'] = array( 'operador@ksio.dev' );
 uonix_intelligence_anomaly_run_check( $anomalia, $hoje );
 uox_assert( 1 === count( $GLOBALS['uox_mail_calls'] ), 'cadastrar destinatário com anomalia em curso deveria disparar o aviso na verificação seguinte' );

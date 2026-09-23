@@ -157,16 +157,41 @@ function uox_semear( array $findings, $anomalous, $unavailable, array $meta = ar
 
 uox_assert( function_exists( 'uonix_intelligence_render_anomalies_panel' ), 'o painel de anomalias precisa existir como função de render' );
 
-$DASH = file_get_contents( $RAIZ . '/mu-plugins/uonix-admin/52-admin-analytics-dashboard.php' );
-uox_assert( false !== strpos( (string) $DASH, 'uonix_intelligence_render_anomalies_panel' ), 'o dashboard precisa CHAMAR o render do painel de anomalias; sem isso a aba fica vazia com a suíte verde' );
-uox_assert( false !== strpos( (string) $DASH, 'uonix-tab-anomalies' ), 'o dashboard precisa ter o link da aba de anomalias' );
-uox_assert( false !== strpos( (string) $DASH, 'uonix-panel-anomalies' ), 'o link da aba precisa apontar para o painel de anomalias' );
-uox_assert( false !== strpos( (string) $DASH, 'uonix_intelligence_anomaly_badge' ), 'o dashboard precisa calcular o badge para o rótulo da aba; sem isso o aviso só aparece para quem já abriu a aba' );
-uox_assert( false !== strpos( (string) $DASH, 'uonix_intelligence_anomaly_get_summary' ), 'o badge do rótulo precisa ler o resumo PERSISTIDO, não recomputar por pageview' );
+/**
+ * As asserções sobre o `52` são ESTRUTURAIS, e a limitação é declarada.
+ *
+ * O ideal seria executar `uonix_render_analytics_dashboard_page()` e afirmar sobre o
+ * HTML. Medido: aquela função exige `get_posts()`, taxonomias, permalinks e a
+ * maquinaria de gráficos — cerca de trinta stubs de partes do painel que nada têm a
+ * ver com anomalias. O teste passaria a reprovar a cada mexida no catálogo, e um
+ * teste que falha por motivo alheio é abandonado ou afrouxado.
+ *
+ * O que estas asserções cobrem: a chamada existe COM a guarda, o link da aba existe,
+ * e o badge é calculado do resumo persistido e impresso condicionalmente.
+ *
+ * O que elas NÃO cobrem: que a página inteira renderize sem erro fatal. Isso fica
+ * para a verificação em produção depois do deploy.
+ *
+ * Os trechos são casados por par guarda-mais-chamada, e não por nome solto. Um grep
+ * pelo nome da função sobrevive a trocar a guarda por `if ( false )`, porque o nome
+ * continua na linha seguinte — foi exatamente o que a verificação por mutação pegou
+ * neste arquivo.
+ */
+$DASH = (string) file_get_contents( $RAIZ . '/mu-plugins/uonix-admin/52-admin-analytics-dashboard.php' );
 
-// O badge no rótulo tem de ser CONDICIONAL ao estado: impresso sempre, deixaria a
+$par_render = "if ( function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {\n\t\t\tuonix_intelligence_render_anomalies_panel( \$active_dashboard_tab );";
+uox_assert( false !== strpos( $DASH, $par_render ), 'o dashboard precisa chamar o render do painel de anomalias, COM a guarda de function_exists imediatamente antes; sem isso a aba fica vazia com a suíte verde' );
+
+$par_badge = "\$anomaly_badge = function_exists( 'uonix_intelligence_anomaly_badge' )";
+uox_assert( false !== strpos( $DASH, $par_badge ), 'o dashboard precisa atribuir o badge a $anomaly_badge; sem isso o marcador do rótulo não tem o que imprimir e o aviso só aparece para quem já abriu a aba' );
+uox_assert( false !== strpos( $DASH, "\$anomaly_summary = function_exists( 'uonix_intelligence_anomaly_get_summary' )" ), 'o badge do rótulo precisa ler o resumo PERSISTIDO, não recomputar por pageview' );
+
+uox_assert( false !== strpos( $DASH, 'uonix-tab-anomalies' ), 'o dashboard precisa ter o link da aba de anomalias' );
+uox_assert( false !== strpos( $DASH, 'uonix-panel-anomalies' ), 'o link da aba precisa apontar para o painel de anomalias' );
+
+// O marcador no rótulo tem de ser CONDICIONAL ao estado: impresso sempre, deixaria a
 // aba com alarme permanente e o operador aprenderia a ignorá-lo.
-uox_assert( 1 === preg_match( "/'normal'\s*!==\s*\\\$anomaly_badge\['state'\]/", (string) $DASH ), 'o marcador no rótulo da aba deve aparecer só quando o estado não é normal' );
+uox_assert( 1 === preg_match( "/'normal'\s*!==\s*\\\$anomaly_badge\['state'\]/", $DASH ), 'o marcador no rótulo da aba deve aparecer só quando o estado não é normal' );
 
 // ---------------------------------------------------------------------------
 // 2. A aba precisa ser ALCANÇÁVEL: sem a allowlist, o link cai em "metrics".
