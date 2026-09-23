@@ -127,13 +127,91 @@ else
   esac
 
   # As versões LEGADAS também precisam estar cobertas: o fallback em cascata de
-  # 53-admin-analytics-metrics.php ainda lê v2 e v1, e elas carregam o mesmo dado.
-  for legado in uonix_analytics_metrics_snapshot_v1 uonix_analytics_metrics_snapshot_v2_30; do
-    case "$legado" in
-      "$snapshot_prefix"*) : ;;
-      *) report "o padrão protegido não cobre o snapshot legado '$legado', que o fallback em cascata ainda lê." ;;
-    esac
-  done
+  # 53-admin-analytics-metrics.php ainda as lê, e elas carregam o mesmo dado.
+  #
+  # A lista é DERIVADA da cascata, não escrita à mão. Escrita à mão, ela divergiria
+  # em silêncio, e a divergência é assimétrica: acrescentar uma geração ao fallback
+  # sem acrescentá-la aqui deixaria a nova geração viajar no clone com o teste
+  # VERDE — e o dado em questão é o texto cru de consultas do Search Console, que
+  # é o motivo de a proteção existir.
+  #
+  # Dentro da cascata, a versão corrente aparece como CHAMADA de função e as
+  # legadas como LITERAIS entre aspas. Por isso extrair os literais devolve
+  # exatamente os legados: a corrente já é conferida acima, por `$php_option`.
+  #
+  # A janela é o corpo da função, delimitado por PROFUNDIDADE DE CHAVES — não pelo
+  # primeiro `return`. Parar no primeiro `return` truncava a janela, e o efeito era
+  # fail-open, não fail-closed: reescrever o `if ( 30 === $days )` como guard clause
+  # (`if ( 30 !== $days ) { return $cascade; }`) faz o `return` aparecer ANTES das
+  # atribuições, e uma geração acrescentada depois dele nunca entra na lista. A lista
+  # ficaria com uma entrada — **não vazia**, então o gate de lista vazia não dispara —
+  # e o teste passaria com a geração nova viajando no clone.
+  #
+  # Profundidade de chaves também não depende de indentação, que era a única
+  # restrição que justificava ancorar no `return`. Trocar tabs por espaços continua
+  # não alterando o que este teste cobre; há mutação de controle para isso.
+  #
+  # A âncora de início exige `function` no começo da linha: uma MENÇÃO ao nome da
+  # função num comentário anterior sequestrava a janela, e o resultado era pior que
+  # truncar — a lista virava o nome da função de opção corrente, que por construção
+  # começa com o prefixo protegido, tornando o laço incapaz de falhar.
+  corpo_da_cascata="$(
+    awk '/^[[:space:]]*function[[:space:]].*_snapshot_option_cascade[[:space:]]*\(/ { f = 1 }
+         f {
+           print
+           abertas = gsub(/\{/, "{")
+           fechadas = gsub(/\}/, "}")
+           profundidade += abertas - fechadas
+           if (dentro && profundidade <= 0) { exit }
+           if (profundidade > 0) { dentro = 1 }
+         }' "$METRICS"
+  )"
+
+  # Sanidade da janela: sem o `array(` da cascata, o que foi capturado não é o corpo
+  # dela, e derivar dali daria lista plausível e errada.
+  # Aspas simples deliberadas nas duas linhas: `$cascade` é nome de variável PHP,
+  # num padrão de grep e numa mensagem. Expandir no shell daria string vazia.
+  # shellcheck disable=SC2016
+  if ! printf '%s' "$corpo_da_cascata" | grep -q '\$cascade[[:space:]]*=[[:space:]]*array('; then
+    # shellcheck disable=SC2016
+    report 'a janela extraída não contém a atribuição de $cascade; não é o corpo de uonix_analytics_metrics_snapshot_option_cascade() e derivar dali daria lista errada.'
+    corpo_da_cascata=''
+  fi
+
+  # O hífen está na classe de propósito: este repositório já tem nome de option com
+  # hífen (`googlesitekit_analytics-4_settings`, no próprio predicado protegido), e
+  # sem ele um legado assim nomeado ficaria invisível com a lista seguindo não vazia.
+  #
+  # LIMITE DECLARADO: só LITERAIS são derivados. Um legado que deixe de ser literal
+  # e vire chamada — `$cascade[] = uonix_legado_v1_option();` — sai da lista em
+  # silêncio, e a lista continua não vazia, então o gate não dispara. Medido: cai de
+  # dois para um legado. Fechar isso exigiria resolver chamada de função PHP a partir
+  # de shell, desproporcional ao risco. O sinal disponível é a contagem impressa na
+  # linha de PASS. Um nome de option que não comece por `uonix_` tem o mesmo limite,
+  # herdado da extração de `$php_option` acima.
+  legados="$(
+    printf '%s' "$corpo_da_cascata" |
+      grep -oE "'uonix_[a-z0-9_-]+'" |
+      tr -d "'" |
+      sort -u
+  )"
+
+  # Falha FECHADA: lista vazia faria o laço não executar e o teste passar sem
+  # verificar nada — o padrão de "teste passando por motivo errado" que este
+  # repositório já viu várias vezes. Sem cascata legível, isto reprova.
+  if [ -z "$legados" ]; then
+    report 'não consegui derivar os snapshots legados de uonix_analytics_metrics_snapshot_option_cascade(); a extração quebrou e a cobertura dos legados ficaria vazia.'
+  else
+    while IFS= read -r legado; do
+      [ -n "$legado" ] || continue
+      case "$legado" in
+        "$snapshot_prefix"*) : ;;
+        *) report "o padrão protegido não cobre o snapshot legado '$legado', que o fallback em cascata ainda lê." ;;
+      esac
+    done <<EOF
+$legados
+EOF
+  fi
 fi
 
 nao_eh_exclusao snapshot
@@ -249,5 +327,13 @@ if [ "$failures" -ne 0 ]; then
   exit 1
 fi
 
-printf 'PASS: snapshot de métricas (prefixo derivado: %s) e Site Kit (%s) protegidos no clone; legados cobertos; 2 DELETE no lugar.\n' \
-  "${snapshot_prefix:-?}" "${sitekit_prefix:-?}"
+# O número de legados derivados vai na saída porque é informação útil no log do CI,
+# e NÃO porque seja a única proteção contra estreitamento — uma versão anterior deste
+# comentário afirmava que "não há como fixar a contagem sem reintroduzir o número à
+# mão", e isso era falso. O estreitamento que preocupava é barrado por construção: a
+# janela é o corpo inteiro da função, delimitado por profundidade de chaves, com
+# sanidade exigindo o `array(` da cascata. Fixar uma contagem seria proxy fraco de
+# uma propriedade que a extração já garante.
+printf 'PASS: snapshot de métricas (prefixo derivado: %s) e Site Kit (%s) protegidos no clone; %s legado(s) derivado(s) da cascata e cobertos; 2 DELETE no lugar.\n' \
+  "${snapshot_prefix:-?}" "${sitekit_prefix:-?}" \
+  "$(printf '%s\n' "${legados:-}" | grep -c '[^[:space:]]' || true)"
