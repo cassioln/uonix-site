@@ -148,7 +148,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_daily_counts' ) ) {
 	 *
 	 * @return array<string, int>|null Null quando a tabela não existe.
 	 */
-	function uonix_intelligence_anomaly_lead_daily_counts( $days = 90 ) {
+	function uonix_intelligence_anomaly_lead_daily_counts( $days = 90, $today = null ) {
 		global $wpdb;
 		$tabela = uonix_intelligence_anomaly_submissions_table();
 		if ( '' === $tabela ) {
@@ -157,7 +157,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_daily_counts' ) ) {
 
 		$days   = is_int( $days ) && $days > 0 ? $days : 90;
 		$ids    = uonix_intelligence_anomaly_lead_form_ids();
-		$desde  = uonix_intelligence_anomaly_now()->modify( '-' . $days . ' days' )->format( 'Y-m-d H:i:s' );
+		$desde  = uonix_intelligence_anomaly_now( $today )->modify( '-' . $days . ' days' )->format( 'Y-m-d H:i:s' );
 		$marcas = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
 
 		// `$tabela` vem de `$wpdb->prefix`, não de entrada; `$marcas` é gerado a
@@ -256,7 +256,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_baseline' ) ) {
 	 *
 	 * @return array{available: bool, reason: string, days: int, leads: int, per_day: float, longest_gap: int|null, threshold_days: int, threshold_is_safe: bool}
 	 */
-	function uonix_intelligence_anomaly_lead_baseline( $days = null ) {
+	function uonix_intelligence_anomaly_lead_baseline( $days = null, $today = null ) {
 		$regras = uonix_intelligence_anomaly_rules();
 		$days   = is_int( $days ) && $days > 0 ? $days : (int) $regras['baseline_days'];
 		$limiar = (int) $regras['lead_silence_days'];
@@ -272,13 +272,13 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_baseline' ) ) {
 			'threshold_is_safe' => false,
 		);
 
-		$por_dia = uonix_intelligence_anomaly_lead_daily_counts( $days );
+		$por_dia = uonix_intelligence_anomaly_lead_daily_counts( $days, $today );
 		if ( null === $por_dia ) {
 			$base['reason'] = 'submissions_table_missing';
 			return $base;
 		}
 
-		$agora  = uonix_intelligence_anomaly_now();
+		$agora  = uonix_intelligence_anomaly_now( $today );
 		$maior  = uonix_intelligence_anomaly_longest_gap(
 			$por_dia,
 			$agora->modify( '-' . ( $days - 1 ) . ' days' )->format( 'Y-m-d' ),
@@ -309,16 +309,16 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_silence' ) ) {
 	 * para um vigia. Com dias corridos, fim de semana e feriado já entram embutidos
 	 * no limiar, porque a medição que produz o limiar os inclui.
 	 */
-	function uonix_intelligence_anomaly_lead_silence() {
+	function uonix_intelligence_anomaly_lead_silence( $today = null ) {
 		$regras = uonix_intelligence_anomaly_rules();
 		$limiar = (int) $regras['lead_silence_days'];
 
-		$por_dia = uonix_intelligence_anomaly_lead_daily_counts( max( $limiar * 2, 30 ) );
+		$por_dia = uonix_intelligence_anomaly_lead_daily_counts( max( $limiar * 2, 30 ), $today );
 		if ( null === $por_dia ) {
 			return uonix_intelligence_anomaly_unavailable( 'lead_silence', 'submissions_table_missing' );
 		}
 
-		$agora = uonix_intelligence_anomaly_now();
+		$agora = uonix_intelligence_anomaly_now( $today );
 		$hoje  = $agora->format( 'Y-m-d' );
 
 		// Dias sem lead contados de hoje para trás. Para o gatilho, o que importa é o
@@ -791,11 +791,11 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_detect' ) ) {
 	 *
 	 * @return array{findings: array, anomalous: int, unavailable: int, checked_at: string}
 	 */
-	function uonix_intelligence_anomaly_detect( $findings = null ) {
+	function uonix_intelligence_anomaly_detect( $findings = null, $today = null ) {
 		if ( ! is_array( $findings ) ) {
 			$findings = array(
-				uonix_intelligence_anomaly_lead_silence(),
-				uonix_intelligence_anomaly_organic_drop(),
+				uonix_intelligence_anomaly_lead_silence( $today ),
+				uonix_intelligence_anomaly_organic_drop( null, null, $today ),
 			);
 		}
 
@@ -818,7 +818,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_detect' ) ) {
 			'findings'    => $findings,
 			'anomalous'   => $anomalos,
 			'unavailable' => $indisponiveis,
-			'checked_at'  => uonix_intelligence_anomaly_now()->format( 'c' ),
+			'checked_at'  => uonix_intelligence_anomaly_now( $today )->format( 'c' ),
 		);
 	}
 }
@@ -1009,8 +1009,8 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_run_check' ) ) {
 	 * anomalia em curso, ele recebe o aviso na verificação seguinte, em vez de
 	 * descobrir que perdeu o episódio.
 	 */
-	function uonix_intelligence_anomaly_run_check() {
-		$resumo     = uonix_intelligence_anomaly_detect();
+	function uonix_intelligence_anomaly_run_check( $findings = null, $today = null ) {
+		$resumo     = uonix_intelligence_anomaly_detect( $findings, $today );
 		$anterior   = uonix_intelligence_anomaly_get_state();
 		$transicoes = uonix_intelligence_anomaly_transitions( $resumo['findings'], $anterior );
 		$novo       = uonix_intelligence_anomaly_state_from_findings( $resumo['findings'], $anterior );
@@ -1050,6 +1050,12 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_hook' ) ) {
 // O handler é registrado no carregamento; o evento NÃO é agendado aqui. Mesmo
 // motivo de 57: carregar arquivo não deve escrever no agendador, e em mu-plugin
 // isso roda antes de `init` e antes dos plugins.
+//
+// `accepted_args = 0` é CARGA ESTRUTURAL aqui, não formalidade. `run_check()`
+// aceita achados prontos, porque é assim que o teste exercita a deduplicação sem
+// banco nem rede. Se o hook fosse registrado com argumentos, um evento de cron
+// forjado poderia passar achados arbitrários e fazer o módulo enviar e-mail de
+// anomalia inventada. O zero é o que fecha essa porta.
 if ( function_exists( 'uonix_intelligence_anomaly_hook' ) ) {
 	add_action( uonix_intelligence_anomaly_hook(), 'uonix_intelligence_anomaly_run_check', 10, 0 );
 }
