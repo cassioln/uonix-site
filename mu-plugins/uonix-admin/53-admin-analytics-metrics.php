@@ -131,6 +131,98 @@ if ( ! function_exists( 'uonix_analytics_metrics_sanitize_query' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_analytics_metrics_query_text_retention' ) ) {
+	/**
+	 * Faixa em que o TEXTO da consulta é persistido no universo de mineração.
+	 *
+	 * Minimização de dados (issue #253). Medido em produção em 2026-09-22: o
+	 * universo real é de 111 consultas em 30 dias, e a regra de oportunidade
+	 * devolve 5. As outras ~106 tinham o texto persistido em `wp_options`, no
+	 * backup e no clone sem que ninguém o lesse — e é na cauda longa que a
+	 * consulta identificável mora. Só o texto sai; a MÉTRICA de toda linha fica,
+	 * porque o contrato exige recalibrar o piso contra a distribuição medida
+	 * (docs/uonix-insights-inteligencia.md), e distribuição é impressão e
+	 * posição, não texto.
+	 *
+	 * Esta faixa é DELIBERADAMENTE mais permissiva que
+	 * `uonix_intelligence_seo_rules()` no arquivo 55, e a margem é o desenho:
+	 *
+	 * - 53 carrega ANTES de 55 e não pode chamá-lo. Inverter a dependência para
+	 *   ler os limiares da regra seria pior que o problema que resolve.
+	 * - Por isso a relação entre as duas faixas é verificada por teste, não
+	 *   presumida: `scripts/tests/test-query-text-retention-superset.php` reprova
+	 *   o build se esta faixa deixar de CONTER a faixa de seleção de 55. Sem esse
+	 *   teste, alargar a regra de 55 faria a oportunidade aparecer sem texto — ou
+	 *   desaparecer em silêncio, que é pior.
+	 * - A margem existe para que um ajuste pequeno em 55 não exija ajuste aqui.
+	 *   Um ajuste grande exige, e o teste diz exatamente isso.
+	 *
+	 * `min_impressions` é piso INCLUSIVO aqui, enquanto o piso de 55 é exclusivo
+	 * (`$impressions <= $rules['min_impressions']` descarta). A diferença anda no
+	 * sentido seguro: retenção mais frouxa que seleção.
+	 */
+	function uonix_analytics_metrics_query_text_retention() {
+		return array(
+			'min_position'    => 3.0,
+			'max_position'    => 15.0,
+			'min_impressions' => 3,
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_query_text_is_retained' ) ) {
+	/**
+	 * Decide se o texto de uma consulta pode ser persistido no universo.
+	 *
+	 * Falha fechada: métrica não finita devolve `false` (texto sai). Uma linha
+	 * cuja posição ou impressão não é número nunca poderia ser selecionada pela
+	 * regra de 55 — ela faz cast para float, e `(float) 'x'` é 0.0, fora da faixa
+	 * de posição —, então descartar o texto aqui não perde oportunidade nenhuma.
+	 */
+	function uonix_analytics_metrics_query_text_is_retained( $position, $impressions ) {
+		$retention   = uonix_analytics_metrics_query_text_retention();
+		$position    = uonix_analytics_metrics_finite_number( $position );
+		$impressions = uonix_analytics_metrics_finite_number( $impressions );
+		if ( null === $position || null === $impressions ) {
+			return false;
+		}
+		return $position >= $retention['min_position']
+			&& $position <= $retention['max_position']
+			&& $impressions >= $retention['min_impressions'];
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_minimize_query_row' ) ) {
+	/**
+	 * Remove o texto de uma linha do universo quando ela não pode qualificar.
+	 *
+	 * A chave `query` é OMITIDA, não gravada vazia. Os dois consumidores do
+	 * universo foram verificados antes da escolha:
+	 *
+	 * - `uonix_intelligence_seo_opportunities()` (55) já abre com
+	 *   `isset( $row['query'], … )` e segue para a linha seguinte quando falha —
+	 *   é o mesmo guard que trata linha de snapshot v2, então a ausência entra
+	 *   por um caminho que já existe e já tem teste;
+	 * - `scripts/maintenance/smoke-intelligence-seo.php` apenas conta as linhas.
+	 *
+	 * Omitir também é o que reduz bytes no `wp_options`, que é o objetivo, e é o
+	 * que faz `array_column( …, 'query' )` pular a linha em vez de devolver um
+	 * termo vazio. Gravar string vazia manteria `isset()` verdadeiro: um consumidor
+	 * futuro que checasse só `isset` renderizaria linha fantasma em silêncio, ao
+	 * passo que a chave ausente falha alto.
+	 */
+	function uonix_analytics_metrics_minimize_query_row( $row ) {
+		if ( ! is_array( $row ) ) {
+			return $row;
+		}
+		if ( uonix_analytics_metrics_query_text_is_retained( $row['position'] ?? null, $row['impressions'] ?? null ) ) {
+			return $row;
+		}
+		unset( $row['query'] );
+		return $row;
+	}
+}
+
 if ( ! function_exists( 'uonix_analytics_metrics_number' ) ) {
 	function uonix_analytics_metrics_number( $value ) {
 		return is_numeric( $value ) ? (float) $value : null;
@@ -205,11 +297,14 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 			}
 			$entry = array( 'query' => $query, 'clicks' => $clicks, 'impressions' => $impressions, 'ctr' => $ctr, 'position' => $position );
 			// `queries` segue sendo a lista curta de exibição, para não alterar o que o
-			// painel já renderiza hoje. `queries_extended` é o universo de mineração.
+			// painel já renderiza hoje. `queries_extended` é o universo de mineração, e
+			// nele o texto é minimizado: toda linha mantém a MÉTRICA, e só as linhas que
+			// podem qualificar como oportunidade mantêm o TEXTO. Ver
+			// uonix_analytics_metrics_query_text_retention().
 			if ( count( $queries ) < 10 ) {
 				$queries[] = $entry;
 			}
-			$queries_extended[] = $entry;
+			$queries_extended[] = uonix_analytics_metrics_minimize_query_row( $entry );
 			if ( count( $queries_extended ) >= uonix_analytics_metrics_extended_query_limit() ) break;
 		}
 		foreach ( isset( $data['pages'] ) && is_array( $data['pages'] ) ? $data['pages'] : array() as $row ) {
@@ -296,6 +391,33 @@ if ( ! function_exists( 'uonix_analytics_metrics_snapshot_option' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_analytics_metrics_snapshot_option_cascade' ) ) {
+	/**
+	 * Cascata de leitura do snapshot, da geração corrente para a mais antiga.
+	 *
+	 * Fonte única de verdade para DUAS coisas que antes divergiriam sem nada
+	 * reprovar: a ordem em que `uonix_analytics_metrics_get_snapshot()` procura, e
+	 * o que `uonix_analytics_metrics_collect_legacy_snapshots()` pode apagar. Um
+	 * coletor que repetisse a cascata à mão apagaria a geração errada no dia em que
+	 * a corrente virasse v4 — e o erro só apareceria como "painel sem dado".
+	 *
+	 * O v1 entra só em 30 dias porque foi a única janela que ele conheceu.
+	 *
+	 * @return array<int, string> Nomes de option, do mais novo para o mais antigo.
+	 */
+	function uonix_analytics_metrics_snapshot_option_cascade( $days = 30 ) {
+		$days = uonix_analytics_metrics_sanitize_period_days( $days );
+		$cascade = array(
+			uonix_analytics_metrics_snapshot_option( $days ),
+			'uonix_analytics_metrics_snapshot_v2_' . $days,
+		);
+		if ( 30 === $days ) {
+			$cascade[] = 'uonix_analytics_metrics_snapshot_v1';
+		}
+		return $cascade;
+	}
+}
+
 if ( ! function_exists( 'uonix_analytics_metrics_get_snapshot' ) ) {
 	/**
 	 * Lê o snapshot da versão corrente e, na ausência dela, cai para as versões
@@ -308,14 +430,66 @@ if ( ! function_exists( 'uonix_analytics_metrics_get_snapshot' ) ) {
 		if ( ! function_exists( 'get_option' ) ) {
 			return false;
 		}
-		$snapshot = get_option( uonix_analytics_metrics_snapshot_option( $days ), false );
-		if ( ! is_array( $snapshot ) ) {
-			$snapshot = get_option( 'uonix_analytics_metrics_snapshot_v2_' . $days, false );
+		foreach ( uonix_analytics_metrics_snapshot_option_cascade( $days ) as $option ) {
+			$snapshot = get_option( $option, false );
+			if ( is_array( $snapshot ) ) {
+				return $snapshot;
+			}
 		}
-		if ( ! is_array( $snapshot ) && 30 === $days ) {
-			$snapshot = get_option( 'uonix_analytics_metrics_snapshot_v1', false );
+		return false;
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_collect_legacy_snapshots' ) ) {
+	/**
+	 * Apaga as gerações de snapshot que a cascata desta janela não alcança mais.
+	 *
+	 * Minimização de dados (issue #253): gerações antigas foram produzidas ANTES da
+	 * minimização de texto e guardam o universo de consultas inteiro, com o texto
+	 * cru de cada linha. Elas nunca foram apagadas — medido em produção em
+	 * 2026-09-22, quatro gerações conviviam em `wp_options` — e viajam para o
+	 * backup do deploy e (não fosse `protected_options_where()`) para o clone.
+	 *
+	 * O CRITÉRIO é derivado da própria cascata, não de um padrão de nome: apaga
+	 * exatamente o que vem DEPOIS da primeira entrada presente. Como
+	 * `uonix_analytics_metrics_get_snapshot()` devolve a primeira entrada presente e
+	 * para ali, tudo que vem depois é inalcançável, e apagar é no-op de leitura por
+	 * construção — não por coincidência de estado. Consequências deliberadas:
+	 *
+	 * - o snapshot CORRENTE nunca é apagado. Não há TTL aqui, e não deve haver: o
+	 *   módulo exibe dado velho com aviso de "desatualizado", e
+	 *   `snapshot_is_fresh()` decide EXIBIÇÃO, não validade. Trocar isso por
+	 *   "indisponível" seria regressão;
+	 * - se a geração corrente desta janela ainda não existe, o legado que a
+	 *   substitui é o caminho de leitura VÁLIDO de hoje e fica onde está. Em
+	 *   produção é o caso de `…_v2_7`: enquanto ninguém sincronizar a janela de 7
+	 *   dias, é ele que o painel mostra. Apagá-lo trocaria "dado velho com aviso"
+	 *   por "sem dado" — a mesma regressão, por outra porta;
+	 * - a coleta roda por janela, no sucesso da sincronização daquela janela, que é
+	 *   justamente o evento que torna o legado dela inalcançável.
+	 *
+	 * @return array<int, string> Options efetivamente apagadas.
+	 */
+	function uonix_analytics_metrics_collect_legacy_snapshots( $days = 30 ) {
+		$days = uonix_analytics_metrics_sanitize_period_days( $days );
+		if ( ! function_exists( 'get_option' ) || ! function_exists( 'delete_option' ) ) {
+			return array();
 		}
-		return is_array( $snapshot ) ? $snapshot : false;
+		$cascade = uonix_analytics_metrics_snapshot_option_cascade( $days );
+		$reached = false;
+		$collected = array();
+		foreach ( $cascade as $option ) {
+			if ( ! $reached ) {
+				$reached = is_array( get_option( $option, false ) );
+				continue;
+			}
+			if ( false === get_option( $option, false ) ) {
+				continue;
+			}
+			delete_option( $option );
+			$collected[] = $option;
+		}
+		return $collected;
 	}
 }
 
@@ -676,6 +850,23 @@ if ( ! function_exists( 'uonix_analytics_metrics_sync' ) ) {
 				'ga4' => $ga4, 'search_console' => $search_console,
 			);
 			if ( function_exists( 'update_option' ) ) update_option( uonix_analytics_metrics_snapshot_option( $days ), $snapshot, false );
+			// A escrita acima acabou de tornar inalcançável o legado desta janela, e é
+			// esse fato — não a passagem do tempo — que autoriza a coleta. Rodar aqui, e
+			// não em `mark_stale()`, é deliberado: uma sincronização que falhou não é o
+			// momento de apagar dado.
+			//
+			// O `try/catch` próprio existe porque a coleta é **acessória**: o snapshot
+			// fresco já está gravado nesta altura. Sem ele, um hook de terceiro em
+			// `delete_option` que lance faria o `catch` externo rotular uma sincronização
+			// bem-sucedida como `stale` e o refresh manual reportar erro — trocando um
+			// resultado correto por uma falha inventada.
+			try {
+				uonix_analytics_metrics_collect_legacy_snapshots( $days );
+			} catch ( Throwable $falha_na_coleta ) {
+				if ( function_exists( 'error_log' ) ) {
+					error_log( 'uonix: coleta de snapshot legado falhou: ' . $falha_na_coleta->getMessage() );
+				}
+			}
 			return $snapshot;
 		} catch ( Throwable $error ) {
 			$previous = uonix_analytics_metrics_mark_stale( $days );
