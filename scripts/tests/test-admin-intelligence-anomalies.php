@@ -346,7 +346,20 @@ uox_assert( $limiar === ( $silencio['measured']['threshold_days'] ?? -1 ), 'o li
 $vespera = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-' . ( $limiar - 1 ) . ' days' )->format( 'Y-m-d' );
 $GLOBALS['uox_lead_rows'] = array( $vespera => 1 );
 $naFronteira = uonix_intelligence_anomaly_lead_silence( $hoje );
+uox_assert( $limiar - 1 === ( $naFronteira['measured']['silent_days'] ?? -1 ), 'o fixture de véspera deveria medir ' . ( $limiar - 1 ) . ' dias de silêncio, obteve ' . ( $naFronteira['measured']['silent_days'] ?? -1 ) );
 uox_assert( empty( $naFronteira['anomalous'] ), 'silêncio de ' . ( $limiar - 1 ) . ' dias não deveria disparar (fronteira do limiar)' );
+
+// O caso EXATO, que é o único que distingue `>=` de `>` no limiar.
+//
+// Descoberto ao planejar as mutações: com silêncio total o laço para em limiar+1,
+// e no caso da véspera para em limiar−1. Nos dois, `>=` e `>` concordam. Sem esta
+// asserção, trocar o operador passaria despercebido e o alerta atrasaria um dia
+// inteiro — o que num limiar medido em dias é um erro de 10%.
+$noPonto = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-' . $limiar . ' days' )->format( 'Y-m-d' );
+$GLOBALS['uox_lead_rows'] = array( $noPonto => 1 );
+$exato = uonix_intelligence_anomaly_lead_silence( $hoje );
+uox_assert( $limiar === ( $exato['measured']['silent_days'] ?? -1 ), 'o fixture exato deveria medir ' . $limiar . ' dias de silêncio, obteve ' . ( $exato['measured']['silent_days'] ?? -1 ) );
+uox_assert( ! empty( $exato['anomalous'] ), 'silêncio de exatamente ' . $limiar . ' dias DEVE disparar: o limiar é inclusivo' );
 
 // A consulta precisa excluir spam e cobrir os dois formulários. Sem isso, uma
 // rajada de spam contaria como conversão e ESCONDERIA um colapso real.
