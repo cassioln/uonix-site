@@ -145,7 +145,19 @@ Três consequências que qualquer alteração aqui precisa respeitar:
 
 `organic_settle_lag_days` sai de medição (3 dias observados em 2026-09-23, mais um de margem). Fixá-lo só é seguro porque a completude é conferida à parte: se o Google atrasar mais, a janela fica incompleta e o gatilho se declara indisponível em vez de comparar janela furada.
 
-`lead_silence_days` é o limiar que a especificação da issue #193 propunha derivar de "3-5 leads/dia", número nunca medido. O painel exibe a medição ao lado do limiar em uso e avisa quando o limiar não é maior que o maior silêncio já observado.
+`lead_silence_days` é o limiar que a especificação da issue #193 propunha derivar de "3-5 leads/dia", número nunca medido. O painel exibe a medição ao lado do limiar em uso.
+
+**A medição em produção reprovou o primeiro valor na primeira execução**, que era exatamente para isso que ela existe. Medido em 2026-09-23, logo após o deploy: **14 orçamentos em 90 dias, 0,16 por dia**, e um silêncio encerrado de **10 dias já observado em operação normal**. O valor inicial era 10 — errado por descrever o funcionamento habitual do site. A suposição da issue estava fora por um fator de ~25, o mesmo tipo de erro do `min_impressions = 100`.
+
+Com intervalo médio de ~6,4 dias, a estimativa de falso alarme era ~3 por trimestre em 10 dias, ~2 por ano em 21, e ~1 a cada dois anos em 30 — ordem de grandeza, porque 14 intervalos é amostra pequena. O valor passou a **21**.
+
+#### Por que o limiar NÃO é adaptativo
+
+O site é novo e ainda não foi divulgado, então 0,16/dia não é o estado estacionário: o volume vai crescer. Derivar o limiar da taxa medida parece a resposta óbvia e tem um modo de falha pior que o problema — **se os orçamentos caírem devagar, o intervalo médio cresce, o limiar cresce atrás dele, e o alerta se dissolve exatamente quando o negócio está morrendo.** É a armadilha clássica do baseline adaptativo.
+
+Com valor fixo o erro é sempre na direção segura: quando o volume subir, 21 fica conservador — mais lento que o ideal, nunca falso. Perder pressa é aceitável; perder o alerta não é.
+
+O que fecha o ciclo é o painel aconselhar nos **dois** sentidos: ele avisa quando o limiar está baixo demais (vai descrever normalidade) e quando ficou alto demais (não dá falso alarme, mas demora mais do que precisaria). O segundo aviso **não sugere um número**: uma fórmula não validada produziria falsa precisão, que é a classe de erro que trouxe este limiar ao valor atual.
 
 A medição considera apenas intervalos **encerrados**. Dois recortes, e o segundo é condicional:
 

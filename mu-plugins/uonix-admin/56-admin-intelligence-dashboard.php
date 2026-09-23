@@ -418,6 +418,18 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 					<div class="notice notice-warning inline">
 						<p>O limiar em uso não é maior que o maior silêncio observado no período. Enquanto isso valer, o gatilho vai disparar descrevendo o comportamento habitual do site em vez de uma anomalia.</p>
 					</div>
+				<?php elseif ( ! empty( $baseline['threshold_is_conservative'] ) ) : ?>
+					<?php // O conselho no outro sentido: o limiar é fixo de propósito, então cresce
+					// de folga conforme o volume sobe. Continua sem dar falso alarme, mas demora
+					// mais do que precisaria. Sem número sugerido: fórmula não validada seria
+					// falsa precisão, que é o erro que trouxe este limiar ao valor atual. ?>
+					<div class="notice notice-info inline">
+						<p><?php echo esc_html( sprintf(
+							'O limiar está conservador: %d dias contra um silêncio normal de no máximo %d. Ele não vai dar falso alarme, mas demora mais do que precisaria para avisar. Se o volume de orçamentos se mantiver neste patamar, vale reduzi-lo.',
+							(int) $baseline['threshold_days'],
+							(int) $baseline['longest_gap']
+						) ); ?></p>
+					</div>
 				<?php endif; ?>
 			<?php endif; ?>
 		</section>

@@ -289,6 +289,33 @@ uox_assert( false !== strpos( $html, 'ou MAIS' ), 'quando a medição começa na
 $GLOBALS['uox_lead_before'] = null;
 
 // ---------------------------------------------------------------------------
+// 6d. O conselho nos DOIS sentidos sobre o limiar.
+// ---------------------------------------------------------------------------
+
+// Limiar INSEGURO: o gatilho vai descrever normalidade.
+$GLOBALS['uox_lead_rows'] = array();
+$cursor = new DateTimeImmutable( '2026-09-23', new DateTimeZone( 'UTC' ) );
+for ( $i = 0; $i < 60; $i++ ) {
+	if ( 0 === $i || $i > 40 ) { $GLOBALS['uox_lead_rows'][ $cursor->format( 'Y-m-d' ) ] = 1; }
+	$cursor = $cursor->modify( '-1 day' );
+}
+uox_semear( array( uox_finding( array( 'anomalous' => false ) ) ), 0, 0 );
+$html = uox_render();
+uox_assert( false !== strpos( $html, 'não é maior que o maior silêncio observado' ), 'limiar inseguro precisa ser avisado na tela' );
+
+// Limiar CONSERVADOR: não dá falso alarme, mas demora mais do que precisaria.
+$GLOBALS['uox_lead_rows'] = array();
+$cursor = new DateTimeImmutable( '2026-09-23', new DateTimeZone( 'UTC' ) );
+for ( $i = 0; $i < 60; $i++ ) {
+	if ( 0 === $i % 3 ) { $GLOBALS['uox_lead_rows'][ $cursor->format( 'Y-m-d' ) ] = 1; }
+	$cursor = $cursor->modify( '-1 day' );
+}
+$html = uox_render();
+uox_assert( false !== strpos( $html, 'está conservador' ), 'limiar com folga grande precisa do conselho no outro sentido, senão ninguém descobre que pode avisar mais rápido' );
+uox_assert( false === strpos( $html, 'não é maior que o maior silêncio observado' ), 'e os dois avisos não podem aparecer juntos: são estados excludentes' );
+$GLOBALS['uox_lead_rows'] = array();
+
+// ---------------------------------------------------------------------------
 // 7. Nunca verificado é estado distinto de verificado e normal.
 // ---------------------------------------------------------------------------
 

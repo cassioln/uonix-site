@@ -36,6 +36,37 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_rules' ) ) {
 	 * observado, e o painel imprime a medição ao lado do limiar vigente. Se a taxa
 	 * de leads do site mudar, a tela mostra que o limiar ficou defasado.
 	 *
+	 * ## O valor 21 vem de MEDIÇÃO em produção, em 2026-09-23
+	 *
+	 * O primeiro valor foi 10, escolhido sem medir, e a própria tela o reprovou na
+	 * primeira execução — que era exactamente para isso que ela existe. Medido em
+	 * produção: **14 orçamentos em 90 dias, 0,16 por dia**, e um silêncio encerrado de
+	 * **10 dias já observado em operação normal**. A especificação da #193 supunha
+	 * "3-5 leads/dia": errado por um fator de ~25, o mesmo tipo de erro do
+	 * `min_impressions = 100`.
+	 *
+	 * Com intervalo médio de ~6,4 dias, a estimativa de falso alarme por limiar — ordem
+	 * de grandeza, porque 14 intervalos é amostra pequena — era ~3 por trimestre em 10
+	 * dias, ~2 por ano em 21, e ~1 a cada dois anos em 30. O 21 é o ponto em que o
+	 * alerta passa a significar algo sem virar ruído.
+	 *
+	 * ## Por que NÃO é adaptativo, embora o volume vá crescer
+	 *
+	 * O site é novo e ainda não foi divulgado, então 0,16/dia não é o estado
+	 * estacionário. Derivar o limiar da taxa medida parece a resposta óbvia e tem um
+	 * modo de falha pior que o problema: **se os orçamentos caírem devagar, o intervalo
+	 * médio cresce, o limiar cresce atrás dele, e o alerta se dissolve exatamente
+	 * quando o negócio está morrendo.** É a armadilha clássica do baseline adaptativo.
+	 *
+	 * Com um valor fixo o erro é sempre na direção segura: quando o volume subir, 21
+	 * fica conservador — mais lento que o ideal, nunca falso. Perder pressa é
+	 * aceitável; perder o alerta não é.
+	 *
+	 * O que fecha o ciclo é o painel dar o conselho nos DOIS sentidos: ele já avisa
+	 * quando o limiar está baixo demais, e passou a avisar quando ficou alto demais,
+	 * sugerindo o valor que a medição atual sustenta. Ver
+	 * `uonix_intelligence_anomaly_lead_baseline()`.
+	 *
 	 * `organic_drop_percent` é percentual, logo livre de escala: 35% de queda
 	 * significa a mesma coisa com 100 ou com 100.000 impressões. Esse número pode
 	 * vir da especificação sem medição prévia, ao contrário do anterior.
@@ -62,7 +93,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_rules' ) ) {
 	 */
 	function uonix_intelligence_anomaly_rules() {
 		return array(
-			'lead_silence_days'       => 10,
+			'lead_silence_days'       => 21,
 			'organic_drop_percent'    => 35.0,
 			'organic_window_days'     => 7,
 			'organic_min_impressions' => 50,
@@ -375,6 +406,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_baseline' ) ) {
 			'current_silence'   => null,
 			'threshold_days'    => $limiar,
 			'threshold_is_safe' => false,
+			'threshold_is_conservative' => false,
 		);
 
 		$por_dia = uonix_intelligence_anomaly_lead_daily_counts( $days, $today );
@@ -431,6 +463,24 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_baseline' ) ) {
 		// não serve: o intervalo que já aconteceu sem nada de errado voltaria a
 		// acontecer, e o alerta dispararia descrevendo normalidade.
 		$base['threshold_is_safe'] = null !== $base['longest_gap'] && $limiar > (int) $base['longest_gap'];
+
+		// O conselho no OUTRO sentido, que faltava.
+		//
+		// O limiar é fixo de propósito — adaptativo se dissolveria numa queda lenta de
+		// orçamentos, ver `uonix_intelligence_anomaly_rules()`. A consequência é que,
+		// quando o volume cresce, ele fica conservador: continua não dando falso alarme,
+		// mas demora mais do que precisaria para avisar. O site é novo e ainda não foi
+		// divulgado, então esse é o caminho esperado.
+		//
+		// Deliberadamente NÃO sugere um número. Uma fórmula que eu não validei produziria
+		// falsa precisão, que é a classe de erro que trouxe este limiar a 21 em primeiro
+		// lugar. A tela informa a folga e quem tem o dado decide.
+		//
+		// O piso de 2 dias no `longest_gap` evita opinar no caso degenerado: com
+		// orçamentos quase diários, nenhuma razão simples dá um limiar sensato.
+		$base['threshold_is_conservative'] = null !== $base['longest_gap']
+			&& (int) $base['longest_gap'] >= 2
+			&& $limiar > ( 2 * (int) $base['longest_gap'] );
 
 		return $base;
 	}
