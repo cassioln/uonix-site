@@ -52,8 +52,13 @@ O procedimento descrito rotacionava algo que nunca havia sido provisionado.
   meses sem emitir sinal algum; embutir o padrão remove essa classe de falha.
 - **Formato:** string separada por vírgula com o `id` de cada tag da AdOpt. São
   identificadores curtos de **10 caracteres** no alfabeto `[A-Za-z0-9_-]` — por exemplo
-  `9BxuTvI1_q`. **Não são UUIDs.** Nomes de categoria (`funcional`, `marketing`) são
-  rejeitados explicitamente e nunca funcionam como ID.
+  `9BxuTvI1_q`. **Não são UUIDs.**
+- **Nome de categoria nunca funciona como ID**, e a garantia vem de duas barreiras
+  complementares: uma exigência estrutural (o identificador curto precisa conter ao menos um
+  caractere que não seja letra minúscula, o que derruba `statistics`, `desempenho`,
+  `necessarios` e qualquer rótulo em minúsculas, em qualquer idioma) e uma lista explícita de
+  nomes conhecidos, que é o que barra rótulos com underscore ou dígito, como `uonix_cookies`.
+  Uma barreira sozinha não fecha — foi medido por mutação.
 - **Categoria importa, e é pré-requisito:** a tag precisa estar em uma categoria
   **recusável** no painel. A categoria `Necessárias` (id 1) é aceita incondicionalmente
   pela AdOpt mesmo quando o visitante clica em "Rejeitar tudo", então uma tag ali
