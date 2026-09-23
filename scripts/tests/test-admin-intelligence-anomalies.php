@@ -671,6 +671,22 @@ uox_assert( 'critical' === uonix_intelligence_anomaly_badge( $resumoStale )['sta
 $resumoLimpo = uonix_intelligence_anomaly_detect( array( uox_achado( 'organic_drop', false, false ) ), $hoje, array() );
 uox_assert( 0 === $resumoLimpo['anomalous'] && 1 === $resumoLimpo['unavailable'], 'indisponível sem anomalia prévia não pode inventar anomalia' );
 
+// O PADRÃO de `detect()` sem estado explícito precisa ler `observed`, não `triggers`.
+//
+// A verificação por mutação pegou isto: trocar a leitura padrão sobrevivia, porque o
+// `run_check()` passa o estado explicitamente e as asserções todas iam por ele. Um
+// chamador futuro que invoque `detect()` sem argumento — o caminho natural — herdaria
+// a conflação de volta.
+$GLOBALS['uox_options']['uonix_intelligence_anomaly_state'] = array(
+	'triggers' => array(),                              // nada avisado
+	'observed' => array( 'organic_drop' => true ),       // mas observado anômalo
+	'meta'     => array( 'organic_drop' => array( 'since' => $hoje, 'attempts' => 0, 'undelivered' => false, 'observed_at' => $hoje ) ),
+	'summary'  => array(),
+);
+$resumoPadrao = uonix_intelligence_anomaly_detect( array( uox_achado( 'organic_drop', false, false ) ), $hoje );
+uox_assert( 1 === $resumoPadrao['anomalous'], 'detect() sem estado explícito deve ler `observed`; lendo `triggers` a anomalia desaparece quando o aviso não saiu' );
+unset( $GLOBALS['uox_options']['uonix_intelligence_anomaly_state'] );
+
 // ---------------------------------------------------------------------------
 // 5d. A proteção acima NÃO pode depender da entrega do e-mail (ALTO 2 da 2a revisão).
 // ---------------------------------------------------------------------------
