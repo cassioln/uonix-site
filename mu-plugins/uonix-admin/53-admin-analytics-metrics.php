@@ -854,7 +854,19 @@ if ( ! function_exists( 'uonix_analytics_metrics_sync' ) ) {
 			// esse fato — não a passagem do tempo — que autoriza a coleta. Rodar aqui, e
 			// não em `mark_stale()`, é deliberado: uma sincronização que falhou não é o
 			// momento de apagar dado.
-			uonix_analytics_metrics_collect_legacy_snapshots( $days );
+			//
+			// O `try/catch` próprio existe porque a coleta é **acessória**: o snapshot
+			// fresco já está gravado nesta altura. Sem ele, um hook de terceiro em
+			// `delete_option` que lance faria o `catch` externo rotular uma sincronização
+			// bem-sucedida como `stale` e o refresh manual reportar erro — trocando um
+			// resultado correto por uma falha inventada.
+			try {
+				uonix_analytics_metrics_collect_legacy_snapshots( $days );
+			} catch ( Throwable $falha_na_coleta ) {
+				if ( function_exists( 'error_log' ) ) {
+					error_log( 'uonix: coleta de snapshot legado falhou: ' . $falha_na_coleta->getMessage() );
+				}
+			}
 			return $snapshot;
 		} catch ( Throwable $error ) {
 			$previous = uonix_analytics_metrics_mark_stale( $days );

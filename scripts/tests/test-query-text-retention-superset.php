@@ -217,8 +217,21 @@ uox_ret_assert(
 // ---------------------------------------------------------------------------
 // 3. IMPLICAÇÃO — roda as DUAS funções reais sobre uma grade que cruza as duas
 //    fronteiras. Pega divergência de operador, que comparar números não pega.
-// ---------------------------------------------------------------------------
-
+//
+// A grade varia CINCO eixos, e não três, porque a propriedade só cobre os eixos
+// que ela varia. Um critério novo em 55 sobre um eixo mantido constante aqui
+// passaria por omissão — e a consequência é a pior possível: a oportunidade
+// desaparece **em silêncio**, porque o `isset()` de 55 pula a linha sem texto.
+//
+// `clicks` e o TEXTO entraram por isso. Uma regra de produto plausível — "consulta
+// de marca é sempre oportunidade" ou "quem já tem clique merece atenção" — cria
+// caminho disjuntivo nesses eixos, e sem variá-los a suíte inteira fica verde
+// enquanto uma oportunidade real se perde.
+// Os eixos de `clicks` e de TEXTO entram num conjunto DIRIGIDO, acrescentado à
+// grade, e não multiplicados no produto cartesiano: multiplicar estouraria o teto
+// de `extended_query_limit()`, e a asserção de tamanho logo abaixo reprovaria por
+// motivo errado — o `break` do normalizador cortaria linhas e a equivalência
+// compararia conjuntos diferentes.
 $grade = array();
 $indice = 0;
 foreach ( array( 0.5, 2.9, 3.0, 3.1, 3.9, 4.0, 4.1, 8.0, 11.9, 12.0, 12.1, 14.9, 15.0, 15.1, 40.0 ) as $posicao ) {
@@ -232,6 +245,26 @@ foreach ( array( 0.5, 2.9, 3.0, 3.1, 3.9, 4.0, 4.1, 8.0, 11.9, 12.0, 12.1, 14.9,
 				'ctr'         => $ctr,
 				'position'    => $posicao,
 			);
+		}
+	}
+}
+
+// Conjunto dirigido: varre `clicks` e TEXTO na região onde uma regra disjuntiva
+// faria diferença — dentro e fora das duas faixas. Termos reais do site, porque
+// uma regra de produto plausível reconhece marca ou norma, não string sintética.
+foreach ( array( 2.0, 3.5, 4.5, 11.0, 13.0, 20.0 ) as $posicao ) {
+	foreach ( array( 2, 4, 6, 30, 120 ) as $impressoes ) {
+		foreach ( array( 0, 1, 9 ) as $cliques ) {
+			foreach ( array( 'linha de vida uonix', 'nbr 16325 ancoragem' ) as $termo ) {
+				++$indice;
+				$grade[] = array(
+					'query'       => $termo . ' ' . $indice,
+					'clicks'      => $cliques,
+					'impressions' => $impressoes,
+					'ctr'         => 0.01,
+					'position'    => $posicao,
+				);
+			}
 		}
 	}
 }

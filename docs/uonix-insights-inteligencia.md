@@ -207,9 +207,17 @@ Consequências deliberadas:
 
 ### O que NÃO foi feito, e por quê
 
+**A postura não foi registrada em `docs/legal/` nem no ROPA, e isso é pendência declarada — não decisão.** A issue 253 pede a postura registrada em `docs/legal/` e referenciada aqui; só a segunda metade foi feita. `docs/legal/ropa-inventario-dados-uonix.md` não menciona Search Console: a entrada de analytics cobre cookies e GA4 do lado do cliente, com retenção de "24h a 2 anos", e não descreve texto de consulta em `wp_options`.
+
+Isso importa porque a postura escolhida **mantém retenção indefinida** do residual, por desenho — não há TTL no corrente, e é deliberado. Retenção indefinida não é prazo de retenção, e um inventário de dados precisa declarar um. Rastreado em issue própria.
+
 **Não há TTL sobre o snapshot corrente, e não deve haver.** `uonix_analytics_metrics_snapshot_is_fresh()` decide **exibição**, não validade: o módulo mostra dado velho com aviso de "desatualizado", e isso é comportamento documentado e desejado (fail-soft, ver a linha *Cache* na tabela de base factual). Um TTL no corrente trocaria "dado velho com aviso" por "indisponível" — regressão, não minimização. O que a coleta remove é geração **inalcançável**, que é outra coisa.
 
-**O snapshot não foi excluído do backup, e a tentativa seria mecanicamente impossível.** `scripts/backup-remote-database.sh` faz `mysqldump` do banco inteiro, e `--ignore-table` exclui **tabela**, não **linha** — o snapshot é uma linha em `wp_options`. Partir o dump para contornar isso mexeria no caminho de backup, que é a última coisa que se quer frágil, por um ganho que a minimização de texto já entrega: cada backup passa a carregar o texto de ~5 consultas em vez de 111, na mesma proporção.
+**O snapshot não foi excluído do backup, e a tentativa seria mecanicamente impossível.** `scripts/backup-remote-database.sh` faz `mysqldump` do banco inteiro, e `--ignore-table` exclui **tabela**, não **linha** — o snapshot é uma linha em `wp_options`. Partir o dump para contornar isso mexeria no caminho de backup, que é a última coisa que se quer frágil, por um ganho que a minimização de texto já entrega na mesma proporção.
+
+**Quanto texto sobra, com precisão.** Não é "~5". Esse é o tamanho do conjunto de **oportunidade**, e quem guarda texto é o conjunto de **retenção**, que é estritamente maior — ele não filtra CTR, e a faixa de posição e o piso de impressões são mais folgados. Somado a isso, `search_console.queries` mantém o texto de **10 linhas incondicionalmente**, porque é a lista curta que o painel renderiza no gráfico.
+
+Então o residual é **≥ 10 consultas com texto**, e o número exato depende da distribuição do período. Confundir os dois conjuntos subestima a superfície remanescente, e é justamente ela que o ROPA precisa declarar.
 
 **O filtro de PII não foi ampliado** — ver a rejeição da heurística de nome próprio acima.
 
