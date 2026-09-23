@@ -2,9 +2,10 @@
 /**
  * Central de Inteligência — render.
  *
- * Renderiza os painéis das abas `intelligence` e `settings` do menu Uônix
- * Insights. Consome apenas o que 55-admin-intelligence-metrics.php devolve; não
- * consulta API, não grava nada e não agenda nada.
+ * Renderiza os painéis das abas `intelligence`, `anomalies` e `settings` do menu
+ * Uônix Insights. Consome apenas o que 55-admin-intelligence-metrics.php e
+ * 58-admin-intelligence-anomalies.php devolvem; não consulta API, não grava nada
+ * e não agenda nada.
  *
  * Reaproveita as classes de CSS já declaradas em 52-admin-analytics-dashboard.php
  * e as do core (`wp-list-table`, `form-table`), para não crescer o bloco de estilo
@@ -199,6 +200,224 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 							<?php endforeach; ?>
 						</tbody>
 					</table>
+				<?php endif; ?>
+			<?php endif; ?>
+		</section>
+		<?php
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_anomaly_reason_message' ) ) {
+	/**
+	 * Traduz o motivo de indisponibilidade de um gatilho para linguagem de operador.
+	 *
+	 * Separado de `uonix_intelligence_unavailable_message()` porque os conjuntos de
+	 * motivo são disjuntos: aquele fala de snapshot, este de série diária e de
+	 * tabela de submissões. Um mapa único aceitaria motivo do domínio errado sem
+	 * reclamar, e cairia no texto genérico exatamente quando houvesse explicação.
+	 */
+	function uonix_intelligence_anomaly_reason_message( $reason ) {
+		$mapa = array(
+			'submissions_table_missing' => 'A tabela de submissões do Fluent Forms não existe neste ambiente, então não há como contar orçamentos.',
+			'no_leads_in_window'        => 'Nenhum orçamento no período medido, então não há comportamento normal a medir — e portanto não há como conferir o limiar.',
+			'config_missing'            => 'As credenciais de leitura do Search Console não estão configuradas neste ambiente.',
+			'series_fetch_failed'       => 'A consulta à Search Console falhou. O gatilho tenta de novo na próxima verificação.',
+			'series_invalid'            => 'A Search Console respondeu num formato inesperado.',
+			'series_too_short'          => 'A série devolvida não cobre as duas semanas necessárias para comparar.',
+			'series_dates_invalid'      => 'A Search Console devolveu datas inconsistentes.',
+			// Não existem mais `series_incomplete` nem `baseline_incomplete`: janela com dias
+			// faltando deixou de ser recusada e passou a ser resolvida por imputação
+			// otimista, em `uonix_intelligence_anomaly_organic_drop()`. Recusar silenciava
+			// colapso severo — a mesma queda de 94% alertava com 1 impressão/dia e ficava
+			// calada com zero.
+			'baseline_too_small'        => 'A semana anterior teve impressões insuficientes: nesse volume a variação percentual é ruído, não sinal.',
+			'comparison_failed'         => 'A comparação entre as duas semanas não produziu número finito.',
+		);
+
+		return isset( $mapa[ $reason ] ) ? $mapa[ $reason ] : 'Este gatilho não pôde ser verificado nesta rodada.';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
+	/**
+	 * Painel da aba "Anomalias" (Módulo 5).
+	 *
+	 * Renderiza a partir do resultado PERSISTIDO pela verificação diária, nunca
+	 * recomputando: `uonix_intelligence_anomaly_detect()` consulta o banco e chama a
+	 * API da Search Console, e este painel — como todos os outros — é renderizado em
+	 * toda carga da tela e apenas escondido. Recomputar aqui custaria uma chamada de
+	 * API por pageview.
+	 *
+	 * A exceção é a linha de base de leads, que é só um `GROUP BY` local sobre a
+	 * tabela de submissões, sem rede. Ela fica fora do cache de propósito: é a
+	 * medição que torna o limiar auditável, e um limiar auditado contra número
+	 * guardado de ontem não está auditado.
+	 */
+	function uonix_intelligence_render_anomalies_panel( $active_tab ) {
+		$is_active = 'anomalies' === $active_tab;
+		$resumo    = function_exists( 'uonix_intelligence_anomaly_get_summary' )
+			? uonix_intelligence_anomaly_get_summary()
+			: array( 'findings' => array(), 'anomalous' => 0, 'unavailable' => 0, 'checked_at' => '' );
+		$badge     = function_exists( 'uonix_intelligence_anomaly_badge' )
+			? uonix_intelligence_anomaly_badge( $resumo )
+			: array( 'state' => 'normal', 'label' => 'Sistema normal' );
+		$baseline  = function_exists( 'uonix_intelligence_anomaly_lead_baseline' )
+			? uonix_intelligence_anomaly_lead_baseline()
+			: array( 'available' => false, 'reason' => '', 'days' => 0, 'leads' => 0, 'per_day' => 0.0, 'longest_gap' => null, 'threshold_days' => 0, 'threshold_is_safe' => false );
+		$verificado = isset( $resumo['checked_at'] ) ? (string) $resumo['checked_at'] : '';
+		$momento    = '' !== $verificado ? strtotime( $verificado ) : false;
+		$classe     = 'critical' === $badge['state'] ? 'uonix-cache-stale' : ( 'normal' === $badge['state'] ? 'uonix-cache-fresh' : 'uonix-cache-empty' );
+		?>
+		<section id="uonix-panel-anomalies" role="tabpanel" aria-labelledby="uonix-tab-anomalies"<?php echo $is_active ? '' : ' hidden'; ?>>
+			<div class="uonix-panel-header">
+				<div class="uonix-metrics-copy">
+					<h2 id="uonix-anomalies-title">Vigilância de anomalias</h2>
+					<p>Dois gatilhos verificados uma vez por dia: silêncio de orçamentos e queda de tráfego orgânico na comparação entre semanas. O aviso por e-mail sai uma vez por episódio, no momento em que a anomalia começa.</p>
+					<div class="uonix-metrics-cache-meta">
+						<span class="uonix-metrics-cache-status <?php echo esc_attr( $classe ); ?>"><?php echo esc_html( $badge['label'] ); ?></span>
+						<?php if ( false !== $momento ) : ?>
+							<time datetime="<?php echo esc_attr( gmdate( 'c', $momento ) ); ?>">
+								<?php echo esc_html( 'Verificado em ' . ( function_exists( 'wp_date' ) ? wp_date( 'd/m/Y H:i', $momento ) : gmdate( 'd/m/Y H:i', $momento ) ) ); ?>
+							</time>
+						<?php else : ?>
+							<span>Nenhuma verificação registrada ainda</span>
+						<?php endif; ?>
+					</div>
+				</div>
+			</div>
+
+			<?php if ( false === $momento ) : ?>
+				<div class="notice notice-info inline">
+					<p>A primeira verificação ainda não rodou. Ela é disparada pelo agendador do WordPress, que depende de tráfego no site — então acontece na primeira visita depois do horário agendado, e não em horário fixo.</p>
+				</div>
+			<?php endif; ?>
+
+			<?php
+			foreach ( ( isset( $resumo['findings'] ) && is_array( $resumo['findings'] ) ? $resumo['findings'] : array() ) as $achado ) :
+				if ( ! is_array( $achado ) ) {
+					continue;
+				}
+				$rotulos = array(
+					'lead_silence' => 'Colapso de conversões',
+					'organic_drop' => 'Queda de tráfego orgânico',
+				);
+				$gatilho = isset( $achado['trigger'] ) ? (string) $achado['trigger'] : '';
+				$titulo  = isset( $rotulos[ $gatilho ] ) ? $rotulos[ $gatilho ] : $gatilho;
+				?>
+				<h3><?php echo esc_html( $titulo ); ?></h3>
+				<?php if ( ! empty( $achado['stale_expired'] ) ) : ?>
+					<?php // Anomalia antiga demais para ser afirmada no presente. Manter o badge
+					// crítico com dado velho treinaria o operador a ignorar a tela. ?>
+					<div class="notice notice-warning inline">
+						<p><strong><?php echo esc_html( sprintf(
+							'Última observação anômala em %s, não reverificada há %d dias.',
+							isset( $achado['last_observed'] ) ? (string) $achado['last_observed'] : '(sem data)',
+							isset( $achado['stale_days'] ) ? (int) $achado['stale_days'] : 0
+						) ); ?></strong></p>
+						<p><?php echo esc_html( uonix_intelligence_anomaly_reason_message( isset( $achado['reason'] ) ? (string) $achado['reason'] : '' ) ); ?></p>
+					</div>
+				<?php elseif ( ! empty( $achado['stale_anomaly'] ) ) : ?>
+					<?php // Anomalia detectada antes e não reverificada hoje. Nem "acontecendo
+					// agora", nem "não sei nada": a fonte falhou, mas o que já foi medido continua
+					// valendo, e apagar da tela esconderia um incidente ativo. ?>
+					<div class="notice notice-error inline">
+						<p><strong><?php echo esc_html(
+							'' !== ( isset( $achado['started_at'] ) ? (string) $achado['started_at'] : '' )
+								? sprintf( 'Anomalia detectada em %s e ainda não resolvida.', (string) $achado['started_at'] )
+								: 'Anomalia detectada anteriormente e ainda não resolvida.'
+						); ?></strong></p>
+						<p><?php echo esc_html( 'Não foi possível reverificar nesta rodada: ' . uonix_intelligence_anomaly_reason_message( isset( $achado['reason'] ) ? (string) $achado['reason'] : '' ) ); ?></p>
+					</div>
+				<?php elseif ( empty( $achado['available'] ) ) : ?>
+					<div class="notice notice-warning inline">
+						<p><?php echo esc_html( uonix_intelligence_anomaly_reason_message( isset( $achado['reason'] ) ? (string) $achado['reason'] : '' ) ); ?></p>
+					</div>
+				<?php elseif ( empty( $achado['anomalous'] ) ) : ?>
+					<div class="notice notice-success inline">
+						<p><?php echo esc_html( isset( $achado['headline'] ) ? (string) $achado['headline'] : '' ); ?></p>
+					</div>
+				<?php else : ?>
+					<div class="notice notice-error inline">
+						<p><strong><?php echo esc_html( isset( $achado['headline'] ) ? (string) $achado['headline'] : '' ); ?></strong></p>
+					</div>
+					<table class="form-table" role="presentation">
+						<tbody>
+							<?php foreach ( array(
+								'Quando começou'   => isset( $achado['started_at'] ) ? (string) $achado['started_at'] : '',
+								'Causa provável'   => isset( $achado['likely_cause'] ) ? (string) $achado['likely_cause'] : '',
+								'Ação recomendada' => isset( $achado['action'] ) ? (string) $achado['action'] : '',
+							) as $rotulo => $valor ) : ?>
+								<?php if ( '' === $valor ) { continue; } ?>
+								<tr>
+									<th scope="row"><?php echo esc_html( $rotulo ); ?></th>
+									<td><?php echo esc_html( $valor ); ?></td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				<?php endif; ?>
+			<?php endforeach; ?>
+
+			<?php
+			// Aviso que não saiu: o episódio esgotou o teto de retentativas de e-mail. O
+			// operador precisa saber que existe anomalia detectada cujo aviso não chegou,
+			// senão a ausência de e-mail seria lida como ausência de problema.
+			$meta_alerta = function_exists( 'uonix_intelligence_anomaly_get_alert_meta' ) ? uonix_intelligence_anomaly_get_alert_meta() : array();
+			$sem_entrega = array();
+			foreach ( $meta_alerta as $gatilho_meta => $dados_meta ) {
+				if ( ! empty( $dados_meta['undelivered'] ) ) {
+					$sem_entrega[] = (string) $gatilho_meta;
+				}
+			}
+			?>
+			<?php if ( array() !== $sem_entrega ) : ?>
+				<div class="notice notice-error inline">
+					<p><strong><?php echo esc_html( sprintf(
+						1 === count( $sem_entrega ) ? 'Uma anomalia foi detectada e o aviso por e-mail NÃO foi entregue.' : '%d anomalias foram detectadas e os avisos por e-mail NÃO foram entregues.',
+						count( $sem_entrega )
+					) ); ?></strong></p>
+					<p>O envio foi tentado até o limite e falhou. Confira a lista de destinatários na aba Configurações: um único endereço inválido faz o servidor recusar a mensagem inteira.</p>
+				</div>
+			<?php endif; ?>
+
+			<h3>Limiar de silêncio de orçamentos, conferido contra o histórico</h3>
+			<?php if ( empty( $baseline['available'] ) ) : ?>
+				<div class="notice notice-warning inline">
+					<p><?php echo esc_html( uonix_intelligence_anomaly_reason_message( isset( $baseline['reason'] ) ? (string) $baseline['reason'] : '' ) ); ?></p>
+				</div>
+			<?php else : ?>
+				<p>O limiar precisa ser maior que o maior silêncio já observado em operação normal. Um limiar menor ou igual descreve o funcionamento do site, dispara toda semana, e o alerta passa a ser ignorado.</p>
+				<p>A medição considera apenas intervalos <strong>encerrados</strong> — do primeiro dia do período até o último orçamento recebido. O silêncio em curso fica de fora de propósito: incluí-lo faria a anomalia atual entrar na definição de normalidade, e o aviso abaixo apareceria sempre que o alerta estivesse certo.</p>
+				<div class="uonix-kpi-grid">
+					<div class="uonix-kpi-card">
+						<div class="uonix-kpi-title">Limiar em uso</div>
+						<div class="uonix-kpi-value"><?php echo esc_html( uonix_intelligence_number( $baseline['threshold_days'], 0 ) ); ?></div>
+						<div class="uonix-kpi-sub">dias corridos sem orçamento</div>
+					</div>
+					<div class="uonix-kpi-card">
+						<div class="uonix-kpi-title">Maior silêncio encerrado</div>
+						<div class="uonix-kpi-value"><?php echo esc_html( null === $baseline['longest_gap'] ? '—' : uonix_intelligence_number( $baseline['longest_gap'], 0 ) ); ?></div>
+						<div class="uonix-kpi-sub"><?php echo esc_html(
+							! empty( $baseline['gap_from_edge'] )
+								? sprintf( 'dias ou MAIS: o intervalo começou antes dos %d dias medidos', (int) $baseline['days'] )
+								: sprintf( 'dias, nos últimos %d', (int) $baseline['days'] )
+						); ?></div>
+					</div>
+					<div class="uonix-kpi-card">
+						<div class="uonix-kpi-title">Silêncio em curso</div>
+						<div class="uonix-kpi-value"><?php echo esc_html( null === $baseline['current_silence'] ? '—' : uonix_intelligence_number( $baseline['current_silence'], 0 ) ); ?></div>
+						<div class="uonix-kpi-sub">dias desde o último orçamento</div>
+					</div>
+					<div class="uonix-kpi-card">
+						<div class="uonix-kpi-title">Orçamentos por dia</div>
+						<div class="uonix-kpi-value"><?php echo esc_html( uonix_intelligence_number( $baseline['per_day'], 2 ) ); ?></div>
+						<div class="uonix-kpi-sub"><?php echo esc_html( sprintf( '%s no período', uonix_intelligence_number( $baseline['leads'], 0 ) ) ); ?></div>
+					</div>
+				</div>
+				<?php if ( empty( $baseline['threshold_is_safe'] ) ) : ?>
+					<div class="notice notice-warning inline">
+						<p>O limiar em uso não é maior que o maior silêncio observado no período. Enquanto isso valer, o gatilho vai disparar descrevendo o comportamento habitual do site em vez de uma anomalia.</p>
+					</div>
 				<?php endif; ?>
 			<?php endif; ?>
 		</section>

@@ -222,6 +222,16 @@ function uonix_render_analytics_dashboard_page()
 	$active_dashboard_tab = $dashboard_state['tab'];
 	$active_metrics_subtab = $dashboard_state['subtab'];
 	$active_catalog_tab = $dashboard_state['catalog_tab'];
+	// Badge de anomalia no RÓTULO da aba, e não só dentro do painel: um aviso que só
+	// aparece depois de abrir a aba não vigia nada, porque quem não suspeita não
+	// clica. Lê o resultado persistido pela verificação diária — recomputar aqui
+	// custaria uma chamada à API da Search Console em cada carga desta tela.
+	$anomaly_summary = function_exists( 'uonix_intelligence_anomaly_get_summary' )
+		? uonix_intelligence_anomaly_get_summary()
+		: array( 'findings' => array(), 'anomalous' => 0, 'unavailable' => 0, 'checked_at' => '' );
+	$anomaly_badge = function_exists( 'uonix_intelligence_anomaly_badge' )
+		? uonix_intelligence_anomaly_badge( $anomaly_summary )
+		: array( 'state' => 'normal', 'label' => 'Sistema normal' );
 	// O auto-refresh só pode disparar na aba de métricas. O formulário e o script
 	// que o submetem vivem dentro do painel de métricas, que é renderizado em toda
 	// aba e apenas escondido; sem esta guarda, abrir outra aba dispara um sync de 8
@@ -258,6 +268,7 @@ function uonix_render_analytics_dashboard_page()
 			<a id="uonix-tab-metrics" role="tab" aria-selected="<?php echo 'metrics' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-metrics" tabindex="<?php echo 'metrics' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-metrics" data-uonix-query-key="tab" data-uonix-query-value="metrics">Métricas</a>
 			<a id="uonix-tab-destinations" role="tab" aria-selected="<?php echo 'destinations' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-destinations" tabindex="<?php echo 'destinations' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'destinations', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-destinations" data-uonix-query-key="tab" data-uonix-query-value="destinations">Destinos de marketing configurados</a>
 			<a id="uonix-tab-intelligence" role="tab" aria-selected="<?php echo 'intelligence' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-intelligence" tabindex="<?php echo 'intelligence' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'intelligence', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-intelligence" data-uonix-query-key="tab" data-uonix-query-value="intelligence">Oportunidades SEO</a>
+			<a id="uonix-tab-anomalies" role="tab" aria-selected="<?php echo 'anomalies' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-anomalies" tabindex="<?php echo 'anomalies' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'anomalies', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-anomalies" data-uonix-query-key="tab" data-uonix-query-value="anomalies">Anomalias<?php if ( 'normal' !== $anomaly_badge['state'] ) : ?> <span aria-hidden="true"><?php echo 'critical' === $anomaly_badge['state'] ? '&#x1F6A8;' : '&#x26A0;&#xFE0F;'; ?></span><span class="screen-reader-text"><?php echo esc_html( ' — ' . $anomaly_badge['label'] ); ?></span><?php endif; ?></a>
 			<a id="uonix-tab-settings" role="tab" aria-selected="<?php echo 'settings' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-settings" tabindex="<?php echo 'settings' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'settings', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-settings" data-uonix-query-key="tab" data-uonix-query-value="settings">Configurações</a>
 		</nav>
 
@@ -729,6 +740,9 @@ function uonix_render_analytics_dashboard_page()
 		// 56-admin-intelligence-dashboard.php para não crescer este arquivo.
 		if ( function_exists( 'uonix_intelligence_render_panel' ) ) {
 			uonix_intelligence_render_panel( $active_dashboard_tab );
+		}
+		if ( function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
+			uonix_intelligence_render_anomalies_panel( $active_dashboard_tab );
 		}
 		if ( function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 			uonix_intelligence_render_settings_panel( $active_dashboard_tab );

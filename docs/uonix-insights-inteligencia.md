@@ -56,7 +56,9 @@ Módulos novos seguem `NN-slug.php` dentro de `mu-plugins/uonix-<domínio>/`, in
 | Arquivo | Papel |
 |---|---|
 | `mu-plugins/uonix-admin/55-admin-intelligence-metrics.php` | Camada de dados: regras de detecção, normalização e procedência |
-| `mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php` | Render: aba, tabelas, cards |
+| `mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php` | Render: abas `intelligence`, `anomalies` e `settings` |
+| `mu-plugins/uonix-admin/57-admin-intelligence-report.php` | Relatório executivo semanal por e-mail e seu agendamento |
+| `mu-plugins/uonix-admin/58-admin-intelligence-anomalies.php` | Módulo 5: detecção de anomalias, estado, alerta e verificação diária |
 
 Dados precedem render no array. Não inflar o `52`, que já tem mais de 1.500 linhas com CSS inline.
 
@@ -84,6 +86,10 @@ O hardening existente em `53` é referência para qualquer credencial de arquivo
 
 A Central é uma aba nova no painel existente, adicionada à allowlist de `tab` no `53` e à tablist do `52`. Mantém a semântica ARIA e o funcionamento sem JavaScript já implementados: os painéis são escondidos server-side e as abas são links reais.
 
+Abas em uso: `metrics`, `destinations`, `intelligence` (Oportunidades SEO), `anomalies` (Módulo 5) e `settings`. **Acrescentar uma aba exige as duas pontas** — a allowlist do `53` e o link do `52`. Só o link faz o `tab` cair de volta em `metrics` e o painel nunca aparecer; só a allowlist deixa o painel inalcançável. `scripts/tests/test-admin-intelligence-anomalies-panel.php` guarda as duas pontas para a aba de anomalias.
+
+Todo valor vindo do banco sai por `esc_html`/`esc_attr`/`esc_url`, e isso é **asserido**, não convenção: os painéis são renderizados em toda carga da tela e apenas escondidos, então um escape removido vazaria em qualquer aba.
+
 ### Destinatários do relatório
 
 Lista em `wp_options`. E-mail de destinatário não é segredo; token de API é — e por isso os dois vivem em lugares diferentes.
@@ -100,6 +106,8 @@ WP-Cron `weekly`. O painel exibe o **próximo disparo real** lido do agendador (
 
 #### Quem cria o evento: o invariante dos destinatários
 
+**Este invariante vale para o RELATÓRIO EXECUTIVO (`57`), e deliberadamente não vale para a verificação de anomalias (`58`).** A distinção está registrada em "Verificação de anomalias" abaixo, e o código de `uonix_intelligence_anomaly_maybe_schedule()` traz a mesma nota — quem auditar o agendamento encontra a explicação nos dois lugares, em vez de achar que um deles está errado.
+
 **Existe evento agendado se, e somente se, existe destinatário.** Um callback de `init` mantém esse invariante em toda requisição: agenda `weekly` quando há destinatário e nenhum evento, e remove o evento quando o último destinatário sai.
 
 A lista de destinatários é, portanto, a **chave de ativação** — não um campo a mais. Isso já estava implícito em `uonix_intelligence_send_report()`, que recusa lista vazia com o motivo `no_recipients`; o agendamento passou a respeitar a mesma regra.
@@ -112,6 +120,57 @@ O que essa amarração compra, e que um `wp_schedule_event` manual por WP-CLI n�
 **A contenção por ambiente NÃO é automática, e depende do clone.** Não vale dizer que "a opção vive no banco de cada ambiente, então o ambiente clonado não agenda": `scripts/clone-environment.sh` copia `wp_options` da origem. Ele preserva `cron` no destino — o evento não viaja —, mas os destinatários viajariam, e o callback de `init` recriaria o evento no destino na requisição seguinte. O ambiente clonado passaria a exibir um "próximo disparo" concreto que ninguém configurou ali.
 
 Por isso `uonix_executive_report_recipients` está em `protected_options_where()`, junto de `cron`, SMTP, Turnstile e captcha — todas configurações que ativam comportamento e não devem atravessar ambientes. `scripts/tests/test-clone-activation-options.sh` reprova o build se qualquer uma das duas sair da lista, ou se o invariante deixar de existir no módulo.
+
+### Verificação de anomalias
+
+O Módulo 5 (`58`) vigia dois gatilhos: silêncio de orçamentos, a partir de `wp_fluentform_submissions`, e queda de tráfego orgânico semana-a-semana, a partir da Search Console. Aba `anomalies`, badge no **rótulo** da aba, e e-mail uma vez por episódio para a lista do relatório executivo.
+
+#### Por que o agendamento aqui NÃO segue o invariante dos destinatários
+
+A verificação é agendada **sempre**, independentemente de existir destinatário. A razão é que ela alimenta o badge do painel, que é útil sem e-mail nenhum: quem abre a tela quer saber se há anomalia, tenha ou não cadastrado endereço. Só o **envio** depende de destinatário, e essa condição vive em `uonix_intelligence_anomaly_send_alert()`.
+
+No relatório executivo a situação é outra: sem destinatário ele não tem o que fazer, e um agendamento ativo faria o painel prometer um envio que não aconteceria.
+
+#### O que a API não distingue, e o que fazer a respeito
+
+A Search Console **omite a linha** de um dia tanto quando ele ainda não foi publicado quanto quando ele teve zero impressão. Os dois casos são o mesmo byte na resposta, e essa ambiguidade é a fonte dos defeitos mais sérios deste módulo — dois deles chegaram a ser mergeados como desenho antes de a revisão do PR #293 medi-los.
+
+Três consequências que qualquer alteração aqui precisa respeitar:
+
+- **O que separa "não publicado" de "zero" é o NÚMERO DE DIAS PRESENTES na janela, não a última data com dado.** Ancorar as janelas na última data devolvida parece resolver a defasagem e na verdade esconde o colapso: num site desindexado a ancoragem recua para o último dia saudável, as duas janelas caem em período bom, e o módulo afirma `0,0%` e "dentro do normal" durante um apagão total de tráfego.
+- **Dia ausente é resolvido por IMPUTAÇÃO OTIMISTA, não por recusa.** Tratá-lo como zero produz queda artificial — medido em −42,9% com o tráfego real do site. Mas recusar silencia colapso severo: a mesma queda de ~94% alertava com 1 impressão/dia e ficava calada com zero absoluto, ou seja, **aumentar a severidade desligava o alerta**. Dia ausente é ≥ 0, então imputa-se o valor mais favorável à hipótese "nada aconteceu" — média por dia observado da janela anterior, na janela atual; zero, na anterior — e só se conclui se a conclusão sobrevive. Isso é um limite, não um palpite.
+- **A precedência do bloco de colapso é carga estrutural.** Semana atual **vazia** contra semana anterior com volume observado é colapso, e tem de ser avaliada **antes** de qualquer portão de completude da base. Com ela depois, um apagão total era detectável em **um único dia de 26** — a interseção "atual exatamente vazia E anterior exatamente completa" —, e um dia de deriva do WP-Cron perdia o episódio para sempre. O piso de ruído continua vindo antes de tudo: sem volume de referência, nem o colapso tem significado.
+
+#### Limiares medidos, e por que o painel os audita
+
+`organic_settle_lag_days` sai de medição (3 dias observados em 2026-09-23, mais um de margem). Fixá-lo só é seguro porque a completude é conferida à parte: se o Google atrasar mais, a janela fica incompleta e o gatilho se declara indisponível em vez de comparar janela furada.
+
+`lead_silence_days` é o limiar que a especificação da issue #193 propunha derivar de "3-5 leads/dia", número nunca medido. O painel exibe a medição ao lado do limiar em uso e avisa quando o limiar não é maior que o maior silêncio já observado.
+
+A medição considera apenas intervalos **encerrados**. Dois recortes, e o segundo é condicional:
+
+- **Terminar no último orçamento** exclui o silêncio em curso. Incluí-lo tornava o aviso matematicamente garantido sempre que o gatilho acertava: `longest_gap >= silêncio_em_curso >= limiar` implica `limiar > longest_gap` falso, e o painel exibia "1 anomalia crítica detectada" com a instrução de desconsiderá-la logo abaixo.
+- **Onde COMEÇAR depende de existir orçamento antes da janela**, e uma consulta resolve. O vazio inicial tem dois significados que a contagem dentro da janela não distingue: pode ser a janela de observação sendo maior que a história (site novo), ou um intervalo real cujo orçamento anterior ficou de fora. Tratá-los como um só produzia verdictos opostos para o mesmo site — medido: leads até 20/06, silêncio de três meses, retomada em 19/09 dava `longest_gap = 0` e "seguro" numa janela de 90 dias, e 90 com "inseguro" numa de 120.
+
+Havendo orçamento antes da janela, a medição começa na **borda** e o valor é um **piso** do real, porque a consulta não enxerga além dela — o painel declara isso com "dias ou MAIS". Não havendo, começa no primeiro orçamento. Portanto `longest_gap` significa "o maior intervalo encerrado observável nesta janela", e **não** o maior intervalo absoluto entre dois orçamentos consecutivos.
+
+### Anomalia não reverificada tem prazo
+
+Quando a fonte falha, uma anomalia já observada continua na tela — apagá-la esconderia um incidente ativo. O que a sustenta é o `observed`, **não** o sinalizador de "já avisei": a contabilidade de aviso não pode governar o que a tela afirma, e conflacionar os dois deixava a proteção inerte e permanentemente na configuração sem destinatário, que é a que esta seção declara suportada.
+
+São **três** fatos distintos, e cada conflação entre eles produziu um defeito: `observed` (o último achado disponível foi anômalo), `triggers` (já avisei sobre este episódio) e `meta.attempts` (já tentei, quantas vezes).
+
+E há prazo: passados `stale_anomaly_max_days` sem reverificação, o badge cai para "indisponível" e a tela nomeia a última observação. Sem prazo, uma credencial revogada mantinha o badge crítico indefinidamente — medido em 400 dias afirmando "ainda não resolvida". Alarme permanente treina a pessoa a ignorar a tela tão bem quanto alarme semanal.
+
+#### "Já avisei" e "já tentei" são estados diferentes
+
+`wp_mail()` devolver `false` **não** prova que nada foi entregue: o PHPMailer transmite o `DATA` quando há ao menos um destinatário aceito e só depois lança `recipients_failed`. Um endereço com typo na lista faz os bons receberem e a função devolver falso.
+
+Por isso a retentativa de aviso tem **teto** (`alert_max_attempts`). Esgotado, o episódio é marcado `undelivered` e o painel diz "anomalia detectada, aviso não entregue" — em vez de silenciar o episódio ou repetir o e-mail todo dia. Lista vazia é o único caso em que a retentativa é provadamente inofensiva, e ali não conta tentativa.
+
+#### Estado por ambiente
+
+`uonix_intelligence_anomaly_state` guarda o resultado da última verificação e o sinalizador de "já avisei" por gatilho, e está em `protected_options_where()`. É categoria distinta das opções de ativação: ela não liga automação no destino, faz a **tela** do destino afirmar um estado que é da origem. Sem a proteção, um clone `prod → qa` faz o painel do QA exibir o incidente da produção. `scripts/tests/test-clone-activation-options.sh` reprova se ela sair da lista.
 
 **O que faz o trabalho é o `DELETE`, não a preservação** — e a distinção importa para a próxima opção de ativação que alguém acrescentar. `snapshot_options()` gera uma instrução de replay por linha **que existe no destino**; num ambiente que nunca cadastrou destinatário não existe linha, e o snapshot sai vazio para essa opção. Quem impede a herança é o `DELETE FROM ... WHERE <predicado>` que `restore_options()` roda **antes** do replay: ele remove do destino a linha que acabou de vir da origem. Ou seja, "preservar a opção do destino" e "impedir que a opção da origem seja herdada" são efeitos diferentes, e é o segundo que fecha o furo. Estar no predicado garante os dois, porque o mesmo predicado governa snapshot e `DELETE`.
 
