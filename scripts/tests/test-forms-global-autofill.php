@@ -281,14 +281,128 @@ if ($idsFromUuid !== array('6332f834-41df-4cc5-a3bf-dffe359112c5')) {
 }
 unset($GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids']);
 
+// CENÁRIO B6: o ID REAL da conta AdOpt é aceito.
+// Regressão direta da issue #264: as cinco tags desta conta têm 10 caracteres, e o mínimo
+// histórico de 12 rejeitava todas, mantendo o módulo inativo sem emitir sinal nenhum.
+// Fixture fictícia não cobre isto — o valor abaixo é o ID real de `uonix.com.br`.
+$realFilter = function() { return array('9BxuTvI1_q'); };
+$GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids'] = array($realFilter);
+$idsReais = uonix_adopt_get_consent_tag_ids();
+if ($idsReais !== array('9bxutvi1_q')) {
+    echo "ERRO #264: o ID real da AdOpt ('9BxuTvI1_q', 10 caracteres) foi rejeitado pelo validador. "
+        . "Retornado: " . var_export($idsReais, true) . "\n";
+    exit(1);
+}
+unset($GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids']);
+
+// CENÁRIO B7: nomes de categoria continuam rejeitados, UM A UM.
+// Com o mínimo em 10, quatro deles ('functional', 'necessario', 'preferences',
+// 'uonix_cookies') passam pelo teste de comprimento — quem os rejeita é a lista explícita.
+// Verificar em bloco esconderia a remoção de um nome isolado da lista.
+$nomesDeCategoria = array(
+    'funcional', 'preferences', 'functional', 'uonix_cookies',
+    'marketing', 'analytics', 'necessario', 'essential',
+);
+foreach ($nomesDeCategoria as $nomeGenerico) {
+    $filtroNome = function() use ($nomeGenerico) { return array($nomeGenerico); };
+    $GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids'] = array($filtroNome);
+    $resultado = uonix_adopt_get_consent_tag_ids();
+    if (!empty($resultado)) {
+        echo "ERRO FAIL-CLOSED: o nome de categoria '{$nomeGenerico}' (" . strlen($nomeGenerico)
+            . " caracteres) foi aceito como ID de tag. A lista explícita de descarte é a única "
+            . "defesa contra ele desde que o mínimo de comprimento caiu para 10.\n";
+        exit(1);
+    }
+    unset($GLOBALS['_mock_filters']['uonix_adopt_consent_tag_ids']);
+}
+
+// CENÁRIO B8: sem a constante de ambiente, o padrão embutido já autoriza.
+// É o que dispensa provisionamento por SSH e o que impede a inatividade silenciosa de #264.
+$idsPadrao = uonix_adopt_get_consent_tag_ids();
+if (count($idsPadrao) < 1) {
+    echo "ERRO #264: sem UONIX_ADOPT_CONSENT_TAG_IDS definida, o padrão embutido deveria "
+        . "autorizar ao menos uma tag. O módulo voltaria a ficar inativo em silêncio.\n";
+    exit(1);
+}
+if (!defined('UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO') || '' === trim((string) UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO)) {
+    echo "ERRO: UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO deve existir e não pode ser vazia.\n";
+    exit(1);
+}
+
+// CENÁRIO B9: a constante de ambiente tem precedência sobre o padrão embutido.
+// Subprocesso porque a precedência só é observável se a constante existir ANTES do require,
+// e este processo já carregou o módulo sem ela (cenário B8).
+$harnessPrecedencia = <<<'PHP_HARNESS'
+<?php
+define('ABSPATH', __DIR__ . '/');
+define('UONIX_ADOPT_CONSENT_TAG_IDS', 'AbCdEfGhIjKl');
+function add_action($h, $c, $p = 10, $a = 1) {}
+function add_filter($h, $c, $p = 10, $a = 1) {}
+function apply_filters($h, $v, ...$rest) { return $v; }
+function is_admin() { return false; }
+require MODULO;
+$ids = uonix_adopt_get_consent_tag_ids();
+echo implode(',', $ids);
+PHP_HARNESS;
+
+$harnessPrecedencia = str_replace(
+    'MODULO',
+    var_export($rootDir . '/mu-plugins/uonix-forms/49-forms-global-autofill.php', true),
+    $harnessPrecedencia
+);
+$tempPrecedencia = tempnam(sys_get_temp_dir(), 'uonix_precedencia_') . '.php';
+file_put_contents($tempPrecedencia, $harnessPrecedencia);
+$saidaPrecedencia = trim((string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($tempPrecedencia) . ' 2>&1'));
+unlink($tempPrecedencia);
+
+if ($saidaPrecedencia !== 'abcdefghijkl') {
+    echo "ERRO: UONIX_ADOPT_CONSENT_TAG_IDS deveria ter precedência sobre o padrão embutido "
+        . "(rotação emergencial sem deploy). Esperado 'abcdefghijkl', obtido: '{$saidaPrecedencia}'\n";
+    exit(1);
+}
+
+// CENÁRIO B10: o stub de adoptCB roda ANTES do GTM.
+// A AdOpt captura window.adoptCB uma única vez, na montagem, com `??`. Se ela montar antes
+// deste módulo registrar o global, guarda um no-op em definitivo e o consentimento nunca
+// chega ao avaliador. O GTM (que injeta a AdOpt) entra em wp_head; o stub tem que vir antes.
+if (!preg_match('/add_action\(\s*[\'"]wp_head[\'"]\s*,\s*[\'"]uonix_autofill_registra_adopt_cb_antecipado[\'"]\s*,\s*(\d+)/', $globalAutofill, $mStub)) {
+    echo "ERRO: o stub antecipado de adoptCB não está registrado em wp_head com prioridade explícita.\n";
+    exit(1);
+}
+$prioridadeStub = (int) $mStub[1];
+
+$analyticsLgpd = file_get_contents($rootDir . '/mu-plugins/uonix-integrations/38-integracoes-analytics-lgpd.php');
+if (!preg_match('/add_action\(\s*[\'"]wp_head[\'"]\s*,\s*[\'"]uonix_render_analytics_head[\'"]\s*,\s*(\d+)/', $analyticsLgpd, $mGtm)) {
+    echo "ERRO: não foi possível ler a prioridade de wp_head de uonix_render_analytics_head "
+        . "(injeção do GTM). A asserção de ordem não pode ser verificada.\n";
+    exit(1);
+}
+$prioridadeGtm = (int) $mGtm[1];
+
+if ($prioridadeStub >= $prioridadeGtm) {
+    echo "ERRO DE ORDEM: o stub de adoptCB está na prioridade {$prioridadeStub} e o GTM na "
+        . "{$prioridadeGtm}. A AdOpt pode montar antes do stub e capturar um no-op, deixando o "
+        . "autopreenchimento morto de forma intermitente.\n";
+    exit(1);
+}
+
+if (strpos($globalAutofill, '__uonixAvaliaConsentAdopt') === false
+    || strpos($globalAutofill, '__uonixAdoptConsentPendente') === false) {
+    echo "ERRO: o rodapé precisa publicar __uonixAvaliaConsentAdopt e consumir "
+        . "__uonixAdoptConsentPendente, senão o stub antecipado guarda o consentimento e ninguém lê.\n";
+    exit(1);
+}
+
 // ==============================================================================
 // 3. VALIDAÇÃO COMPORTAMENTAL DO FRONTEND VIA NODE.JS (SIMULAÇÃO DOM & ADOPT)
 // ==============================================================================
 
-// Extrai o conteúdo do script JS de 49-forms-global-autofill.php
-preg_match('/<script[^>]*>(.*?)<\/script>/s', $globalAutofill, $jsMatch);
+// Extrai o conteúdo do script JS de 49-forms-global-autofill.php.
+// Alvo explícito pelo id: o arquivo tem DOIS blocos <script> (o stub antecipado de wp_head
+// e este), e uma regex de primeira ocorrência pegaria o bloco errado silenciosamente.
+preg_match('/<script id="uonix-global-autofill-js"[^>]*>(.*?)<\/script>/s', $globalAutofill, $jsMatch);
 if (empty($jsMatch[1])) {
-    echo "ERRO: Bloco JavaScript não encontrado em 49-forms-global-autofill.php\n";
+    echo "ERRO: Bloco JavaScript 'uonix-global-autofill-js' não encontrado em 49-forms-global-autofill.php\n";
     exit(1);
 }
 
