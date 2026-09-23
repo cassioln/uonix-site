@@ -484,6 +484,28 @@ uox_assert( empty( $semConfig['available'] ), 'sem configuração o gatilho deve
 
 $limiar = (int) $regras['lead_silence_days'];
 
+// FAIXA do limiar, com as duas pontas justificadas. Não é piso solto.
+//
+// A versão anterior desta asserção era `> 10`, e a revisão do PR #298 mostrou que ela
+// proibia o NÚMERO e não o COMPORTAMENTO: mutações para 11, 20, 22 e 30 todas
+// sobreviviam, e 11 dá ~10,3 falsos alarmes por ano contra ~12,0 em 10 — uma catraca de
+// um degrau e depois nada. O risco não era o piso virar obstáculo; era o teto não
+// existir.
+//
+// Piso 21 = duas vezes o maior silêncio ENCERRADO medido em produção (10 dias, em
+// 2026-09-23, com 14 orçamentos em 90 dias). Abaixo disso o limiar fica perto demais do
+// que já aconteceu sem nada de errado, e a estimativa de falso alarme passa de ~4/ano.
+//
+// Teto 30 = um mês. Acima disso o operador percebe a seca antes do alerta, e o gatilho
+// deixa de acrescentar informação.
+//
+// **A latitude entre 21 e 30 é intencional, não lacuna.** Dentro da faixa a escolha é
+// julgamento — 21 detecta em três semanas com ~2,2 falsos/ano, 30 detecta em um mês com
+// ~0,5 — e um teste não deve decidir isso. O que ele impede é sair da faixa sem refazer
+// a medição.
+uox_assert( $limiar >= 21, 'o limiar precisa ser ao menos o dobro do maior silêncio encerrado medido em produção (10 dias); está em ' . $limiar );
+uox_assert( $limiar <= 30, 'acima de um mês o operador percebe a seca antes do alerta e o gatilho para de acrescentar informação; está em ' . $limiar );
+
 $GLOBALS['uox_table_exists'] = false;
 $semTabela = uonix_intelligence_anomaly_lead_silence( $hoje );
 uox_assert( empty( $semTabela['available'] ), 'tabela ausente deveria ser indisponível' );
@@ -593,6 +615,23 @@ $baseInsegura = uonix_intelligence_anomaly_lead_baseline( 60, $hoje );
 uox_assert( $limiar === (int) $baseInsegura['longest_gap'], 'o fixture deveria produzir silêncio encerrado igual ao limiar, obteve ' . $baseInsegura['longest_gap'] );
 uox_assert( empty( $baseInsegura['threshold_is_safe'] ), 'limiar IGUAL a um silêncio ENCERRADO observado não pode ser considerado seguro' );
 
+// O ESTADO DE PRODUÇÃO como fixture, para o comportamento medido ficar documentado em
+// vez de surpreendente. Sugestão da revisão do PR #298.
+//
+// 14 orçamentos em 90 dias com o maior silêncio encerrado em 10 dias: é o dado que
+// levou o limiar de 10 para 21, e é o estado que a tela vai renderizar.
+$GLOBALS['uox_lead_rows'] = array();
+$cursor = new DateTimeImmutable( $hoje, $fuso );
+for ( $i = 0; $i < 90; $i++ ) {
+	// Lead a cada 11 dias: silêncio encerrado de exatamente 10.
+	if ( 0 === $i % 11 ) { $GLOBALS['uox_lead_rows'][ $cursor->format( 'Y-m-d' ) ] = 1; }
+	$cursor = $cursor->modify( '-1 day' );
+}
+$baseProducao = uonix_intelligence_anomaly_lead_baseline( 90, $hoje );
+uox_assert( 10 === (int) $baseProducao['longest_gap'], 'o fixture de produção deveria dar silêncio encerrado de 10 dias, obteve ' . $baseProducao['longest_gap'] );
+uox_assert( ! empty( $baseProducao['threshold_is_safe'] ), 'com o limiar corrigido, o estado medido em produção deve ser declarado SEGURO — era o defeito que motivou este ajuste' );
+uox_assert( ! array_key_exists( 'threshold_is_conservative', $baseProducao ), 'não pode existir sinalizador de "conservador": aconselhar redução exige um modelo de falso alarme que 14 intervalos não sustentam' );
+
 // O vazio INICIAL da janela não é intervalo entre leads: é a janela de observação
 // sendo maior que a história disponível. Descoberto pelo próprio fixture ao corrigir
 // o ALTO 4 — num site novo, contá-lo declararia o limiar inseguro sem evidência.
@@ -626,18 +665,25 @@ $GLOBALS['uox_lead_before'] = null;
 // 5b. Saturação do contador e o dia que "Quando começou" nomeia (MÉDIO 1).
 // ---------------------------------------------------------------------------
 
-// Silêncio de 15 dias precisa reportar 15. A versão anterior parava o laço em
-// `limiar + 1` e o painel dizia "há 11 dias" no 40º dia de colapso, com `started_at`
-// andando um dia por dia — fazendo um incidente único parecer episódios novos.
-$GLOBALS['uox_lead_rows'] = array( ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-15 days' )->format( 'Y-m-d' ) => 1 );
+// Silêncio acima do limiar precisa reportar o número REAL. A versão anterior parava o
+// laço em `limiar + 1` e o painel dizia "há 11 dias" no 40º dia de colapso, com
+// `started_at` andando um dia por dia — fazendo um incidente único parecer episódios
+// novos a cada visita.
+//
+// O fixture é relativo ao limiar de propósito: escrito com o valor absoluto, ele
+// quebrou quando o limiar passou de 10 para 21 por medição em produção, e voltaria a
+// quebrar no próximo ajuste.
+$silLongo = $limiar + 5;
+$GLOBALS['uox_lead_rows'] = array( ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-' . $silLongo . ' days' )->format( 'Y-m-d' ) => 1 );
 $longo = uonix_intelligence_anomaly_lead_silence( $hoje );
-uox_assert( 15 === ( $longo['measured']['silent_days'] ?? -1 ), 'silêncio de 15 dias deve reportar 15, não saturar no limiar, obteve ' . ( $longo['measured']['silent_days'] ?? -1 ) );
-uox_assert( false !== strpos( (string) ( $longo['headline'] ?? '' ), '15' ), 'a manchete deve trazer o número real de dias' );
+uox_assert( $silLongo === ( $longo['measured']['silent_days'] ?? -1 ), 'silêncio de ' . $silLongo . ' dias deve reportar ' . $silLongo . ', não saturar no limiar, obteve ' . ( $longo['measured']['silent_days'] ?? -1 ) );
+uox_assert( ! empty( $longo['anomalous'] ), 'silêncio acima do limiar deve ser anomalia' );
+uox_assert( false !== strpos( (string) ( $longo['headline'] ?? '' ), (string) $silLongo ), 'a manchete deve trazer o número real de dias' );
 
 // `started_at` nomeia o primeiro dia SILENCIOSO, não o dia em que o último orçamento
-// chegou. Com 15 dias de silêncio, o último lead foi em hoje−15 e o primeiro dia
-// silencioso é hoje−14.
-$esperado_inicio = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-14 days' )->format( 'Y-m-d' );
+// chegou: com N dias de silêncio, o último lead foi em hoje−N e o primeiro dia
+// silencioso é hoje−(N−1).
+$esperado_inicio = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-' . ( $silLongo - 1 ) . ' days' )->format( 'Y-m-d' );
 uox_assert( $esperado_inicio === ( $longo['started_at'] ?? '' ), '"Quando começou" deve ser o primeiro dia silencioso (' . $esperado_inicio . '), não o dia do último orçamento; obteve ' . ( $longo['started_at'] ?? '(nada)' ) );
 
 // E o teto da contagem tem de ser a janela da linha de base, não 30.
@@ -646,11 +692,15 @@ uox_assert( $esperado_inicio === ( $longo['started_at'] ?? '' ), '"Quando começ
 // de colapso. A correção levou o teto a 30, e a segunda revisão mediu que o MESMO
 // defeito reaparecia no 31º dia: "há 30 dias", com `started_at` andando um dia por
 // dia e fazendo um incidente único parecer episódios novos a cada visita.
-$GLOBALS['uox_lead_rows'] = array( ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-40 days' )->format( 'Y-m-d' ) => 1 );
+// Acima de `limiar * 2` de propósito: a janela de contagem antiga era
+// `max( limiar * 2, 30 )`, e um fixture abaixo disso não distingue a correção do
+// defeito — a mutação fica equivalente e sobrevive. Verificado pelo harness.
+$silMuito = max( 60, $limiar * 3 );
+$GLOBALS['uox_lead_rows'] = array( ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-' . $silMuito . ' days' )->format( 'Y-m-d' ) => 1 );
 $muitoLongo = uonix_intelligence_anomaly_lead_silence( $hoje );
-uox_assert( 40 === ( $muitoLongo['measured']['silent_days'] ?? -1 ), 'silêncio de 40 dias deve reportar 40, não saturar em 30, obteve ' . ( $muitoLongo['measured']['silent_days'] ?? -1 ) );
-$inicio40 = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-39 days' )->format( 'Y-m-d' );
-uox_assert( $inicio40 === ( $muitoLongo['started_at'] ?? '' ), 'e "Quando começou" deve ficar FIXO no primeiro dia silencioso real (' . $inicio40 . '), obteve ' . ( $muitoLongo['started_at'] ?? '(nada)' ) );
+uox_assert( $silMuito === ( $muitoLongo['measured']['silent_days'] ?? -1 ), 'silêncio de ' . $silMuito . ' dias deve reportar o número real, não saturar em 30, obteve ' . ( $muitoLongo['measured']['silent_days'] ?? -1 ) );
+$inicioMuito = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-' . ( $silMuito - 1 ) . ' days' )->format( 'Y-m-d' );
+uox_assert( $inicioMuito === ( $muitoLongo['started_at'] ?? '' ), 'e "Quando começou" deve ficar FIXO no primeiro dia silencioso real (' . $inicioMuito . '), obteve ' . ( $muitoLongo['started_at'] ?? '(nada)' ) );
 
 // ---------------------------------------------------------------------------
 // 5c. Anomalia ativa não pode desaparecer porque a fonte falhou (MÉDIO 2).

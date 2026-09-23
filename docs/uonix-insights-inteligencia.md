@@ -145,7 +145,36 @@ Três consequências que qualquer alteração aqui precisa respeitar:
 
 `organic_settle_lag_days` sai de medição (3 dias observados em 2026-09-23, mais um de margem). Fixá-lo só é seguro porque a completude é conferida à parte: se o Google atrasar mais, a janela fica incompleta e o gatilho se declara indisponível em vez de comparar janela furada.
 
-`lead_silence_days` é o limiar que a especificação da issue #193 propunha derivar de "3-5 leads/dia", número nunca medido. O painel exibe a medição ao lado do limiar em uso e avisa quando o limiar não é maior que o maior silêncio já observado.
+`lead_silence_days` é o limiar que a especificação da issue #193 propunha derivar de "3-5 leads/dia", número nunca medido. O painel exibe a medição ao lado do limiar em uso.
+
+**A medição em produção reprovou o primeiro valor na primeira execução**, que era exatamente para isso que ela existe. Medido em 2026-09-23, logo após o deploy: **14 orçamentos em 90 dias, 0,16 por dia**, e um silêncio encerrado de **10 dias já observado em operação normal**. O valor inicial era 10 — errado por descrever o funcionamento habitual do site. A suposição da issue estava fora por um fator de ~25, o mesmo tipo de erro do `min_impressions = 100`.
+
+O valor passou a **21**, e o que o sustenta é, **nesta ordem**:
+
+1. **A medição direta.** Um silêncio de 10 dias já aconteceu sem nada de errado, então qualquer limiar até 10 descreve a normalidade deste site.
+2. **A assimetria de custo.** Alerta atrasado custa menos que alerta ignorado.
+3. **21 é três semanas** — unidade humana, não um ponto que um modelo escolheu.
+
+Há uma estimativa de falso alarme por trás (~12/ano em 10 dias, ~2,2 em 21, ~0,5 em 30, com λ = 14/90), mas ela é o **elo mais fraco** do argumento e não carrega a decisão. A revisão do PR #298 mostrou duas razões:
+
+- **O modelo não passa no teste de aderência que o próprio dado permite.** Sob λ = 0,1556 com 13 intervalos fechados, `E[máximo] = 20,4 dias`, e o observado foi 10: `P(máx ≤ 10) = 0,046`. Rejeitado a ~5%, na direção de cauda mais **leve** — as chegadas são mais regulares que Poisson. A estimativa é conservadora, e 14 a 16 seriam defensáveis com o mesmo dado.
+- **A incerteza é larga.** Erro padrão relativo de λ com n=14 é 26,7%, o que dá **1,15–3,80 falsos/ano a ±1σ e 0,58–5,78 a ±2σ** em 21 dias. Dizer "~2 por ano" subdeclara.
+
+A faixa validada é **21 a 30**, e `test-admin-intelligence-anomalies.php` reprova fora dela. A latitude dentro da faixa é intencional: 21 detecta em três semanas, 30 em um mês, e a escolha entre os dois é julgamento que um teste não deve decidir.
+
+#### Por que o limiar NÃO é adaptativo
+
+O site é novo e ainda não foi divulgado, então 0,16/dia não é o estado estacionário: o volume vai crescer. Derivar o limiar da taxa medida **sem guarda** tem modo de falha pior que o problema — se os orçamentos caírem devagar, o intervalo médio cresce, o limiar cresce atrás dele, e o alerta se dissolve exatamente quando o negócio está morrendo. É a armadilha clássica do baseline adaptativo.
+
+**Esse argumento não vale para a variante COM guarda**, e a revisão do PR #298 mostrou isso: um `clamp( k × gap, piso, teto )` com catraca só para baixo não tem caminho para cima, então não pode se dissolver. Ela é estritamente melhor no crescimento esperado e empata na queda. Não está implementada por escopo, e é o desenho a avaliar na issue de acompanhamento.
+
+Com valor fixo o erro é sempre na direção segura: quando o volume subir, 21 fica conservador — mais lento que o ideal, nunca falso.
+
+#### Não existe aviso de "limiar conservador demais"
+
+A ausência é deliberada, e a tentativa de criá-lo foi retirada na revisão do PR #298 com **três defeitos independentes**: ela lia `longest_gap` como valor exato quando ele é **piso**, disparava já no estado medido em produção contradizendo a justificativa do próprio limiar, e aparecia durante colapso em curso afirmando um "patamar" que não existe no 42º dia de seca.
+
+A causa comum é que aconselhar uma **redução** de limiar exige um modelo de falso alarme, e o que este dado sustenta é fraco demais para justificar uma ação. Enquanto isso valer, a tela informa a folga e não opina.
 
 A medição considera apenas intervalos **encerrados**. Dois recortes, e o segundo é condicional:
 

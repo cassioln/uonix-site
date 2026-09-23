@@ -36,6 +36,54 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_rules' ) ) {
 	 * observado, e o painel imprime a medição ao lado do limiar vigente. Se a taxa
 	 * de leads do site mudar, a tela mostra que o limiar ficou defasado.
 	 *
+	 * ## O valor 21 vem de MEDIÇÃO em produção, em 2026-09-23
+	 *
+	 * O primeiro valor foi 10, escolhido sem medir, e a própria tela o reprovou na
+	 * primeira execução — que era exatamente para isso que ela existe. Medido em
+	 * produção: **14 orçamentos em 90 dias, 0,16 por dia**, e um silêncio encerrado de
+	 * **10 dias já observado em operação normal**. A especificação da #193 supunha
+	 * "3-5 leads/dia": errado por um fator de ~25, o mesmo tipo de erro do
+	 * `min_impressions = 100`.
+	 *
+	 * **O que sustenta 21 é a medição direta mais a assimetria de custo**, nesta ordem:
+	 *
+	 * 1. Um silêncio de 10 dias já aconteceu sem nada de errado, então qualquer limiar
+	 *    até 10 descreve a normalidade deste site em vez de uma anomalia.
+	 * 2. Alerta atrasado custa menos que alerta ignorado. Errar para cima perde pressa;
+	 *    errar para baixo destrói o módulo.
+	 * 3. 21 é três semanas — unidade humana, não um ponto que um modelo escolheu.
+	 *
+	 * Há uma estimativa de falso alarme por trás (cauda exponencial com λ = 14/90,
+	 * intervalo médio 6,43 dias: ~12/ano em 10 dias, ~2,2/ano em 21, ~0,5/ano em 30),
+	 * mas ela é o **elo mais fraco** do argumento e não deve carregar o peso da decisão.
+	 * Duas razões, as duas levantadas na revisão do PR #298:
+	 *
+	 * - **O modelo não passa no teste de aderência que o próprio dado permite.** Sob
+	 *   λ = 0,1556 com 13 intervalos fechados, `E[máximo] = H₁₃/λ = 20,4 dias`, e o
+	 *   observado foi 10: `P(máx ≤ 10) = 0,046`. Rejeitado a ~5%, na direção de cauda
+	 *   mais LEVE — as chegadas são mais regulares que Poisson. A estimativa é, portanto,
+	 *   conservadora, e 14 a 16 seriam defensáveis com o mesmo dado.
+	 * - **A incerteza é larga.** O erro padrão relativo de λ com n = 14 é 26,7%, o que
+	 *   dá **1,15 a 3,80 falsos/ano a ±1σ e 0,58 a 5,78 a ±2σ** em 21 dias. Dizer "~2
+	 *   por ano" subdeclara: a ponta alta do intervalo de 95% é quase mensal.
+	 *
+	 * ## Por que NÃO é adaptativo, embora o volume vá crescer
+	 *
+	 * O site é novo e ainda não foi divulgado, então 0,16/dia não é o estado
+	 * estacionário. Derivar o limiar da taxa medida **sem guarda** tem modo de falha
+	 * pior que o problema: se os orçamentos caírem devagar, o intervalo médio cresce, o
+	 * limiar cresce atrás dele, e o alerta se dissolve exatamente quando o negócio está
+	 * morrendo. É a armadilha clássica do baseline adaptativo.
+	 *
+	 * **A revisão do PR #298 mostrou que esse argumento não vale para a variante COM
+	 * guarda** — um `clamp( k * gap, piso, teto )` com catraca só para baixo não tem
+	 * caminho para cima, então não pode se dissolver. Ela é estritamente melhor no
+	 * crescimento esperado e empata na queda. Não foi implementada aqui por escopo, e
+	 * está na issue de acompanhamento como o desenho a avaliar.
+	 *
+	 * Com um valor fixo o erro é sempre na direção segura: quando o volume subir, 21
+	 * fica conservador — mais lento que o ideal, nunca falso.
+	 *
 	 * `organic_drop_percent` é percentual, logo livre de escala: 35% de queda
 	 * significa a mesma coisa com 100 ou com 100.000 impressões. Esse número pode
 	 * vir da especificação sem medição prévia, ao contrário do anterior.
@@ -62,7 +110,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_rules' ) ) {
 	 */
 	function uonix_intelligence_anomaly_rules() {
 		return array(
-			'lead_silence_days'       => 10,
+			'lead_silence_days'       => 21,
 			'organic_drop_percent'    => 35.0,
 			'organic_window_days'     => 7,
 			'organic_min_impressions' => 50,
@@ -357,7 +405,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_baseline' ) ) {
 	 * indisponível — não um `longest_gap` igual à janela inteira, que produziria o
 	 * mesmo aviso enganoso.
 	 *
-	 * @return array{available: bool, reason: string, days: int, leads: int, per_day: float, longest_gap: int|null, current_silence: int|null, threshold_days: int, threshold_is_safe: bool}
+	 * @return array{available: bool, reason: string, days: int, leads: int, per_day: float, longest_gap: int|null, gap_from_edge: bool, current_silence: int|null, threshold_days: int, threshold_is_safe: bool}
 	 */
 	function uonix_intelligence_anomaly_lead_baseline( $days = null, $today = null ) {
 		$regras = uonix_intelligence_anomaly_rules();
@@ -432,6 +480,14 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_lead_baseline' ) ) {
 		// acontecer, e o alerta dispararia descrevendo normalidade.
 		$base['threshold_is_safe'] = null !== $base['longest_gap'] && $limiar > (int) $base['longest_gap'];
 
+		// NÃO existe aqui um sinalizador de "limiar conservador demais", e a ausência é
+		// deliberada. Ver a issue de acompanhamento: aconselhar uma REDUÇÃO de limiar
+		// exige um modelo de falso alarme, e o que este dado sustenta é fraco demais
+		// (±2σ cobre 0,58 a 5,78 falsos por ano em 21 dias). A primeira tentativa foi
+		// escrita e retirada na revisão do PR #298, com três defeitos independentes: ela
+		// lia `longest_gap` como valor exato quando ele é PISO, disparava já no estado
+		// medido em produção contradizendo a própria justificativa, e aparecia durante
+		// colapso em curso afirmando um "patamar" que não existe no 42º dia de seca.
 		return $base;
 	}
 }
