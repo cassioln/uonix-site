@@ -127,13 +127,46 @@ else
   esac
 
   # As versões LEGADAS também precisam estar cobertas: o fallback em cascata de
-  # 53-admin-analytics-metrics.php ainda lê v2 e v1, e elas carregam o mesmo dado.
-  for legado in uonix_analytics_metrics_snapshot_v1 uonix_analytics_metrics_snapshot_v2_30; do
-    case "$legado" in
-      "$snapshot_prefix"*) : ;;
-      *) report "o padrão protegido não cobre o snapshot legado '$legado', que o fallback em cascata ainda lê." ;;
-    esac
-  done
+  # 53-admin-analytics-metrics.php ainda as lê, e elas carregam o mesmo dado.
+  #
+  # A lista é DERIVADA da cascata, não escrita à mão. Escrita à mão, ela divergiria
+  # em silêncio, e a divergência é assimétrica: acrescentar uma geração ao fallback
+  # sem acrescentá-la aqui deixaria a nova geração viajar no clone com o teste
+  # VERDE — e o dado em questão é o texto cru de consultas do Search Console, que
+  # é o motivo de a proteção existir.
+  #
+  # Dentro da cascata, a versão corrente aparece como CHAMADA de função e as
+  # legadas como LITERAIS entre aspas. Por isso extrair os literais devolve
+  # exatamente os legados: a corrente já é conferida acima, por `$php_option`.
+  #
+  # Ancorado em `function ...cascade(` e no `return`, como a extração de
+  # `$php_option` acima, e pelo mesmo motivo: não depender de indentação. Trocar
+  # tabs por espaços no PHP não pode alterar o que este teste cobre.
+  legados="$(
+    awk '/function uonix_analytics_metrics_snapshot_option_cascade\(/{f=1}
+         f && /return/ {exit}
+         f {print}' "$METRICS" |
+      grep -oE "'uonix_[a-z0-9_]+'" |
+      tr -d "'" |
+      sort -u
+  )"
+
+  # Falha FECHADA: lista vazia faria o laço não executar e o teste passar sem
+  # verificar nada — o padrão de "teste passando por motivo errado" que este
+  # repositório já viu várias vezes. Sem cascata legível, isto reprova.
+  if [ -z "$legados" ]; then
+    report 'não consegui derivar os snapshots legados de uonix_analytics_metrics_snapshot_option_cascade(); a extração quebrou e a cobertura dos legados ficaria vazia.'
+  else
+    while IFS= read -r legado; do
+      [ -n "$legado" ] || continue
+      case "$legado" in
+        "$snapshot_prefix"*) : ;;
+        *) report "o padrão protegido não cobre o snapshot legado '$legado', que o fallback em cascata ainda lê." ;;
+      esac
+    done <<EOF
+$legados
+EOF
+  fi
 fi
 
 nao_eh_exclusao snapshot
@@ -249,5 +282,11 @@ if [ "$failures" -ne 0 ]; then
   exit 1
 fi
 
-printf 'PASS: snapshot de métricas (prefixo derivado: %s) e Site Kit (%s) protegidos no clone; legados cobertos; 2 DELETE no lugar.\n' \
-  "${snapshot_prefix:-?}" "${sitekit_prefix:-?}"
+# O número de legados derivados vai na saída de propósito. A lista não é mais
+# escrita à mão, então não há como uma asserção fixar a contagem sem reintroduzir
+# o número à mão que este teste acabou de remover. Imprimir torna visível um
+# estreitamento silencioso da extração — de dois legados para um, por exemplo —
+# sem transformar o número em contrato.
+printf 'PASS: snapshot de métricas (prefixo derivado: %s) e Site Kit (%s) protegidos no clone; %s legado(s) derivado(s) da cascata e cobertos; 2 DELETE no lugar.\n' \
+  "${snapshot_prefix:-?}" "${sitekit_prefix:-?}" \
+  "$(printf '%s\n' "${legados:-}" | grep -c '[^[:space:]]' || true)"
