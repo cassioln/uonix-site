@@ -386,10 +386,25 @@ if ($prioridadeStub >= $prioridadeGtm) {
     exit(1);
 }
 
-if (strpos($globalAutofill, '__uonixAvaliaConsentAdopt') === false
-    || strpos($globalAutofill, '__uonixAdoptConsentPendente') === false) {
-    echo "ERRO: o rodapé precisa publicar __uonixAvaliaConsentAdopt e consumir "
-        . "__uonixAdoptConsentPendente, senão o stub antecipado guarda o consentimento e ninguém lê.\n";
+// Asserções sobre a LIGAÇÃO entre stub e rodapé, não sobre a mera presença dos nomes.
+// A simples menção a __uonixAvaliaConsentAdopt aparece também no stub e no docblock, então
+// buscar a substring passaria mesmo com a atribuição removida.
+if (!preg_match('/window\.__uonixAvaliaConsentAdopt\s*=\s*evaluateAdoptConsent\s*;/', $globalAutofill)) {
+    echo "ERRO: o rodapé precisa ATRIBUIR window.__uonixAvaliaConsentAdopt = evaluateAdoptConsent. "
+        . "Sem isso o stub antecipado guarda o consentimento e ninguém o lê, e o autopreenchimento "
+        . "nunca é armado.\n";
+    exit(1);
+}
+
+if (!preg_match('/if\s*\(\s*window\.__uonixAdoptConsentPendente\s*\)\s*\{\s*evaluateAdoptConsent\s*\(\s*window\.__uonixAdoptConsentPendente\s*\)/', $globalAutofill)) {
+    echo "ERRO: o rodapé precisa CONSUMIR window.__uonixAdoptConsentPendente. Sem isso, um "
+        . "consentimento entregue pela AdOpt antes do rodapé é perdido em silêncio.\n";
+    exit(1);
+}
+
+if (!preg_match('/window\.__uonixAdoptCBRegistrado\s*=\s*true\s*;/', $globalAutofill)) {
+    echo "ERRO: o stub antecipado precisa marcar __uonixAdoptCBRegistrado, senão o rodapé não "
+        . "sabe distinguir 'stub rodou' de 'stub não rodou' e sobrescreve o callback da AdOpt.\n";
     exit(1);
 }
 
