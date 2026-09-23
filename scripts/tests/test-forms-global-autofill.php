@@ -665,12 +665,30 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
         'F7b: consentimento deve ser gravado com ID em caixa mista');
 }
 
-// F7c: a simetria vale também na recusa — senão um opt-out explícito passaria batido.
+// F7c: a simetria vale também na recusa — e para ser OBSERVÁVEL o teste precisa do caso em que
+// o opt-out tem de VENCER o opt-in. Com a tag só em optOutTags, reconhecer a recusa e cair no
+// fail-closed final produzem o mesmo resultado, então a asserção passaria sem provar nada.
 {
     const { win } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO]);
-    win.adoptCB({ optInTags: [], optOutTags: [ID_REAL_ADOPT] });
+    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [ID_REAL_ADOPT] });
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), false,
-        'F7c: opt-out com ID em caixa original deve ser reconhecido e negar');
+        'F7c: com a tag em optInTags E optOutTags, a recusa deve vencer — o que só acontece se o '
+        + 'lado optOutTags também for normalizado para minúsculas');
+}
+
+// F7d: opt-out sozinho, em caixa original, também nega e expurga dados já salvos.
+{
+    const { win, doc, storage } = runTestEnvironment(
+        'uonix_consent_granted=1',
+        { uonix_consent_granted: '1', uonix_user_lead: JSON.stringify({ nome: 'Teste' }) },
+        [ID_REAL_NORMALIZADO]
+    );
+    win.adoptCB({ optInTags: [], optOutTags: [ID_REAL_ADOPT] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F7d1: recusa deve negar');
+    assert.strictEqual('uonix_user_lead' in storage, false,
+        'F7d2: dados previamente salvos devem ser expurgados na recusa');
+    assert.strictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1,
+        'F7d3: cookie de consentimento deve ser removido na recusa');
 }
 
 // F8: o stub de wp_head entrega ao rodapé um consentimento que chegou ANTES dele.
