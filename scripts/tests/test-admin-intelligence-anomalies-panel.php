@@ -289,13 +289,13 @@ uox_assert( false !== strpos( $html, 'ou MAIS' ), 'quando a medição começa na
 $GLOBALS['uox_lead_before'] = null;
 
 // ---------------------------------------------------------------------------
-// 6d. O conselho nos DOIS sentidos sobre o limiar.
+// 6d. O aviso de limiar inseguro, e os NÚMEROS do card.
 // ---------------------------------------------------------------------------
 
 // Limiar INSEGURO: o gatilho vai descrever normalidade.
 $GLOBALS['uox_lead_rows'] = array();
 $cursor = new DateTimeImmutable( '2026-09-23', new DateTimeZone( 'UTC' ) );
-for ( $i = 0; $i < 60; $i++ ) {
+for ( $i = 0; $i < 90; $i++ ) {
 	if ( 0 === $i || $i > 40 ) { $GLOBALS['uox_lead_rows'][ $cursor->format( 'Y-m-d' ) ] = 1; }
 	$cursor = $cursor->modify( '-1 day' );
 }
@@ -303,16 +303,20 @@ uox_semear( array( uox_finding( array( 'anomalous' => false ) ) ), 0, 0 );
 $html = uox_render();
 uox_assert( false !== strpos( $html, 'não é maior que o maior silêncio observado' ), 'limiar inseguro precisa ser avisado na tela' );
 
-// Limiar CONSERVADOR: não dá falso alarme, mas demora mais do que precisaria.
-$GLOBALS['uox_lead_rows'] = array();
-$cursor = new DateTimeImmutable( '2026-09-23', new DateTimeZone( 'UTC' ) );
-for ( $i = 0; $i < 60; $i++ ) {
-	if ( 0 === $i % 3 ) { $GLOBALS['uox_lead_rows'][ $cursor->format( 'Y-m-d' ) ] = 1; }
-	$cursor = $cursor->modify( '-1 day' );
-}
-$html = uox_render();
-uox_assert( false !== strpos( $html, 'está conservador' ), 'limiar com folga grande precisa do conselho no outro sentido, senão ninguém descobre que pode avisar mais rápido' );
-uox_assert( false === strpos( $html, 'não é maior que o maior silêncio observado' ), 'e os dois avisos não podem aparecer juntos: são estados excludentes' );
+// Os NÚMEROS do card, não só a presença das frases.
+//
+// Lacuna apontada na revisão do PR #298: o teste procurava a frase e nunca os valores,
+// então trocar `longest_gap` por `threshold_days` na impressão sobrevivia — a tela podia
+// dizer "21 dias contra um silêncio normal de no máximo 21" e passar verde. O valor
+// inteiro deste bloco é a folga medida, então é ela que precisa de asserção.
+$base  = uonix_intelligence_anomaly_lead_baseline();
+$gap   = (int) $base['longest_gap'];
+$lim   = (int) $base['threshold_days'];
+uox_assert( $gap !== $lim, 'o fixture precisa ter gap diferente do limiar, senão a asserção abaixo não distingue os dois campos' );
+// `/u` é obrigatório por causa do "ê": sem a flag, uma classe como `[êe]` vira classe de
+// BYTES e não casa o par de bytes do UTF-8. Errei nisso ao escrever a asserção.
+uox_assert( 1 === preg_match( '/Maior silêncio encerrado.*?uonix-kpi-value">\s*' . $gap . '\s*</su', $html ), 'o card do maior silêncio deve imprimir o gap medido (' . $gap . '), não outro número' );
+uox_assert( 1 === preg_match( '/Limiar em uso.*?uonix-kpi-value">\s*' . $lim . '\s*</su', $html ), 'o card do limiar deve imprimir o limiar em uso (' . $lim . ')' );
 $GLOBALS['uox_lead_rows'] = array();
 
 // ---------------------------------------------------------------------------
