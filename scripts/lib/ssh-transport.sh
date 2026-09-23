@@ -449,19 +449,61 @@ uonix_exec() {
   fi
 
   remote_command="$(uonix_transport_shell_join "$@")"
+  # `ssh_once`, e NÃO `ssh_retry`, de propósito.
+  #
+  # A recomendação registrada na issue #272 era "trocar uma palavra aqui". Está
+  # errada: uonix_exec herda o stdin do chamador, e a biblioteca não tem como
+  # provar que nenhum chamador canaliza dados. Se algum canalizar, o retry
+  # repetiria o comando com stdin já consumido — o fail-open descrito em
+  # uonix_transport_stream_from_stdin.
+  #
+  # Quem precisa de retry tem duas portas seguras, escolhidas pelo chamador que
+  # sabe se a operação é replay-safe: uonix_transport_ssh_retry para comando sem
+  # stdin, e uonix_transport_stream_from_stdin para comando alimentado por stdin.
+  # O padrão está em scripts/clone-environment.sh, que separa `remote_run` de
+  # `remote_run_idempotent` por chamador em vez de decidir na biblioteca.
   uonix_transport_ssh_once "$environment" "$remote_command"
 }
 
+# Leitura remota com retry, SEM risco de saída duplicada.
+#
+# `cat -- arquivo` é leitura pura e não consome stdin local, então seria elegível
+# a retry direto. O que impede é o destino: a saída vai para o stdout do
+# chamador, e uma tentativa cortada no meio já emitiu bytes. Retentar ali
+# concatenaria conteúdo parcial com a leitura completa, e o chamador receberia um
+# arquivo corrompido com status 0 — outra forma de fail-open.
+#
+# Por isso a leitura passa por uonix_transport_stream_to_file, que já resolve
+# exatamente isso com `.partial` + `mv` atômico: nenhuma tentativa contamina a
+# anterior, e o stdout só recebe bytes depois de a leitura ter convergido.
 uonix_stream_from() {
   local environment
   local source_path="$2"
+  local buffer
+  local status
   environment="$(uonix_env_canonical "$1")" || return
 
   if [ "$environment" = local ]; then
     podman exec "$UONIX_LOCAL_APP_CONTAINER" cat -- "$source_path"
-  else
-    uonix_transport_ssh_once "$environment" "cat -- $(printf '%q' "$source_path")"
+    return
   fi
+
+  buffer="$(mktemp "${TMPDIR:-/tmp}/uonix-transport-read.XXXXXX")" || {
+    uonix_transport_error 'não foi possível criar o buffer de leitura remota.'
+    return 1
+  }
+  chmod 600 "$buffer" 2>/dev/null || :
+
+  if uonix_transport_stream_to_file "$environment" \
+      "cat -- $(printf '%q' "$source_path")" "$buffer"; then
+    status=0
+    cat -- "$buffer" || status=$?
+  else
+    status=$?
+  fi
+
+  rm -f -- "$buffer" "${buffer}.partial"
+  return "$status"
 }
 
 uonix_stream_to() {
@@ -472,8 +514,82 @@ uonix_stream_to() {
   if [ "$environment" = local ]; then
     podman exec -i "$UONIX_LOCAL_APP_CONTAINER" sh -c "cat > $(printf '%q' "$target_path")"
   else
-    uonix_transport_ssh_once "$environment" "cat > $(printf '%q' "$target_path")"
+    uonix_transport_stream_from_stdin "$environment" "cat > $(printf '%q' "$target_path")"
   fi
+}
+
+# Retry de comando remoto alimentado pelo STDIN LOCAL.
+#
+# Por que não dá para usar uonix_transport_ssh_retry aqui: o payload vem de um
+# descritor cujo offset AVANÇA. A primeira tentativa consome tudo e as seguintes
+# recebem stdin vazio — e `cat > arquivo` com entrada vazia SAI 0, truncando o
+# destino e reportando sucesso. Fail-open, pior que não ter retry. É a mesma
+# classe medida em 2026-09-22 no preflight do deploy e corrigida no #276 com
+# `--replay-stdin`; aqui o algoritmo é o mesmo, dentro da lib.
+#
+# O payload é materializado UMA vez e cada tentativa é redirecionada de uma
+# abertura nova, o que põe esta operação na mesma categoria replay-safe do rsync:
+# payload local imutável, reaplicado idêntico. Sem isso, a operação não é
+# elegível a retry — e é por isso que ela não tinha.
+#
+# Payload vazio é RECUSADO em vez de retentado: com stdin vazio não há o que
+# replicar, e um retry aprovaria o comando sem transferir nada.
+#
+# Diferente de uonix_transport_import_gzip, aqui NÃO há marcador de início. Um
+# `cat > arquivo` interrompido deixa arquivo parcial, e a tentativa seguinte o
+# reescreve inteiro: a última execução completa vence. Retry não piora o estado,
+# só aumenta a chance de convergir. Importação de banco é o oposto — pode ter
+# aplicado metade das instruções —, e por isso lá o marcador existe.
+uonix_transport_stream_from_stdin() {
+  local environment="$1"
+  local remote_command="$2"
+  local attempt=1
+  local status
+  local payload
+
+  uonix_transport_validate_retry_config || return
+
+  payload="$(mktemp "${TMPDIR:-/tmp}/uonix-transport-stdin.XXXXXX")" || {
+    uonix_transport_error 'não foi possível materializar o payload de stdin.'
+    return 1
+  }
+  chmod 600 "$payload" 2>/dev/null || :
+  cat > "$payload"
+
+  # Limpeza explícita, com um único ponto de saída, como fazem
+  # uonix_transport_stream_to_file e uonix_transport_import_gzip. Um `trap ...
+  # RETURN` seria mais curto e errado: esta biblioteca é SOURCED, e o trap
+  # sobreviveria à função, substituindo o RETURN do chamador.
+  if [ ! -s "$payload" ]; then
+    rm -f -- "$payload"
+    uonix_transport_error 'payload de stdin vazio: retry aprovaria a escrita remota sem transferir nada.'
+    return 1
+  fi
+
+  status=0
+  while [ "$attempt" -le "$UONIX_TRANSPORT_MAX_ATTEMPTS" ]; do
+    if uonix_transport_ssh_once "$environment" "$remote_command" < "$payload"; then
+      status=0
+      break
+    else
+      status=$?
+    fi
+
+    if [ "$status" -ne 255 ] || [ "$attempt" -eq "$UONIX_TRANSPORT_MAX_ATTEMPTS" ]; then
+      break
+    fi
+
+    printf 'uonix_transport_stream_from_stdin: tentativa %s/%s falhou com exit 255 (transporte); aguardando %ss\n' \
+      "$attempt" "$UONIX_TRANSPORT_MAX_ATTEMPTS" \
+      "$(( attempt * UONIX_TRANSPORT_RETRY_DELAY ))" >&2
+    if [ "$UONIX_TRANSPORT_RETRY_DELAY" -gt 0 ]; then
+      sleep "$(( attempt * UONIX_TRANSPORT_RETRY_DELAY ))"
+    fi
+    attempt=$(( attempt + 1 ))
+  done
+
+  rm -f -- "$payload"
+  return "$status"
 }
 
 uonix_rsync_to_runner() {

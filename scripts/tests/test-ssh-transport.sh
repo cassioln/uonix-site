@@ -48,6 +48,31 @@ case "${MOCK_SSH_MODE:-success}" in
     printf '__UONIX_REMOTE_IMPORT_STARTED__\n' >&2
     exit 255
     ;;
+  retry-partial)
+    # Emite bytes ANTES de cair. Sem isso a asserção de "não duplicou a saída"
+    # seria vazia: um retry ingênuo que escreve direto no stdout passaria, porque
+    # tentativa falha sem output não contamina nada.
+    printf 'parcial-'
+    if [ "$count" -lt 3 ]; then
+      exit 255
+    fi
+    printf 'completo\n'
+    exit 0
+    ;;
+  stdin-retry)
+    # Registra o TAMANHO do payload recebido em cada tentativa. É o único jeito de
+    # falsificar o fail-open: sem materializar o stdin, a 2ª tentativa chega com 0
+    # bytes e `cat > arquivo` sairia 0 — sucesso sem transferir nada.
+    cat | wc -c | tr -d ' ' >> "$MOCK_STDIN_SIZES"
+    if [ "$count" -lt 3 ]; then
+      exit 255
+    fi
+    exit 0
+    ;;
+  stdin-nonretryable)
+    cat | wc -c | tr -d ' ' >> "$MOCK_STDIN_SIZES"
+    exit 2
+    ;;
   *) exit 2 ;;
 esac
 MOCK
@@ -94,6 +119,7 @@ export PATH="$TMP_DIR/bin:$PATH"
 export MOCK_TRANSPORT_LOG="$TMP_DIR/transport.log"
 export MOCK_TRANSPORT_COUNT="$TMP_DIR/transport.count"
 export MOCK_RSYNC_COUNT="$TMP_DIR/rsync.count"
+export MOCK_STDIN_SIZES="$TMP_DIR/stdin.sizes"
 export HOSTGATOR_SSH_KEY="$TMP_DIR/key"
 export HOSTGATOR_SSH_KNOWN_HOSTS_FILE="$TMP_DIR/known-hosts"
 export LOCAWEB_SSH_PASSWORD_FILE="$TMP_DIR/password"
@@ -465,6 +491,62 @@ unset MOCK_RSYNC_FAILURE_STATUS MOCK_RSYNC_FAILURES_BEFORE_SUCCESS
 : > "$MOCK_TRANSPORT_COUNT"
 MOCK_SSH_MODE=retry uonix_transport_ssh_retry qa 'printf retry' >/dev/null
 [ "$(cat "$MOCK_TRANSPORT_COUNT")" = 3 ] || fail 'retry idempotente não parou após sucesso'
+
+# --- Escrita remota alimentada por stdin -------------------------------------
+# O payload de stdin é um descritor cujo offset AVANÇA. Sem materializá-lo, a 2ª
+# tentativa chega vazia e `cat > arquivo` sai 0: sucesso sem transferir nada, com
+# o destino truncado. Estas asserções existem para falsificar esse fail-open.
+printf 'payload-de-doze\n' > "$TMP_DIR/upload-payload"
+UPLOAD_BYTES="$(wc -c < "$TMP_DIR/upload-payload" | tr -d ' ')"
+
+: > "$MOCK_TRANSPORT_LOG"
+: > "$MOCK_TRANSPORT_COUNT"
+: > "$MOCK_STDIN_SIZES"
+MOCK_SSH_MODE=stdin-retry uonix_stream_to prod '/remote/alvo' < "$TMP_DIR/upload-payload" \
+  || fail 'stream_to não convergiu após falha transitória 255'
+[ "$(cat "$MOCK_TRANSPORT_COUNT")" = 3 ] || \
+  fail "stream_to não parou após sucesso: $(cat "$MOCK_TRANSPORT_COUNT") tentativas"
+[ "$(wc -l < "$MOCK_STDIN_SIZES" | tr -d ' ')" = 3 ] || \
+  fail 'stream_to não entregou payload nas três tentativas'
+# A asserção central: TODA tentativa recebeu o payload inteiro, não só a primeira.
+[ "$(LC_ALL=C sort -u "$MOCK_STDIN_SIZES" | wc -l | tr -d ' ')" = 1 ] || \
+  fail "stream_to variou o payload entre tentativas: $(tr '\n' ' ' < "$MOCK_STDIN_SIZES")"
+[ "$(head -1 "$MOCK_STDIN_SIZES")" = "$UPLOAD_BYTES" ] || \
+  fail "stream_to entregou payload de tamanho errado: $(head -1 "$MOCK_STDIN_SIZES") != $UPLOAD_BYTES"
+grep -qv '^0$' "$MOCK_STDIN_SIZES" || fail 'stream_to entregou payload vazio em alguma tentativa'
+
+# Payload vazio é recusado, não retentado: não há o que replicar, e retentar
+# aprovaria a escrita remota sem transferir nada.
+: > "$MOCK_TRANSPORT_COUNT"
+: > "$MOCK_STDIN_SIZES"
+if MOCK_SSH_MODE=stdin-retry uonix_stream_to prod '/remote/vazio' < /dev/null 2>/dev/null; then
+  fail 'stream_to aceitou payload vazio como sucesso'
+fi
+[ ! -s "$MOCK_TRANSPORT_COUNT" ] || fail 'stream_to abriu SSH com payload vazio'
+
+# Status não transitório propaga na primeira tentativa: não é falha de conexão.
+: > "$MOCK_TRANSPORT_COUNT"
+: > "$MOCK_STDIN_SIZES"
+if MOCK_SSH_MODE=stdin-nonretryable uonix_stream_to prod '/remote/alvo' < "$TMP_DIR/upload-payload"; then
+  fail 'stream_to aceitou status não transitório como sucesso'
+else
+  stream_to_status=$?
+fi
+[ "$stream_to_status" -eq 2 ] || fail "stream_to alterou status não transitório: ${stream_to_status}"
+[ "$(cat "$MOCK_TRANSPORT_COUNT")" = 1 ] || fail 'stream_to repetiu status não transitório'
+
+# --- Leitura remota ----------------------------------------------------------
+# Retry de leitura que escreve direto no stdout concatenaria bytes parciais com a
+# leitura completa. A saída precisa conter o conteúdo UMA vez.
+# O mock emite 'parcial-' antes de cair nas duas primeiras tentativas. Um retry
+# que escrevesse direto no stdout entregaria 'parcial-parcial-parcial-completo';
+# com o buffer atômico, o chamador recebe exatamente a leitura que convergiu.
+: > "$MOCK_TRANSPORT_COUNT"
+read_output="$(MOCK_SSH_MODE=retry-partial uonix_stream_from prod '/remote/origem')" \
+  || fail 'stream_from não convergiu após falha transitória 255'
+[ "$(cat "$MOCK_TRANSPORT_COUNT")" = 3 ] || fail 'stream_from não parou após sucesso'
+[ "$read_output" = 'parcial-completo' ] || \
+  fail "stream_from concatenou tentativas parciais na saída: ${read_output}"
 
 # A biblioteca é sourceável: helpers não podem alterar `errexit` do chamador.
 (
