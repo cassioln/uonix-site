@@ -33,22 +33,47 @@ As constantes devem ser definidas na configuração privada de cada ambiente, nu
 | QA | `WP_ENVIRONMENT_TYPE=staging`; URL canônica `https://uonix.ksio.dev`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; caixa segura não produtiva e Turnstile de teste definidos fora do repositório. |
 | Local | `WP_ENVIRONMENT_TYPE=local`; URL canônica `http://localhost:8080`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; Mailpit ativo e Turnstile desligado. |
 
-Não declarar IDs GTM, GA4 ou AdOpt em QA ou local. Os identificadores de analytics, a configuração SMTP e as chaves Turnstile são dados por ambiente e não pertencem a arquivos versionados.
+Não declarar IDs GTM, GA4 ou `UONIX_ADOPT_WEBSITE_ID` em QA ou local. Os identificadores de analytics, a configuração SMTP e as chaves Turnstile são dados por ambiente e não pertencem a arquivos versionados.
 
-### Provisionamento e Rotação: Tags AdOpt (`UONIX_ADOPT_CONSENT_TAG_IDS`)
+Exceção deliberada: `UONIX_ADOPT_CONSENT_TAG_IDS` tem um **padrão versionado no código** desde 2026-09-23, por não ser segredo e por existir uma única conta AdOpt — ver a seção abaixo. A constante de ambiente segue existindo, apenas como override opcional. Sem `UONIX_ADOPT_WEBSITE_ID`, a AdOpt não é carregada fora de produção, então o padrão não tem efeito em QA nem local.
 
-- **Localização:** Declarado exclusivamente no `wp-config.php` fora do Git (em Produção).
-- **Formato:** String separada por vírgula de UUIDs reais das tags da AdOpt responsáveis por persistência/cookies de funcionalidade (ex: `define( 'UONIX_ADOPT_CONSENT_TAG_IDS', '6332f834-41df-4cc5-a3bf-dffe359112c5' );`).
-- **Política Fail-Closed:** Se a constante não estiver declarada ou nenhum UUID for válido, o sistema opera estritamente sem persistência de dados no navegador.
-- **Procedimento de Rotação:**
-  1. No painel AdOpt (`app.goadopt.io`), identificar o novo UUID da tag.
-  2. No `wp-config.php`, incluir o novo UUID concatenado com o anterior: `define( 'UONIX_ADOPT_CONSENT_TAG_IDS', 'novo-uuid,antigo-uuid' );`.
-  3. Executar `wp cache flush` para aplicar.
-  4. Após o período de transição, remover o UUID antigo mantendo apenas o novo.
-- **Verificação Segura no Runtime (sem expor segredos):**
+### Tags AdOpt de consentimento (`UONIX_ADOPT_CONSENT_TAG_IDS`)
+
+Corrigido em 2026-09-23 (issue #264). A versão anterior desta seção descrevia um formato
+de UUID que a AdOpt não usa, e um painel em `app.goadopt.io` que não é o desta conta.
+O procedimento descrito rotacionava algo que nunca havia sido provisionado.
+
+- **Valor padrão:** embutido em `mu-plugins/uonix-forms/49-forms-global-autofill.php`, na
+  constante `UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO` (hoje `9BxuTvI1_q`, a tag `uonix.com.br`).
+  **Não** requer provisionamento por SSH.
+- **Por que não fica no `wp-config.php`:** o ID não é segredo — a AdOpt o entrega na
+  configuração pública que todo visitante baixa — e existe uma única conta AdOpt, usada
+  somente em produção. A ausência silenciosa da constante manteve o módulo inativo por
+  meses sem emitir sinal algum; embutir o padrão remove essa classe de falha.
+- **Formato:** string separada por vírgula com o `id` de cada tag da AdOpt. São
+  identificadores curtos de **10 caracteres** no alfabeto `[A-Za-z0-9_-]` — por exemplo
+  `9BxuTvI1_q`. **Não são UUIDs.** Nomes de categoria (`funcional`, `marketing`) são
+  rejeitados explicitamente e nunca funcionam como ID.
+- **Categoria importa, e é pré-requisito:** a tag precisa estar em uma categoria
+  **recusável** no painel. A categoria `Necessárias` (id 1) é aceita incondicionalmente
+  pela AdOpt mesmo quando o visitante clica em "Rejeitar tudo", então uma tag ali
+  autorizaria a persistência contra uma recusa explícita. A tag `uonix.com.br` foi movida
+  para `Funcional` em 2026-09-23 exatamente por isso.
+- **Política Fail-Closed:** se nenhum ID válido restar, o sistema opera estritamente sem
+  persistência de dados no navegador.
+- **Rotação (override de emergência, sem deploy):** declarar
+  `define( 'UONIX_ADOPT_CONSENT_TAG_IDS', 'novo-id,antigo-id' );` no `wp-config.php` de
+  produção — a constante tem precedência sobre o padrão embutido. Depois do período de
+  transição, remover o ID antigo, ou remover a constante para voltar ao padrão do código.
+  O caminho normal de mudança é um PR alterando `UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO`.
+- **Onde ver os IDs no painel:** card AdOpt do painel do WordPress → **Escanear tags**
+  (`dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags`). Cada tag mostra seu ID e um
+  seletor de **Classificação**.
+- **Verificação no runtime:**
   ```bash
-  wp eval 'echo defined("UONIX_ADOPT_CONSENT_TAG_IDS") ? "PRESENTE: tags=" . count(uonix_adopt_get_consent_tag_ids()) . " hash=" . substr(hash("sha256", UONIX_ADOPT_CONSENT_TAG_IDS), 0, 8) : "0";'
+  wp eval 'printf("tags=%d ids=%s\n", count(uonix_adopt_get_consent_tag_ids()), implode(",", uonix_adopt_get_consent_tag_ids()));'
   ```
+  Esperado em produção: `tags=1` ou mais. `tags=0` significa autopreenchimento inativo.
 
 ## Contrato de clone
 
