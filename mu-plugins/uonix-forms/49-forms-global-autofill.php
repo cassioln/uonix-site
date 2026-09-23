@@ -48,9 +48,11 @@ if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
      * Medido em 2026-09-23 na configuração pública da conta: as cinco tags têm 10 caracteres.
      * O mínimo histórico de 12 rejeitava todas elas, o que mantinha o módulo inativo (#264).
      *
-     * Nomes textuais de categoria (ex: 'funcional', 'preferences') NÃO são IDs. Como quatro
-     * deles têm 10 caracteres ou mais, o comprimento não os separa: quem os rejeita é a lista
-     * explícita abaixo, que por isso precisa ser verificada nome a nome em teste.
+     * Nomes textuais de categoria (ex: 'funcional', 'statistics', 'desempenho') NÃO são IDs.
+     * O comprimento não os separa — vários têm 10 caracteres ou mais. O que os separa é uma
+     * exigência estrutural: o identificador curto precisa conter ao menos um caractere que não
+     * seja letra minúscula. Nome de categoria é palavra minúscula, então cai por construção,
+     * sem depender de uma lista de nomes estar completa.
      *
      * Se nenhum ID válido restar, o sistema opera estritamente fail-closed.
      *
@@ -78,16 +80,30 @@ if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
                 continue;
             }
 
-            // Descarta explicitamente nomes de categoria genéricos.
-            // Esta é a defesa real contra nomes de categoria: 'functional' (10), 'necessario' (10),
-            // 'preferences' (11) e 'uonix_cookies' (13) passariam pelo teste de comprimento abaixo.
+            // Primeira barreira: lista explícita de nomes de categoria conhecidos.
+            // Defesa em profundidade — a barreira que de fato garante a invariante é a estrutural,
+            // logo abaixo. Enumerar nomes nunca fecha: o painel os exibe em português e em inglês,
+            // e uma lista sempre fica atrás de um nome novo.
             if ( in_array( strtolower( $id ), array( 'funcional', 'preferences', 'functional', 'uonix_cookies', 'marketing', 'analytics', 'necessario', 'essential' ), true ) ) {
                 continue;
             }
 
-            // Exige formato de ID de tag realista: UUID de 36 caracteres (usado por outras contas
-            // AdOpt) ou o identificador curto desta conta, de 10 caracteres ou mais.
-            if ( preg_match( '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $id ) || preg_match( '/^[a-zA-Z0-9_-]{10,}$/', $id ) ) {
+            // Segunda barreira, estrutural: aceita UUID de 36 caracteres (formato de outras contas
+            // AdOpt) ou o identificador curto desta conta — 10+ caracteres em [A-Za-z0-9_-] que
+            // contenham ao menos um caractere que NÃO seja letra minúscula.
+            //
+            // É essa última exigência que torna a invariante verdadeira por construção: nome de
+            // categoria é palavra minúscula em qualquer idioma ('statistics', 'performance',
+            // 'necessarios', 'desempenho', 'publicidade'), então é rejeitado sem depender da lista.
+            // Nomes acentuados ('estatísticas') já falham no conjunto de caracteres.
+            //
+            // Custo assumido: um identificador da AdOpt composto só de letras minúsculas seria
+            // rejeitado. Com alfabeto de 64 caracteres isso tem ordem de 1 em 7.700 por tag, e o
+            // erro cai para o lado seguro — o módulo fica inativo, não permissivo.
+            $uuid_valido  = (bool) preg_match( '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $id );
+            $curto_valido = (bool) preg_match( '/^[a-zA-Z0-9_-]{10,}$/', $id ) && (bool) preg_match( '/[^a-z]/', $id );
+
+            if ( $uuid_valido || $curto_valido ) {
                 $valid_ids[] = strtolower( $id );
             }
         }
@@ -132,7 +148,10 @@ if ( ! function_exists( 'uonix_autofill_registra_adopt_cb_antecipado' ) ) {
                     try { window.__uonixAvaliaConsentAdopt(consent); } catch (e) {}
                 }
             };
-            window.__uonixAdoptCBRegistrado = true;
+            // Marca a IDENTIDADE do stub, não apenas "alguém registrou". Se um terceiro
+            // sobrescrever window.adoptCB depois daqui, o rodapé precisa detectar e voltar a
+            // registrar encadeando — senão o autopreenchimento morreria em silêncio.
+            window.adoptCB.__uonixStub = true;
         })();
         </script>
         <?php
@@ -442,16 +461,18 @@ add_action('wp_footer', function() {
         // Publica o avaliador para o stub registrado em wp_head (antes do GTM).
         window.__uonixAvaliaConsentAdopt = evaluateAdoptConsent;
 
-        // Rede de segurança: se o stub de wp_head não rodou, registra aqui, encadeando.
-        if (!window.__uonixAdoptCBRegistrado) {
-            const previousAdoptCB = window.adoptCB;
+        // Rede de segurança: registra aqui se o stub de wp_head não rodou OU se um terceiro
+        // sobrescreveu window.adoptCB depois dele. Testar a identidade do stub, e não um
+        // booleano "alguém registrou", é o que impede a morte silenciosa nesse segundo caso.
+        const cbAtual = window.adoptCB;
+        const stubIntacto = typeof cbAtual === 'function' && true === cbAtual.__uonixStub;
+        if (!stubIntacto) {
             window.adoptCB = function(consent) {
-                if (typeof previousAdoptCB === 'function') {
-                    try { previousAdoptCB(consent); } catch (e) {}
+                if (typeof cbAtual === 'function') {
+                    try { cbAtual(consent); } catch (e) {}
                 }
                 evaluateAdoptConsent(consent);
             };
-            window.__uonixAdoptCBRegistrado = true;
         }
 
         // Consome um consentimento que a AdOpt já tenha entregue antes deste script rodar.
