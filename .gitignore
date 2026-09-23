@@ -63,3 +63,5 @@ scripts/local/
 # Configuração e skills instalados do Claude Code (dev-específico, não sincroniza).
 /.claude/
 
+# Material interno e arquivos de treinamento locais
+Treinamento/
