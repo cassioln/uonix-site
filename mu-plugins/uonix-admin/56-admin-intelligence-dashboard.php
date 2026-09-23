@@ -219,13 +219,17 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_reason_message' ) ) {
 	function uonix_intelligence_anomaly_reason_message( $reason ) {
 		$mapa = array(
 			'submissions_table_missing' => 'A tabela de submissões do Fluent Forms não existe neste ambiente, então não há como contar orçamentos.',
+			'no_leads_in_window'        => 'Nenhum orçamento no período medido, então não há comportamento normal a medir — e portanto não há como conferir o limiar.',
 			'config_missing'            => 'As credenciais de leitura do Search Console não estão configuradas neste ambiente.',
 			'series_fetch_failed'       => 'A consulta à Search Console falhou. O gatilho tenta de novo na próxima verificação.',
 			'series_invalid'            => 'A Search Console respondeu num formato inesperado.',
-			'series_empty'              => 'A Search Console não devolveu nenhum dia com dado na janela consultada.',
-			'series_stale'              => 'O dado mais recente da Search Console está atrasado demais para responder a uma comparação semanal.',
 			'series_too_short'          => 'A série devolvida não cobre as duas semanas necessárias para comparar.',
 			'series_dates_invalid'      => 'A Search Console devolveu datas inconsistentes.',
+			// A API omite linha para dia sem impressão, então dia ausente pode ser zero real
+			// ou atraso do Google — e o dado não diz qual. Comparar janela furada produziria
+			// queda artificial, então recusar é a resposta honesta.
+			'series_incomplete'         => 'A semana mais recente está com dias faltando na Search Console. Como a API não distingue "zero impressões" de "ainda não publicado", comparar produziria uma queda que talvez não exista.',
+			'baseline_incomplete'       => 'A semana usada como referência está com dias faltando na Search Console, então não há linha de base confiável para comparar.',
 			'baseline_too_small'        => 'A semana anterior teve impressões insuficientes: nesse volume a variação percentual é ruído, não sinal.',
 			'comparison_failed'         => 'A comparação entre as duas semanas não produziu número finito.',
 		);
@@ -301,7 +305,19 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 				$titulo  = isset( $rotulos[ $gatilho ] ) ? $rotulos[ $gatilho ] : $gatilho;
 				?>
 				<h3><?php echo esc_html( $titulo ); ?></h3>
-				<?php if ( empty( $achado['available'] ) ) : ?>
+				<?php if ( ! empty( $achado['stale_anomaly'] ) ) : ?>
+					<?php // Anomalia detectada antes e não reverificada hoje. Nem "acontecendo
+					// agora", nem "não sei nada": a fonte falhou, mas o que já foi medido continua
+					// valendo, e apagar da tela esconderia um incidente ativo. ?>
+					<div class="notice notice-error inline">
+						<p><strong><?php echo esc_html(
+							'' !== ( isset( $achado['started_at'] ) ? (string) $achado['started_at'] : '' )
+								? sprintf( 'Anomalia detectada em %s e ainda não resolvida.', (string) $achado['started_at'] )
+								: 'Anomalia detectada anteriormente e ainda não resolvida.'
+						); ?></strong></p>
+						<p><?php echo esc_html( 'Não foi possível reverificar nesta rodada: ' . uonix_intelligence_anomaly_reason_message( isset( $achado['reason'] ) ? (string) $achado['reason'] : '' ) ); ?></p>
+					</div>
+				<?php elseif ( empty( $achado['available'] ) ) : ?>
 					<div class="notice notice-warning inline">
 						<p><?php echo esc_html( uonix_intelligence_anomaly_reason_message( isset( $achado['reason'] ) ? (string) $achado['reason'] : '' ) ); ?></p>
 					</div>
@@ -331,6 +347,28 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 				<?php endif; ?>
 			<?php endforeach; ?>
 
+			<?php
+			// Aviso que não saiu: o episódio esgotou o teto de retentativas de e-mail. O
+			// operador precisa saber que existe anomalia detectada cujo aviso não chegou,
+			// senão a ausência de e-mail seria lida como ausência de problema.
+			$meta_alerta = function_exists( 'uonix_intelligence_anomaly_get_alert_meta' ) ? uonix_intelligence_anomaly_get_alert_meta() : array();
+			$sem_entrega = array();
+			foreach ( $meta_alerta as $gatilho_meta => $dados_meta ) {
+				if ( ! empty( $dados_meta['undelivered'] ) ) {
+					$sem_entrega[] = (string) $gatilho_meta;
+				}
+			}
+			?>
+			<?php if ( array() !== $sem_entrega ) : ?>
+				<div class="notice notice-error inline">
+					<p><strong><?php echo esc_html( sprintf(
+						1 === count( $sem_entrega ) ? 'Uma anomalia foi detectada e o aviso por e-mail NÃO foi entregue.' : '%d anomalias foram detectadas e os avisos por e-mail NÃO foram entregues.',
+						count( $sem_entrega )
+					) ); ?></strong></p>
+					<p>O envio foi tentado até o limite e falhou. Confira a lista de destinatários na aba Configurações: um único endereço inválido faz o servidor recusar a mensagem inteira.</p>
+				</div>
+			<?php endif; ?>
+
 			<h3>Limiar de silêncio de orçamentos, conferido contra o histórico</h3>
 			<?php if ( empty( $baseline['available'] ) ) : ?>
 				<div class="notice notice-warning inline">
@@ -338,6 +376,7 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 				</div>
 			<?php else : ?>
 				<p>O limiar precisa ser maior que o maior silêncio já observado em operação normal. Um limiar menor ou igual descreve o funcionamento do site, dispara toda semana, e o alerta passa a ser ignorado.</p>
+				<p>A medição considera apenas intervalos <strong>encerrados</strong> — do primeiro dia do período até o último orçamento recebido. O silêncio em curso fica de fora de propósito: incluí-lo faria a anomalia atual entrar na definição de normalidade, e o aviso abaixo apareceria sempre que o alerta estivesse certo.</p>
 				<div class="uonix-kpi-grid">
 					<div class="uonix-kpi-card">
 						<div class="uonix-kpi-title">Limiar em uso</div>
@@ -345,9 +384,14 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 						<div class="uonix-kpi-sub">dias corridos sem orçamento</div>
 					</div>
 					<div class="uonix-kpi-card">
-						<div class="uonix-kpi-title">Maior silêncio observado</div>
+						<div class="uonix-kpi-title">Maior silêncio encerrado</div>
 						<div class="uonix-kpi-value"><?php echo esc_html( null === $baseline['longest_gap'] ? '—' : uonix_intelligence_number( $baseline['longest_gap'], 0 ) ); ?></div>
 						<div class="uonix-kpi-sub"><?php echo esc_html( sprintf( 'dias, nos últimos %d', (int) $baseline['days'] ) ); ?></div>
+					</div>
+					<div class="uonix-kpi-card">
+						<div class="uonix-kpi-title">Silêncio em curso</div>
+						<div class="uonix-kpi-value"><?php echo esc_html( null === $baseline['current_silence'] ? '—' : uonix_intelligence_number( $baseline['current_silence'], 0 ) ); ?></div>
+						<div class="uonix-kpi-sub">dias desde o último orçamento</div>
 					</div>
 					<div class="uonix-kpi-card">
 						<div class="uonix-kpi-title">Orçamentos por dia</div>

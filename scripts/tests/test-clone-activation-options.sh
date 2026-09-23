@@ -73,6 +73,27 @@ if ! printf '%s' "$protected_sql" | grep -qE "IN \([^)]*'cron'"; then
   report "a opção 'cron' saiu de protected_options_where(); o evento agendado da origem passaria a viajar para o destino."
 fi
 
+# Opções de ESTADO, categoria distinta das de ativação acima.
+#
+# Elas não ligam automação no destino: fazem a interface do destino AFIRMAR algo
+# que só vale na origem. `uonix_intelligence_anomaly_state` guarda o resultado da
+# última verificação de anomalia e o sinalizador de "já avisei" por gatilho. Herdada
+# num clone `prod -> qa`, o painel do QA exibe o badge "anomalia crítica detectada"
+# com o detalhe do incidente da PRODUÇÃO, e o sinalizador herdado faz o QA achar que
+# já avisou sobre um episódio que nunca observou.
+#
+# Diferente das de ativação, aqui o guard de e-mail não contém nada: o dano é na
+# afirmação da tela, não no envio.
+state_options=(
+  'uonix_intelligence_anomaly_state'
+)
+
+for option in "${state_options[@]}"; do
+  if ! printf '%s' "$protected_sql" | grep -qE "IN \([^)]*'$option'"; then
+    report "opção de estado '$option' NÃO está na lista IN de protected_options_where(); o ambiente clonado passaria a afirmar na tela um estado que é da origem."
+  fi
+done
+
 # Quem consome o invariante precisa continuar amarrando agendamento a
 # destinatário. Se essa amarração sair, proteger a opção deixa de bastar.
 REPORT_MODULE="$ROOT_DIR/mu-plugins/uonix-admin/57-admin-intelligence-report.php"
