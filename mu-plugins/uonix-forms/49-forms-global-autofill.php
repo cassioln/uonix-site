@@ -21,18 +21,45 @@ if ( ! defined( 'ABSPATH' ) ) {
  *    nenhum dado é salvo no navegador e nenhum cookie de comentário é autorizado.
  */
 
+if ( ! defined( 'UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO' ) ) {
+    /**
+     * Tag da AdOpt que autoriza a persistência: `uonix.com.br`, na categoria Funcional.
+     *
+     * É ela que declara `uonix_lead_profile`, `uonix_consent_granted` e `_adoptReject` —
+     * exatamente o armazenamento que este módulo usa.
+     *
+     * Fica embutido, e não em `wp-config.php`, por três razões medidas em 2026-09-23:
+     * o ID não é segredo (a AdOpt o serve na configuração pública de qualquer visitante),
+     * existe uma única conta AdOpt, e a ausência silenciosa da constante manteve este
+     * módulo inativo em produção por meses sem que nada reclamasse (issue #264).
+     *
+     * A constante `UONIX_ADOPT_CONSENT_TAG_IDS` continua tendo precedência, para permitir
+     * rotação emergencial por `wp-config.php` sem depender de um deploy.
+     */
+    define( 'UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO', '9BxuTvI1_q' );
+}
+
 if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
     /**
      * Obtém e valida a lista de IDs de tags da AdOpt que autorizam a persistência de formulários.
      *
-     * A API oficial da AdOpt entrega UUIDs/IDs em optInTags e optOutTags.
-     * Nomes textuais de categoria (ex: 'funcional', 'preferences') NÃO são IDs e são descartados.
-     * Se nenhum ID válido for configurado no ambiente, o sistema opera estritamente fail-closed.
+     * A AdOpt entrega em optInTags/optOutTags o `id` de cada tag, que é um identificador
+     * curto de 10 caracteres no alfabeto [A-Za-z0-9_-] (ex: `9BxuTvI1_q`) — e NÃO um UUID.
+     * Medido em 2026-09-23 na configuração pública da conta: as cinco tags têm 10 caracteres.
+     * O mínimo histórico de 12 rejeitava todas elas, o que mantinha o módulo inativo (#264).
+     *
+     * Nomes textuais de categoria (ex: 'funcional', 'preferences') NÃO são IDs. Como quatro
+     * deles têm 10 caracteres ou mais, o comprimento não os separa: quem os rejeita é a lista
+     * explícita abaixo, que por isso precisa ser verificada nome a nome em teste.
+     *
+     * Se nenhum ID válido restar, o sistema opera estritamente fail-closed.
      *
      * @return array
      */
     function uonix_adopt_get_consent_tag_ids() {
-        $raw_ids = defined( 'UONIX_ADOPT_CONSENT_TAG_IDS' ) ? UONIX_ADOPT_CONSENT_TAG_IDS : array();
+        $raw_ids = defined( 'UONIX_ADOPT_CONSENT_TAG_IDS' )
+            ? UONIX_ADOPT_CONSENT_TAG_IDS
+            : UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO;
         if ( is_string( $raw_ids ) ) {
             $raw_ids = array_map( 'trim', explode( ',', $raw_ids ) );
         } elseif ( ! is_array( $raw_ids ) ) {
@@ -51,13 +78,16 @@ if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
                 continue;
             }
 
-            // Descarta explicitamente nomes de categoria genéricos
+            // Descarta explicitamente nomes de categoria genéricos.
+            // Esta é a defesa real contra nomes de categoria: 'functional' (10), 'necessario' (10),
+            // 'preferences' (11) e 'uonix_cookies' (13) passariam pelo teste de comprimento abaixo.
             if ( in_array( strtolower( $id ), array( 'funcional', 'preferences', 'functional', 'uonix_cookies', 'marketing', 'analytics', 'necessario', 'essential' ), true ) ) {
                 continue;
             }
 
-            // Exige formato de ID de tag realista (UUID com 36 caracteres ou identificador alfanumérico com hífen)
-            if ( preg_match( '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $id ) || preg_match( '/^[a-zA-Z0-9_-]{12,}$/', $id ) ) {
+            // Exige formato de ID de tag realista: UUID de 36 caracteres (usado por outras contas
+            // AdOpt) ou o identificador curto desta conta, de 10 caracteres ou mais.
+            if ( preg_match( '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $id ) || preg_match( '/^[a-zA-Z0-9_-]{10,}$/', $id ) ) {
                 $valid_ids[] = strtolower( $id );
             }
         }
@@ -65,6 +95,51 @@ if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
         return array_values( array_unique( $valid_ids ) );
     }
 }
+
+if ( ! function_exists( 'uonix_autofill_registra_adopt_cb_antecipado' ) ) {
+    /**
+     * Registra `window.adoptCB` antes do GTM, para que a AdOpt não capture um no-op.
+     *
+     * A AdOpt lê o callback UMA vez, na montagem do componente:
+     *
+     *     barCallback: window?.top?.adoptCB ?? function(e){}
+     *
+     * O `??` é avaliado naquele instante. Como a AdOpt é injetada pelo container do GTM
+     * (`wp_head` prioridade 1) e este módulo escreve no rodapé, existe uma corrida: se a
+     * AdOpt montar primeiro, ela guarda o no-op em definitivo e o consentimento nunca
+     * chega ao avaliador — o autopreenchimento ficaria morto de forma intermitente.
+     *
+     * Este stub roda na prioridade 0, antes do GTM, e apenas guarda o payload. O rodapé
+     * publica `window.__uonixAvaliaConsentAdopt` e consome o que já tiver chegado, então a
+     * ordem deixa de importar nos dois sentidos.
+     */
+    function uonix_autofill_registra_adopt_cb_antecipado() {
+        if ( is_admin() ) {
+            return;
+        }
+        ?>
+        <script id="uonix-autofill-adopt-cb-antecipado">
+        (function() {
+            var anterior = window.adoptCB;
+            window.__uonixAdoptConsentPendente = window.__uonixAdoptConsentPendente || null;
+            window.adoptCB = function(consent) {
+                // Preserva qualquer outro consumidor do global.
+                if (typeof anterior === 'function') {
+                    try { anterior(consent); } catch (e) {}
+                }
+                window.__uonixAdoptConsentPendente = consent;
+                if (typeof window.__uonixAvaliaConsentAdopt === 'function') {
+                    try { window.__uonixAvaliaConsentAdopt(consent); } catch (e) {}
+                }
+            };
+            window.__uonixAdoptCBRegistrado = true;
+        })();
+        </script>
+        <?php
+    }
+}
+
+add_action( 'wp_head', 'uonix_autofill_registra_adopt_cb_antecipado', 0, 0 );
 
 add_action('wp_footer', function() {
     if (is_admin()) {
@@ -364,14 +439,25 @@ add_action('wp_footer', function() {
             return false;
         }
 
-        // Registra e encadeia o callback oficial da AdOpt
-        const previousAdoptCB = window.adoptCB;
-        window.adoptCB = function(consent) {
-            if (typeof previousAdoptCB === 'function') {
-                try { previousAdoptCB(consent); } catch (e) {}
-            }
-            evaluateAdoptConsent(consent);
-        };
+        // Publica o avaliador para o stub registrado em wp_head (antes do GTM).
+        window.__uonixAvaliaConsentAdopt = evaluateAdoptConsent;
+
+        // Rede de segurança: se o stub de wp_head não rodou, registra aqui, encadeando.
+        if (!window.__uonixAdoptCBRegistrado) {
+            const previousAdoptCB = window.adoptCB;
+            window.adoptCB = function(consent) {
+                if (typeof previousAdoptCB === 'function') {
+                    try { previousAdoptCB(consent); } catch (e) {}
+                }
+                evaluateAdoptConsent(consent);
+            };
+            window.__uonixAdoptCBRegistrado = true;
+        }
+
+        // Consome um consentimento que a AdOpt já tenha entregue antes deste script rodar.
+        if (window.__uonixAdoptConsentPendente) {
+            evaluateAdoptConsent(window.__uonixAdoptConsentPendente);
+        }
 
         // 7. Dispara preenchimento na inicialização e quando o modal técnico abrir
         if (document.readyState === 'loading') {
