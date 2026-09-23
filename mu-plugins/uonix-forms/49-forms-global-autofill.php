@@ -48,11 +48,29 @@ if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
      * Medido em 2026-09-23 na configuração pública da conta: as cinco tags têm 10 caracteres.
      * O mínimo histórico de 12 rejeitava todas elas, o que mantinha o módulo inativo (#264).
      *
-     * Nomes textuais de categoria (ex: 'funcional', 'statistics', 'desempenho') NÃO são IDs.
-     * O comprimento não os separa — vários têm 10 caracteres ou mais. O que os separa é uma
-     * exigência estrutural: o identificador curto precisa conter ao menos um caractere que não
-     * seja letra minúscula. Nome de categoria é palavra minúscula, então cai por construção,
-     * sem depender de uma lista de nomes estar completa.
+     * Nomes textuais de categoria (ex: 'Statistics', 'Desempenho') NÃO são IDs, e nenhuma regra
+     * de formato os separa com segurança: uma palavra de 10 caracteres é indistinguível de um
+     * token aleatório de 10 caracteres. A informação não está na string.
+     *
+     * O que torna isso aceitável é a consequência: a AdOpt só entrega `id` de tag em
+     * optInTags/optOutTags, nunca nome de categoria, então um valor indevido aqui jamais casa e
+     * o módulo simplesmente não arma. O erro cai para o lado seguro. Esta validação é, portanto,
+     * um **detector de engano humano**, não uma fronteira de segurança.
+     *
+     * O engano plausível é colar um rótulo do painel, e esse conjunto é pequeno e enumerável —
+     * cinco categorias em dois idiomas.
+     *
+     * O que esta validação NÃO faz, e não pode: separar palavra arbitrária de token. `Habilitado`
+     * tem exatamente o mesmo formato de `Lc-8ztRDYp` — 10 caracteres com maiúscula. Aceitar isso
+     * é consequência de a informação não existir na string, e é inofensivo pelo motivo acima.
+     *
+     * Daí as duas barreiras, nesta ordem de importância:
+     *
+     *   1. Lista explícita de rótulos conhecidos, comparada em minúsculas (o painel os exibe
+     *      capitalizados: `Statistics`, `Desempenho`).
+     *   2. Comprimento exato de 10 caracteres, medido nas cinco tags da conta em 2026-09-23.
+     *      Isso elimina de uma vez a família de strings inventadas mais longas
+     *      (`uonix_funcional`, `preferences_v2`, `Estatisticas`, `Preferencias`).
      *
      * Se nenhum ID válido restar, o sistema opera estritamente fail-closed.
      *
@@ -80,34 +98,49 @@ if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
                 continue;
             }
 
-            // Primeira barreira: lista explícita de nomes conhecidos que não são IDs.
+            // Primeira barreira, e a principal: rótulos do painel da AdOpt.
             //
-            // Ela NÃO é redundante com a regra estrutural abaixo. Nomes compostos só de letras
-            // minúsculas ('statistics', 'desempenho') caem na regra estrutural; nomes que contêm
-            // underscore, dígito ou maiúscula — como 'uonix_cookies' — passam por ela e só são
-            // barrados aqui. Medido por mutação: esvaziar esta lista faz 'uonix_cookies' ser
-            // aceito como ID.
-            if ( in_array( strtolower( $id ), array( 'funcional', 'preferences', 'functional', 'uonix_cookies', 'marketing', 'analytics', 'necessario', 'essential' ), true ) ) {
+            // A comparação é em minúsculas porque o painel os exibe CAPITALIZADOS — foi
+            // exatamente essa dimensão que uma versão anterior deste guard ignorou, deixando
+            // `Statistics` e `Performance` passarem enquanto `statistics` caía.
+            //
+            // O conjunto é o namespace real da conta, em inglês (`Required`, `Marketing`,
+            // `Statistics`, `Performance`, `Functional`) e nos rótulos em português que o banner
+            // renderiza, mais variações de grafia sem acento. Entradas mais curtas ou mais longas
+            // que 10 caracteres já morreriam no comprimento; ficam aqui como defesa em
+            // profundidade, para o caso de o comprimento ser afrouxado no futuro.
+            $rotulos_de_categoria = array(
+                // inglês
+                'required', 'marketing', 'statistics', 'performance', 'functional',
+                'necessary', 'essential', 'preferences', 'analytics',
+                // português
+                'necessario', 'necessarios', 'necessarias', 'estatisticas', 'funcional',
+                'funcionais', 'desempenho', 'preferencias', 'publicidade', 'essenciais',
+                'analiticos',
+                // nome interno herdado
+                'uonix_cookies',
+            );
+            if ( in_array( strtolower( $id ), $rotulos_de_categoria, true ) ) {
                 continue;
             }
 
-            // Segunda barreira, estrutural: aceita UUID de 36 caracteres (formato de outras contas
-            // AdOpt) ou o identificador curto desta conta — 10+ caracteres em [A-Za-z0-9_-] que
-            // contenham ao menos um caractere que NÃO seja letra minúscula.
+            // Segunda barreira: comprimento. UUID de 36 caracteres, formato usado por outras
+            // contas AdOpt, ou o identificador curto desta conta, de EXATAMENTE 10 caracteres em
+            // [A-Za-z0-9_-]. Os cinco IDs da conta foram medidos em 2026-09-23 e todos têm 10.
             //
-            // Essa última exigência cobre, por construção, todo nome de categoria composto só de
-            // letras minúsculas em qualquer idioma — 'statistics', 'performance', 'necessarios',
-            // 'desempenho', 'publicidade' —, sem depender de uma lista estar completa. Nomes
-            // acentuados ('estatísticas') já falham no conjunto de caracteres.
+            // A exatidão é o que elimina, sem enumerar, toda a família de strings inventadas de
+            // outro tamanho: 'uonix_funcional' (15), 'preferences_v2' (14), 'Estatisticas' (12),
+            // 'Preferencias' (12), 'Necessarios' (11), 'Performance' (11), 'funcional_1' (11).
             //
-            // O que ela NÃO cobre: rótulos com underscore, dígito ou maiúscula. Para esses a
-            // barreira é a lista explícita acima. As duas juntas é que fecham.
+            // O que ela NÃO faz é separar palavra de token: 'Statistics' e 'Desempenho' também
+            // têm 10 caracteres. Para esses, a barreira é a lista de rótulos acima — e é por isso
+            // que ela vem primeiro e é a principal.
             //
-            // Custo assumido: um identificador da AdOpt composto só de letras minúsculas seria
-            // rejeitado. Com alfabeto de 64 caracteres isso tem ordem de 1 em 7.700 por tag, e o
-            // erro cai para o lado seguro — o módulo fica inativo, não permissivo.
+            // Custo assumido: se a AdOpt passar a emitir identificador de outro comprimento, o
+            // módulo fica inativo até alguém ajustar aqui. É o lado seguro do erro, e o teste com
+            // os IDs reais falha alto se o comprimento medido deixar de valer.
             $uuid_valido  = (bool) preg_match( '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $id );
-            $curto_valido = (bool) preg_match( '/^[a-zA-Z0-9_-]{10,}$/', $id ) && (bool) preg_match( '/[^a-z]/', $id );
+            $curto_valido = (bool) preg_match( '/^[a-zA-Z0-9_-]{10}$/', $id );
 
             if ( $uuid_valido || $curto_valido ) {
                 $valid_ids[] = strtolower( $id );
