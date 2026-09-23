@@ -207,9 +207,11 @@ Consequências deliberadas:
 
 ### O que NÃO foi feito, e por quê
 
-**A postura não foi registrada em `docs/legal/` nem no ROPA, e isso é pendência declarada — não decisão.** A issue 253 pede a postura registrada em `docs/legal/` e referenciada aqui; só a segunda metade foi feita. `docs/legal/ropa-inventario-dados-uonix.md` não menciona Search Console: a entrada de analytics cobre cookies e GA4 do lado do cliente, com retenção de "24h a 2 anos", e não descreve texto de consulta em `wp_options`.
+**A postura está registrada no ROPA, entrada 09** de [`docs/legal/ropa-inventario-dados-uonix.md`](../legal/ropa-inventario-dados-uonix.md), seguindo as nove colunas das outras entradas.
 
-Isso importa porque a postura escolhida **mantém retenção indefinida** do residual, por desenho — não há TTL no corrente, e é deliberado. Retenção indefinida não é prazo de retenção, e um inventário de dados precisa declarar um. Rastreado em issue própria.
+O campo de retenção foi preenchido como **justificativa para guarda**, e não como prazo em dias. Isso não é lacuna: a Fase 2 da matriz RoPA definida para este projeto aceita as duas formas — *"Tempo de Retenção: prazo de descarte **ou** justificativa para guarda"*.
+
+A justificativa é factual e verificável no código: a única cópia é o *snapshot* corrente do período, **sobrescrito** a cada sincronização. Não há acúmulo histórico, e gerações anteriores são eliminadas quando se tornam inalcançáveis. Por isso não existe um prazo a declarar — existe um mecanismo, que é mais forte que um prazo, porque não depende de ninguém lembrar de executá-lo.
 
 **Não há TTL sobre o snapshot corrente, e não deve haver.** `uonix_analytics_metrics_snapshot_is_fresh()` decide **exibição**, não validade: o módulo mostra dado velho com aviso de "desatualizado", e isso é comportamento documentado e desejado (fail-soft, ver a linha *Cache* na tabela de base factual). Um TTL no corrente trocaria "dado velho com aviso" por "indisponível" — regressão, não minimização. O que a coleta remove é geração **inalcançável**, que é outra coisa.
 
