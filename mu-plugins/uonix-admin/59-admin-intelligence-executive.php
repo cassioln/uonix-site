@@ -945,6 +945,8 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 				}
 				// Fim conhecido é onde o servidor RESPONDEU com status próprio: 2xx, 404/410,
 				// ou erro 4xx/5xx — um 500 é resposta do endereço, e o visitante chega nele.
+				// Limitação conhecida: 408, 429, 502, 503 e 504 também caem aqui, embora
+				// sejam indisponibilidade passageira, e o nó possa redirecionar de novo (#304).
 				// Sem resposta (código 0: falha de rede, teto ou orçamento) o nó pode
 				// redirecionar de novo, e 3xx sem `Location` não diz para onde. Nos dois
 				// casos não há fim, e nada é somado (MÉDIO 2 da terceira revisão).
@@ -959,9 +961,10 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 				);
 				break;
 			}
-			// Saltos demais: só o endereço de partida fica sem fim. O último nó nem foi
-			// consultado, e os intermediários, partindo deles mesmos, cabem no limite — marcá-
-			// los aqui seria dar "não verificado" a quem tem resposta.
+			// Saltos demais: só o endereço de partida é marcado sem fim aqui. O último nó nem
+			// foi consultado, e cada intermediário conta os próprios saltos quando for
+			// resolvido: se couber no limite, tem resposta, e marcá-lo aqui seria dar "não
+			// verificado" a quem tem; se não couber, fica sem fim pela própria resolução.
 			if ( null === $resultado && $salto > (int) $regras['max_hops'] ) {
 				$cadeia = array( $caminho );
 			}

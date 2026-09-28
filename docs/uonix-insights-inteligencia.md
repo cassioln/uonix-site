@@ -378,7 +378,7 @@ O status HTTP das 10 de mais impressão é conferido **sem que o cliente siga o 
 
 - **Redirecionamento é somado ao destino final da cadeia**, que passa a declarar quantos endereços antigos inclui. A procedência do bloco só diz que houve soma quando houve.
 - **404 entra marcado em vermelho**: página que o Google mostra e não existe é o achado mais acionável do bloco.
-- **Status que não pôde ser conferido fica como "não verificado"**, nunca como página existente. Isso inclui falha de rede, loopback bloqueado, ciclo, redirecionamento para fora do site, 3xx sem `Location`, saltos demais e teto de consultas ou orçamento atingido — **no endereço de partida ou em qualquer ponto da cadeia**. Nesses casos nada é somado. Um destino que responde erro 4xx ou 5xx é fim conhecido e recebe a soma: o servidor respondeu ali, e o visitante chega nele.
+- **Status que não pôde ser conferido fica como "não verificado"**, nunca como página existente. Isso inclui falha de rede, loopback bloqueado, ciclo, redirecionamento para fora do site, 3xx sem `Location`, saltos demais e teto de consultas ou orçamento atingido — **no endereço de partida ou em qualquer ponto da cadeia**. Nesses casos nada é somado. Um destino que responde erro 4xx ou 5xx é tratado como fim conhecido e recebe a soma. Isso vale para o 500, que é resposta do endereço, mas **também para os erros passageiros** (408, 429, 502, 503, 504), em que o nó pode redirecionar de novo quando voltar: com cadeia de 2 saltos ou mais e erro passageiro no meio, a cadeia sai partida em duas linhas. Hoje a produção não tem cadeia de 2 saltos; a correção está na #304.
 
 **A soma é feita em duas fases.** Primeiro cada endereço segue a **própria** cadeia até o fim, contando os **próprios** saltos; só depois as impressões **originais** são somadas no destino final de cada um. A memória de status garante uma requisição por endereço.
 
@@ -386,7 +386,7 @@ O status HTTP das 10 de mais impressão é conferido **sem que o cliente siga o 
 - **A terceira revisão** mostrou que a versão seguinte ainda dependia da ordem. Ela reusava o fim de um trecho já resolvido por outra cadeia, sem contar os saltos daquele trecho, e somava cadeia de cinco saltos numa ordem e não na outra. Em 400 grafos aleatórios, os 6 com cadeia acima de 3 saltos mudavam com a ordem. Sem o reuso, o resultado de cada endereço depende só do grafo a partir dele, e o teste roda o mesmo grafo nas duas ordens.
 - **A exceção é o esgotamento do teto ou do orçamento.** Aí **o que** fica sem conferência depende da ordem, que é por impressões. Mas o que fica sem conferência sai "não verificado" e sem soma: a ordem muda a completude, não a verdade.
 
-Quando uma cadeia passa de `max_hops`, só o endereço de partida fica "não verificado"; os intermediários, partindo deles mesmos, cabem no limite e são resolvidos. Endereço que chega ao topo sem ter sido candidato também é conferido e somado.
+Quando uma cadeia passa de `max_hops`, o endereço de partida fica "não verificado". Cada intermediário conta os **próprios** saltos: os que cabem no limite são resolvidos e somados, e os que não cabem também ficam "não verificado". Endereço que chega ao topo sem ter sido candidato também é conferido e somado.
 
 **O custo tem teto explícito, não estimativa.** A primeira versão deste contrato dizia "até ~10 requisições", e a revisão mediu que o teto real era 15. Agora:
 

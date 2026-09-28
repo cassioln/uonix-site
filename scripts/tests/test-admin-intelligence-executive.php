@@ -712,8 +712,8 @@ uox_assert( 'unknown' === uonix_intelligence_executive_page_status( '/nao-respon
 $argsHead = end( $GLOBALS['uox_http_args'] );
 uox_assert( 0 === ( $argsHead['redirection'] ?? -1 ), 'a conferência não pode seguir redirecionamento' );
 uox_assert( 8 === ( $argsHead['timeout'] ?? -1 ), 'o limite por requisição é 8 s: o 404 de produção levou 4,2 s, e 5 s deixava margem de 0,8 s' );
-// A requisição passa pelo Rank Math e conta no contador do redirecionamento: quem ler o
-// contador precisa conseguir separá-la dos visitantes.
+// O User-Agent serve ao log de acesso do servidor. O contador de redirecionamento do
+// Rank Math não guarda User-Agent, então lá o acesso não tem como ser separado.
 uox_assert( 0 === strpos( (string) ( $argsHead['user-agent'] ?? '' ), 'Uonix-Relatorio-Executivo/' ), 'a conferência deve se identificar no User-Agent, obteve ' . var_export( $argsHead['user-agent'] ?? null, true ) );
 
 // ---- O buscador de páginas DE VERDADE, com a consulta injetada (MÉDIO 2). ----
