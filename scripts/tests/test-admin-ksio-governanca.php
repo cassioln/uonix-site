@@ -165,6 +165,7 @@ $GLOBALS['uox_user'] = 'ksiodev';
 foreach ( array( 'limpeza', 'clone', 'analytics' ) as $c ) {
 	uox_assert( true === uonix_ksio_can_access_tool( $c ), "o dono pode {$c} mesmo com tudo oculto" );
 }
+uox_assert( false === uonix_ksio_can_access_tool( 'inexistente' ), 'chave desconhecida nunca dá acesso, nem ao dono' );
 
 // ---------------------------------------------------------------------------
 // 5. Identificação do dono: login exato, logado.
@@ -193,22 +194,23 @@ $GLOBALS['uox_options'] = array();
 $GLOBALS['uox_user']    = 'root';
 $GLOBALS['uox_caps']    = $ADMIN;
 $_POST = array( 'uonix_ksio_visible' => array( 'clone' => '1' ) );
-try {
-	uonix_ksio_save_visibility();
-	uox_assert( false, 'administrador que não é o dono deveria ser recusado ao salvar' );
-} catch ( Uox_Die_Exception $e ) {
-	uox_assert( true, '' );
+/** Roda o handler e diz se ele RECUSOU (wp_die). Sem a guarda ele seguiria até o redirect. */
+function uox_salvar_recusou() {
+	try {
+		uonix_ksio_save_visibility();
+	} catch ( Uox_Die_Exception $e ) {
+		return true;
+	} catch ( Uox_Redirect_Exception $e ) {
+		return false;
+	}
+	return false;
 }
+uox_assert( uox_salvar_recusou(), 'administrador que não é o dono deveria ser recusado ao salvar' );
 uox_assert( array() === $GLOBALS['uox_options'], 'e a opção não pode mudar' );
 
 $GLOBALS['uox_user']       = 'ksiodev';
 $GLOBALS['uox_referer_ok'] = false;
-try {
-	uonix_ksio_save_visibility();
-	uox_assert( false, 'sem nonce o dono também deveria ser recusado' );
-} catch ( Uox_Die_Exception $e ) {
-	uox_assert( true, '' );
-}
+uox_assert( uox_salvar_recusou(), 'sem nonce o dono também deveria ser recusado' );
 uox_assert( array() === $GLOBALS['uox_options'], 'sem nonce a opção não muda' );
 
 $GLOBALS['uox_referer_ok'] = true;
