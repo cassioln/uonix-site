@@ -18,7 +18,7 @@ Specs que governam código pertencem a `docs/`, versionadas e revisadas.
 
 | Peça | Onde | Estado |
 |---|---|---|
-| Painel e menu | `mu-plugins/uonix-admin/52-admin-analytics-dashboard.php:21-33` | Menu **top-level**, slug `uonix-analytics`, capability `edit_posts`, **sem submenus** |
+| Painel e menu | Página em `mu-plugins/uonix-admin/52-admin-analytics-dashboard.php`; menu registrado em `49-admin-ksio-governanca.php` (PR #310) | Slug `uonix-analytics`, capability `edit_posts`. Para o usuário `ksiodev`, é **submenu de `ksio.dev`**. Para os demais, é **item próprio do menu, só se liberado** na tela "Visibilidade para usuários" (padrão: oculto). Oculto, a página e os três `admin_post` do Insights recusam — ver [clone-ambientes.md](clone-ambientes.md#como-usar-o-painel-ksiodev) |
 | Abas | `52` (tablist) + allowlist em `53-admin-analytics-metrics.php:673-708` | Três níveis: `?tab=` → `?subtab=` → `?catalog_tab=`, validados por `sanitize_key` contra listas fechadas |
 | Camada de dados GA4/GSC | `mu-plugins/uonix-admin/53-admin-analytics-metrics.php` | OAuth2 JWT RS256 escrito à mão, sem bibliotecas; escopos read-only; 8 chamadas por sync |
 | Cache | `53`, `uonix_analytics_metrics_snapshot_option()` e `…_get_snapshot()` | Snapshot em `wp_options`, **sem TTL sobre a geração corrente**, por desenho; validade por frescor de 24h; snapshot velho é preservado como `stale` (fail-soft). Gerações **inalcançáveis** pela cascata de leitura são coletadas — ver *Coleta das gerações mortas de snapshot* |
@@ -44,7 +44,7 @@ A issue #193 descreve o produto corretamente e o repositório incorretamente. As
 | "Metadados CAPI no banco"; auditoria de EMQ | **Meta CAPI não está implementado**: nenhuma chamada a `graph.facebook.com` em código executável (`mu-plugins/`, `themes/`, `scripts/`); as ocorrências no repositório estão em documentação de skill. Sem CAPI não há EMQ para medir. O Pixel é client-side via GTM |
 | "Transients de 12 horas já existentes no Uônix Insights" | **Zero transients no Insights.** O padrão é snapshot em `wp_options` com frescor de 24h e lock |
 | `scripts/cron/send-weekly-executive-report.php` | `scripts/cron/` não existe; nenhum cronjob de servidor documentado; nenhum workflow com `schedule:` |
-| `page=uonix-insights`, submenu `> Central de Inteligência` | Slug é `uonix-analytics`, menu top-level sem submenus |
+| `page=uonix-insights`, submenu `> Central de Inteligência` | Slug é `uonix-analytics`. A Central de Inteligência é uma **aba** da página, não submenu. Desde o PR #310 o Insights é submenu de `ksio.dev` para o `ksiodev`, e item próprio para os demais quando liberado |
 | `_uonix_utm_*` no Fluent Forms | Lá é **uma linha JSON** com `meta_key='uonix_attribution'`, só para os formulários de captura, contato e newsletter, e **nunca lida** |
 
 ## Arquitetura

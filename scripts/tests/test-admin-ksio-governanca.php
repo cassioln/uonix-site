@@ -67,6 +67,14 @@ function submit_button( $text = '' ) { echo '<button>' . $text . '</button>'; }
 function sanitize_text_field( $v ) { return trim( (string) $v ); }
 function wp_unslash( $v ) { return $v; }
 
+// `$wpdb` mudo: as páginas de Limpeza e Clone seguem depois da guarda quando deixam
+// passar, e sem isto imprimiriam avisos de propriedade em nulo no log do CI.
+class Uox_Wpdb_Mudo {
+	public $prefix = 'wp_';
+	public function __call( $metodo, $args ) { return null; }
+}
+$GLOBALS['wpdb'] = new Uox_Wpdb_Mudo();
+
 $RAIZ = dirname( __DIR__, 2 );
 require_once $RAIZ . '/mu-plugins/uonix-admin/49-admin-ksio-governanca.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/46-admin-limpeza-conteudo.php';
@@ -98,7 +106,9 @@ function uox_liberar( array $chaves ) {
 $hooks = array();
 foreach ( $GLOBALS['uox_actions'] as $a ) { $hooks[ $a[0] ] = $a; }
 uox_assert( isset( $hooks['admin_menu'] ) && 'uonix_ksio_register_menus' === $hooks['admin_menu'][1], 'o 49 deve registrar os menus no admin_menu' );
-uox_assert( isset( $hooks['admin_post_uonix_ksio_save_visibility'] ), 'o 49 deve registrar o handler de visibilidade' );
+// O CALLBACK, e não só o hook: ligado à tela, o botão "Salvar" imprimiria a página em
+// vez de gravar (achado BAIXO da revisão do PR #310).
+uox_assert( 'uonix_ksio_save_visibility' === ( $hooks['admin_post_uonix_ksio_save_visibility'][1] ?? '' ), 'o handler de visibilidade deve ser uonix_ksio_save_visibility' );
 
 // ---------------------------------------------------------------------------
 // 2. O dono: ksio.dev com os cinco submenus, e o Insights SÓ dentro dele.
@@ -113,6 +123,12 @@ uox_assert(
 uox_assert( array( 'ksio-dev' ) === array_values( array_unique( array_column( $dono['submenus'], 'parent' ) ) ), 'todos os submenus do dono ficam em ksio-dev' );
 $subInsights = $dono['submenus'][3];
 uox_assert( 'edit_posts' === $subInsights['cap'] && 'uonix_render_analytics_dashboard_page' === $subInsights['callback'], 'o Insights do dono usa a página e a capacidade de sempre' );
+// A capacidade de cada item do dono (sugestão da revisão do PR #310).
+uox_assert( 'manage_options' === ( $dono['menus'][0]['cap'] ?? '' ), 'o topo ksio-dev do dono exige manage_options' );
+uox_assert(
+	array( 'manage_options', 'manage_options', 'manage_options', 'edit_posts', 'manage_options' ) === array_column( $dono['submenus'], 'cap' ),
+	'as capacidades dos submenus do dono são as de sempre; obteve ' . json_encode( array_column( $dono['submenus'], 'cap' ) )
+);
 
 // Liberar para os demais não muda o menu do dono.
 uox_liberar( array( 'limpeza', 'clone', 'analytics' ) );
@@ -277,6 +293,36 @@ foreach ( array( 'uox_content_render_cleanup_page' => 'Limpeza', 'uox_clone_rend
 	ob_end_clean();
 	uox_assert( $recusou, "{$nome} oculta deveria recusar o administrador que não é o dono" );
 }
+// A guarda consulta a chave da PRÓPRIA ferramenta, e deixa passar quem pode (achado
+// BAIXO da revisão do PR #310). "Passou" = não recusou com a mensagem de permissão; a
+// página segue e pode quebrar adiante, por falta de banco ou WooCommerce neste teste.
+/** A página recusou por permissão? */
+function uox_pagina_recusou( $pagina ) {
+	ob_start();
+	try {
+		call_user_func( $pagina );
+		$recusou = false;
+	} catch ( Uox_Die_Exception $e ) {
+		$recusou = false !== strpos( $e->getMessage(), 'Você não tem permissão para acessar esta página.' );
+	} catch ( Throwable $e ) {
+		$recusou = false;
+	}
+	ob_end_clean();
+	return $recusou;
+}
+uox_liberar( array( 'clone' ) );
+$GLOBALS['uox_user'] = 'root';
+$GLOBALS['uox_caps'] = $ADMIN;
+uox_assert( true === uox_pagina_recusou( 'uox_content_render_cleanup_page' ), 'com só o Clone liberado, a Limpeza recusa o administrador: a guarda usa a chave limpeza' );
+uox_assert( false === uox_pagina_recusou( 'uox_clone_render_page' ), 'e o Clone deixa passar: a guarda usa a chave clone' );
+uox_liberar( array( 'limpeza' ) );
+uox_assert( false === uox_pagina_recusou( 'uox_content_render_cleanup_page' ), 'com só a Limpeza liberada, a Limpeza deixa passar' );
+uox_assert( true === uox_pagina_recusou( 'uox_clone_render_page' ), 'e o Clone recusa' );
+$GLOBALS['uox_options'] = array();
+$GLOBALS['uox_user']    = 'ksiodev';
+uox_assert( false === uox_pagina_recusou( 'uox_content_render_cleanup_page' ) && false === uox_pagina_recusou( 'uox_clone_render_page' ), 'o dono passa pelas duas guardas com tudo oculto' );
+$GLOBALS['uox_user'] = 'root';
+
 // A Visão Geral é do dono mesmo com tudo liberado.
 uox_liberar( array( 'limpeza', 'clone', 'analytics' ) );
 ob_start();
