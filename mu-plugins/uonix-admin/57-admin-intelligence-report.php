@@ -60,8 +60,15 @@ if ( ! function_exists( 'uonix_intelligence_report_context' ) ) {
 			'rows'      => array(),
 		);
 
+		// Módulo 4. Opcional: sem o 59 carregado, o e-mail sai como antes, só com as
+		// oportunidades de SEO. Ver 59-admin-intelligence-executive.php.
+		$executive = function_exists( 'uonix_intelligence_executive_collect' )
+			? uonix_intelligence_executive_collect( array( 'snapshot' => $snapshot, 'seo' => $analysis ) )
+			: null;
+
 		return array(
 			'analysis'     => $analysis,
+			'executive'    => $executive,
 			'period_label' => uonix_intelligence_report_period_label( $snapshot ),
 			'environment'  => defined( 'UONIX_ENV' ) ? (string) UONIX_ENV : '',
 			'panel_url'    => function_exists( 'admin_url' ) ? admin_url( 'admin.php?page=uonix-analytics&tab=intelligence' ) : '',
@@ -74,6 +81,265 @@ if ( ! function_exists( 'uonix_intelligence_report_subject' ) ) {
 		$assunto = 'Uônix — Relatório de Inteligência e Performance';
 		$periodo = isset( $context['period_label'] ) ? (string) $context['period_label'] : '';
 		return '' !== $periodo ? $assunto . ' (' . $periodo . ')' : $assunto;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Módulo 4: blocos executivos. A camada de dados é 59-admin-intelligence-executive.php;
+// daqui para baixo só se formata o que ela devolve.
+// ---------------------------------------------------------------------------
+
+if ( ! function_exists( 'uonix_intelligence_report_window_label' ) ) {
+	/**
+	 * "21/09 a 27/09" a partir de `array( 'start' => 'Y-m-d', 'end' => 'Y-m-d' )`.
+	 */
+	function uonix_intelligence_report_window_label( $window ) {
+		if ( ! is_array( $window ) || ! isset( $window['start'], $window['end'] ) ) {
+			return '';
+		}
+		$fuso   = new DateTimeZone( 'UTC' );
+		$inicio = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $window['start'], $fuso );
+		$fim    = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $window['end'], $fuso );
+		if ( false === $inicio || false === $fim ) {
+			return '';
+		}
+
+		return $inicio->format( 'd/m' ) . ' a ' . $fim->format( 'd/m' );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_report_executive_reason' ) ) {
+	/**
+	 * Motivo de indisponibilidade de uma caixa, em linguagem de leitor.
+	 *
+	 * Motivos da Search Console vêm do Módulo 5 e já têm tradução em
+	 * `uonix_intelligence_anomaly_reason_message()`; os próprios deste módulo ficam
+	 * aqui. Motivo desconhecido cai num texto honestamente vago.
+	 */
+	function uonix_intelligence_report_executive_reason( $reason ) {
+		$mapa = array(
+			'submissions_table_missing' => 'a tabela de orçamentos não está disponível.',
+			'ga4_fetch_failed'          => 'a consulta ao GA4 falhou nesta execução.',
+			'ga4_missing'               => 'os dados do GA4 não estão disponíveis.',
+			'config_missing'            => 'as credenciais de leitura do Google não estão configuradas.',
+			'no_sessions'               => 'nenhuma visita registrada no período.',
+			'organic_missing'           => 'os dados da Search Console não estão disponíveis.',
+			'windows_invalid'           => 'o período do relatório é inválido.',
+		);
+		if ( isset( $mapa[ $reason ] ) ) {
+			return $mapa[ $reason ];
+		}
+		if ( function_exists( 'uonix_intelligence_anomaly_reason_message' ) ) {
+			return uonix_intelligence_anomaly_reason_message( (string) $reason );
+		}
+
+		return 'o dado não está disponível nesta semana.';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_report_delta_html' ) ) {
+	/**
+	 * "▲ +30,4% vs. semana anterior", com a seta e a cor do sentido.
+	 */
+	function uonix_intelligence_report_delta_html( $delta, $sufixo ) {
+		$d     = (float) $delta;
+		$seta  = $d > 0 ? '▲' : ( $d < 0 ? '▼' : '=' );
+		$cor   = $d > 0 ? '#15803d' : ( $d < 0 ? '#b91c1c' : '#64748b' );
+		$sinal = $d > 0 ? '+' : ( $d < 0 ? '−' : '' );
+
+		return '<span style="color:' . $cor . ';font-weight:bold;">' . $seta . ' ' . $sinal . esc_html( number_format( abs( $d ), 1, ',', '.' ) ) . '%</span> ' . esc_html( (string) $sufixo );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_report_detect_html' ) ) {
+	/**
+	 * Resultado do teste de diferença, sem porcentagem.
+	 */
+	function uonix_intelligence_report_detect_html( $direction ) {
+		if ( 'up' === $direction ) {
+			return '<span style="color:#15803d;font-weight:bold;">▲ aumento detectável</span>';
+		}
+		if ( 'down' === $direction ) {
+			return '<span style="color:#b91c1c;font-weight:bold;">▼ queda detectável</span>';
+		}
+
+		return '<span style="color:#64748b;">sem mudança detectável</span>';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_report_box_html' ) ) {
+	/**
+	 * Uma célula do scorecard. Toda string vinda de dado passa por `esc_html`.
+	 */
+	function uonix_intelligence_report_box_html( $box ) {
+		$titulos = array(
+			'leads'      => 'Orçamentos',
+			'visits'     => 'Visitas',
+			'organic'    => 'Impressões na busca',
+			'conversion' => 'Conversão',
+		);
+		$chave  = is_array( $box ) && isset( $box['key'] ) ? (string) $box['key'] : '';
+		$titulo = isset( $titulos[ $chave ] ) ? $titulos[ $chave ] : $chave;
+
+		$celula  = '<td width="50%" valign="top" style="width:50%;padding:14px 16px;border:1px solid #e2e8f0;">';
+		$celula .= '<div style="color:#475569;font-size:12px;font-weight:bold;text-transform:uppercase;letter-spacing:.04em;">' . esc_html( $titulo ) . '</div>';
+
+		if ( ! is_array( $box ) || empty( $box['available'] ) ) {
+			$motivo  = uonix_intelligence_report_executive_reason( is_array( $box ) && isset( $box['reason'] ) ? (string) $box['reason'] : '' );
+			$celula .= '<div style="color:#92400e;font-size:12px;line-height:1.5;padding-top:8px;">Indisponível: ' . esc_html( $motivo ) . '</div>';
+			return $celula . '</td>';
+		}
+
+		$valor  = '';
+		$linhas = array();
+		$fonte  = '';
+
+		if ( 'leads' === $chave ) {
+			$valor    = number_format( (float) $box['current'], 0, ',', '.' );
+			$linhas[] = esc_html( 'últimos 7 dias (' . uonix_intelligence_report_window_label( $box['window'] ) . ')' );
+			$linhas[] = esc_html( sprintf( '4 semanas: %d, contra %d nas 4 anteriores', (int) $box['month'], (int) $box['prev_month'] ) );
+			$linhas[] = uonix_intelligence_report_detect_html( (string) $box['direction'] );
+			$fonte    = 'Fonte: formulários do site';
+		} elseif ( 'visits' === $chave ) {
+			$valor    = number_format( (float) $box['current'], 0, ',', '.' );
+			$linhas[] = esc_html( 'semana de ' . uonix_intelligence_report_window_label( $box['window'] ) );
+			if ( ! empty( $box['comparable'] ) ) {
+				$linhas[] = uonix_intelligence_report_delta_html( $box['delta_percent'], 'vs. semana anterior' );
+			} elseif ( 'no_history' === ( $box['note'] ?? '' ) ) {
+				$linhas[] = esc_html( 'sem histórico do GA4 para comparar' );
+			} else {
+				$linhas[] = esc_html( 'semana anterior sem visitas registradas' );
+			}
+			$fonte = 'Fonte: GA4 · só visitas com consentimento';
+		} elseif ( 'organic' === $chave ) {
+			$valor    = number_format( (float) $box['current'], 0, ',', '.' );
+			$linhas[] = esc_html( 'semana de ' . uonix_intelligence_report_window_label( $box['window'] ) );
+			if ( 'collapse' === ( $box['note'] ?? '' ) ) {
+				$linhas[] = '<span style="color:#b91c1c;font-weight:bold;">▼ nenhuma impressão na semana</span> ' . esc_html( '— veja a aba Anomalias' );
+			} elseif ( ! empty( $box['comparable'] ) ) {
+				$linhas[] = uonix_intelligence_report_delta_html( $box['delta_percent'], 'vs. semana anterior' );
+			} else {
+				$linhas[] = esc_html( sprintf( 'comparação parcial: %d dia(s) ainda sem dado', (int) ( $box['imputed_days'] ?? 0 ) ) );
+			}
+			// A semana termina alguns dias antes de hoje porque a Search Console publica
+			// com atraso. Dizer isso evita que a data pareça um erro.
+			$fonte = 'Fonte: Search Console · a semana termina antes de hoje porque os dados chegam com ~3 dias de atraso';
+		} elseif ( 'conversion' === $chave ) {
+			$valor    = 'até ' . number_format( (float) $box['rate'] * 100, 1, ',', '.' ) . '%';
+			$linhas[] = esc_html( sprintf( '%d orçamento(s) em %s visitas · 4 semanas (%s)', (int) $box['leads'], number_format( (float) $box['sessions'], 0, ',', '.' ), uonix_intelligence_report_window_label( $box['window'] ) ) );
+			if ( ! empty( $box['comparable'] ) ) {
+				$linhas[] = esc_html( 'antes: até ' . number_format( (float) $box['prev_rate'] * 100, 1, ',', '.' ) . '% · ' ) . uonix_intelligence_report_detect_html( (string) $box['direction'] );
+			} elseif ( 'no_history' === ( $box['note'] ?? '' ) ) {
+				$linhas[] = esc_html( 'sem histórico do GA4 para comparar' );
+			} else {
+				$linhas[] = esc_html( 'período anterior sem visitas registradas' );
+			}
+			// O sentido do erro é conhecido e vai escrito: o numerador conta todos os
+			// orçamentos, o denominador só visitas com consentimento.
+			$fonte = 'Teto: o GA4 só conta visitas com consentimento, então a taxa real é menor ou igual';
+		}
+
+		$celula .= '<div style="color:#0b1c2c;font-size:26px;font-weight:bold;line-height:1.2;padding-top:6px;">' . esc_html( $valor ) . '</div>';
+		foreach ( $linhas as $linha ) {
+			$celula .= '<div style="color:#334155;font-size:12px;line-height:1.5;padding-top:3px;">' . $linha . '</div>';
+		}
+		if ( '' !== $fonte ) {
+			$celula .= '<div style="color:#94a3b8;font-size:10px;line-height:1.4;padding-top:8px;">' . esc_html( $fonte ) . '</div>';
+		}
+
+		return $celula . '</td>';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_report_executive_top_html' ) ) {
+	/**
+	 * Scorecard e destaques, que abrem o e-mail.
+	 */
+	function uonix_intelligence_report_executive_top_html( $executive ) {
+		$caixas = isset( $executive['scorecard']['boxes'] ) && is_array( $executive['scorecard']['boxes'] ) ? $executive['scorecard']['boxes'] : array();
+		$html   = '';
+
+		$html .= '<tr><td style="padding:24px 28px 8px 28px;">';
+		$html .= '<div style="color:#0e3780;font-size:16px;font-weight:bold;">Resumo da semana</div>';
+		$html .= '<div style="color:#64748b;font-size:11px;padding-top:6px;">Cada caixa declara a própria fonte e o próprio período.</div>';
+		$html .= '</td></tr>';
+
+		$html .= '<tr><td style="padding:8px 28px 8px 28px;">';
+		$html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">';
+		foreach ( array( array( 'leads', 'visits' ), array( 'organic', 'conversion' ) ) as $par ) {
+			$html .= '<tr>';
+			foreach ( $par as $chave ) {
+				$html .= uonix_intelligence_report_box_html( isset( $caixas[ $chave ] ) ? $caixas[ $chave ] : array( 'key' => $chave, 'available' => false, 'reason' => '' ) );
+			}
+			$html .= '</tr>';
+		}
+		$html .= '</table>';
+		$html .= '</td></tr>';
+
+		$destaques = isset( $executive['insights'] ) && is_array( $executive['insights'] ) ? $executive['insights'] : array();
+		if ( array() !== $destaques ) {
+			$html .= '<tr><td style="padding:16px 28px 8px 28px;">';
+			$html .= '<div style="color:#0e3780;font-size:16px;font-weight:bold;">Destaques</div>';
+			$html .= '<ul style="margin:8px 0 0 0;padding-left:18px;color:#1e293b;font-size:13px;line-height:1.6;">';
+			foreach ( $destaques as $destaque ) {
+				if ( is_array( $destaque ) && isset( $destaque['text'] ) && '' !== (string) $destaque['text'] ) {
+					$html .= '<li style="padding-bottom:6px;">' . esc_html( (string) $destaque['text'] ) . '</li>';
+				}
+			}
+			$html .= '</ul>';
+			$html .= '</td></tr>';
+		}
+
+		return $html;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_report_executive_pages_html' ) ) {
+	/**
+	 * Páginas mais encontradas na busca (pilar 4).
+	 */
+	function uonix_intelligence_report_executive_pages_html( $executive ) {
+		$paginas = isset( $executive['top_pages'] ) && is_array( $executive['top_pages'] ) ? $executive['top_pages'] : array();
+
+		$procedencia = 'Fonte: Search Console';
+		$janela      = uonix_intelligence_report_window_label( isset( $paginas['window'] ) ? $paginas['window'] : null );
+		if ( '' !== $janela ) {
+			$procedencia .= ' · ' . $janela;
+		}
+		$momento = isset( $paginas['synced_at'] ) && '' !== (string) $paginas['synced_at'] ? strtotime( (string) $paginas['synced_at'] ) : false;
+		$procedencia .= false !== $momento ? ' · sincronizado em ' . gmdate( 'd/m/Y H:i', $momento ) . ' (UTC)' : '';
+		$procedencia .= ! empty( $paginas['stale'] ) ? ' · dado desatualizado' : '';
+
+		$html  = '<tr><td style="padding:8px 28px 8px 28px;">';
+		$html .= '<div style="color:#0e3780;font-size:16px;font-weight:bold;">Páginas mais encontradas na busca</div>';
+		$html .= '<div style="color:#64748b;font-size:11px;padding-top:6px;">' . esc_html( $procedencia ) . '</div>';
+		$html .= '</td></tr>';
+
+		$html .= '<tr><td style="padding:8px 28px 24px 28px;">';
+		if ( empty( $paginas['available'] ) ) {
+			$html .= '<div style="padding:14px 16px;background-color:#fffbeb;border-left:4px solid #f59e0b;color:#78350f;font-size:13px;line-height:1.5;">As páginas mais encontradas ainda não estão disponíveis: o snapshot da Search Console não foi sincronizado.</div>';
+		} else {
+			$html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">';
+			$html .= '<tr style="background-color:#f8fafc;">';
+			$html .= '<th align="left" style="padding:8px 10px;color:#334155;font-size:12px;border-bottom:1px solid #e2e8f0;">Página</th>';
+			$html .= '<th align="right" style="padding:8px 10px;color:#334155;font-size:12px;border-bottom:1px solid #e2e8f0;">Impressões</th>';
+			$html .= '<th align="right" style="padding:8px 10px;color:#334155;font-size:12px;border-bottom:1px solid #e2e8f0;">Cliques</th>';
+			$html .= '</tr>';
+			foreach ( (array) $paginas['rows'] as $linha ) {
+				if ( ! is_array( $linha ) ) {
+					continue;
+				}
+				$html .= '<tr>';
+				$html .= '<td style="padding:10px;border-bottom:1px solid #f1f5f9;color:#1e293b;">' . esc_html( isset( $linha['label'] ) ? (string) $linha['label'] : '' ) . '</td>';
+				$html .= '<td align="right" style="padding:10px;border-bottom:1px solid #f1f5f9;color:#1e293b;">' . esc_html( number_format( (float) ( $linha['impressions'] ?? 0 ), 0, ',', '.' ) ) . '</td>';
+				$html .= '<td align="right" style="padding:10px;border-bottom:1px solid #f1f5f9;color:#1e293b;">' . esc_html( number_format( (float) ( $linha['clicks'] ?? 0 ), 0, ',', '.' ) ) . '</td>';
+				$html .= '</tr>';
+			}
+			$html .= '</table>';
+		}
+		$html .= '</td></tr>';
+
+		return $html;
 	}
 }
 
@@ -115,6 +381,13 @@ if ( ! function_exists( 'uonix_intelligence_report_html' ) ) {
 		}
 		$html .= '</td></tr>';
 
+		// Módulo 4: scorecard e destaques abrem o e-mail, porque é o que o leitor
+		// executivo lê primeiro. Ausente o contexto, o e-mail sai como antes.
+		$executivo = isset( $context['executive'] ) && is_array( $context['executive'] ) ? $context['executive'] : null;
+		if ( null !== $executivo ) {
+			$html .= uonix_intelligence_report_executive_top_html( $executivo );
+		}
+
 		// Bloco: Oportunidades SEO.
         $html .= '<tr><td style="padding:24px 28px 8px 28px;">';
 		$html .= '<div style="color:#0e3780;font-size:16px;font-weight:bold;">Oportunidades de busca a um passo do topo</div>';
@@ -154,6 +427,10 @@ if ( ! function_exists( 'uonix_intelligence_report_html' ) ) {
 			$html .= '</table>';
 		}
 		$html .= '</td></tr>';
+
+		if ( null !== $executivo ) {
+			$html .= uonix_intelligence_report_executive_pages_html( $executivo );
+		}
 
 		// Rodapé.
 		$html .= '<tr><td style="background-color:#f8fafc;padding:18px 28px;border-top:1px solid #e2e8f0;color:#64748b;font-size:11px;line-height:1.6;">';
