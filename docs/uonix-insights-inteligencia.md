@@ -59,6 +59,7 @@ Módulos novos seguem `NN-slug.php` dentro de `mu-plugins/uonix-<domínio>/`, in
 | `mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php` | Render: abas `intelligence`, `anomalies` e `settings` |
 | `mu-plugins/uonix-admin/57-admin-intelligence-report.php` | Relatório executivo semanal por e-mail e seu agendamento |
 | `mu-plugins/uonix-admin/58-admin-intelligence-anomalies.php` | Módulo 5: detecção de anomalias, estado, alerta e verificação diária |
+| `mu-plugins/uonix-admin/59-admin-intelligence-executive.php` | Módulo 4: scorecard, destaques e páginas mais encontradas do e-mail semanal |
 
 Dados precedem render no array. Não inflar o `52`, que já tem mais de 1.500 linhas com CSS inline.
 
@@ -310,6 +311,107 @@ A justificativa é factual e verificável no código: a única cópia é o *snap
 Então o residual é **≥ 10 consultas com texto**, e o número exato depende da distribuição do período. Confundir os dois conjuntos subestima a superfície remanescente, e é justamente ela que o ROPA precisa declarar.
 
 **O filtro de PII não foi ampliado** — ver a rejeição da heurística de nome próprio acima.
+
+## Módulo 4 — Relatório Executivo
+
+O e-mail semanal existente (`57`) passa a abrir com um scorecard de quatro caixas e até três destaques, e ganha um bloco de páginas mais encontradas na busca. A camada de dados é o `59`, que não renderiza e não grava nada. Sem ela carregada, o e-mail sai exatamente como antes.
+
+Decisões do Cassio em 2026-09-28: estender o e-mail semanal em vez de criar um segundo; destaques por **regra determinística**, não por LLM; **cortar o Custo por Lead** enquanto não houver fonte de gasto; e comparar orçamentos em **número absoluto** com janela de 4 semanas. O espaço do CPL no scorecard é ocupado por **Visitas**, que é o pilar 1 (volume de demanda).
+
+### Cada caixa tem o próprio relógio, e declara
+
+| Caixa | Fonte | Janela | Comparação |
+|---|---|---|---|
+| Orçamentos | Fluent Forms (form 3 e 4, sem spam) | 7 dias até ontem | 28 dias contra os 28 anteriores, **só em número absoluto** e pelo teste de diferença |
+| Visitas | GA4, série diária | 7 dias até ontem | semana contra semana, em % |
+| Impressões na busca | Search Console, via `organic_drop()` do Módulo 5 | semana **assentada**, ~4 dias antes de hoje | semana contra semana, em % |
+| Conversão | orçamentos ÷ visitas | 28 dias até ontem | 28 contra 28, pelo teste de diferença com exposição |
+
+As janelas terminam **ontem** porque o relatório sai segunda às 08:00, e "hoje" teria oito horas. Para os orçamentos isso é exato: vêm do banco local.
+
+Para o GA4, o que foi **medido** em 2026-09-28 é que o dado intradiário chega em horas — às 13:00 já havia dado parcial do próprio dia. **Não foi medido que o dia anterior esteja fechado às 08:00**, e a revisão do PR #301 apontou a diferença: o processamento diário pode seguir refinando o domingo depois disso. O tamanho do erro possível foi medido no mesmo dia: o domingo 27/09 teve 2 das 65 visitas da semana (~3%). O viés possível na variação semanal de visitas é dessa ordem, para baixo, e fica declarado.
+
+A Search Console segue com ~3 dias de atraso (medido de novo no mesmo dia), e por isso a caixa de impressões reusa as janelas assentadas do Módulo 5 em vez de somar a série de novo. Reimplementar ali seria reabrir os pontos cegos que duas revisões fecharam.
+
+### "Mudança detectável" é um teste, não um limiar
+
+Orçamentos nunca aparecem em porcentagem. Com ~1 por semana, "▲ +100%" é um orçamento a mais. A caixa mostra o número absoluto e o resultado de um **teste binomial exato** de duas contagens de Poisson: condicionado ao total, a primeira contagem segue Binomial(n, p0), com p0 = 0,5 para janelas iguais e p0 proporcional às visitas quando se comparam taxas. O nível é o convencional, α = 0,05 — o único número do módulo que não vem de medição do site.
+
+**Exato, e não a aproximação normal**, porque ela erra justo no volume deste site: 0 contra 5 passa em `|a − b| > 2√(a+b)` e tem valor-p exato de 0,0625.
+
+O bilateral é por **duplicação da cauda menor**. Para p0 ≠ 0,5 existe outra convenção — a do `binom.test` do R, que soma as probabilidades menores ou iguais à observada —, e as duas divergem: para 3 em 3 com p0 = 0,2, esta dá 0,016 e aquela, 0,008. A duplicação é mais conservadora, e a revisão do PR #301 mediu que o tamanho real deste teste nunca passa de 5% na grade n ≤ 80, p0 ∈ [0,02; 0,98]. Perde poder, não inventa sinal.
+
+A alternativa rejeitada era um limiar fixo de diferença. Com este volume, qualquer limiar fixo ou calaria sempre ou dispararia sempre — a lição do limiar de silêncio do Módulo 5, que a própria tela reprovou na primeira execução.
+
+### Três recusas que a medição obrigou
+
+- **Sem histórico do GA4, não há comparação.** O snapshot de 30 dias gravava `sessions.previous = 0, state = new`: o GA4 deste site não tem dado antes de ~29/08. Uma janela anterior que começa antes disso soma menos dias do que tem e acusaria um crescimento que é só a instalação. A cobertura exige dado **estritamente antes** do início da janela; para verificar isso, a série é pedida desde 7 dias antes da janela mais antiga. Em 2026-09-28, a semana anterior tem cobertura e as 4 semanas anteriores não.
+- **Com dia ausente na semana ATUAL, a porcentagem de impressões é recusada.** A imputação otimista do Módulo 5 produz um **limite** construído para o alerta, não uma medição.
+- **Com dia ausente na semana ANTERIOR, também.** Esta faltava na primeira versão, e a revisão do PR #301 mediu o dano. O `imputed_days` do Módulo 5 conta só a semana atual; na anterior, dia ausente vale zero — conservador para detectar **queda**, que é o trabalho do alerta, e errado para exibir variação nos dois sentidos. Com tráfego constante e dois dias ausentes na semana anterior, o e-mail diria "▲ +40%"; com queda real de −35% e três dias ausentes, diria "+13,8%, abaixo do limiar". O primeiro rascunho deste contrato afirmava que a porcentagem era recusada nesse caso. Era falso.
+
+Nos três casos a caixa mostra os números observados e diz o que faltou. O colapso é a exceção deliberada: semana atual sem nenhuma impressão é −100% contra qualquer semana anterior com volume, completa ou não.
+
+### A conversão é um teto
+
+O GA4 roda com Consent Mode v2 e só conta, nos relatórios, as visitas com consentimento de estatística. Os orçamentos contam todos. O denominador fica menor que o real e a divisão fica **maior**, então a caixa mostra "até X%". O sentido do erro é conhecido e vai escrito na própria caixa.
+
+**Limitação que o teste de diferença não resolve:** a exposição do teste também são visitas consentidas. Se a taxa de aceite do banner da AdOpt mudar entre os dois períodos, o denominador muda sem que a conversão real mude, e o teste lê isso como mudança de conversão. Com este dado, as duas coisas são indistinguíveis.
+
+### Destaques
+
+Até três, e nunca enchimento: cada um só existe se o dado que o sustenta está disponível. Descrevem, não explicam — "a visibilidade cresceu mais que a demanda" é uma constatação sobre dois números; causa, nada aqui mede.
+
+O limiar de variação de impressões reusa `organic_drop_percent` do Módulo 5 (35%), para as duas superfícies nunca discordarem sobre o que é relevante.
+
+### Páginas mais encontradas
+
+Ordenadas por **impressões** — é o que a Search Console mede de procura. Páginas, e não consultas, porque o pilar 4 pergunta pelos produtos e serviços mais procurados e página é a unidade de produto e serviço no site; as consultas já aparecem no bloco de oportunidades de SEO. (O primeiro rascunho justificava a escolha com a minimização de texto do #278. Era falso: `search_console.queries` guarda 10 consultas com texto inteiro, e a revisão do PR #301 mediu que 9 das 10 maiores têm texto.)
+
+A primeira versão lia as 10 páginas do snapshot, e a revisão do PR #301 encontrou dois defeitos:
+
+- **Três das cinco linhas não eram páginas do site.** Conferido por HTTP em 2026-09-28: `/olhal-de-ancoragem/` dava **404** com 327 impressões, e `/projeto-de-balancim` e `/projeto-de-ancoragem` eram **301** para `/servico/...`. O bloco os apresentava como páginas, e os 301 dividiam as impressões entre o endereço antigo e o novo.
+- **O ranking dependia da ordem errada.** O snapshot guarda as 10 páginas de mais **cliques**, porque a API ordena por cliques. Reordenar essas 10 por impressões perdia justamente as páginas de muita impressão e pouco clique — a quinta posição daquele dia dependia disso por 9 impressões.
+
+Agora o bloco busca até **1000** páginas (`pages_rows`) numa janela **assentada** de 28 dias, terminando no mesmo dia que a semana das impressões. A revisão mediu 78 páginas em 30 dias. O limite é alto porque a API corta por cliques: se o universo passasse dele, o defeito voltaria na cauda. Resposta que chega exatamente no limite de linhas **cruas** é declarada no e-mail como "lista pode estar incompleta". A contagem é crua porque a propriedade é de domínio (`sc-domain:`): ela pode trazer subdomínio, que a normalização descarta, e contar depois esconderia o corte.
+
+O status HTTP das 10 de mais impressão é conferido **sem que o cliente siga o redirecionamento**. Quem segue é o próprio código, salto a salto, até `max_hops` = 3.
+
+- **Redirecionamento é somado ao destino final da cadeia**, que passa a declarar quantos endereços antigos inclui. A procedência do bloco só diz que houve soma quando houve.
+- **404 entra marcado em vermelho**: página que o Google mostra e não existe é o achado mais acionável do bloco.
+- **Status que não pôde ser conferido fica como "não verificado"**, nunca como página existente. Isso inclui falha de rede, loopback bloqueado, ciclo, redirecionamento para fora do site, 3xx sem `Location`, saltos demais e teto de consultas ou orçamento atingido — **no endereço de partida ou em qualquer ponto da cadeia**. Nesses casos nada é somado. Um destino que responde erro 4xx ou 5xx é tratado como fim conhecido e recebe a soma. Isso vale para o 500, que é resposta do endereço, mas **também para os erros passageiros** (408, 429, 502, 503, 504), em que o nó pode redirecionar de novo quando voltar: com cadeia de 2 saltos ou mais e erro passageiro no meio, a cadeia sai partida em duas linhas. Hoje a produção não tem cadeia de 2 saltos; a correção está na #304.
+
+**A soma é feita em duas fases.** Primeiro cada endereço segue a **própria** cadeia até o fim, contando os **próprios** saltos; só depois as impressões **originais** são somadas no destino final de cada um. A memória de status garante uma requisição por endereço.
+
+- **A segunda revisão do PR #301** mostrou que a primeira versão somava durante o laço. Com `/b` (300) → `/c` e `/a` (100) → `/b`, o e-mail mostrava `/c` com 350 e, embaixo, `/b` com 100: a mesma cadeia partida em duas linhas. O comentário da época afirmava o contrário.
+- **A terceira revisão** mostrou que a versão seguinte ainda dependia da ordem. Ela reusava o fim de um trecho já resolvido por outra cadeia, sem contar os saltos daquele trecho, e somava cadeia de cinco saltos numa ordem e não na outra. Em 400 grafos aleatórios, os 6 com cadeia acima de 3 saltos mudavam com a ordem. Sem o reuso, o resultado de cada endereço depende só do grafo a partir dele, e o teste roda o mesmo grafo nas duas ordens.
+- **A exceção é o esgotamento do teto ou do orçamento.** Aí **o que** fica sem conferência depende da ordem, que é por impressões. Mas o que fica sem conferência sai "não verificado" e sem soma: a ordem muda a completude, não a verdade.
+
+Quando uma cadeia passa de `max_hops`, o endereço de partida fica "não verificado". Cada intermediário conta os **próprios** saltos: os que cabem no limite são resolvidos e somados, e os que não cabem também ficam "não verificado". Endereço que chega ao topo sem ter sido candidato também é conferido e somado.
+
+**O custo tem teto explícito, não estimativa.** A primeira versão deste contrato dizia "até ~10 requisições", e a revisão mediu que o teto real era 15. Agora:
+
+| Regra | Valor | O que garante |
+|---|---|---|
+| `head_max` | 20 | Teto **rígido** de requisições HEAD por execução, contando os saltos. |
+| `head_timeout` | 8 s | Limite por requisição. Medido em produção: raiz 133 ms, serviço ~80 ms (cache), 301 2,2 s, 404 4,2 s; a revisão mediu um 301 frio em 6,81 s. Nenhum número fixo tem folga contra essa variação. O que torna 8 s defensável é o modo de falha: estourar dá "não verificado", nunca "ok". |
+| `head_budget` | 20 s | Orçamento de tempo, conferido **antes** de cada requisição. Por isso o total pode passar dele por até um `head_timeout`: ~28 s no pior caso. O relógio é injetável, e o teste confere o orçamento com um relógio falso, sem dormir. |
+
+O orçamento **não** existe por causa do `max_execution_time`: no Linux ele não conta o tempo gasto em operação de rede (nota de `set_time_limit()` no manual do PHP). O limite de relógio real vem do servidor web e do PHP-FPM, e não foi medido. O orçamento existe para as conferências HEAD não somarem mais que ~28 s a esse limite desconhecido. **Ele não protege a execução inteira:** as três chamadas ao Google (GA4, série e páginas), cada uma com o próprio pedido de token e timeout de 20 s, somam até 120 s no pior caso, fora dele. Então o botão "Enviar Teste Agora" continua dependendo de um limite que ninguém mediu.
+
+A requisição passa pelo Rank Math, e isso tem um custo que o User-Agent **não** resolve:
+
+- **O contador do redirecionamento ganha um acesso artificial por semana**, por endereço antigo conferido. Ele grava só acessos e a data do último, sem User-Agent, então não há como separar esse acesso dos visitantes pelo contador.
+- **O monitor de 404 não registra a requisição.** O WordPress encerra HEAD logo depois de `template_redirect`, antes do template, e o monitor captura em `get_header` ou `wp_head`.
+
+As duas coisas foram conferidas pela terceira revisão do PR #301 no código do Rank Math e do WordPress. A versão anterior deste contrato afirmava o contrário das duas. O User-Agent `Uonix-Relatorio-Executivo/1.0` fica porque serve ao log de acesso do servidor.
+
+**Motivos de indisponibilidade têm texto de leitor.** Os motivos da Search Console vêm do Módulo 5, mas o texto da aba Anomalias fala com o operador ("o gatilho tenta de novo na próxima verificação"). A primeira versão delegava a ele, e o e-mail imprimia essa frase. Agora o 57 tem tradução própria para cada motivo, e o teste extrai do código do 58 e do 59 todos os motivos que chegam a uma caixa e exige texto não genérico para cada um. Sem credencial do Google, o motivo é `config_missing`, e não "a consulta falhou": nenhuma consulta foi feita. Isso vale para as três caixas que dependem do Google e para o bloco de páginas, que passou a imprimir o motivo em vez de uma frase fixa.
+
+### O que o Módulo 4 ainda não entrega
+
+- **Custo por Lead**, até existir fonte de gasto de anúncio.
+- **Destaques por LLM.** Integração com Gemini é fatia separada e exige migrar `GEMINI_API_KEY` para o `wp-config.php`.
+- **Painel.** Nesta fatia o relatório executivo existe só no e-mail; o botão "Enviar Teste Agora" é a forma de vê-lo sob demanda.
 
 ## Ordem de entrega dos módulos
 

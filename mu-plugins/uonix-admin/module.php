@@ -25,6 +25,7 @@ uonix_mu_require_files(
 		'56-admin-intelligence-dashboard.php',
 		'57-admin-intelligence-report.php',
 		'58-admin-intelligence-anomalies.php',
+		'59-admin-intelligence-executive.php',
 		'52-admin-analytics-dashboard.php',
 	),
 	'uonix-admin'
