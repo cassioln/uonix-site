@@ -789,17 +789,24 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 	 * - **unknown** — entra marcada como "status não verificado". Inclui ciclo,
 	 *   redirecionamento para fora do site, saltos demais e teto de consultas atingido.
 	 *
-	 * Função pura: linhas, conferência de status e rótulo entram por parâmetro. Devolve
-	 * também `head_count`, o número de conferências feitas, para o teto ser verificável.
+	 * Função pura: linhas, conferência de status, rótulo e relógio entram por parâmetro.
+	 * Devolve também `head_count`, o número de conferências feitas, para o teto ser
+	 * verificável. O relógio é injetável para o orçamento de tempo ter teste sem dormir:
+	 * a primeira versão guardava o gasto dentro de `page_status()`, e o teste precisaria
+	 * esperar 20 s de verdade (sugestão da segunda revisão do PR #301).
 	 *
 	 * @param array<int, array{page: string, impressions: float, clicks: float}>|WP_Error|null $rows
+	 * @param callable|null $clock Segundos, como `microtime( true )`.
 	 */
-	function uonix_intelligence_executive_top_pages( $rows, $window, $status_fetcher = null, $labeler = null, $limit = null, $candidates = null ) {
+	function uonix_intelligence_executive_top_pages( $rows, $window, $status_fetcher = null, $labeler = null, $limit = null, $candidates = null, $clock = null ) {
 		$regras     = uonix_intelligence_executive_rules();
 		$limit      = is_int( $limit ) && $limit > 0 ? $limit : (int) $regras['top_pages'];
 		$candidates = is_int( $candidates ) && $candidates > 0 ? $candidates : (int) $regras['page_candidates'];
 		$status_fn  = is_callable( $status_fetcher ) ? $status_fetcher : 'uonix_intelligence_executive_page_status';
 		$labeler    = is_callable( $labeler ) ? $labeler : 'uonix_intelligence_executive_page_label';
+		$relogio    = is_callable( $clock ) ? $clock : static function () {
+			return microtime( true );
+		};
 
 		$base = array( 'available' => false, 'reason' => '', 'rows' => array(), 'window' => is_array( $window ) ? $window : array(), 'truncated' => false, 'head_count' => 0 );
 		if ( is_wp_error( $rows ) ) {
@@ -830,7 +837,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 				continue;
 			}
 			if ( ! isset( $por_caminho[ $caminho ] ) ) {
-				$por_caminho[ $caminho ] = array( 'path' => $caminho, 'impressions' => 0.0, 'clicks' => 0.0, 'state' => 'unchecked', 'merged' => 0 );
+				$por_caminho[ $caminho ] = array( 'path' => $caminho, 'impressions' => 0.0, 'clicks' => 0.0 );
 			}
 			$por_caminho[ $caminho ]['impressions'] += (float) $r['impressions'];
 			$por_caminho[ $caminho ]['clicks']      += isset( $r['clicks'] ) ? (float) $r['clicks'] : 0.0;
@@ -855,7 +862,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 		$memo_status = array();
 		$consultas   = 0;
 		$gasto       = 0.0;
-		$consultar   = static function ( $caminho ) use ( &$memo_status, &$consultas, &$gasto, $status_fn, $regras ) {
+		$consultar   = static function ( $caminho ) use ( &$memo_status, &$consultas, &$gasto, $status_fn, $regras, $relogio ) {
 			if ( isset( $memo_status[ $caminho ] ) ) {
 				return $memo_status[ $caminho ];
 			}
@@ -863,9 +870,9 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 				return array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
 			}
 			++$consultas;
-			$inicio = microtime( true );
+			$inicio = (float) call_user_func( $relogio );
 			$status = call_user_func( $status_fn, $caminho );
-			$gasto += microtime( true ) - $inicio;
+			$gasto += (float) call_user_func( $relogio ) - $inicio;
 			$status = is_array( $status ) ? $status : array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
 			$memo_status[ $caminho ] = $status;
 			return $status;

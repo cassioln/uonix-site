@@ -388,7 +388,7 @@ O status HTTP das 10 de mais impressão é conferido **sem que o cliente siga o 
 |---|---|---|
 | `head_max` | 20 | Teto **rígido** de requisições HEAD por execução, contando os saltos. |
 | `head_timeout` | 8 s | Limite por requisição. Medido em produção: raiz 133 ms, serviço ~80 ms (cache), 301 2,2 s, 404 4,2 s; a revisão mediu um 301 frio em 6,81 s. Nenhum número fixo tem folga contra essa variação. O que torna 8 s defensável é o modo de falha: estourar dá "não verificado", nunca "ok". |
-| `head_budget` | 20 s | Orçamento de tempo, conferido **antes** de cada requisição. Por isso o total pode passar dele por até um `head_timeout`: ~28 s no pior caso. |
+| `head_budget` | 20 s | Orçamento de tempo, conferido **antes** de cada requisição. Por isso o total pode passar dele por até um `head_timeout`: ~28 s no pior caso. O relógio é injetável, e o teste confere o orçamento com um relógio falso, sem dormir. |
 
 O orçamento **não** existe por causa do `max_execution_time`: no Linux ele conta tempo de CPU, não espera de rede. O limite de relógio real vem do servidor web e do PHP-FPM, e não foi medido. O orçamento existe para o botão "Enviar Teste Agora" não depender desse limite desconhecido. Fora dele ficam as três chamadas ao Google (GA4, série e páginas), cada uma com o próprio pedido de token e timeout de 20 s: até 120 s no pior caso.
 

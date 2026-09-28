@@ -578,6 +578,35 @@ $teto  = uonix_intelligence_executive_top_pages( uox_linhas( $muitas ), $janelaP
 uox_assert( 20 === count( $q ) && 20 === ( $teto['head_count'] ?? -1 ), 'o teto é 20 requisições por execução, obteve ' . count( $q ) );
 uox_assert( array( 'ok' ) === array_values( array_unique( array_column( array_slice( $teto['rows'], 0, 20 ), 'state' ) ) ) && array( 'unknown' ) === array_values( array_unique( array_column( array_slice( $teto['rows'], 20 ), 'state' ) ) ), 'as 20 primeiras são conferidas e as 5 seguintes ficam como não verificadas' );
 
+// Orçamento de tempo, com relógio falso: cada conferência "leva" 7 s. Ele é conferido
+// ANTES de cada requisição, então a terceira começa com 14 s gastos, termina em 21 s, e a
+// quarta já não sai. Sem o relógio injetável, isto exigiria dormir 20 s no teste.
+$agora   = 0.0;
+$q       = array();
+$lenta   = uox_status_mapa( array(), $q );
+$orcado  = uonix_intelligence_executive_top_pages(
+	uox_linhas( $muitas ),
+	$janelaPag,
+	static function ( $p ) use ( $lenta, &$agora ) { $agora += 7.0; return $lenta( $p ); },
+	$rotulo,
+	25,
+	25,
+	static function () use ( &$agora ) { return $agora; }
+);
+uox_assert( 3 === count( $q ), 'com 7 s por conferência, o orçamento de 20 s admite 3 e recusa a quarta; obteve ' . count( $q ) );
+uox_assert( 'unknown' === ( $orcado['rows'][3]['state'] ?? '' ) && 'ok' === ( $orcado['rows'][2]['state'] ?? '' ), 'e o que ficou fora do orçamento sai como não verificado' );
+
+// Endereço que redireciona para si mesmo não some, nem soma em si.
+$q    = array();
+$auto = uonix_intelligence_executive_top_pages( uox_linhas( array( '/eu' => 30 ) ), $janelaPag, uox_status_mapa( array( '/eu' => '/eu' ), $q ), $rotulo );
+uox_assert( array( '/eu' ) === array_column( $auto['rows'], 'path' ) && 30.0 === $auto['rows'][0]['impressions'] && 0 === $auto['rows'][0]['merged'] && 'unknown' === $auto['rows'][0]['state'], 'auto-redirecionamento fica na própria linha, não verificado e sem soma; obteve ' . json_encode( $auto['rows'] ) );
+
+// Candidata ALÉM do topo que redireciona para uma página do topo: é por isso que as
+// candidatas são o dobro das exibidas. `/velho` é a sexta e soma em `/t5`.
+$q      = array();
+$alem   = uonix_intelligence_executive_top_pages( uox_linhas( array( '/t1' => 100, '/t2' => 90, '/t3' => 80, '/t4' => 70, '/t5' => 60, '/velho' => 50 ) ), $janelaPag, uox_status_mapa( array( '/velho' => '/t5' ), $q ), $rotulo );
+uox_assert( '/t5' === ( $alem['rows'][0]['path'] ?? '' ) && 110.0 === $alem['rows'][0]['impressions'], 'a sexta página, que redireciona, é conferida e soma no topo: /t5 com 60 + 50 = 110; obteve ' . json_encode( array_column( $alem['rows'], 'impressions', 'path' ) ) );
+
 uox_assert( 'Página inicial' === uonix_intelligence_executive_page_label( '/' ), 'a raiz deve ser rotulada como Página inicial' );
 uox_assert( 'pages_fetch_failed' === ( uonix_intelligence_executive_top_pages( new WP_Error( 'x' ), $janelaPag )['reason'] ?? '' ), 'falha de busca deixa o bloco indisponível com motivo' );
 
@@ -596,6 +625,11 @@ uox_assert( 'not_found' === uonix_intelligence_executive_page_status( '/sumiu' )
 $st301 = uonix_intelligence_executive_page_status( '/projeto-de-balancim' );
 uox_assert( 'redirect' === $st301['state'] && 'https://uonix.com.br/servico/projeto-balancim/' === $st301['location'], '301 com destino é redirecionamento, e o destino é devolvido' );
 uox_assert( 'unknown' === uonix_intelligence_executive_page_status( '/sem-destino' )['state'], '301 sem cabeçalho Location não tem destino onde somar' );
+// O Rank Math também serve 302 e 307, e 308 é o permanente que preserva o método.
+foreach ( array( 302, 307, 308 ) as $codigoRedir ) {
+	$GLOBALS['uox_http'][ 'https://uonix.com.br/r' . $codigoRedir ] = array( 'response' => array( 'code' => $codigoRedir ), 'headers' => array( 'location' => '/destino/' ) );
+	uox_assert( 'redirect' === uonix_intelligence_executive_page_status( '/r' . $codigoRedir )['state'], "{$codigoRedir} com destino também é redirecionamento" );
+}
 uox_assert( 'unknown' === uonix_intelligence_executive_page_status( '/quebrada' )['state'], 'erro 500 não é página existente nem inexistente' );
 uox_assert( 'unknown' === uonix_intelligence_executive_page_status( '/nao-responde' )['state'], 'falha de rede nunca vira página existente' );
 // Sem seguir redirecionamento — senão o 301 viraria o 200 do destino e nada seria
