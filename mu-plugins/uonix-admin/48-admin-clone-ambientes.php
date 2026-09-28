@@ -7,18 +7,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-add_action( 'admin_menu', 'uox_clone_register_menu', 20 );
-
-function uox_clone_register_menu() {
-	add_submenu_page(
-		'ksio-dev',
-		'Clone de Ambientes',
-		'Clone de Ambientes',
-		'manage_options',
-		'ksio-dev-clone-ambientes',
-		'uox_clone_render_page'
-	);
-}
+// O menu desta ferramenta é registrado em 49-admin-ksio-governanca.php.
 
 function uox_clone_env_labels() {
 	return array(
@@ -242,7 +231,9 @@ function uox_clone_render_notice( $result ) {
 }
 
 function uox_clone_render_page() {
-	if ( ! current_user_can( 'manage_options' ) ) {
+	// Além da capacidade, a ferramenta precisa estar liberada para quem não é o dono.
+	// O POST do clone é lido aqui dentro, então esta guarda também cobre o envio.
+	if ( ! current_user_can( 'manage_options' ) || ( function_exists( 'uonix_ksio_can_access_tool' ) && ! uonix_ksio_can_access_tool( 'clone' ) ) ) {
 		wp_die( 'Você não tem permissão para acessar esta página.' );
 	}
 

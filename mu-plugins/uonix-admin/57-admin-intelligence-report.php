@@ -645,7 +645,9 @@ if ( ! function_exists( 'uonix_intelligence_handle_test_send' ) ) {
 	 * e-mail para a lista é ação de efeito externo, não leitura.
 	 */
 	function uonix_intelligence_handle_test_send() {
-		if ( ! current_user_can( 'manage_options' ) ) {
+		// O Uônix Insights oculto para este usuário bloqueia também o POST direto
+		// (governança em 49-admin-ksio-governanca.php).
+		if ( ! current_user_can( 'manage_options' ) || ( function_exists( 'uonix_ksio_can_access_tool' ) && ! uonix_ksio_can_access_tool( 'analytics' ) ) ) {
 			wp_die( esc_html__( 'Sem permissão para enviar o relatório.', 'uonix' ), '', array( 'response' => 403 ) );
 		}
 

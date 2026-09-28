@@ -366,7 +366,9 @@ if ( ! function_exists( 'uonix_intelligence_save_recipients' ) ) {
 	 * Insights: ler quem recebe é diferente de mudar quem recebe.
 	 */
 	function uonix_intelligence_save_recipients() {
-		if ( ! current_user_can( 'manage_options' ) ) {
+		// O Uônix Insights oculto para este usuário bloqueia também o POST direto
+		// (governança em 49-admin-ksio-governanca.php).
+		if ( ! current_user_can( 'manage_options' ) || ( function_exists( 'uonix_ksio_can_access_tool' ) && ! uonix_ksio_can_access_tool( 'analytics' ) ) ) {
 			wp_die( esc_html__( 'Sem permissão para alterar os destinatários do relatório.', 'uonix' ), '', array( 'response' => 403 ) );
 		}
 

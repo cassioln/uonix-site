@@ -961,6 +961,11 @@ if ( ! function_exists( 'uonix_analytics_metrics_refresh_redirect_url' ) ) {
 
 if ( ! function_exists( 'uonix_analytics_metrics_manual_refresh' ) ) {
 	function uonix_analytics_metrics_manual_refresh() {
+		// O Uônix Insights oculto para este usuário bloqueia também o POST direto
+		// (governança em 49-admin-ksio-governanca.php).
+		if ( function_exists( 'uonix_ksio_can_access_tool' ) && ! uonix_ksio_can_access_tool( 'analytics' ) ) {
+			wp_die( esc_html__( 'Você não tem permissão para atualizar métricas.', 'uonix' ), '', array( 'response' => 403 ) );
+		}
 		if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'uonix_analytics_metrics_refresh' ) ) {
 			wp_die( esc_html__( 'Você não tem permissão para atualizar métricas.', 'uonix' ) );
 		}

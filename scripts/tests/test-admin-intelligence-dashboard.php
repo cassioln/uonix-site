@@ -90,6 +90,15 @@ function wp_remote_get( $url, $args = array() ) { return array(); }
 function wp_remote_retrieve_response_code( $r ) { return 0; }
 function wp_remote_retrieve_body( $r ) { return ''; }
 
+// Governança do ksio.dev (49), substituída por um interruptor: o 49 tem teste próprio,
+// e aqui importa que o handler CONSULTE a regra, com a chave certa.
+$GLOBALS['uox_ksio_pode']   = true;
+$GLOBALS['uox_ksio_chaves'] = array();
+function uonix_ksio_can_access_tool( $chave ) {
+	$GLOBALS['uox_ksio_chaves'][] = $chave;
+	return (bool) $GLOBALS['uox_ksio_pode'];
+}
+
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
@@ -216,6 +225,24 @@ try {
 	uox_assert( true, 'Handler sem nonce interrompe' );
 }
 uox_assert( array() === $GLOBALS['uox_options'], 'Handler sem nonce não grava' );
+
+// Com manage_options e nonce, mas com o Insights oculto pela governança do ksio.dev:
+// esconder o menu não bloqueia um POST direto, então o handler recusa.
+$GLOBALS['uox_can']         = true;
+$GLOBALS['uox_referer_ok']  = true;
+$GLOBALS['uox_options']     = array();
+$GLOBALS['uox_ksio_pode']   = false;
+$GLOBALS['uox_ksio_chaves'] = array();
+$_POST = array( 'uonix_recipients' => 'intruso@example.test' );
+try {
+	uonix_intelligence_save_recipients();
+	uox_assert( false, 'Handler com o Insights oculto deveria interromper' );
+} catch ( Uox_Die_Exception $e ) {
+	uox_assert( true, 'Handler com o Insights oculto interrompe' );
+}
+uox_assert( array() === $GLOBALS['uox_options'], 'Handler com o Insights oculto não grava' );
+uox_assert( in_array( 'analytics', $GLOBALS['uox_ksio_chaves'], true ), 'Handler consulta a governança com a chave analytics' );
+$GLOBALS['uox_ksio_pode'] = true;
 
 $GLOBALS['uox_can'] = true;
 $GLOBALS['uox_referer_ok'] = true;

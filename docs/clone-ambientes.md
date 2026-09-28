@@ -589,7 +589,29 @@ o texto.
 
 ## Como usar o painel `ksio.dev`
 
-O painel exige `manage_options` e valida nonce, ambientes, modo e par.
+### Quem vê o painel
+
+O menu `ksio.dev` é **exclusivo do usuário `ksiodev`**, nem outro administrador o vê. A regra única está em `mu-plugins/uonix-admin/49-admin-ksio-governanca.php`.
+
+- **O `ksiodev` vê o menu `ksio.dev`** com Visão Geral, Limpeza de Conteúdo, Clone de Ambientes, Uônix Insights e **Visibilidade para usuários**.
+- **Os demais só veem uma ferramenta se o `ksiodev` a liberar** na tela Visibilidade para usuários. A ferramenta liberada aparece como **item próprio** do menu, nunca como submenu de `ksio.dev`, e exige a capacidade de sempre: `manage_options` para Limpeza e Clone, e `edit_posts` para o Uônix Insights.
+- **O padrão é tudo oculto.** Ferramenta oculta não tem página registrada para o usuário, então a URL direta responde "sem permissão". Os handlers `admin_post` do Insights (salvar destinatários, envio de teste e atualização de métricas) recusam do mesmo jeito.
+- **A escolha fica na opção `uonix_ksio_tools_visibility`**, com as chaves `limpeza`, `clone` e `analytics`.
+
+**Ambiente sem o usuário `ksiodev`** (QA ou local clonado sem substituir usuários): ninguém vê o menu. Há duas saídas:
+
+- definir `UONIX_KSIO_OWNER_LOGIN` no `wp-config.php` daquele ambiente com o login que deve ser o dono;
+- ou liberar as ferramentas por WP-CLI:
+
+```bash
+wp option update uonix_ksio_tools_visibility '{"limpeza":false,"clone":false,"analytics":true}' --format=json
+```
+
+**Isto é governança de interface, não barreira contra outro administrador.** Quem tem `manage_options` pode editar o usuário `ksiodev` pela tela de Usuários.
+
+### Validações do painel de clone
+
+O painel exige `manage_options`, a ferramenta liberada para quem não é o `ksiodev`, e valida nonce, ambientes, modo e par.
 
 - Par remoto sem escrita em produção: dispara
   `.github/workflows/clone-environment.yml` em `master`, desde que

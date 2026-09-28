@@ -3,8 +3,9 @@
  * Teste do Módulo Uônix Insights (Painel Integrado de Analytics & Performance).
  *
  * Valida:
- *  - Registro do menu admin 'Uônix Insights' na action 'admin_menu';
- *  - Slug correto 'uonix-analytics' e capability 'edit_posts';
+ *  - Que o 52 NÃO registra mais o menu: a estrutura é decidida em
+ *    49-admin-ksio-governanca.php, testada em test-admin-ksio-governanca.php;
+ *  - Bloqueio quando a governança do ksio.dev oculta o Insights para o usuário;
  *  - Bloqueio de acesso para usuários sem permissão (current_user_can fail);
  *  - Renderização dos cards de KPIs, tabelas de produtos e atalhos do Google.
  */
@@ -312,6 +313,15 @@ function uonix_dashboard_element_end_offset( $html, $opening_offset, $tag_name )
 }
 
 // Carrega os módulos na mesma ordem do loader administrativo.
+// Governança do ksio.dev (49), substituída por um interruptor: o 49 tem teste próprio,
+// e aqui importa que o 52 e o handler do 53 CONSULTEM a regra, com a chave certa.
+$GLOBALS['uox_ksio_pode']   = true;
+$GLOBALS['uox_ksio_chaves'] = array();
+function uonix_ksio_can_access_tool( $chave ) {
+	$GLOBALS['uox_ksio_chaves'][] = $chave;
+	return (bool) $GLOBALS['uox_ksio_pode'];
+}
+
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/52-admin-analytics-dashboard.php';
 
@@ -358,26 +368,15 @@ if ( function_exists( 'uonix_analytics_dashboard_metric_comparison' ) ) {
 	uonix_dashboard_assert( array( 'label' => 'Comparação indisponível', 'class' => 'uonix-trend-empty' ) === $comparison_invalid, 'Variação inválida falha fechado' );
 }
 
-// Asserção 1: Registra action admin_menu
-uonix_dashboard_assert( ! empty( $GLOBALS['uonix_test_menu_actions'] ), 'Não registrou nenhuma action' );
-$admin_menu_registered = false;
+// Asserção 1: o 52 e o 53 não registram menu. Quem registra é o 49, e um segundo
+// registro aqui faria o Insights reaparecer como item próprio para quem não deve vê-lo.
 foreach ( $GLOBALS['uonix_test_menu_actions'] as $act ) {
 	if ( 'admin_menu' === $act['hook'] ) {
-		$admin_menu_registered = true;
 		call_user_func( $act['callback'] );
 	}
 }
-uonix_dashboard_assert( $admin_menu_registered, 'Action admin_menu não registrada' );
-echo "ok   Action admin_menu registrada corretamente\n";
-
-// Asserção 2: Verifica parâmetros do menu
-uonix_dashboard_assert( ! empty( $GLOBALS['uonix_test_menus'] ), 'Menu não foi adicionado via add_menu_page' );
-$menu = $GLOBALS['uonix_test_menus'][0];
-uonix_dashboard_assert( 'Uônix Insights' === $menu['menu_title'], 'Título do menu incorreto' );
-uonix_dashboard_assert( 'edit_posts' === $menu['capability'], 'Capability do menu incorreta' );
-uonix_dashboard_assert( 'uonix-analytics' === $menu['menu_slug'], 'Slug do menu incorreto' );
-uonix_dashboard_assert( 'dashicons-chart-area' === $menu['icon_url'], 'Ícone do menu incorreto' );
-echo "ok   Menu Uônix Insights registrado com slug, permissões e ícone corretos\n";
+uonix_dashboard_assert( array() === $GLOBALS['uonix_test_menus'], 'O 52 não pode registrar menu próprio: a estrutura é do 49' );
+echo "ok   O menu do Insights não é registrado pelo 52\n";
 
 // Asserção 3: Renderização do dashboard com permissão
 ob_start();
@@ -648,6 +647,36 @@ try {
 }
 uonix_dashboard_assert( $blocked, 'Usuário sem permissão edit_posts deveria ser bloqueado' );
 echo "ok   Acesso sem permissão é bloqueado com segurança via wp_die\n";
+
+// Asserção 6: com edit_posts, mas com o Insights oculto pela governança do ksio.dev,
+// a URL direta também é recusada.
+$GLOBALS['uonix_test_can_edit'] = true;
+$GLOBALS['uox_ksio_pode']       = false;
+$GLOBALS['uox_ksio_chaves']     = array();
+$blocked = false;
+try {
+	ob_start();
+	uonix_render_analytics_dashboard_page();
+	ob_end_clean();
+} catch ( RuntimeException $e ) {
+	ob_end_clean();
+	$blocked = ( strpos( $e->getMessage(), 'WP_DIE' ) !== false );
+}
+uonix_dashboard_assert( $blocked, 'Insights oculto pela governança deve recusar a página mesmo com edit_posts' );
+uonix_dashboard_assert( array( 'analytics' ) === $GLOBALS['uox_ksio_chaves'], 'A página consulta a regra com a chave analytics' );
+
+// O refresh manual (admin_post do 53) também: esconder o menu não bloqueia um POST.
+$GLOBALS['uonix_test_can_manage'] = true;
+$GLOBALS['uox_ksio_chaves']       = array();
+$blocked = false;
+try {
+	uonix_analytics_metrics_manual_refresh();
+} catch ( RuntimeException $e ) {
+	$blocked = ( strpos( $e->getMessage(), 'WP_DIE' ) !== false );
+}
+uonix_dashboard_assert( $blocked && array( 'analytics' ) === $GLOBALS['uox_ksio_chaves'], 'Refresh manual com o Insights oculto deve ser recusado, consultando a chave analytics' );
+$GLOBALS['uox_ksio_pode'] = true;
+echo "ok   Insights oculto recusa a página e o refresh manual\n";
 
 // O auto-refresh de métricas vive dentro do painel de métricas, que é renderizado
 // em toda aba e apenas escondido. Sem guarda de aba, abrir outra aba dispara um

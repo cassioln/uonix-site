@@ -51,4 +51,6 @@ O passo a passo para recriar o ambiente local apos apagar containers, imagens ou
 
 A ferramenta `ksio.dev > Clone de Ambientes` somente solicita o workflow manual `.github/workflows/clone-environment.yml`; ela não escreve banco ou arquivos diretamente. A ferramenta suporta os três ambientes canônicos (`prod`, `qa` e `local`); pares com `local` são executados pelo Mac como ponte privada.
 
+**Quem vê a ferramenta.** O menu `ksio.dev` é exclusivo do usuário `ksiodev`, e nenhum outro administrador o vê. Dentro dele ficam Limpeza de Conteúdo, Clone de Ambientes, Uônix Insights e a tela **Visibilidade para usuários**. É nela que o `ksiodev` escolhe quais dessas ferramentas os demais usuários veem. O padrão é tudo oculto. Uma ferramenta liberada aparece para os demais como item próprio do menu, com a capacidade de sempre: `manage_options` para Limpeza e Clone, e `edit_posts` para o Insights. A regra fica em `mu-plugins/uonix-admin/49-admin-ksio-governanca.php` (ver a seção "Como usar o painel `ksio.dev`" em [docs/clone-ambientes.md](docs/clone-ambientes.md)).
+
 Leia [docs/clone-ambientes.md](docs/clone-ambientes.md) antes de qualquer clone. Destino `prod` exige aprovação explícita, confirmação dinâmica, backup validado e preflight/dry-run no mesmo processo.
