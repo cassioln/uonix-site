@@ -43,7 +43,7 @@ if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
     /**
      * Obtém e valida a lista de IDs de tags da AdOpt que autorizam a persistência de formulários.
      *
-     * A AdOpt entrega em optInTags/optOutTags o `id` de cada tag, que é um identificador
+     * A AdOpt entrega no campo `tags` do callback o `id` de cada tag, que é um identificador
      * curto de 10 caracteres no alfabeto [A-Za-z0-9_-] (ex: `9BxuTvI1_q`) — e NÃO um UUID.
      * Medido em 2026-09-23 na configuração pública da conta: as cinco tags têm 10 caracteres.
      * O mínimo histórico de 12 rejeitava todas elas, o que mantinha o módulo inativo (#264).
@@ -53,7 +53,7 @@ if ( ! function_exists( 'uonix_adopt_get_consent_tag_ids' ) ) {
      * token aleatório de 10 caracteres. A informação não está na string.
      *
      * O que torna isso aceitável é a consequência: a AdOpt só entrega `id` de tag em
-     * optInTags/optOutTags, nunca nome de categoria, então um valor indevido aqui jamais casa e
+     * `tags[].id`, nunca nome de categoria, então um valor indevido aqui jamais casa e
      * o módulo simplesmente não arma. O erro cai para o lado seguro. Esta validação é, portanto,
      * um **detector de engano humano**, não uma fronteira de segurança.
      *
@@ -467,33 +467,44 @@ add_action('wp_footer', function() {
             saveLeadData(payload);
         }, true);
 
-        // 6. Integração oficial com a API da AdOpt via window.adoptCB (optInTags / optOutTags)
+        // 6. Integração com a AdOpt via window.adoptCB.
+        //
+        // Contrato REAL, medido em 2026-09-23 no bundle que a conta serve (uma única invocação
+        // do callback em todo o app da AdOpt):
+        //     { disclaimerId, visitorId, tags, websiteId, language, legislation }
+        // O consentimento vem em `tags`, array de { id, accept, ... }. `optInTags`/`optOutTags`
+        // NÃO existem neste payload — só no POST para a API da AdOpt e no cookie AdoptConsent.
+        // Uma versão anterior lia esses campos inexistentes, e toda entrega caía na recusa.
+        //
+        // Três estados, e só dois deles mudam algo:
+        //   accept === true  na nossa tag  -> concede
+        //   accept === false na nossa tag  -> recusa (grava _adoptReject, expurga dados)
+        //   nossa tag ausente / payload inválido -> NÃO faz nada
+        // O terceiro continua fail-closed (nada é concedido sem accept === true), mas NÃO grava
+        // _adoptReject: ausência de sinal não é recusa. Gravar ali envenenava a ponte do GTM em
+        // 38-integracoes-analytics-lgpd.php, que lê essa chave como recusa de marketing (#296).
         function evaluateAdoptConsent(consent) {
-            if (!consent || typeof consent !== 'object' || !Array.isArray(ALLOWED_TAG_IDS) || ALLOWED_TAG_IDS.length === 0) {
+            if (!consent || typeof consent !== 'object' || !Array.isArray(consent.tags)
+                || !Array.isArray(ALLOWED_TAG_IDS) || ALLOWED_TAG_IDS.length === 0) {
+                return false;
+            }
+
+            const nossas = consent.tags.filter(t => t && typeof t === 'object'
+                && ALLOWED_TAG_IDS.includes(String(t.id).toLowerCase()));
+
+            // Recusa explícita vence: se alguma tag autorizada veio recusada, recusa.
+            if (nossas.some(t => t.accept === false)) {
                 markConsentRejected();
                 return false;
             }
 
-            const optIn = Array.isArray(consent.optInTags) ? consent.optInTags.map(t => String(t).toLowerCase()) : [];
-            const optOut = Array.isArray(consent.optOutTags) ? consent.optOutTags.map(t => String(t).toLowerCase()) : [];
-
-            // Se qualquer ID de tag autorizada foi explicitamente rejeitado no optOutTags -> REJEITA
-            const isExplicitOptOut = optOut.some(id => ALLOWED_TAG_IDS.includes(id));
-            if (isExplicitOptOut) {
-                markConsentRejected();
-                return false;
-            }
-
-            // Exige que ao menos um ID de tag autorizada esteja presente no optInTags
-            const isExplicitOptIn = optIn.some(id => ALLOWED_TAG_IDS.includes(id));
-            if (isExplicitOptIn) {
+            if (nossas.some(t => t.accept === true)) {
                 markConsentGranted();
                 autofillForms();
                 return true;
             }
 
-            // Fail-closed: se nenhum ID autorizado foi concedido, nega
-            markConsentRejected();
+            // Nenhum sinal sobre a nossa tag: não concede e não recusa.
             return false;
         }
 

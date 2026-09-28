@@ -513,6 +513,23 @@ const FIXTURE_TAG_ID = '6332f834-41df-4cc5-a3bf-dffe359112c5';
 const ID_REAL_ADOPT = '9BxuTvI1_q';
 const ID_REAL_NORMALIZADO = '9bxutvi1_q';
 
+// Forma REAL do payload de window.adoptCB, medida em 2026-09-23 no bundle que a conta serve.
+// Existe uma unica invocacao do callback em todo o app da AdOpt:
+//     a({ disclaimerId, visitorId, tags, websiteId, language, legislation })
+// O consentimento vem em `tags`, array de { id, accept, ... }. `optInTags`/`optOutTags` NAO
+// existem neste payload — so no POST para a API e no cookie AdoptConsent. Os cenarios anteriores
+// alimentavam essa forma inventada, e a suite ficava verde medindo um contrato inexistente.
+function payloadAdopt(aceitas, recusadas) {
+    return {
+        disclaimerId: 'disclaimer-teste', visitorId: 'visitante-teste',
+        websiteId: 'e4cf5304-daa0-444f-936e-f18ae793fbf2', language: 'pt', legislation: 'lgpd',
+        tags: [].concat(
+            aceitas.map(id => ({ id: id, accept: true, name: 'tag', tag_category_id: 5 })),
+            recusadas.map(id => ({ id: id, accept: false, name: 'tag', tag_category_id: 5 }))
+        )
+    };
+}
+
 function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagIds = [FIXTURE_TAG_ID], opcoes = {}) {
     let cookieStr = initialCookie;
     const storage = Object.assign({}, initialStorage);
@@ -615,7 +632,7 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
     const { win, doc, commentForm, triggerSubmit } = runTestEnvironment('', {});
     assert.strictEqual(typeof win.adoptCB, 'function', 'F1: window.adoptCB deve ser uma função registrada');
 
-    win.adoptCB({ optInTags: [FIXTURE_TAG_ID], optOutTags: [] });
+    win.adoptCB(payloadAdopt([FIXTURE_TAG_ID], []));
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F1a: isAdoptConsentGranted deve ser true para UUID autorizado em optInTags');
     assert.notStrictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1, 'F1b: uonix_consent_granted DEVE ser gravado');
 
@@ -628,7 +645,7 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
 // F2: UUID desconhecido em optInTags nega consentimento (fail-closed)
 {
     const { win, doc, commentForm, triggerSubmit } = runTestEnvironment('', {});
-    win.adoptCB({ optInTags: ['b9a1e041-0000-4000-8000-000000000000'], optOutTags: [] });
+    win.adoptCB(payloadAdopt(['b9a1e041-0000-4000-8000-000000000000'], []));
 
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F2a: UUID desconhecido NÃO deve autorizar');
     assert.strictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1, 'F2b: uonix_consent_granted NÃO deve ser emitido');
@@ -640,7 +657,7 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
 // F3: Defaults textuais genéricos em optInTags (ex: 'funcional') NÃO são tratados como IDs e são negados
 {
     const { win, doc, commentForm, triggerSubmit } = runTestEnvironment('', {});
-    win.adoptCB({ optInTags: ['funcional', 'preferences'], optOutTags: [] });
+    win.adoptCB(payloadAdopt(['funcional', 'preferences'], []));
 
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F3a: Defaults textuais NÃO são IDs válidos e devem ser negados');
     triggerSubmit(commentForm);
@@ -650,7 +667,7 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
 // F4: Ambiente sem IDs autorizados configurados (ALLOWED_TAG_IDS = []) opera estritamente fail-closed
 {
     const { win, doc } = runTestEnvironment('', {}, []);
-    win.adoptCB({ optInTags: [FIXTURE_TAG_ID], optOutTags: [] });
+    win.adoptCB(payloadAdopt([FIXTURE_TAG_ID], []));
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F4: Sem IDs configurados no ambiente deve sempre negar');
 }
 
@@ -659,7 +676,7 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
     const { win, doc, storage } = runTestEnvironment('uonix_consent_granted=1', { 'uonix_user_lead': '{"nome":"Teste"}' });
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F5a: Inicialmente autorizado');
 
-    win.adoptCB({ optInTags: [], optOutTags: [FIXTURE_TAG_ID] });
+    win.adoptCB(payloadAdopt([], [FIXTURE_TAG_ID]));
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F5b: Após opt-out, isAdoptConsentGranted deve ser false');
     assert.strictEqual(storage['uonix_user_lead'], undefined, 'F5c: Dados de lead devem ser apagados');
     assert.strictEqual(doc.cookie.indexOf('uonix_consent_granted='), -1, 'F5d: Cookie uonix_consent_granted deve ser excluído');
@@ -678,22 +695,24 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
 // fixture anterior exercitava isso, porque todas eram minúsculas.
 {
     const { win, doc } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO]);
-    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [] });
+    win.adoptCB(payloadAdopt([ID_REAL_ADOPT], []));
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), true,
         'F7a: ID em caixa original da AdOpt deve casar com a lista normalizada em minúsculas');
     assert.notStrictEqual(doc.cookie.indexOf('uonix_consent_granted=1'), -1,
         'F7b: consentimento deve ser gravado com ID em caixa mista');
 }
 
-// F7c: a simetria vale também na recusa — e para ser OBSERVÁVEL o teste precisa do caso em que
-// o opt-out tem de VENCER o opt-in. Com a tag só em optOutTags, reconhecer a recusa e cair no
-// fail-closed final produzem o mesmo resultado, então a asserção passaria sem provar nada.
+// F7c: a simetria vale tambem na recusa. Para ser OBSERVAVEL, a recusa precisa REVOGAR uma
+// concessao previa: se o id recusado nao for normalizado, nada casa, a avaliacao vira no-op e a
+// concessao anterior sobrevive — e a asserção falha.
 {
     const { win } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO]);
-    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [ID_REAL_ADOPT] });
+    win.adoptCB(payloadAdopt([ID_REAL_ADOPT], []));
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F7c1: pre-condicao, concessao previa');
+    win.adoptCB(payloadAdopt([], [ID_REAL_ADOPT]));
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), false,
-        'F7c: com a tag em optInTags E optOutTags, a recusa deve vencer — o que só acontece se o '
-        + 'lado optOutTags também for normalizado para minúsculas');
+        'F7c2: recusa com id em caixa original deve revogar a concessao previa — o que so acontece '
+        + 'se o lado da recusa tambem for normalizado para minusculas');
 }
 
 // F7d: opt-out sozinho, em caixa original, também nega e expurga dados já salvos.
@@ -703,7 +722,7 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
         { uonix_consent_granted: '1', uonix_user_lead: JSON.stringify({ nome: 'Teste' }) },
         [ID_REAL_NORMALIZADO]
     );
-    win.adoptCB({ optInTags: [], optOutTags: [ID_REAL_ADOPT] });
+    win.adoptCB(payloadAdopt([], [ID_REAL_ADOPT]));
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F7d1: recusa deve negar');
     assert.strictEqual('uonix_user_lead' in storage, false,
         'F7d2: dados previamente salvos devem ser expurgados na recusa');
@@ -719,7 +738,7 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
         entreStubERodape: (w) => {
             assert.strictEqual(typeof w.adoptCB, 'function', 'F8a: stub deve registrar adoptCB antes do rodapé');
             assert.strictEqual(w.adoptCB.__uonixStub, true, 'F8b: stub deve marcar a própria identidade');
-            w.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [] });
+            w.adoptCB(payloadAdopt([ID_REAL_ADOPT], []));
             assert.strictEqual(w.__uonixAdoptConsentPendente !== null, true, 'F8c: stub deve guardar o consentimento');
         }
     });
@@ -733,7 +752,7 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
 {
     const { win } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO], { rodaStubAntes: true });
     assert.strictEqual(win.adoptCB.__uonixStub, true, 'F9a: com stub intacto, o rodapé não deve substituí-lo');
-    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [] });
+    win.adoptCB(payloadAdopt([ID_REAL_ADOPT], []));
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F9b: consentimento posterior deve ser avaliado');
 }
 
@@ -748,7 +767,7 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
             w.adoptCB = function(consent) { recebidoPeloTerceiro = consent; };
         }
     });
-    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [] });
+    win.adoptCB(payloadAdopt([ID_REAL_ADOPT], []));
     assert.strictEqual(win.uonixIsAdoptConsentGranted(), true,
         'F10a: rodapé deve reassumir quando um terceiro sobrescreve o stub');
     assert.notStrictEqual(recebidoPeloTerceiro, null,
@@ -765,9 +784,47 @@ function runTestEnvironment(initialCookie = '', initialStorage = {}, allowedTagI
     win.adoptCB = function(consent) { recebidoPeloAnterior = consent; };
     const vm2 = require('vm');
     vm2.runInContext(STUB_PAYLOAD, vm2.createContext(win));
-    win.adoptCB({ optInTags: [ID_REAL_ADOPT], optOutTags: [] });
+    win.adoptCB(payloadAdopt([ID_REAL_ADOPT], []));
     assert.notStrictEqual(recebidoPeloAnterior, null,
         'F11: o stub deve encadear um adoptCB preexistente, não descartá-lo');
+}
+
+// F12 (#296): "Aceitar tudo" com o payload real concede e NAO grava _adoptReject.
+// Antes, lendo campos inexistentes, toda entrega caia em markConsentRejected() e gravava um
+// bloqueio de 12 meses — inclusive no aceite. A ponte do GTM le essa chave como recusa.
+{
+    const { win, doc, storage } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO]);
+    win.adoptCB(payloadAdopt([ID_REAL_ADOPT, 'BiAMEDoi-V', 'ExClwcP566'], []));
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), true, 'F12a: aceitar tudo deve conceder');
+    assert.strictEqual('_adoptReject' in storage, false, 'F12b: aceite NAO pode gravar _adoptReject no localStorage');
+    assert.strictEqual(doc.cookie.indexOf('_adoptReject=1'), -1, 'F12c: aceite NAO pode gravar o cookie _adoptReject');
+}
+
+// F13 (#296): payload sem a nossa tag, ou invalido, e AUSENCIA de sinal — nao recusa.
+// Continua fail-closed (nada concedido), mas nao pode gravar _adoptReject.
+{
+    const { win, doc, storage } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO]);
+    win.adoptCB(payloadAdopt(['ExClwcP566'], ['Lc-8ztRDYp']));
+    win.adoptCB({ disclaimerId: 'x' });
+    win.adoptCB(null);
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F13a: sem sinal da nossa tag, nada e concedido');
+    assert.strictEqual('_adoptReject' in storage, false, 'F13b: ausencia de sinal NAO pode gravar _adoptReject');
+    assert.strictEqual(doc.cookie.indexOf('_adoptReject=1'), -1, 'F13c: ausencia de sinal NAO pode gravar o cookie');
+}
+
+// F14: recusa explicita da nossa tag continua gravando _adoptReject (a recusa precisa ser lembrada).
+{
+    const { win, storage } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO]);
+    win.adoptCB(payloadAdopt([], [ID_REAL_ADOPT]));
+    assert.strictEqual(storage['_adoptReject'], '1', 'F14: recusa explicita deve gravar _adoptReject');
+}
+
+// F15: so accept === true (booleano) concede. accept ausente, string ou numero e payload
+// malformado — sem sinal inequivoco, nada e concedido.
+{
+    const { win } = runTestEnvironment('', {}, [ID_REAL_NORMALIZADO]);
+    win.adoptCB({ tags: [{ id: ID_REAL_ADOPT }, { id: ID_REAL_ADOPT, accept: 'true' }, { id: ID_REAL_ADOPT, accept: 1 }] });
+    assert.strictEqual(win.uonixIsAdoptConsentGranted(), false, 'F15: accept nao-booleano NAO pode conceder');
 }
 
 console.log('NODE_JS_PASS');
