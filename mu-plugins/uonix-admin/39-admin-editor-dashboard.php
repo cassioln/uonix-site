@@ -982,9 +982,12 @@ function uox_render_trafego() {
         <span class="uox-badge uox-badge-purple">Meta Pixel Ativo</span>
     </div>
     <div class="uox-btn-group">
+        <?php // Só para quem pode abrir o Uônix Insights; senão o botão levaria a "sem permissão". ?>
+        <?php if ( ! function_exists( 'uonix_ksio_can_access_tool' ) || uonix_ksio_can_access_tool( 'analytics' ) ) : ?>
         <a href="<?php echo esc_url( admin_url( 'admin.php?page=uonix-analytics' ) ); ?>" class="uox-btn uox-btn-primary">
             Central de Analytics
         </a>
+        <?php endif; ?>
         <a href="https://business.facebook.com/events_manager2" target="_blank" rel="noopener noreferrer" class="uox-btn">
             Meta Events
         </a>

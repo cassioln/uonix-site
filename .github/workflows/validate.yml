@@ -205,6 +205,9 @@ jobs:
       - name: Test admin analytics dashboard
         run: php scripts/tests/test-admin-analytics-dashboard.php
 
+      - name: Test ksio.dev menu governance
+        run: php scripts/tests/test-admin-ksio-governanca.php
+
       - name: Test admin cache security
         run: php scripts/tests/test-admin-cache-security.php
 

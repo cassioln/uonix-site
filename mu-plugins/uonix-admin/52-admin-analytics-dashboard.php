@@ -15,22 +15,8 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-/**
- * Registra o menu "Uônix Insights" no painel administrativo.
- */
-add_action('admin_menu', 'uonix_register_analytics_dashboard_menu', 20);
-function uonix_register_analytics_dashboard_menu()
-{
-	add_menu_page(
-		__('Uônix Insights', 'uonix'),
-		__('Uônix Insights', 'uonix'),
-		'edit_posts',
-		'uonix-analytics',
-		'uonix_render_analytics_dashboard_page',
-		'dashicons-chart-area',
-		3
-	);
-}
+// O menu "Uônix Insights" é registrado em 49-admin-ksio-governanca.php: dentro de
+// ksio.dev para o dono, e como item próprio para os demais quando liberado.
 
 /**
  * Resolve visualizações de uma URL no snapshot selecionado.
@@ -133,7 +119,7 @@ function uonix_analytics_dashboard_metric_comparison( $metric )
  */
 function uonix_render_analytics_dashboard_page()
 {
-	if (!current_user_can('edit_posts')) {
+	if (!current_user_can('edit_posts') || (function_exists('uonix_ksio_can_access_tool') && !uonix_ksio_can_access_tool('analytics'))) {
 		wp_die(esc_html__('Você não tem permissão para acessar esta página.', 'uonix'));
 	}
 
