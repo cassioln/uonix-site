@@ -234,12 +234,17 @@ $GLOBALS['uox_options']     = array();
 $GLOBALS['uox_ksio_pode']   = false;
 $GLOBALS['uox_ksio_chaves'] = array();
 $_POST = array( 'uonix_recipients' => 'intruso@example.test' );
+// Sem a guarda o handler seguiria até o redirect; o teste precisa reprovar pela
+// asserção, não por exceção não capturada.
+$interrompeu = false;
 try {
 	uonix_intelligence_save_recipients();
-	uox_assert( false, 'Handler com o Insights oculto deveria interromper' );
 } catch ( Uox_Die_Exception $e ) {
-	uox_assert( true, 'Handler com o Insights oculto interrompe' );
+	$interrompeu = true;
+} catch ( Uox_Redirect_Exception $e ) {
+	$interrompeu = false;
 }
+uox_assert( $interrompeu, 'Handler com o Insights oculto deveria interromper' );
 uox_assert( array() === $GLOBALS['uox_options'], 'Handler com o Insights oculto não grava' );
 uox_assert( in_array( 'analytics', $GLOBALS['uox_ksio_chaves'], true ), 'Handler consulta a governança com a chave analytics' );
 $GLOBALS['uox_ksio_pode'] = true;

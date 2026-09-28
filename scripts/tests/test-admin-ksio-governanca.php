@@ -261,13 +261,19 @@ $GLOBALS['uox_user']    = 'root';
 $GLOBALS['uox_caps']    = $ADMIN;
 foreach ( array( 'uox_content_render_cleanup_page' => 'Limpeza', 'uox_clone_render_page' => 'Clone', 'uox_content_render_ksio_tools_home' => 'Visão Geral' ) as $pagina => $nome ) {
 	ob_start();
+	$recusou = false;
 	try {
 		call_user_func( $pagina );
-		uox_assert( false, "{$nome} oculta deveria recusar o administrador que não é o dono" );
 	} catch ( Uox_Die_Exception $e ) {
+		$recusou = true;
 		uox_assert( '' === ob_get_contents(), "{$nome} recusa antes de imprimir qualquer coisa" );
+	} catch ( Throwable $e ) {
+		// Sem a guarda a página segue e quebra noutro ponto (banco, WooCommerce); só
+		// `wp_die` conta como recusa.
+		$recusou = false;
 	}
 	ob_end_clean();
+	uox_assert( $recusou, "{$nome} oculta deveria recusar o administrador que não é o dono" );
 }
 // A Visão Geral é do dono mesmo com tudo liberado.
 uox_liberar( array( 'limpeza', 'clone', 'analytics' ) );

@@ -654,14 +654,13 @@ $GLOBALS['uonix_test_can_edit'] = true;
 $GLOBALS['uox_ksio_pode']       = false;
 $GLOBALS['uox_ksio_chaves']     = array();
 $blocked = false;
+ob_start();
 try {
-	ob_start();
 	uonix_render_analytics_dashboard_page();
-	ob_end_clean();
-} catch ( RuntimeException $e ) {
-	ob_end_clean();
-	$blocked = ( strpos( $e->getMessage(), 'WP_DIE' ) !== false );
+} catch ( Throwable $e ) {
+	$blocked = ( $e instanceof RuntimeException && strpos( $e->getMessage(), 'WP_DIE' ) !== false );
 }
+ob_end_clean();
 uonix_dashboard_assert( $blocked, 'Insights oculto pela governança deve recusar a página mesmo com edit_posts' );
 uonix_dashboard_assert( array( 'analytics' ) === $GLOBALS['uox_ksio_chaves'], 'A página consulta a regra com a chave analytics' );
 
@@ -671,8 +670,9 @@ $GLOBALS['uox_ksio_chaves']       = array();
 $blocked = false;
 try {
 	uonix_analytics_metrics_manual_refresh();
-} catch ( RuntimeException $e ) {
-	$blocked = ( strpos( $e->getMessage(), 'WP_DIE' ) !== false );
+} catch ( Throwable $e ) {
+	// Sem a guarda o handler segue adiante e quebra noutro ponto; só `wp_die` conta.
+	$blocked = ( $e instanceof RuntimeException && strpos( $e->getMessage(), 'WP_DIE' ) !== false );
 }
 uonix_dashboard_assert( $blocked && array( 'analytics' ) === $GLOBALS['uox_ksio_chaves'], 'Refresh manual com o Insights oculto deve ser recusado, consultando a chave analytics' );
 $GLOBALS['uox_ksio_pode'] = true;
