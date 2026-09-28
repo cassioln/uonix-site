@@ -112,6 +112,18 @@ function wp_remote_head( $url, $args = array() ) {
 	return array_key_exists( $url, $GLOBALS['uox_http'] ) ? $GLOBALS['uox_http'][ $url ] : new WP_Error( 'http_request_failed' );
 }
 
+// Transporte do Google falso, definido ANTES do `53`: as guardas `function_exists`
+// deixam, e assim o adaptador de produção de `fetch_gsc_pages()` roda na suíte. A
+// terceira revisão do PR #301 mostrou que, só com a consulta injetada, passar 100 fixo
+// no lugar do limite, ou trocar a dimensão, sobrevivia com tudo verde.
+$GLOBALS['uox_gsc_pedidos']  = array();
+$GLOBALS['uox_gsc_resposta'] = '';
+function uonix_analytics_metrics_get_access_token( $config ) { return 'token-falso'; }
+function uonix_analytics_metrics_search_console_rows( $access_token, $site_url, $period, $dimension = null, $row_limit = 10 ) {
+	$GLOBALS['uox_gsc_pedidos'][] = array( 'token' => $access_token, 'site' => $site_url, 'period' => $period, 'dimension' => $dimension, 'limit' => $row_limit );
+	return $GLOBALS['uox_gsc_resposta'];
+}
+
 $RAIZ = dirname( __DIR__, 2 );
 require_once $RAIZ . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
@@ -402,6 +414,10 @@ uox_assert( array() === uonix_intelligence_executive_insights( $vazio, null ), '
 // A segunda revisão mediu que a primeira versão deste fixture divergia da produção em
 // dois pontos: o andaime estava como página que responde 200, e `/projeto-de-ancoragem`
 // tinha 150 impressões em vez de 255. Com os valores reais, a quarta posição muda.
+//
+// Um valor NÃO é de produção: as 20 impressões próprias de `/servico/projeto-ancoragem/`
+// foram escritas à mão e ninguém as mediu — a sonda da segunda revisão não tinha linha
+// para o destino (achado BAIXO da terceira revisão). O 20 não muda a ordem asserida.
 $linhasPaginas = array(
 	array( 'page' => '/', 'clicks' => 33, 'impressions' => 201 ),
 	array( 'page' => '/ensaio-de-arrancamento/', 'clicks' => 10, 'impressions' => 987 ),
@@ -460,8 +476,8 @@ uox_assert( '/destino/' === ( $semDestino['rows'][0]['path'] ?? '' ) && 40.0 ===
 uox_assert( 'not_found' === ( $porCaminho['/olhal-de-ancoragem/']['state'] ?? '' ), 'página que dá 404 deve entrar marcada como inexistente' );
 uox_assert( '/olhal-de-ancoragem/' === ( $porCaminho['/olhal-de-ancoragem/']['label'] ?? '' ), 'página inexistente não pode receber título: ela não é página do site' );
 
-// A ordem final, com os valores de produção: 987, 503 (balancim somado), 327 (404),
-// 275 (ancoragem: 255 + 20) e 201. O andaime (192, somado ao destino) é o sexto.
+// A ordem final: 987, 503 (balancim somado), 327 (404), 275 (ancoragem: 255 medido +
+// 20 sintético) e 201. O andaime (192, somado ao destino) é o sexto.
 uox_assert(
 	array( '/ensaio-de-arrancamento/', '/servico/projeto-balancim/', '/olhal-de-ancoragem/', '/servico/projeto-ancoragem/', '/' ) === array_column( $paginas['rows'], 'path' ),
 	'a ordem das 5 páginas com os valores de produção, obteve ' . json_encode( array_column( $paginas['rows'], 'path' ) )
@@ -552,6 +568,9 @@ uox_assert( array( '/d', '/a' ) === array_column( $tardia['rows'], 'path' ) && 1
 $q    = array();
 $raiz = uonix_intelligence_executive_top_pages( uox_linhas( array( '/inicio' => 40, '/' => 10 ) ), $janelaPag, uox_status_mapa( array( '/inicio' => 'https://uonix.com.br' ), $q ), $rotulo );
 uox_assert( array( '/' ) === array_column( $raiz['rows'], 'path' ) && 50.0 === $raiz['rows'][0]['impressions'], 'redirecionamento para a raiz é somado à página inicial: 40 + 10 = 50, obteve ' . json_encode( array_column( $raiz['rows'], 'path' ) ) );
+$q       = array();
+$raizWww = uonix_intelligence_executive_top_pages( uox_linhas( array( '/inicio' => 40, '/' => 10 ) ), $janelaPag, uox_status_mapa( array( '/inicio' => 'https://www.uonix.com.br' ), $q ), $rotulo );
+uox_assert( array( '/' ) === array_column( $raizWww['rows'], 'path' ), 'e com www também' );
 
 // Memória: dois endereços antigos para o mesmo destino conferem o destino UMA vez.
 $q    = array();
@@ -569,6 +588,55 @@ uox_assert( 'ok' === ( $pLonga['/h4']['state'] ?? '' ) && 55.0 === ( $pLonga['/h
 // Refazer a cadeia a partir de /h1 não repete requisição: a memória de status cobre os
 // nós que a memória de cadeia não guardou.
 uox_assert( array( '/h0', '/h1', '/h2', '/h3', '/h4' ) === $q, 'cada caminho é conferido uma vez só, mesmo quando a cadeia longa é refeita a partir do meio; obteve ' . json_encode( $q ) );
+
+// O MESMO grafo na ordem inversa (MÉDIO 1 da terceira revisão). A versão anterior reusava
+// o fim do trecho `/h1 → /h4`, já resolvido, sem contar os saltos dele, e somava `/h0`
+// em `/h4` por quatro saltos. A estrutura tem de ser a mesma nas duas ordens.
+$q       = array();
+$inversa = uonix_intelligence_executive_top_pages( uox_linhas( array( '/h1' => 90, '/h0' => 50, '/h4' => 5 ) ), $janelaPag, uox_status_mapa( array( '/h0' => '/h1', '/h1' => '/h2', '/h2' => '/h3', '/h3' => '/h4' ), $q ), $rotulo );
+$pInv    = array();
+foreach ( $inversa['rows'] as $r ) { $pInv[ $r['path'] ] = $r; }
+uox_assert( 'unknown' === ( $pInv['/h0']['state'] ?? '' ) && 50.0 === ( $pInv['/h0']['impressions'] ?? 0.0 ), 'na ordem inversa /h0 continua a quatro saltos: linha própria, não verificado; obteve ' . json_encode( $inversa['rows'] ) );
+uox_assert( 95.0 === ( $pInv['/h4']['impressions'] ?? 0.0 ) && 1 === ( $pInv['/h4']['merged'] ?? 0 ), 'e /h4 soma só /h1: 90 + 5 = 95, merged 1' );
+
+// Cinco saltos, com a cadeia mais longa entrando por cima de um trecho já resolvido.
+$q      = array();
+$cinco  = uonix_intelligence_executive_top_pages( uox_linhas( array( '/h1' => 90, '/z' => 60, '/y' => 50, '/h4' => 5 ) ), $janelaPag, uox_status_mapa( array( '/y' => '/z', '/z' => '/h1', '/h0' => '/h1', '/h1' => '/h2', '/h2' => '/h3', '/h3' => '/h4' ), $q ), $rotulo );
+$pCin   = array();
+foreach ( $cinco['rows'] as $r ) { $pCin[ $r['path'] ] = $r; }
+uox_assert( 'unknown' === ( $pCin['/y']['state'] ?? '' ) && 'unknown' === ( $pCin['/z']['state'] ?? '' ) && 95.0 === ( $pCin['/h4']['impressions'] ?? 0.0 ), 'cadeias de 5 e 4 saltos não são somadas, mesmo entrando num trecho resolvido; obteve ' . json_encode( $cinco['rows'] ) );
+
+// ---- Destino sem resposta não recebe soma (MÉDIO 2 da terceira revisão). ----
+
+// Orçamento esgotado depois da primeira conferência: `/a` (300) → `/b` → `/c` (50). A
+// versão anterior mostrava `/b` — que nem está na Search Console — com 300 e "inclui 1
+// endereço antigo", e `/c` separado: a cadeia partida em duas linhas pelo orçamento.
+$agora = 0.0;
+$q     = array();
+$mapaA = uox_status_mapa( array( '/a' => '/b', '/b' => '/c' ), $q );
+$semOrc = uonix_intelligence_executive_top_pages(
+	uox_linhas( array( '/a' => 300, '/c' => 50 ) ),
+	$janelaPag,
+	static function ( $p ) use ( $mapaA, &$agora ) { $agora += 21.0; return $mapaA( $p ); },
+	$rotulo,
+	5,
+	10,
+	static function () use ( &$agora ) { return $agora; }
+);
+uox_assert( array( '/a', '/c' ) === array_column( $semOrc['rows'], 'path' ) && array( 0, 0 ) === array_column( $semOrc['rows'], 'merged' ), 'com o orçamento esgotado no meio da cadeia nada é somado, e o destino não conferido não vira linha; obteve ' . json_encode( $semOrc['rows'] ) );
+uox_assert( array( 'unknown', 'unknown' ) === array_column( $semOrc['rows'], 'state' ), 'e as duas linhas saem como não verificadas' );
+
+// Falha de rede no destino: mesma coisa.
+$semRede = uonix_intelligence_executive_top_pages( uox_linhas( array( '/a' => 300, '/novo' => 10 ) ), $janelaPag, static function ( $p ) { return '/a' === $p ? array( 'state' => 'redirect', 'code' => 301, 'location' => '/novo' ) : array( 'state' => 'unknown', 'code' => 0, 'location' => '' ); }, $rotulo );
+uox_assert( array( '/a', '/novo' ) === array_column( $semRede['rows'], 'path' ) && array( 0, 0 ) === array_column( $semRede['rows'], 'merged' ), 'destino com falha de rede não recebe a soma; obteve ' . json_encode( $semRede['rows'] ) );
+
+// 3xx sem `Location` no destino: não diz para onde vai, então também não é fim.
+$semLoc = uonix_intelligence_executive_top_pages( uox_linhas( array( '/a' => 300, '/b' => 10 ) ), $janelaPag, static function ( $p ) { return '/a' === $p ? array( 'state' => 'redirect', 'code' => 301, 'location' => '/b' ) : array( 'state' => 'unknown', 'code' => 301, 'location' => '' ); }, $rotulo );
+uox_assert( array( 0, 0 ) === array_column( $semLoc['rows'], 'merged' ), 'destino 3xx sem Location não recebe a soma' );
+
+// Erro 500 no destino É fim conhecido: o servidor respondeu ali, e o visitante chega nele.
+$com500 = uonix_intelligence_executive_top_pages( uox_linhas( array( '/a' => 300, '/quebrada' => 10 ) ), $janelaPag, static function ( $p ) { return '/a' === $p ? array( 'state' => 'redirect', 'code' => 301, 'location' => '/quebrada' ) : array( 'state' => 'unknown', 'code' => 500, 'location' => '' ); }, $rotulo );
+uox_assert( array( '/quebrada' ) === array_column( $com500['rows'], 'path' ) && 310.0 === $com500['rows'][0]['impressions'] && 'unknown' === $com500['rows'][0]['state'], 'destino que responde 500 recebe a soma e sai como não verificado; obteve ' . json_encode( $com500['rows'] ) );
 
 // Teto rígido de consultas: 25 páginas distintas, todas candidatas, e 20 conferências.
 $q     = array();
@@ -595,6 +663,13 @@ $orcado  = uonix_intelligence_executive_top_pages(
 );
 uox_assert( 3 === count( $q ), 'com 7 s por conferência, o orçamento de 20 s admite 3 e recusa a quarta; obteve ' . count( $q ) );
 uox_assert( 'unknown' === ( $orcado['rows'][3]['state'] ?? '' ) && 'ok' === ( $orcado['rows'][2]['state'] ?? '' ), 'e o que ficou fora do orçamento sai como não verificado' );
+
+// O relógio PADRÃO também conta (BAIXO 1 da terceira revisão). Sem esta asserção, trocar
+// o de produção por um que devolve sempre 0 desligava o orçamento com a suíte verde.
+$q       = array();
+$mapaDef = uox_status_mapa( array(), $q );
+$real    = uonix_intelligence_executive_top_pages( uox_linhas( array( '/r1' => 20, '/r2' => 10 ) ), $janelaPag, static function ( $p ) use ( $mapaDef ) { usleep( 20000 ); return $mapaDef( $p ); }, $rotulo );
+uox_assert( ( $real['head_seconds'] ?? 0.0 ) >= 0.035, 'com o relógio padrão, duas conferências de 20 ms devem somar ao menos 35 ms; obteve ' . var_export( $real['head_seconds'] ?? null, true ) );
 
 // Endereço que redireciona para si mesmo não some, nem soma em si.
 $q    = array();
@@ -677,6 +752,15 @@ uox_assert( true === ( $cortada['truncated'] ?? null ) && 999 === count( $cortad
 uox_assert( true === ( uonix_intelligence_executive_top_pages( $cortada, $janelaPag, $statusFixo, $rotulo )['truncated'] ?? null ), 'e o bloco de páginas carrega o corte adiante' );
 uox_assert( is_wp_error( uonix_intelligence_executive_fetch_gsc_pages( $CFG, $janelaPag, static function () { return new WP_Error( 'http' ); } ) ), 'falha da consulta chega como erro, não como lista vazia' );
 
+// Sem consulta injetada: o adaptador de PRODUÇÃO, até o transporte falso do `53`.
+$GLOBALS['uox_gsc_pedidos']  = array();
+$GLOBALS['uox_gsc_resposta'] = json_encode( array( 'responseAggregationType' => 'byPage', 'rows' => array( $linhaGsc( 'https://uonix.com.br/x/', 7, 1 ) ) ) );
+$producao = uonix_intelligence_executive_fetch_gsc_pages( $CFG, $janelaPag );
+$pedido   = $GLOBALS['uox_gsc_pedidos'][0] ?? array();
+uox_assert( 1 === count( $GLOBALS['uox_gsc_pedidos'] ) && 'page' === ( $pedido['dimension'] ?? '' ) && 1000 === ( $pedido['limit'] ?? 0 ), 'o adaptador de produção deve pedir por página e com até 1000 linhas ao 53; obteve ' . json_encode( $pedido ) );
+uox_assert( 'token-falso' === ( $pedido['token'] ?? '' ) && 'sc-domain:x' === ( $pedido['site'] ?? '' ) && $janelaPag === ( $pedido['period'] ?? null ), 'com o token, a propriedade da configuração e a janela pedida' );
+uox_assert( array( array( 'page' => '/x/', 'impressions' => 7.0, 'clicks' => 1.0 ) ) === ( $producao['rows'] ?? null ), 'e a resposta do 53 passa pela mesma normalização' );
+
 // ---------------------------------------------------------------------------
 // 11. collect(): o caminho inteiro, com rede injetada.
 // ---------------------------------------------------------------------------
@@ -723,6 +807,7 @@ uox_assert( empty( $execSemCfg['top_pages']['available'] ), 'e as páginas tamb�
 uox_assert( ! empty( $execSemCfg['scorecard']['boxes']['leads']['available'] ), 'mas os orçamentos, que não dependem do Google, continuam disponíveis' );
 // Sem credencial, nenhuma consulta foi feita: o motivo não pode dizer que ela falhou.
 uox_assert( 'config_missing' === ( $execSemCfg['scorecard']['boxes']['visits']['reason'] ?? '' ) && 'config_missing' === ( $execSemCfg['scorecard']['boxes']['conversion']['reason'] ?? '' ), 'sem credencial o motivo é config_missing, não ga4_fetch_failed; obteve ' . ( $execSemCfg['scorecard']['boxes']['visits']['reason'] ?? '(nada)' ) );
+uox_assert( 'config_missing' === ( $execSemCfg['top_pages']['reason'] ?? '' ), 'e o bloco de páginas também: sem credencial nenhuma consulta foi feita; obteve ' . ( $execSemCfg['top_pages']['reason'] ?? '(nada)' ) );
 
 // ---------------------------------------------------------------------------
 // 12. Renderização no e-mail semanal.
@@ -790,6 +875,20 @@ uox_assert( false === strpos( $htmlSemSoma, 'foram somados ao destino' ), 'seman
 $execCortado = $exec;
 $execCortado['top_pages']['truncated'] = true;
 uox_assert( false !== strpos( uonix_intelligence_report_html( array( 'analysis' => $analise, 'executive' => $execCortado, 'period_label' => '', 'environment' => 'production', 'panel_url' => '' ) ), 'a Search Console devolveu o limite de páginas, e a lista pode estar incompleta' ), 'lista cortada pelo limite deve ser declarada incompleta' );
+
+// O bloco indisponível diz o motivo de verdade (BAIXO 5 da terceira revisão). A versão
+// anterior dizia "a consulta à Search Console não retornou dados" até sem credencial.
+foreach ( array(
+	'config_missing'     => 'credenciais de leitura do Google não estão configuradas',
+	'pages_fetch_failed' => 'a consulta à Search Console falhou nesta execução',
+	'pages_empty'        => 'não devolveu nenhuma página no período',
+) as $motivoPag => $textoPag ) {
+	$execPag              = $exec;
+	$execPag['top_pages'] = array( 'available' => false, 'reason' => $motivoPag, 'rows' => array(), 'window' => $janelaPag );
+	$htmlPag              = uonix_intelligence_report_html( array( 'analysis' => $analise, 'executive' => $execPag, 'period_label' => '', 'environment' => 'production', 'panel_url' => '' ) );
+	uox_assert( false !== strpos( $htmlPag, $textoPag ), "bloco de páginas indisponível por '{$motivoPag}' deve dizer: {$textoPag}" );
+	uox_assert( false === strpos( $htmlPag, 'não retornou dados' ), 'a frase fixa antiga não pode voltar' );
+}
 
 // MÉDIO 6 da revisão do PR #301: todo texto condicional do e-mail precisa de asserção.
 // Sem isto, a lição do PR #298 se repetia — a tela podia dizer o texto errado com a

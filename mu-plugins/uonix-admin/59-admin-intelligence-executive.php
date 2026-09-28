@@ -36,12 +36,13 @@ if ( ! function_exists( 'uonix_intelligence_executive_rules' ) ) {
 	 *
 	 * `head_budget` = 20 s é o orçamento de tempo, conferido ANTES de cada requisição.
 	 * Por isso o tempo total pode passar dele por até um `head_timeout` (8 s): ~28 s no
-	 * pior caso. O motivo NÃO é o `max_execution_time` do PHP — no Linux ele conta
-	 * tempo de CPU e não espera de rede. O limite de relógio real vem do servidor web e
-	 * do PHP-FPM, e não foi medido. O orçamento existe para o botão "Enviar Teste Agora"
-	 * não depender de um limite que ninguém mediu. As três chamadas ao Google, com os
-	 * seus três pedidos de token, têm timeout de 20 s cada em `53` e somam até 120 s no
-	 * pior caso, fora deste orçamento.
+	 * pior caso. O motivo NÃO é o `max_execution_time` do PHP — no Linux ele não conta
+	 * o tempo gasto em operação de rede (nota de `set_time_limit()` no manual do PHP).
+	 * O limite de relógio real vem do servidor web e do PHP-FPM, e não foi medido. O
+	 * orçamento existe para as conferências HEAD não somarem mais que ~28 s a esse
+	 * limite desconhecido. Ele NÃO protege a execução inteira: as três chamadas ao
+	 * Google, com os seus três pedidos de token, têm timeout de 20 s cada em `53` e somam
+	 * até 120 s no pior caso, fora deste orçamento.
 	 *
 	 * `max_hops` = 3: medido pela revisão do PR #301, nenhum dos 12 endereços de
 	 * produção conferidos passa de um salto. Três é margem; acima disso, o endereço fica
@@ -724,10 +725,15 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_status' ) ) {
 	 * `static`, e uma segunda chamada no mesmo processo devolvia "não verificado" sem
 	 * fazer requisição nenhuma.
 	 *
-	 * O User-Agent identificável existe porque a requisição passa pelo Rank Math: ela
-	 * conta como acesso no contador do redirecionamento e, com o monitor de 404 ligado,
-	 * registra um 404 por semana. Quem olhar esses contadores precisa conseguir separar
-	 * este acesso dos visitantes (achado BAIXO da revisão do PR #301).
+	 * A requisição passa pelo Rank Math, e isso tem um custo que o User-Agent NÃO
+	 * resolve. O contador do redirecionamento grava só acessos e data do último, sem
+	 * User-Agent: cada endereço antigo conferido ganha um acesso artificial por semana,
+	 * e o contador não tem como separá-lo. O monitor de 404, por outro lado, não
+	 * registra esta requisição: o WordPress encerra HEAD logo depois de
+	 * `template_redirect`, antes do template, e o monitor captura em `get_header` ou
+	 * `wp_head`. As duas coisas foram conferidas pela terceira revisão do PR #301 no
+	 * código do Rank Math e do WordPress; a versão anterior deste comentário afirmava o
+	 * contrário das duas. O User-Agent identificável serve ao log de acesso do servidor.
 	 *
 	 * @return array{state: string, code: int, location: string}
 	 */
@@ -789,9 +795,10 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 	 * - **unknown** — entra marcada como "status não verificado". Inclui ciclo,
 	 *   redirecionamento para fora do site, saltos demais e teto de consultas atingido.
 	 *
-	 * Função pura: linhas, conferência de status, rótulo e relógio entram por parâmetro.
-	 * Devolve também `head_count`, o número de conferências feitas, para o teto ser
-	 * verificável. O relógio é injetável para o orçamento de tempo ter teste sem dormir:
+	 * Linhas, conferência de status, rótulo e relógio entram por parâmetro; é pura
+	 * quando os quatro são injetados, e os padrões fazem HTTP e leem o relógio. Devolve
+	 * também `head_count` e `head_seconds`, as conferências feitas e o tempo gasto
+	 * nelas, para o teto e o orçamento serem verificáveis. O relógio é injetável para o orçamento de tempo ter teste sem dormir:
 	 * a primeira versão guardava o gasto dentro de `page_status()`, e o teste precisaria
 	 * esperar 20 s de verdade (sugestão da segunda revisão do PR #301).
 	 *
@@ -808,9 +815,11 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 			return microtime( true );
 		};
 
-		$base = array( 'available' => false, 'reason' => '', 'rows' => array(), 'window' => is_array( $window ) ? $window : array(), 'truncated' => false, 'head_count' => 0 );
+		$base = array( 'available' => false, 'reason' => '', 'rows' => array(), 'window' => is_array( $window ) ? $window : array(), 'truncated' => false, 'head_count' => 0, 'head_seconds' => 0.0 );
 		if ( is_wp_error( $rows ) ) {
-			$base['reason'] = 'pages_fetch_failed';
+			// Sem credencial nenhuma consulta foi feita, e o e-mail não pode dizer que ela
+			// falhou (BAIXO 5 da terceira revisão).
+			$base['reason'] = 'config_missing' === $rows->get_error_code() ? 'config_missing' : 'pages_fetch_failed';
 			return $base;
 		}
 		// O formato de `uonix_intelligence_executive_fetch_gsc_pages()`, que sabe se a
@@ -895,11 +904,25 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 		// revisão do PR #301 rodou `/b` (300) → `/c` e `/a` (100) → `/b`: o e-mail
 		// mostrava `/c` com 350 e, embaixo, `/b` com 100 — a mesma cadeia partida em
 		// duas linhas, e o comentário da época afirmava que a soma "seguia junto até o
-		// destino final". Resolvendo primeiro e somando depois, a ordem deixa de existir.
+		// destino final".
 		//
-		// `terminal` separa quem chegou a um fim conhecido de quem não chegou (ciclo,
-		// destino fora do site, saltos demais). Quem não chegou não é somado a nada e
-		// fica como "não verificado": somar a um destino incerto seria inventar.
+		// Cada endereço segue a PRÓPRIA cadeia, a partir dele, e conta os PRÓPRIOS
+		// saltos. Uma versão intermediária reusava o fim de um trecho já resolvido por
+		// outra cadeia, sem contar os saltos daquele trecho: a terceira revisão do PR
+		// #301 mostrou que, com cadeia acima de `max_hops`, isso fazia o resultado
+		// depender de quem era resolvido primeiro — e somava cinco saltos. Sem o reuso,
+		// o resultado de cada endereço depende só do grafo a partir dele. A memória de
+		// status continua garantindo uma requisição por endereço.
+		//
+		// A exceção é o esgotamento do teto ou do orçamento: aí O QUE fica sem
+		// conferência depende da ordem, que é por impressões. O que fica sem conferência
+		// sai como "não verificado" e não recebe soma, então a ordem muda a completude,
+		// não a verdade.
+		//
+		// `terminal` separa quem chegou a um fim conhecido de quem não chegou: ciclo,
+		// destino fora do site, saltos demais, ou um nó sem resposta do servidor (falha
+		// de rede, teto, orçamento). Quem não chegou não é somado a nada e fica como
+		// "não verificado": somar a um destino incerto seria inventar.
 		$resolvido = array();
 		$resolver  = static function ( $caminho ) use ( &$resolvido, $consultar, $destino_de, $regras ) {
 			if ( isset( $resolvido[ $caminho ] ) ) {
@@ -909,11 +932,6 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 			$atual     = $caminho;
 			$resultado = null;
 			for ( $salto = 0; $salto <= (int) $regras['max_hops']; $salto++ ) {
-				if ( $atual !== $caminho && isset( $resolvido[ $atual ] ) ) {
-					// Trecho já resolvido por outra cadeia: reusa, se ele chegou a um fim.
-					$resultado = $resolvido[ $atual ]['terminal'] ? $resolvido[ $atual ] : null;
-					break;
-				}
 				$status = $consultar( $atual );
 				$estado = isset( $status['state'] ) ? (string) $status['state'] : 'unknown';
 				if ( 'redirect' === $estado ) {
@@ -925,8 +943,15 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 					$atual    = $destino;
 					continue;
 				}
-				// Parou num nó com status próprio: ok, 404, ou desconhecido. Em todos, o
-				// endereço de partida chega ali, e é ali que a soma cai.
+				// Fim conhecido é onde o servidor RESPONDEU com status próprio: 2xx, 404/410,
+				// ou erro 4xx/5xx — um 500 é resposta do endereço, e o visitante chega nele.
+				// Sem resposta (código 0: falha de rede, teto ou orçamento) o nó pode
+				// redirecionar de novo, e 3xx sem `Location` não diz para onde. Nos dois
+				// casos não há fim, e nada é somado (MÉDIO 2 da terceira revisão).
+				$codigo = isset( $status['code'] ) ? (int) $status['code'] : 0;
+				if ( ! in_array( $estado, array( 'ok', 'not_found' ), true ) && $codigo < 400 ) {
+					break;
+				}
 				$resultado = array(
 					'final'    => $atual,
 					'state'    => in_array( $estado, array( 'ok', 'not_found' ), true ) ? $estado : 'unknown',
@@ -940,9 +965,11 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 			if ( null === $resultado && $salto > (int) $regras['max_hops'] ) {
 				$cadeia = array( $caminho );
 			}
-			// Com fim conhecido, todo nó da cadeia aponta para ele. Sem fim — ciclo ou
-			// destino fora do site —, nenhum nó da cadeia chega a lugar nenhum: cada um fica
-			// por conta própria, como "não verificado", e nada é somado.
+			// Com fim conhecido, todo nó da cadeia aponta para ele — e partindo de cada nó a
+			// cadeia é um sufixo desta, então o resultado é o mesmo que ele acharia sozinho.
+			// Sem fim — ciclo, destino fora do site, nó sem resposta —, nenhum nó da cadeia
+			// chega a lugar nenhum: cada um fica por conta própria, como "não verificado",
+			// e nada é somado.
 			foreach ( $cadeia as $no ) {
 				if ( null !== $resultado ) {
 					$resolvido[ $no ] = $resultado;
@@ -1012,6 +1039,10 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 		$base['reason']     = array() === $saida ? 'pages_empty' : '';
 		$base['rows']       = $saida;
 		$base['head_count'] = $consultas;
+		// O tempo gasto sai no resultado para o relógio PADRÃO ter teste: com relógio
+		// injetado, trocar o de produção por um que devolve sempre 0 desligava o
+		// orçamento com a suíte verde (BAIXO 1 da terceira revisão).
+		$base['head_seconds'] = $gasto;
 
 		return $base;
 	}

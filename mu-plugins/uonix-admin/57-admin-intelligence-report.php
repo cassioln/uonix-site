@@ -137,6 +137,10 @@ if ( ! function_exists( 'uonix_intelligence_report_executive_reason' ) ) {
 			'series_too_short'          => 'a Search Console ainda não tem as duas semanas necessárias para comparar.',
 			'baseline_too_small'        => 'a semana anterior teve poucas impressões; nesse volume a variação é ruído, não sinal.',
 			'comparison_failed'         => 'a comparação entre as duas semanas não produziu número válido.',
+			// Motivos do bloco de páginas, produzidos por `uonix_intelligence_executive_top_pages()`.
+			'pages_fetch_failed'        => 'a consulta à Search Console falhou nesta execução.',
+			'pages_missing'             => 'os dados da Search Console não estão disponíveis.',
+			'pages_empty'               => 'a Search Console não devolveu nenhuma página no período.',
 		);
 
 		return isset( $mapa[ $reason ] ) ? $mapa[ $reason ] : 'o dado não está disponível nesta semana.';
@@ -350,7 +354,10 @@ if ( ! function_exists( 'uonix_intelligence_report_executive_pages_html' ) ) {
 
 		$html .= '<tr><td style="padding:8px 28px 24px 28px;">';
 		if ( empty( $paginas['available'] ) ) {
-			$html .= '<div style="padding:14px 16px;background-color:#fffbeb;border-left:4px solid #f59e0b;color:#78350f;font-size:13px;line-height:1.5;">As páginas mais encontradas não estão disponíveis nesta semana: a consulta à Search Console não retornou dados.</div>';
+			// O motivo de verdade, e não uma frase fixa: a versão anterior dizia "a consulta
+			// não retornou dados" até quando nenhuma consulta tinha sido feita.
+			$motivo = uonix_intelligence_report_executive_reason( isset( $paginas['reason'] ) ? (string) $paginas['reason'] : '' );
+			$html  .= '<div style="padding:14px 16px;background-color:#fffbeb;border-left:4px solid #f59e0b;color:#78350f;font-size:13px;line-height:1.5;">' . esc_html( 'As páginas mais encontradas não estão disponíveis nesta semana: ' . $motivo ) . '</div>';
 		} else {
 			$html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">';
 			$html .= '<tr style="background-color:#f8fafc;">';

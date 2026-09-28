@@ -378,9 +378,15 @@ O status HTTP das 10 de mais impressão é conferido **sem que o cliente siga o 
 
 - **Redirecionamento é somado ao destino final da cadeia**, que passa a declarar quantos endereços antigos inclui. A procedência do bloco só diz que houve soma quando houve.
 - **404 entra marcado em vermelho**: página que o Google mostra e não existe é o achado mais acionável do bloco.
-- **Status que não pôde ser conferido fica como "não verificado"**, nunca como página existente. Isso inclui falha de rede, loopback bloqueado, ciclo, redirecionamento para fora do site, saltos demais e teto de consultas atingido. Nesses casos nada é somado.
+- **Status que não pôde ser conferido fica como "não verificado"**, nunca como página existente. Isso inclui falha de rede, loopback bloqueado, ciclo, redirecionamento para fora do site, 3xx sem `Location`, saltos demais e teto de consultas ou orçamento atingido — **no endereço de partida ou em qualquer ponto da cadeia**. Nesses casos nada é somado. Um destino que responde erro 4xx ou 5xx é fim conhecido e recebe a soma: o servidor respondeu ali, e o visitante chega nele.
 
-**A soma é feita em duas fases, e a ordem não altera o resultado.** Primeiro cada cadeia é seguida até o fim, com memória por endereço; só depois as impressões **originais** são somadas no destino final de cada uma. A segunda revisão do PR #301 mostrou que a versão anterior somava durante o laço. Com `/b` (300) → `/c` e `/a` (100) → `/b`, o e-mail mostrava `/c` com 350 e, embaixo, `/b` com 100: a mesma cadeia partida em duas linhas. O comentário da época afirmava o contrário. Quando uma cadeia passa de `max_hops`, só o endereço de partida fica "não verificado". Os intermediários, partindo deles mesmos, cabem no limite e são resolvidos. Endereço que chega ao topo sem ter sido candidato também é conferido e somado.
+**A soma é feita em duas fases.** Primeiro cada endereço segue a **própria** cadeia até o fim, contando os **próprios** saltos; só depois as impressões **originais** são somadas no destino final de cada um. A memória de status garante uma requisição por endereço.
+
+- **A segunda revisão do PR #301** mostrou que a primeira versão somava durante o laço. Com `/b` (300) → `/c` e `/a` (100) → `/b`, o e-mail mostrava `/c` com 350 e, embaixo, `/b` com 100: a mesma cadeia partida em duas linhas. O comentário da época afirmava o contrário.
+- **A terceira revisão** mostrou que a versão seguinte ainda dependia da ordem. Ela reusava o fim de um trecho já resolvido por outra cadeia, sem contar os saltos daquele trecho, e somava cadeia de cinco saltos numa ordem e não na outra. Em 400 grafos aleatórios, os 6 com cadeia acima de 3 saltos mudavam com a ordem. Sem o reuso, o resultado de cada endereço depende só do grafo a partir dele, e o teste roda o mesmo grafo nas duas ordens.
+- **A exceção é o esgotamento do teto ou do orçamento.** Aí **o que** fica sem conferência depende da ordem, que é por impressões. Mas o que fica sem conferência sai "não verificado" e sem soma: a ordem muda a completude, não a verdade.
+
+Quando uma cadeia passa de `max_hops`, só o endereço de partida fica "não verificado"; os intermediários, partindo deles mesmos, cabem no limite e são resolvidos. Endereço que chega ao topo sem ter sido candidato também é conferido e somado.
 
 **O custo tem teto explícito, não estimativa.** A primeira versão deste contrato dizia "até ~10 requisições", e a revisão mediu que o teto real era 15. Agora:
 
@@ -390,11 +396,16 @@ O status HTTP das 10 de mais impressão é conferido **sem que o cliente siga o 
 | `head_timeout` | 8 s | Limite por requisição. Medido em produção: raiz 133 ms, serviço ~80 ms (cache), 301 2,2 s, 404 4,2 s; a revisão mediu um 301 frio em 6,81 s. Nenhum número fixo tem folga contra essa variação. O que torna 8 s defensável é o modo de falha: estourar dá "não verificado", nunca "ok". |
 | `head_budget` | 20 s | Orçamento de tempo, conferido **antes** de cada requisição. Por isso o total pode passar dele por até um `head_timeout`: ~28 s no pior caso. O relógio é injetável, e o teste confere o orçamento com um relógio falso, sem dormir. |
 
-O orçamento **não** existe por causa do `max_execution_time`: no Linux ele conta tempo de CPU, não espera de rede. O limite de relógio real vem do servidor web e do PHP-FPM, e não foi medido. O orçamento existe para o botão "Enviar Teste Agora" não depender desse limite desconhecido. Fora dele ficam as três chamadas ao Google (GA4, série e páginas), cada uma com o próprio pedido de token e timeout de 20 s: até 120 s no pior caso.
+O orçamento **não** existe por causa do `max_execution_time`: no Linux ele não conta o tempo gasto em operação de rede (nota de `set_time_limit()` no manual do PHP). O limite de relógio real vem do servidor web e do PHP-FPM, e não foi medido. O orçamento existe para as conferências HEAD não somarem mais que ~28 s a esse limite desconhecido. **Ele não protege a execução inteira:** as três chamadas ao Google (GA4, série e páginas), cada uma com o próprio pedido de token e timeout de 20 s, somam até 120 s no pior caso, fora dele. Então o botão "Enviar Teste Agora" continua dependendo de um limite que ninguém mediu.
 
-A requisição passa pelo Rank Math e conta no contador de acessos do redirecionamento; com o monitor de 404 ligado, registra um 404 por semana. Por isso ela se identifica com o User-Agent `Uonix-Relatorio-Executivo/1.0`, para quem ler esses contadores separar o acesso dos visitantes.
+A requisição passa pelo Rank Math, e isso tem um custo que o User-Agent **não** resolve:
 
-**Motivos de indisponibilidade têm texto de leitor.** Os motivos da Search Console vêm do Módulo 5, mas o texto da aba Anomalias fala com o operador ("o gatilho tenta de novo na próxima verificação"). A primeira versão delegava a ele, e o e-mail imprimia essa frase. Agora o 57 tem tradução própria para cada motivo, e o teste extrai do código do 58 e do 59 todos os motivos que chegam a uma caixa e exige texto não genérico para cada um. Sem credencial do Google, o motivo é `config_missing`, e não "a consulta falhou": nenhuma consulta foi feita.
+- **O contador do redirecionamento ganha um acesso artificial por semana**, por endereço antigo conferido. Ele grava só acessos e a data do último, sem User-Agent, então não há como separar esse acesso dos visitantes pelo contador.
+- **O monitor de 404 não registra a requisição.** O WordPress encerra HEAD logo depois de `template_redirect`, antes do template, e o monitor captura em `get_header` ou `wp_head`.
+
+As duas coisas foram conferidas pela terceira revisão do PR #301 no código do Rank Math e do WordPress. A versão anterior deste contrato afirmava o contrário das duas. O User-Agent `Uonix-Relatorio-Executivo/1.0` fica porque serve ao log de acesso do servidor.
+
+**Motivos de indisponibilidade têm texto de leitor.** Os motivos da Search Console vêm do Módulo 5, mas o texto da aba Anomalias fala com o operador ("o gatilho tenta de novo na próxima verificação"). A primeira versão delegava a ele, e o e-mail imprimia essa frase. Agora o 57 tem tradução própria para cada motivo, e o teste extrai do código do 58 e do 59 todos os motivos que chegam a uma caixa e exige texto não genérico para cada um. Sem credencial do Google, o motivo é `config_missing`, e não "a consulta falhou": nenhuma consulta foi feita. Isso vale para as três caixas que dependem do Google e para o bloco de páginas, que passou a imprimir o motivo em vez de uma frase fixa.
 
 ### O que o Módulo 4 ainda não entrega
 
