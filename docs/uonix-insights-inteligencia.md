@@ -327,7 +327,11 @@ Decisões do Cassio em 2026-09-28: estender o e-mail semanal em vez de criar um 
 | Impressões na busca | Search Console, via `organic_drop()` do Módulo 5 | semana **assentada**, ~4 dias antes de hoje | semana contra semana, em % |
 | Conversão | orçamentos ÷ visitas | 28 dias até ontem | 28 contra 28, pelo teste de diferença com exposição |
 
-As janelas terminam **ontem** porque o relatório sai segunda às 08:00, e "hoje" teria oito horas. Isso é seguro para o GA4 porque a defasagem dele é de **horas** — medido em 2026-09-28: às 13:00 já havia dado parcial do próprio dia. Não vale para a Search Console, que segue com ~3 dias de atraso (medido de novo no mesmo dia), e por isso a caixa de impressões reusa as janelas assentadas do Módulo 5 em vez de somar a série de novo. Reimplementar ali seria reabrir os pontos cegos que duas revisões fecharam.
+As janelas terminam **ontem** porque o relatório sai segunda às 08:00, e "hoje" teria oito horas. Para os orçamentos isso é exato: vêm do banco local.
+
+Para o GA4, o que foi **medido** em 2026-09-28 é que o dado intradiário chega em horas — às 13:00 já havia dado parcial do próprio dia. **Não foi medido que o dia anterior esteja fechado às 08:00**, e a revisão do PR #301 apontou a diferença: o processamento diário pode seguir refinando o domingo depois disso. O tamanho do erro possível foi medido no mesmo dia: o domingo 27/09 teve 2 das 65 visitas da semana (~3%). O viés possível na variação semanal de visitas é dessa ordem, para baixo, e fica declarado.
+
+A Search Console segue com ~3 dias de atraso (medido de novo no mesmo dia), e por isso a caixa de impressões reusa as janelas assentadas do Módulo 5 em vez de somar a série de novo. Reimplementar ali seria reabrir os pontos cegos que duas revisões fecharam.
 
 ### "Mudança detectável" é um teste, não um limiar
 
@@ -335,16 +339,23 @@ Orçamentos nunca aparecem em porcentagem. Com ~1 por semana, "▲ +100%" é um 
 
 **Exato, e não a aproximação normal**, porque ela erra justo no volume deste site: 0 contra 5 passa em `|a − b| > 2√(a+b)` e tem valor-p exato de 0,0625.
 
+O bilateral é por **duplicação da cauda menor**. Para p0 ≠ 0,5 existe outra convenção — a do `binom.test` do R, que soma as probabilidades menores ou iguais à observada —, e as duas divergem: para 3 em 3 com p0 = 0,2, esta dá 0,016 e aquela, 0,008. A duplicação é mais conservadora, e a revisão do PR #301 mediu que o tamanho real deste teste nunca passa de 5% na grade n ≤ 80, p0 ∈ [0,02; 0,98]. Perde poder, não inventa sinal.
+
 A alternativa rejeitada era um limiar fixo de diferença. Com este volume, qualquer limiar fixo ou calaria sempre ou dispararia sempre — a lição do limiar de silêncio do Módulo 5, que a própria tela reprovou na primeira execução.
 
-### Duas recusas que a medição obrigou
+### Três recusas que a medição obrigou
 
 - **Sem histórico do GA4, não há comparação.** O snapshot de 30 dias gravava `sessions.previous = 0, state = new`: o GA4 deste site não tem dado antes de ~29/08. Uma janela anterior que começa antes disso soma menos dias do que tem e acusaria um crescimento que é só a instalação. A cobertura exige dado **estritamente antes** do início da janela; para verificar isso, a série é pedida desde 7 dias antes da janela mais antiga. Em 2026-09-28, a semana anterior tem cobertura e as 4 semanas anteriores não.
-- **Com dia imputado, a porcentagem de impressões é recusada.** A imputação otimista do Módulo 5 produz um **limite** construído para o alerta, não uma medição. O relatório mostra os números observados e declara quantos dias faltaram.
+- **Com dia ausente na semana ATUAL, a porcentagem de impressões é recusada.** A imputação otimista do Módulo 5 produz um **limite** construído para o alerta, não uma medição.
+- **Com dia ausente na semana ANTERIOR, também.** Esta faltava na primeira versão, e a revisão do PR #301 mediu o dano. O `imputed_days` do Módulo 5 conta só a semana atual; na anterior, dia ausente vale zero — conservador para detectar **queda**, que é o trabalho do alerta, e errado para exibir variação nos dois sentidos. Com tráfego constante e dois dias ausentes na semana anterior, o e-mail diria "▲ +40%"; com queda real de −35% e três dias ausentes, diria "+13,8%, abaixo do limiar". O primeiro rascunho deste contrato afirmava que a porcentagem era recusada nesse caso. Era falso.
+
+Nos três casos a caixa mostra os números observados e diz o que faltou. O colapso é a exceção deliberada: semana atual sem nenhuma impressão é −100% contra qualquer semana anterior com volume, completa ou não.
 
 ### A conversão é um teto
 
 O GA4 roda com Consent Mode v2 e só conta, nos relatórios, as visitas com consentimento de estatística. Os orçamentos contam todos. O denominador fica menor que o real e a divisão fica **maior**, então a caixa mostra "até X%". O sentido do erro é conhecido e vai escrito na própria caixa.
+
+**Limitação que o teste de diferença não resolve:** a exposição do teste também são visitas consentidas. Se a taxa de aceite do banner da AdOpt mudar entre os dois períodos, o denominador muda sem que a conversão real mude, e o teste lê isso como mudança de conversão. Com este dado, as duas coisas são indistinguíveis.
 
 ### Destaques
 
@@ -354,7 +365,16 @@ O limiar de variação de impressões reusa `organic_drop_percent` do Módulo 5 
 
 ### Páginas mais encontradas
 
-Do snapshot de 30 dias, ordenadas por **impressões** — é o que a Search Console mede de procura. Páginas, e não consultas: as consultas de alto volume fora da faixa de oportunidade têm o texto minimizado no snapshot (#278). O bloco é só ranking e declara a janela; a defasagem muda os totais e pode trocar de lugar páginas próximas, mas nenhum número do bloco depende de o dia ausente ser zero.
+Ordenadas por **impressões** — é o que a Search Console mede de procura. Páginas, e não consultas, porque o pilar 4 pergunta pelos produtos e serviços mais procurados e página é a unidade de produto e serviço no site; as consultas já aparecem no bloco de oportunidades de SEO. (O primeiro rascunho justificava a escolha com a minimização de texto do #278. Era falso: `search_console.queries` guarda 10 consultas com texto inteiro, e a revisão do PR #301 mediu que 9 das 10 maiores têm texto.)
+
+A primeira versão lia as 10 páginas do snapshot, e a revisão do PR #301 encontrou dois defeitos:
+
+- **Três das cinco linhas não eram páginas do site.** Conferido por HTTP em 2026-09-28: `/olhal-de-ancoragem/` dava **404** com 327 impressões, e `/projeto-de-balancim` e `/projeto-de-ancoragem` eram **301** para `/servico/...`. O bloco os apresentava como páginas, e os 301 dividiam as impressões entre o endereço antigo e o novo.
+- **O ranking dependia da ordem errada.** O snapshot guarda as 10 páginas de mais **cliques**, porque a API ordena por cliques. Reordenar essas 10 por impressões perdia justamente as páginas de muita impressão e pouco clique — a quinta posição daquele dia dependia disso por 9 impressões.
+
+Agora o bloco busca até 100 páginas numa janela **assentada** de 28 dias (terminando no mesmo dia que a semana das impressões) e confere o status HTTP das 10 de mais impressão, sem seguir redirecionamento. **Redirecionamento é somado ao destino**, que passa a declarar quantos endereços antigos inclui. **404 entra marcado em vermelho**: página que o Google mostra e não existe é o achado mais acionável do bloco. Status que não pôde ser conferido fica como "não verificado", nunca como página existente — requisição de loopback pode ser bloqueada em alguns hosts. Redirecionamento para fora do site não é somado a nada.
+
+São até ~10 requisições HEAD ao próprio site por semana.
 
 ### O que o Módulo 4 ainda não entrega
 

@@ -63,7 +63,7 @@ if ( ! function_exists( 'uonix_intelligence_report_context' ) ) {
 		// Módulo 4. Opcional: sem o 59 carregado, o e-mail sai como antes, só com as
 		// oportunidades de SEO. Ver 59-admin-intelligence-executive.php.
 		$executive = function_exists( 'uonix_intelligence_executive_collect' )
-			? uonix_intelligence_executive_collect( array( 'snapshot' => $snapshot, 'seo' => $analysis ) )
+			? uonix_intelligence_executive_collect( array( 'seo' => $analysis ) )
 			: null;
 
 		return array(
@@ -218,8 +218,14 @@ if ( ! function_exists( 'uonix_intelligence_report_box_html' ) ) {
 				$linhas[] = '<span style="color:#b91c1c;font-weight:bold;">▼ nenhuma impressão na semana</span> ' . esc_html( '— veja a aba Anomalias' );
 			} elseif ( ! empty( $box['comparable'] ) ) {
 				$linhas[] = uonix_intelligence_report_delta_html( $box['delta_percent'], 'vs. semana anterior' );
+			} elseif ( 'previous_incomplete' === ( $box['note'] ?? '' ) ) {
+				// Sem porcentagem: com dia ausente na semana anterior, a variação sairia
+				// inflada — e é por isso que ela não é mostrada.
+				$faltam   = (int) ( $box['missing_prev'] ?? 0 );
+				$linhas[] = esc_html( sprintf( 'sem comparação: a semana anterior tem %d %s sem dado', $faltam, 1 === $faltam ? 'dia' : 'dias' ) );
 			} else {
-				$linhas[] = esc_html( sprintf( 'comparação parcial: %d dia(s) ainda sem dado', (int) ( $box['imputed_days'] ?? 0 ) ) );
+				$faltam   = (int) ( $box['imputed_days'] ?? 0 );
+				$linhas[] = esc_html( sprintf( 'sem comparação: %d %s desta semana ainda sem dado', $faltam, 1 === $faltam ? 'dia' : 'dias' ) );
 			}
 			// A semana termina alguns dias antes de hoje porque a Search Console publica
 			// com atraso. Dizer isso evita que a data pareça um erro.
@@ -311,11 +317,9 @@ if ( ! function_exists( 'uonix_intelligence_report_executive_pages_html' ) ) {
 		$procedencia = 'Fonte: Search Console';
 		$janela      = uonix_intelligence_report_window_label( isset( $paginas['window'] ) ? $paginas['window'] : null );
 		if ( '' !== $janela ) {
-			$procedencia .= ' · ' . $janela;
+			$procedencia .= ' · ' . $janela . ' (28 dias, sem os dias ainda não publicados)';
 		}
-		$momento = isset( $paginas['synced_at'] ) && '' !== (string) $paginas['synced_at'] ? strtotime( (string) $paginas['synced_at'] ) : false;
-		$procedencia .= false !== $momento ? ' · sincronizado em ' . gmdate( 'd/m/Y H:i', $momento ) . ' (UTC)' : '';
-		$procedencia .= ! empty( $paginas['stale'] ) ? ' · dado desatualizado' : '';
+		$procedencia .= ' · endereços antigos que redirecionam foram somados ao destino';
 
 		$html  = '<tr><td style="padding:8px 28px 8px 28px;">';
 		$html .= '<div style="color:#0e3780;font-size:16px;font-weight:bold;">Páginas mais encontradas na busca</div>';
@@ -324,7 +328,7 @@ if ( ! function_exists( 'uonix_intelligence_report_executive_pages_html' ) ) {
 
 		$html .= '<tr><td style="padding:8px 28px 24px 28px;">';
 		if ( empty( $paginas['available'] ) ) {
-			$html .= '<div style="padding:14px 16px;background-color:#fffbeb;border-left:4px solid #f59e0b;color:#78350f;font-size:13px;line-height:1.5;">As páginas mais encontradas ainda não estão disponíveis: o snapshot da Search Console não foi sincronizado.</div>';
+			$html .= '<div style="padding:14px 16px;background-color:#fffbeb;border-left:4px solid #f59e0b;color:#78350f;font-size:13px;line-height:1.5;">As páginas mais encontradas não estão disponíveis nesta semana: a consulta à Search Console não retornou dados.</div>';
 		} else {
 			$html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;">';
 			$html .= '<tr style="background-color:#f8fafc;">';
@@ -336,8 +340,21 @@ if ( ! function_exists( 'uonix_intelligence_report_executive_pages_html' ) ) {
 				if ( ! is_array( $linha ) ) {
 					continue;
 				}
-				$html .= '<tr>';
-				$html .= '<td style="padding:10px;border-bottom:1px solid #f1f5f9;color:#1e293b;">' . esc_html( isset( $linha['label'] ) ? (string) $linha['label'] : '' ) . '</td>';
+				$estado = isset( $linha['state'] ) ? (string) $linha['state'] : 'unknown';
+				$html  .= '<tr>';
+				$html  .= '<td style="padding:10px;border-bottom:1px solid #f1f5f9;color:#1e293b;">' . esc_html( isset( $linha['label'] ) ? (string) $linha['label'] : '' );
+				// Página que o Google mostra e não existe é o achado mais acionável do
+				// bloco, então ela é marcada em vermelho em vez de escondida.
+				if ( 'not_found' === $estado ) {
+					$html .= '<div style="color:#b91c1c;font-size:11px;font-weight:bold;padding-top:3px;">Esta página não existe (404): o Google mostra o endereço e o visitante não encontra nada.</div>';
+				} elseif ( 'ok' !== $estado ) {
+					$html .= '<div style="color:#64748b;font-size:11px;padding-top:3px;">Status da página não verificado.</div>';
+				}
+				$somados = isset( $linha['merged'] ) ? (int) $linha['merged'] : 0;
+				if ( $somados > 0 ) {
+					$html .= '<div style="color:#64748b;font-size:11px;padding-top:3px;">' . esc_html( 1 === $somados ? 'Inclui 1 endereço antigo que redireciona para cá.' : sprintf( 'Inclui %d endereços antigos que redirecionam para cá.', $somados ) ) . '</div>';
+				}
+				$html .= '</td>';
 				$html .= '<td align="right" style="padding:10px;border-bottom:1px solid #f1f5f9;color:#1e293b;">' . esc_html( number_format( (float) ( $linha['impressions'] ?? 0 ), 0, ',', '.' ) ) . '</td>';
 				$html .= '<td align="right" style="padding:10px;border-bottom:1px solid #f1f5f9;color:#1e293b;">' . esc_html( number_format( (float) ( $linha['clicks'] ?? 0 ), 0, ',', '.' ) ) . '</td>';
 				$html .= '</tr>';

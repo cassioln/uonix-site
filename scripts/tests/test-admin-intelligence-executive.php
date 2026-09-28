@@ -278,6 +278,29 @@ $orgImp = uonix_intelligence_executive_organic_box( uonix_intelligence_anomaly_o
 uox_assert( null === $orgImp['delta_percent'] && 'imputed' === $orgImp['note'], 'com dia imputado a porcentagem é LIMITE do alerta, não medição, e deve ser recusada no relatório' );
 uox_assert( 1 === $orgImp['imputed_days'], 'deve declarar quantos dias foram imputados' );
 
+// ALTO 1 da revisão do PR #301: dia ausente na semana ANTERIOR.
+//
+// `imputed_days` do Módulo 5 conta só a semana atual. Na anterior, dia ausente vale
+// zero — conservador para detectar queda, errado para exibir variação. Com tráfego
+// CONSTANTE e dois dias ausentes na semana anterior, a caixa exibia "▲ +40%".
+$anteriorFurada = static function ( $faltam, $impAtual ) {
+	return static function ( $config, $period ) use ( $faltam, $impAtual ) {
+		$ant = array_slice( uox_gsc_serie( '2026-09-17', 7, 100 ), $faltam );
+		return array_merge( $ant, uox_gsc_serie( '2026-09-24', 7, $impAtual ) );
+	};
+};
+$achadoFurado = uonix_intelligence_anomaly_organic_drop( $anteriorFurada( 2, 100 ), $CFG, $HOJE );
+uox_assert( ! empty( $achadoFurado['available'] ) && 40.0 === (float) ( $achadoFurado['measured']['delta_percent'] ?? 0 ), 'contraprova: o Módulo 5 mede +40% nesse cenário, senão o fixture não reproduz o defeito; obteve ' . var_export( $achadoFurado['measured']['delta_percent'] ?? null, true ) );
+$orgFurado = uonix_intelligence_executive_organic_box( $achadoFurado );
+uox_assert( null === $orgFurado['delta_percent'] && empty( $orgFurado['comparable'] ), 'com dia ausente na semana ANTERIOR a porcentagem deve ser recusada: tráfego constante sairia como +40%' );
+uox_assert( 'previous_incomplete' === $orgFurado['note'] && 2 === $orgFurado['missing_prev'], 'a caixa deve dizer que a semana anterior tem 2 dias sem dado' );
+uox_assert( 0 === $orgFurado['imputed_days'], 'e a semana atual está completa' );
+
+// O mesmo defeito no sentido perigoso: queda real de −35% com três dias ausentes na
+// semana anterior saía como "+13,8%, abaixo do limiar".
+$orgQuedaFurada = uonix_intelligence_executive_organic_box( uonix_intelligence_anomaly_organic_drop( $anteriorFurada( 3, 65 ), $CFG, $HOJE ) );
+uox_assert( null === $orgQuedaFurada['delta_percent'], 'queda real com semana anterior furada não pode sair como variação nenhuma, muito menos positiva' );
+
 $colapso = static function ( $config, $period ) { return uox_gsc_serie( '2026-09-17', 7, 100 ); };
 $orgCol  = uonix_intelligence_executive_organic_box( uonix_intelligence_anomaly_organic_drop( $colapso, $CFG, $HOJE ) );
 uox_assert( 'collapse' === $orgCol['note'] && -100.0 === $orgCol['delta_percent'], 'semana sem impressão contra semana cheia é colapso de −100%' );
@@ -342,6 +365,15 @@ $d35      = uonix_intelligence_executive_insights( $placar35, null );
 uox_assert( false !== strpos( $d35[1]['text'] ?? '', 'subiram 35,0%' ), 'exatamente +35% é relevante, obteve: ' . ( $d35[1]['text'] ?? '' ) );
 uox_assert( false !== strpos( $d35[1]['text'], 'a visibilidade cresceu mais que a demanda' ), 'impressões subindo sem aumento detectável de orçamentos deve ser dito' );
 
+// MÉDIO 3 da revisão do PR #301: com queda DETECTÁVEL de orçamentos, o destaque de
+// impressões não pode dizer "sem aumento detectável" logo depois do que diz "caíram".
+$leadsQueda  = array_merge( uox_leads( '2026-09-01', 1 ), uox_leads( '2026-08-05', 9 ) );
+$placarQueda = uonix_intelligence_executive_scorecard( array( 'today' => $HOJE, 'lead_counts' => $leadsQueda, 'ga4' => $ga4Real, 'organic' => uonix_intelligence_anomaly_organic_drop( $fetcherGsc( 140 ), $CFG, $HOJE ) ) );
+$dQueda      = uonix_intelligence_executive_insights( $placarQueda, null );
+uox_assert( false !== strpos( $dQueda[0]['text'] ?? '', 'caíram de forma detectável' ), 'o fixture deveria ter queda detectável de orçamentos' );
+uox_assert( false !== strpos( $dQueda[1]['text'] ?? '', 'enquanto os orçamentos caíram' ), 'impressões subindo com orçamentos caindo deve dizer isso, obteve: ' . ( $dQueda[1]['text'] ?? '' ) );
+uox_assert( false === strpos( $dQueda[1]['text'] ?? '', 'sem aumento detectável' ), 'e não pode usar a frase que soa como contradição do destaque anterior' );
+
 $placarCai = uonix_intelligence_executive_scorecard( array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'ga4' => $ga4Real, 'organic' => uonix_intelligence_anomaly_organic_drop( $fetcherGsc( 60 ), $CFG, $HOJE ) ) );
 uox_assert( false !== strpos( uonix_intelligence_executive_insights( $placarCai, null )[1]['text'] ?? '', 'Veja a aba Anomalias' ), 'queda relevante deve remeter ao Alerta de Anomalias' );
 
@@ -352,23 +384,86 @@ uox_assert( array() === uonix_intelligence_executive_insights( $vazio, null ), '
 // 10. Páginas mais encontradas.
 // ---------------------------------------------------------------------------
 
-$snapshot = array(
-	'updated_at'     => '2026-09-28T15:59:49+00:00',
-	'periods'        => array( 'current' => array( 'start' => '2026-08-29', 'end' => '2026-09-27' ) ),
-	'search_console' => array( 'pages' => array(
-		array( 'page' => '/', 'clicks' => 33, 'impressions' => 201 ),
-		array( 'page' => '/ensaio-de-arrancamento/', 'clicks' => 10, 'impressions' => 987 ),
-		array( 'page' => '/projeto-de-balancim', 'clicks' => 10, 'impressions' => 332 ),
-		array( 'page' => '/a', 'clicks' => 1, 'impressions' => 50 ),
-		array( 'page' => '/b', 'clicks' => 1, 'impressions' => 40 ),
-		array( 'page' => '/c', 'clicks' => 1, 'impressions' => 30 ),
-	) ),
+// O cenário que a revisão do PR #301 encontrou em PRODUÇÃO, conferido por HTTP em
+// 2026-09-28: `/olhal-de-ancoragem/` dá 404 com 327 impressões, e `/projeto-de-balancim`
+// e `/projeto-de-ancoragem` são 301 para `/servico/...`. O bloco antigo os apresentava
+// como páginas do site, e os 301 dividiam as impressões entre endereço antigo e novo.
+$linhasPaginas = array(
+	array( 'page' => '/', 'clicks' => 33, 'impressions' => 201 ),
+	array( 'page' => '/ensaio-de-arrancamento/', 'clicks' => 10, 'impressions' => 987 ),
+	array( 'page' => '/olhal-de-ancoragem/', 'clicks' => 0, 'impressions' => 327 ),
+	array( 'page' => '/projeto-de-balancim', 'clicks' => 10, 'impressions' => 332 ),
+	array( 'page' => '/servico/projeto-balancim/', 'clicks' => 5, 'impressions' => 171 ),
+	array( 'page' => '/projeto-de-ancoragem', 'clicks' => 2, 'impressions' => 150 ),
+	array( 'page' => '/projeto-de-andaime-fachadeiro', 'clicks' => 1, 'impressions' => 192 ),
+	array( 'page' => '/servico/projeto-ancoragem/', 'clicks' => 1, 'impressions' => 20 ),
+	array( 'page' => '/pouco', 'clicks' => 0, 'impressions' => 5 ),
 );
-$paginas = uonix_intelligence_executive_top_pages( $snapshot, null, static function ( $p ) { return '/' === $p ? 'Página inicial' : 'rótulo ' . $p; } );
-uox_assert( 5 === count( $paginas['rows'] ), 'o bloco é um digest de 5 páginas' );
-uox_assert( '/ensaio-de-arrancamento/' === $paginas['rows'][0]['path'], 'a ordem é por impressões, não por cliques: a página inicial tem mais cliques e menos impressões' );
+$statusFixo = static function ( $p ) {
+	$mapa = array(
+		'/olhal-de-ancoragem/'  => array( 'state' => 'not_found', 'code' => 404, 'location' => '' ),
+		'/projeto-de-balancim'  => array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/servico/projeto-balancim/' ),
+		'/projeto-de-ancoragem' => array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/servico/projeto-ancoragem/' ),
+	);
+	return $mapa[ $p ] ?? array( 'state' => 'ok', 'code' => 200, 'location' => '' );
+};
+$rotulo      = static function ( $p ) { return '/' === $p ? 'Página inicial' : 'Título de ' . $p; };
+$janelaPag   = array( 'start' => '2026-08-28', 'end' => '2026-09-24' );
+$paginas     = uonix_intelligence_executive_top_pages( $linhasPaginas, $janelaPag, $statusFixo, $rotulo );
+$porCaminho  = array();
+foreach ( $paginas['rows'] as $r ) { $porCaminho[ $r['path'] ] = $r; }
+
+uox_assert( 5 === count( $paginas['rows'] ), 'o bloco é um digest de 5 páginas, obteve ' . count( $paginas['rows'] ) );
+uox_assert( '/ensaio-de-arrancamento/' === $paginas['rows'][0]['path'], 'a ordem é por impressões, não por cliques' );
+
+// O 301 é SOMADO ao destino: 332 + 171 = 503, e com isso ele sobe de posição.
+uox_assert( ! isset( $porCaminho['/projeto-de-balancim'] ), 'o endereço antigo que redireciona não pode aparecer como página' );
+uox_assert( 503.0 === ( $porCaminho['/servico/projeto-balancim/']['impressions'] ?? 0.0 ), 'o destino deve somar as impressões do endereço antigo: 332 + 171 = 503, obteve ' . var_export( $porCaminho['/servico/projeto-balancim/']['impressions'] ?? null, true ) );
+uox_assert( 15.0 === ( $porCaminho['/servico/projeto-balancim/']['clicks'] ?? 0.0 ), 'e os cliques: 10 + 5 = 15' );
+uox_assert( 1 === ( $porCaminho['/servico/projeto-balancim/']['merged'] ?? 0 ), 'o destino deve declarar quantos endereços antigos foram somados' );
+uox_assert( '/servico/projeto-balancim/' === ( $paginas['rows'][1]['path'] ?? '' ), 'com a soma, o destino passa a ser a segunda página' );
+uox_assert( 'Título de /servico/projeto-balancim/' === ( $porCaminho['/servico/projeto-balancim/']['label'] ?? '' ), 'o destino, que responde 200, recebe o título' );
+
+// Destino FORA das candidatas: recebe a soma e tem o status conferido depois. Com uma
+// candidata só, `/antigo` (100) é conferida e redireciona; `/novo` (10) não era
+// candidata e precisa ser conferida na montagem final, uma vez.
+$conferidos = array();
+$statusConta = static function ( $p ) use ( &$conferidos ) {
+	$conferidos[] = $p;
+	return '/antigo' === $p ? array( 'state' => 'redirect', 'code' => 301, 'location' => '/novo' ) : array( 'state' => 'ok', 'code' => 200, 'location' => '' );
+};
+$foraCand = uonix_intelligence_executive_top_pages( array( array( 'page' => '/antigo', 'clicks' => 3, 'impressions' => 100 ), array( 'page' => '/novo', 'clicks' => 1, 'impressions' => 10 ) ), $janelaPag, $statusConta, $rotulo, 5, 1 );
+uox_assert( '/novo' === ( $foraCand['rows'][0]['path'] ?? '' ) && 110.0 === ( $foraCand['rows'][0]['impressions'] ?? 0.0 ), 'destino fora das candidatas recebe a soma: 100 + 10 = 110' );
+uox_assert( 'ok' === ( $foraCand['rows'][0]['state'] ?? '' ), 'e tem o status conferido na montagem final, não fica sem verificação' );
+uox_assert( array( '/antigo', '/novo' ) === $conferidos, 'cada caminho deve ser conferido uma vez só, obteve ' . json_encode( $conferidos ) );
+
+// Destino que não está em linha nenhuma é criado com o volume do endereço antigo.
+$semDestino = uonix_intelligence_executive_top_pages( array( array( 'page' => '/velho', 'clicks' => 2, 'impressions' => 40 ) ), $janelaPag, static function ( $p ) { return '/velho' === $p ? array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/destino/' ) : array( 'state' => 'ok', 'code' => 200, 'location' => '' ); }, $rotulo );
+uox_assert( '/destino/' === ( $semDestino['rows'][0]['path'] ?? '' ) && 40.0 === ( $semDestino['rows'][0]['impressions'] ?? 0.0 ), 'destino ausente das linhas é criado com o volume do endereço antigo' );
+
+// O 404 é MARCADO, não escondido e não rotulado como página do site.
+uox_assert( 'not_found' === ( $porCaminho['/olhal-de-ancoragem/']['state'] ?? '' ), 'página que dá 404 deve entrar marcada como inexistente' );
+uox_assert( '/olhal-de-ancoragem/' === ( $porCaminho['/olhal-de-ancoragem/']['label'] ?? '' ), 'página inexistente não pode receber título: ela não é página do site' );
+
+// A quinta posição: `/projeto-de-andaime-fachadeiro` (192 impr, 1 clique) só aparece
+// porque a lista vem por impressões. Com as 10 de mais cliques do snapshot, ficava fora.
+uox_assert( isset( $porCaminho['/projeto-de-andaime-fachadeiro'] ), 'página de muita impressão e pouco clique precisa entrar no ranking' );
+
+// Status desconhecido nunca vira "ok".
+$semStatus = uonix_intelligence_executive_top_pages( array( array( 'page' => '/x', 'clicks' => 1, 'impressions' => 10 ) ), $janelaPag, static function () { return array( 'state' => 'unknown', 'code' => 0, 'location' => '' ); }, $rotulo );
+uox_assert( 'unknown' === ( $semStatus['rows'][0]['state'] ?? '' ), 'falha ao conferir o status deve ficar como não verificado, nunca como página existente' );
+uox_assert( '/x' === ( $semStatus['rows'][0]['label'] ?? '' ), 'e sem status verificado não há título' );
+
+// Redirecionamento para fora do site não é somado a nada.
+$externo = uonix_intelligence_executive_top_pages( array( array( 'page' => '/sai', 'clicks' => 1, 'impressions' => 10 ) ), $janelaPag, static function () { return array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://outro-site.com/x' ); }, $rotulo );
+// O CAMINHO, e não só o estado. A verificação por mutação mostrou que conferir só o
+// estado passava mesmo com a linha trocada pelo endereço externo — que também sai como
+// "não verificado".
+uox_assert( '/sai' === ( $externo['rows'][0]['path'] ?? '' ) && 1 === count( $externo['rows'] ), 'redirecionamento para fora do site não tem destino onde somar: a linha fica no endereço original, obteve ' . json_encode( $externo['rows'] ) );
+uox_assert( 'unknown' === ( $externo['rows'][0]['state'] ?? '' ), 'e fica como status não verificado' );
+
 uox_assert( 'Página inicial' === uonix_intelligence_executive_page_label( '/' ), 'a raiz deve ser rotulada como Página inicial' );
-uox_assert( empty( uonix_intelligence_executive_top_pages( false )['available'] ), 'sem snapshot o bloco é indisponível' );
+uox_assert( 'pages_fetch_failed' === ( uonix_intelligence_executive_top_pages( new WP_Error( 'x' ), $janelaPag )['reason'] ?? '' ), 'falha de busca deixa o bloco indisponível com motivo' );
 
 // ---------------------------------------------------------------------------
 // 11. collect(): o caminho inteiro, com rede injetada.
@@ -379,28 +474,40 @@ $fetcherGa4    = static function ( $config, $period ) use ( &$periodoPedido ) {
 	$periodoPedido = $period;
 	return uox_ga4_rows( '2026-08-29', '2026-09-27', static function ( $d ) { return $d >= '2026-09-21' ? 12 : 10; } );
 };
+$periodoPaginas = null;
+$fetcherPaginas = static function ( $config, $period ) use ( &$periodoPaginas, $linhasPaginas ) {
+	$periodoPaginas = $period;
+	return $linhasPaginas;
+};
 $exec = uonix_intelligence_executive_collect( array(
-	'today'       => $HOJE,
-	'lead_counts' => $leadsFlat,
-	'config'      => $CFG,
-	'ga4_fetcher' => $fetcherGa4,
-	'gsc_fetcher' => $fetcherGsc( 130 ),
-	'snapshot'    => $snapshot,
-	'seo'         => $seo,
-	'labeler'     => static function ( $p ) { return $p; },
+	'today'          => $HOJE,
+	'lead_counts'    => $leadsFlat,
+	'config'         => $CFG,
+	'ga4_fetcher'    => $fetcherGa4,
+	'gsc_fetcher'    => $fetcherGsc( 130 ),
+	'pages_fetcher'  => $fetcherPaginas,
+	'status_fetcher' => $statusFixo,
+	'seo'            => $seo,
+	'labeler'        => $rotulo,
 ) );
 uox_assert( '2026-07-27' === ( $periodoPedido['start'] ?? '' ), 'o GA4 deve ser pedido desde 7 dias antes da janela mais antiga (03/08 − 7 = 27/07), para a cobertura ser verificável; obteve ' . ( $periodoPedido['start'] ?? '(nada)' ) );
 uox_assert( '2026-09-27' === ( $periodoPedido['end'] ?? '' ), 'e até ontem' );
+// As páginas usam a janela ASSENTADA de 28 dias, terminando no mesmo dia que a semana
+// das impressões (hoje − 4), e não ontem.
+uox_assert( '2026-09-24' === ( $periodoPaginas['end'] ?? '' ), 'as páginas devem terminar 4 dias antes de hoje, como as impressões; obteve ' . ( $periodoPaginas['end'] ?? '(nada)' ) );
+uox_assert( '2026-08-28' === ( $periodoPaginas['start'] ?? '' ), 'e ter 28 dias: 28/08 a 24/09' );
+uox_assert( '/servico/projeto-balancim/' === ( $exec['top_pages']['rows'][1]['path'] ?? '' ), 'collect deve montar as páginas com a soma dos redirecionamentos' );
 uox_assert( 84 === ( $exec['scorecard']['boxes']['visits']['current'] ?? -1 ), 'collect deve montar a caixa de visitas a partir do fetcher' );
 uox_assert( 3 === count( $exec['insights'] ), 'collect deve produzir os destaques' );
 
 // Sem `lead_counts` injetado, os orçamentos vêm do banco pelo mesmo leitor do Módulo 5.
 $GLOBALS['uox_lead_rows'] = array( '2026-09-22' => 3 );
-$execDb = uonix_intelligence_executive_collect( array( 'today' => $HOJE, 'config' => $CFG, 'ga4_fetcher' => $fetcherGa4, 'gsc_fetcher' => $fetcherGsc( 130 ), 'snapshot' => $snapshot ) );
+$execDb = uonix_intelligence_executive_collect( array( 'today' => $HOJE, 'config' => $CFG, 'ga4_fetcher' => $fetcherGa4, 'gsc_fetcher' => $fetcherGsc( 130 ), 'pages_fetcher' => $fetcherPaginas, 'status_fetcher' => $statusFixo ) );
 uox_assert( 3 === ( $execDb['scorecard']['boxes']['leads']['current'] ?? -1 ), 'sem injeção, os orçamentos devem vir do banco' );
 
-$execSemCfg = uonix_intelligence_executive_collect( array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'config' => null, 'snapshot' => $snapshot ) );
+$execSemCfg = uonix_intelligence_executive_collect( array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'config' => null ) );
 uox_assert( empty( $execSemCfg['scorecard']['boxes']['visits']['available'] ), 'sem credenciais as visitas são indisponíveis' );
+uox_assert( empty( $execSemCfg['top_pages']['available'] ), 'e as páginas também' );
 uox_assert( ! empty( $execSemCfg['scorecard']['boxes']['leads']['available'] ), 'mas os orçamentos, que não dependem do Google, continuam disponíveis' );
 
 // ---------------------------------------------------------------------------
@@ -453,6 +560,43 @@ $pPag    = strpos( $html, 'Páginas mais encontradas na busca' );
 uox_assert( false !== $pResumo && false !== $pDest && false !== $pSeo && false !== $pPag, 'os quatro blocos devem estar presentes' );
 uox_assert( $pResumo < $pDest && $pDest < $pSeo && $pSeo < $pPag, 'a ordem deve ser: resumo, destaques, oportunidades de SEO, páginas' );
 uox_assert( false !== strpos( $html, '/ensaio-de-arrancamento/' ), 'o bloco de páginas deve listar a página de maior impressão' );
+
+// As marcas de status das páginas (ALTO 2 da revisão do PR #301).
+uox_assert( false !== strpos( $html, 'Esta página não existe (404)' ), 'a página que dá 404 deve aparecer marcada em vermelho no e-mail' );
+uox_assert( false !== strpos( $html, 'Inclui 1 endereço antigo que redireciona para cá.' ), 'o destino deve declarar que somou um endereço antigo' );
+uox_assert( false === strpos( $html, 'Título de /olhal-de-ancoragem/' ), 'a página inexistente não pode aparecer com título' );
+uox_assert( false !== strpos( $html, 'endereços antigos que redirecionam foram somados ao destino' ), 'a procedência do bloco deve dizer que os redirecionamentos foram somados' );
+
+// MÉDIO 6 da revisão do PR #301: todo texto condicional do e-mail precisa de asserção.
+// Sem isto, a lição do PR #298 se repetia — a tela podia dizer o texto errado com a
+// suíte verde.
+$renderCom = static function ( array $troca ) use ( $exec, $analise ) {
+	$e = $exec;
+	foreach ( $troca as $chave => $caixa ) { $e['scorecard']['boxes'][ $chave ] = $caixa; }
+	return uonix_intelligence_report_html( array( 'analysis' => $analise, 'executive' => $e, 'period_label' => '', 'environment' => 'production', 'panel_url' => '' ) );
+};
+
+$cAnt = uox_celula( $renderCom( array( 'organic' => $orgFurado ) ), 'Impressões na busca' );
+uox_assert( false !== strpos( $cAnt, 'sem comparação: a semana anterior tem 2 dias sem dado' ), 'semana anterior incompleta deve ser dita na caixa, obteve: ' . strip_tags( $cAnt ) );
+uox_assert( false === strpos( $cAnt, '%' ), 'e a caixa não pode exibir porcentagem nesse caso' );
+
+$cImp = uox_celula( $renderCom( array( 'organic' => $orgImp ) ), 'Impressões na busca' );
+uox_assert( false !== strpos( $cImp, 'sem comparação: 1 dia desta semana ainda sem dado' ), 'semana atual incompleta deve ser dita na caixa, obteve: ' . strip_tags( $cImp ) );
+
+$cCol = uox_celula( $renderCom( array( 'organic' => $orgCol ) ), 'Impressões na busca' );
+uox_assert( false !== strpos( $cCol, 'nenhuma impressão na semana' ) && false !== strpos( $cCol, 'Anomalias' ), 'o colapso deve ser dito e remeter à aba Anomalias' );
+
+$cUp = uox_celula( $renderCom( array( 'leads' => $caixaAlta ) ), 'Orçamentos' );
+uox_assert( false !== strpos( $cUp, '▲ aumento detectável' ), 'aumento detectável de orçamentos deve aparecer na caixa' );
+$cDown = uox_celula( $renderCom( array( 'leads' => $caixaBaixa ) ), 'Orçamentos' );
+uox_assert( false !== strpos( $cDown, '▼ queda detectável' ), 'queda detectável de orçamentos deve aparecer na caixa' );
+
+$cConvCmp = uox_celula( $renderCom( array( 'conversion' => $convCmp ) ), 'Conversão' );
+uox_assert( false !== strpos( $cConvCmp, 'antes: até ' . number_format( $convCmp['prev_rate'] * 100, 1, ',', '.' ) . '%' ), 'conversão comparável deve exibir a taxa anterior como teto, obteve: ' . strip_tags( $cConvCmp ) );
+uox_assert( false !== strpos( $cConvCmp, '▲ aumento detectável' ), 'e o resultado do teste' );
+
+$cVisNova = uox_celula( $renderCom( array( 'visits' => $visNovas ) ), 'Visitas' );
+uox_assert( false !== strpos( $cVisNova, 'sem histórico do GA4 para comparar' ) && false === strpos( $cVisNova, '%' ), 'visitas sem histórico dizem isso e não exibem porcentagem' );
 
 // Escape: rótulo de página e texto de destaque vêm de dado.
 $execXss = $exec;

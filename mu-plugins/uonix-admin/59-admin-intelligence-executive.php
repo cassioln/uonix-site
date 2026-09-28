@@ -25,14 +25,18 @@ if ( ! function_exists( 'uonix_intelligence_executive_rules' ) ) {
 	 * `uonix_intelligence_executive_binomial_p()`.
 	 *
 	 * `top_pages` = 5 é tamanho de digest, não medição: o bloco é informativo e não
-	 * decide nada.
+	 * decide nada. `page_candidates` = 10 é quantas páginas têm o status HTTP
+	 * conferido — o dobro do que se exibe, porque cada redirecionamento somado libera
+	 * uma posição. São no máximo ~10 requisições HEAD por semana.
 	 */
 	function uonix_intelligence_executive_rules() {
 		return array(
-			'detect_alpha'   => 0.05,
-			'lead_days_read' => 60,
-			'ga4_buffer'     => 7,
-			'top_pages'      => 5,
+			'detect_alpha'    => 0.05,
+			'lead_days_read'  => 60,
+			'ga4_buffer'      => 7,
+			'top_pages'       => 5,
+			'page_candidates' => 10,
+			'pages_days'      => 28,
 		);
 	}
 }
@@ -44,10 +48,16 @@ if ( ! function_exists( 'uonix_intelligence_executive_windows' ) ) {
 	 * Ontem, e não hoje, porque o relatório sai segunda às 08:00: "hoje" teria oito
 	 * horas e puxaria a semana para baixo. Terminar ontem dá sete dias inteiros.
 	 *
-	 * Ontem é seguro para o GA4 e para os orçamentos, e isso foi MEDIDO em
-	 * 2026-09-28: às 13:00 o GA4 já devolvia dado parcial do próprio dia 28/09, então
-	 * a defasagem dele é de horas, não de dias. Os orçamentos vêm do banco local, sem
-	 * defasagem nenhuma.
+	 * Para os orçamentos, ontem é exato: vêm do banco local, sem defasagem nenhuma.
+	 *
+	 * Para o GA4, o que foi MEDIDO em 2026-09-28 é que às 13:00 já havia dado parcial
+	 * do próprio dia 28/09 — o dado intradiário chega em horas. **Não foi medido que o
+	 * dia anterior esteja fechado às 08:00 de segunda**, quando o relatório sai: o
+	 * processamento diário do GA4 pode seguir refinando o dia por mais algumas horas. O
+	 * dia afetado é o domingo, e o tamanho do erro possível foi medido no mesmo dia: o
+	 * domingo 27/09 teve 2 das 65 visitas da semana (~3%). Então o viés possível na
+	 * variação semanal de visitas é dessa ordem, para baixo. Aceitável para um digest,
+	 * e declarado aqui para ninguém ler a caixa como exata.
 	 *
 	 * A Search Console NÃO usa estas janelas. Ela publica com ~3 dias de atraso
 	 * (medido de novo em 2026-09-28: série terminando em 25/09), e a janela dela vem
@@ -129,8 +139,15 @@ if ( ! function_exists( 'uonix_intelligence_executive_binomial_p' ) ) {
 	 * site é pequeno e a aproximação erra justamente ali. Exemplo: 0 contra 5 passa na
 	 * aproximação (5 > 4,47), mas o valor-p exato é 0,0625 — não detectável a 5%.
 	 *
-	 * Bilateral por duplicação da cauda menor, limitado a 1. Calculado em espaço de
-	 * logaritmo, para 0,5ⁿ não virar zero em n grande.
+	 * Bilateral por **duplicação da cauda menor**, limitado a 1. Para p0 ≠ 0,5 existe
+	 * outra convenção — somar as probabilidades menores ou iguais à observada, que é o
+	 * padrão do `binom.test` do R — e as duas divergem: para 3 em 3 com p0 = 0,2, esta
+	 * dá 0,016 e aquela dá 0,008. A duplicação é mais conservadora (cala onde a outra
+	 * dispararia), e a revisão do PR #301 mediu que o tamanho real deste teste nunca
+	 * passa de 5% na grade n ≤ 80, p0 ∈ [0,02; 0,98]. Perde poder, não inventa sinal —
+	 * a direção certa para um relatório que não pode afirmar mudança que não houve.
+	 *
+	 * Calculado em espaço de logaritmo, para 0,5ⁿ não virar zero em n grande.
 	 */
 	function uonix_intelligence_executive_binomial_p( $k, $n, $p0 = 0.5 ) {
 		$k  = (int) $k;
@@ -334,9 +351,18 @@ if ( ! function_exists( 'uonix_intelligence_executive_organic_box' ) ) {
 	 * completude que duas revisões independentes do PR #293 obrigaram a construir.
 	 * Somar de novo neste arquivo seria reabrir os pontos cegos que lá foram fechados.
 	 *
-	 * Quando houve imputação de dias ausentes, a variação daquela função é um LIMITE
-	 * construído para o alerta, não uma medição. Aqui a caixa mostra os números
-	 * observados e recusa a porcentagem.
+	 * **A porcentagem só é exibida com as DUAS semanas completas.** A versão anterior
+	 * olhava apenas `imputed_days`, e a revisão do PR #301 mediu o dano: esse campo
+	 * conta só os dias ausentes da semana ATUAL. Na semana anterior, o Módulo 5 trata
+	 * dia ausente como zero — conservador para detectar QUEDA, que é o trabalho dele,
+	 * e errado para exibir variação nos dois sentidos. Com tráfego constante e dois dias
+	 * ausentes na semana anterior, o e-mail diria "▲ +40%"; com queda real de −35% e
+	 * três dias ausentes, diria "+13,8%, abaixo do limiar".
+	 *
+	 * Então: dia ausente em qualquer das duas semanas recusa a porcentagem, e a caixa
+	 * mostra os números observados e diz qual semana está incompleta. O colapso é a
+	 * exceção deliberada: semana atual sem nenhuma impressão é −100% contra qualquer
+	 * semana anterior com volume, esteja ela completa ou não.
 	 */
 	function uonix_intelligence_executive_organic_box( $achado ) {
 		if ( ! is_array( $achado ) ) {
@@ -352,14 +378,25 @@ if ( ! function_exists( 'uonix_intelligence_executive_organic_box' ) ) {
 			return uonix_intelligence_executive_unavailable_box( 'organic', 'organic_missing' );
 		}
 
-		$colapso  = isset( $j['current_days'] ) && 0 === (int) $j['current_days'];
-		$imputado = isset( $m['imputed_days'] ) ? (int) $m['imputed_days'] : 0;
+		$janela       = isset( $j['window_days'] ) ? (int) $j['window_days'] : 7;
+		$colapso      = isset( $j['current_days'] ) && 0 === (int) $j['current_days'];
+		$faltam_atual = isset( $j['current_days'] ) ? max( 0, $janela - (int) $j['current_days'] ) : $janela;
+		$faltam_ant   = isset( $j['previous_days'] ) ? max( 0, $janela - (int) $j['previous_days'] ) : $janela;
 		if ( $colapso ) {
 			$delta = -100.0;
-		} elseif ( 0 === $imputado && isset( $m['delta_percent'] ) ) {
+		} elseif ( 0 === $faltam_atual && 0 === $faltam_ant && isset( $m['delta_percent'] ) ) {
 			$delta = (float) $m['delta_percent'];
 		} else {
 			$delta = null;
+		}
+		if ( $colapso ) {
+			$nota = 'collapse';
+		} elseif ( $faltam_atual > 0 ) {
+			$nota = 'imputed';
+		} elseif ( $faltam_ant > 0 ) {
+			$nota = 'previous_incomplete';
+		} else {
+			$nota = '';
 		}
 
 		return array(
@@ -373,8 +410,9 @@ if ( ! function_exists( 'uonix_intelligence_executive_organic_box' ) ) {
 			'previous'       => (float) $m['previous'],
 			'delta_percent'  => $delta,
 			'comparable'     => null !== $delta,
-			'note'           => $colapso ? 'collapse' : ( $imputado > 0 ? 'imputed' : '' ),
-			'imputed_days'   => $imputado,
+			'note'           => $nota,
+			'imputed_days'   => $faltam_atual,
+			'missing_prev'   => $faltam_ant,
 			'anomalous'      => ! empty( $achado['anomalous'] ),
 		);
 	}
@@ -393,6 +431,11 @@ if ( ! function_exists( 'uonix_intelligence_executive_conversion_box' ) ) {
 	 * A comparação com os 28 dias anteriores usa o teste binomial exato com a
 	 * exposição proporcional às visitas, e só acontece se o GA4 cobrir a janela
 	 * anterior inteira. Em 2026-09-28 não cobre, e a caixa diz isso.
+	 *
+	 * **Limitação que o teste não resolve:** a exposição também são visitas
+	 * CONSENTIDAS. Se a taxa de aceite do banner da AdOpt mudar entre os dois
+	 * períodos, o denominador muda sem que a conversão real mude, e o teste lê isso
+	 * como mudança de conversão. As duas coisas são indistinguíveis com este dado.
 	 */
 	function uonix_intelligence_executive_conversion_box( $por_dia_leads, $ga4, $w, $alpha ) {
 		if ( null === $por_dia_leads ) {
@@ -547,10 +590,17 @@ if ( ! function_exists( 'uonix_intelligence_executive_insights' ) ) {
 				if ( $d <= -$limiar ) {
 					$texto = sprintf( 'Impressões na busca caíram %s%% na semana. Veja a aba Anomalias.', $p );
 				} elseif ( $d >= $limiar ) {
-					$sem_demanda = ! empty( $leads['available'] ) && 'up' !== $leads['direction'];
-					$texto = $sem_demanda
-						? sprintf( 'Impressões na busca subiram %s%% na semana, sem aumento detectável de orçamentos nas últimas 4 semanas: a visibilidade cresceu mais que a demanda.', $p )
-						: sprintf( 'Impressões na busca subiram %s%% na semana.', $p );
+					// Três ramos, e não dois. Com queda detectável de orçamentos, dizer "sem
+					// aumento detectável" é verdade e soa como contradição logo depois do
+					// destaque que diz que eles caíram (achado da revisão do PR #301).
+					$dir_leads = ! empty( $leads['available'] ) ? (string) $leads['direction'] : '';
+					if ( 'down' === $dir_leads ) {
+						$texto = sprintf( 'Impressões na busca subiram %s%% na semana, enquanto os orçamentos caíram de forma detectável nas últimas 4 semanas: mais visibilidade não virou demanda.', $p );
+					} elseif ( 'flat' === $dir_leads ) {
+						$texto = sprintf( 'Impressões na busca subiram %s%% na semana, sem aumento detectável de orçamentos nas últimas 4 semanas: a visibilidade cresceu mais que a demanda.', $p );
+					} else {
+						$texto = sprintf( 'Impressões na busca subiram %s%% na semana.', $p );
+					}
 				} else {
 					$texto = sprintf( 'Impressões na busca variaram %s%s%% na semana, abaixo do limiar de %s%% que o Alerta de Anomalias trata como relevante.', $d < 0 ? '−' : '+', $p, uonix_intelligence_executive_num( $limiar, 0 ) );
 				}
@@ -606,66 +656,217 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_label' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_executive_page_status' ) ) {
+	/**
+	 * Status HTTP de uma página do próprio site, sem seguir redirecionamento.
+	 *
+	 * Existe por um defeito que a revisão do PR #301 mediu: das cinco páginas que o
+	 * bloco exibia, uma dava **404** (`/olhal-de-ancoragem/`, 327 impressões) e duas
+	 * eram **301** para `/servico/...`. O bloco as apresentava como páginas do site,
+	 * e os 301 dividiam as impressões entre o endereço antigo e o novo.
+	 *
+	 * Consulta HTTP, e não o banco, porque redirecionamento pode vir do Rank Math, do
+	 * `.htaccess` ou do próprio WordPress, e só a resposta HTTP conhece os três.
+	 *
+	 * Falha de rede devolve `unknown`, nunca `ok`: não saber o status não é saber que
+	 * a página existe. Requisição de loopback pode ser bloqueada em alguns hosts, e aí
+	 * o bloco declara "status não verificado" em vez de afirmar.
+	 *
+	 * @return array{state: string, code: int, location: string}
+	 */
+	function uonix_intelligence_executive_page_status( $path ) {
+		if ( ! function_exists( 'wp_remote_head' ) || ! function_exists( 'home_url' ) ) {
+			return array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
+		}
+		$resposta = wp_remote_head( home_url( (string) $path ), array( 'redirection' => 0, 'timeout' => 5 ) );
+		if ( is_wp_error( $resposta ) ) {
+			return array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
+		}
+		$codigo = (int) wp_remote_retrieve_response_code( $resposta );
+		$destino = function_exists( 'wp_remote_retrieve_header' ) ? (string) wp_remote_retrieve_header( $resposta, 'location' ) : '';
+
+		if ( $codigo >= 200 && $codigo < 300 ) {
+			return array( 'state' => 'ok', 'code' => $codigo, 'location' => '' );
+		}
+		if ( in_array( $codigo, array( 301, 302, 307, 308 ), true ) && '' !== $destino ) {
+			return array( 'state' => 'redirect', 'code' => $codigo, 'location' => $destino );
+		}
+		if ( 404 === $codigo || 410 === $codigo ) {
+			return array( 'state' => 'not_found', 'code' => $codigo, 'location' => '' );
+		}
+
+		return array( 'state' => 'unknown', 'code' => $codigo, 'location' => '' );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 	/**
-	 * Páginas mais encontradas na busca (pilar 4), do snapshot de 30 dias.
+	 * Páginas mais encontradas na busca (pilar 4), com o status de cada uma conferido.
 	 *
-	 * Ordena por impressões, não por cliques: o pilar pergunta o que é mais
-	 * procurado, e impressão é o que a Search Console mede de procura.
+	 * Ordena por impressões, que é o que a Search Console mede de procura. Páginas, e
+	 * não consultas, porque o pilar 4 pergunta pelos produtos e serviços mais
+	 * procurados — e página é a unidade de produto e serviço no site. As consultas já
+	 * aparecem no bloco de oportunidades de SEO.
 	 *
-	 * Páginas, e não consultas. As consultas de volume alto fora da faixa de
-	 * oportunidade têm o texto minimizado no snapshot (#278), então uma lista das mais
-	 * buscadas por consulta ficaria com buracos justamente nas maiores.
+	 * **A lista vem de uma busca própria de até 100 páginas, não do snapshot.** O
+	 * snapshot guarda só as 10 páginas de mais CLIQUES, porque a API ordena por cliques;
+	 * reordenar essas 10 por impressões perdia justamente as páginas de muita
+	 * impressão e pouco clique. A revisão do PR #301 mediu que a quinta posição de hoje
+	 * dependia disso por 9 impressões.
 	 *
-	 * Não há comparação aqui, só ranking, e é por isso que o snapshot serve. A
-	 * defasagem da Search Console tira os últimos ~3 dias da janela: isso muda os
-	 * totais e pode trocar de lugar páginas com volume próximo. O bloco declara a
-	 * janela e não afirma variação nenhuma, então nenhum número dele depende dos dias
-	 * ausentes serem zero.
+	 * Cada uma das `$candidates` páginas de mais impressão tem o status conferido:
+	 *
+	 * - **ok** — entra com o título do post;
+	 * - **redirect** — as impressões e cliques são SOMADOS ao destino, porque o Google
+	 *   ainda contabiliza o endereço antigo e o visitante chega no novo;
+	 * - **not_found** — entra marcada. Página que o Google mostra e não existe é
+	 *   informação que o executivo precisa ver, não esconder;
+	 * - **unknown** — entra marcada como "status não verificado".
+	 *
+	 * Função pura: linhas, conferência de status e rótulo entram por parâmetro.
+	 *
+	 * @param array<int, array{page: string, impressions: float, clicks: float}>|WP_Error|null $rows
 	 */
-	function uonix_intelligence_executive_top_pages( $snapshot, $limit = null, $labeler = null ) {
-		$limit   = is_int( $limit ) && $limit > 0 ? $limit : (int) uonix_intelligence_executive_rules()['top_pages'];
-		$labeler = is_callable( $labeler ) ? $labeler : 'uonix_intelligence_executive_page_label';
+	function uonix_intelligence_executive_top_pages( $rows, $window, $status_fetcher = null, $labeler = null, $limit = null, $candidates = null ) {
+		$regras     = uonix_intelligence_executive_rules();
+		$limit      = is_int( $limit ) && $limit > 0 ? $limit : (int) $regras['top_pages'];
+		$candidates = is_int( $candidates ) && $candidates > 0 ? $candidates : (int) $regras['page_candidates'];
+		$status_fn  = is_callable( $status_fetcher ) ? $status_fetcher : 'uonix_intelligence_executive_page_status';
+		$labeler    = is_callable( $labeler ) ? $labeler : 'uonix_intelligence_executive_page_label';
 
-		if ( ! is_array( $snapshot ) || ! isset( $snapshot['search_console']['pages'] ) || ! is_array( $snapshot['search_console']['pages'] ) ) {
-			return array( 'available' => false, 'reason' => 'snapshot_missing', 'rows' => array() );
+		$base = array( 'available' => false, 'reason' => '', 'rows' => array(), 'window' => is_array( $window ) ? $window : array() );
+		if ( is_wp_error( $rows ) ) {
+			$base['reason'] = 'pages_fetch_failed';
+			return $base;
+		}
+		if ( ! is_array( $rows ) ) {
+			$base['reason'] = 'pages_missing';
+			return $base;
 		}
 
-		$linhas = array();
-		foreach ( $snapshot['search_console']['pages'] as $p ) {
-			if ( ! is_array( $p ) || ! isset( $p['page'], $p['impressions'] ) || '' === (string) $p['page'] ) {
+		// Todas as páginas devolvidas, indexadas por caminho. É daqui que sai o volume
+		// próprio do destino de um redirecionamento, mesmo que ele não esteja entre as
+		// candidatas.
+		$por_caminho = array();
+		foreach ( $rows as $r ) {
+			if ( ! is_array( $r ) || ! isset( $r['page'], $r['impressions'] ) ) {
 				continue;
 			}
-			$linhas[] = array(
-				'path'        => (string) $p['page'],
-				'impressions' => (float) $p['impressions'],
-				'clicks'      => isset( $p['clicks'] ) ? (float) $p['clicks'] : 0.0,
-			);
-		}
-		usort(
-			$linhas,
-			static function ( $a, $b ) {
-				if ( $a['impressions'] === $b['impressions'] ) {
-					return strcmp( $a['path'], $b['path'] );
-				}
-				return $a['impressions'] < $b['impressions'] ? 1 : -1;
+			$caminho = (string) $r['page'];
+			if ( '' === $caminho ) {
+				continue;
 			}
-		);
-		$linhas = array_slice( $linhas, 0, $limit );
-		foreach ( $linhas as $i => $l ) {
-			$linhas[ $i ]['label'] = (string) call_user_func( $labeler, $l['path'] );
+			if ( ! isset( $por_caminho[ $caminho ] ) ) {
+				$por_caminho[ $caminho ] = array( 'path' => $caminho, 'impressions' => 0.0, 'clicks' => 0.0, 'state' => 'unchecked', 'merged' => 0 );
+			}
+			$por_caminho[ $caminho ]['impressions'] += (float) $r['impressions'];
+			$por_caminho[ $caminho ]['clicks']      += isset( $r['clicks'] ) ? (float) $r['clicks'] : 0.0;
 		}
 
-		$periodo = isset( $snapshot['periods']['current'] ) && is_array( $snapshot['periods']['current'] ) ? $snapshot['periods']['current'] : array();
+		$ordenar = static function ( array $lista ) {
+			usort(
+				$lista,
+				static function ( $a, $b ) {
+					if ( $a['impressions'] === $b['impressions'] ) {
+						return strcmp( $a['path'], $b['path'] );
+					}
+					return $a['impressions'] < $b['impressions'] ? 1 : -1;
+				}
+			);
+			return $lista;
+		};
 
-		return array(
-			'available' => array() !== $linhas,
-			'reason'    => array() === $linhas ? 'pages_empty' : '',
-			'rows'      => $linhas,
-			'window'    => $periodo,
-			'synced_at' => isset( $snapshot['updated_at'] ) ? (string) $snapshot['updated_at'] : '',
-			'stale'     => function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ) ? ! uonix_analytics_metrics_snapshot_is_fresh( $snapshot ) : true,
+		foreach ( array_slice( $ordenar( array_values( $por_caminho ) ), 0, $candidates ) as $c ) {
+			$status = call_user_func( $status_fn, $c['path'] );
+			$estado = is_array( $status ) && isset( $status['state'] ) ? (string) $status['state'] : 'unknown';
+
+			if ( 'redirect' === $estado ) {
+				$destino = function_exists( 'uonix_analytics_metrics_normalize_path' )
+					? uonix_analytics_metrics_normalize_path( isset( $status['location'] ) ? (string) $status['location'] : '' )
+					: '';
+				if ( '' !== $destino && $destino !== $c['path'] ) {
+					if ( ! isset( $por_caminho[ $destino ] ) ) {
+						$por_caminho[ $destino ] = array( 'path' => $destino, 'impressions' => 0.0, 'clicks' => 0.0, 'state' => 'unchecked', 'merged' => 0 );
+					}
+					// O valor ATUAL da entrada, e não o da candidata: se algo já tinha sido
+					// somado neste caminho, a soma segue junto até o destino final.
+					$atual = $por_caminho[ $c['path'] ];
+					$por_caminho[ $destino ]['impressions'] += $atual['impressions'];
+					$por_caminho[ $destino ]['clicks']      += $atual['clicks'];
+					$por_caminho[ $destino ]['merged']      += 1 + (int) $atual['merged'];
+					unset( $por_caminho[ $c['path'] ] );
+					continue;
+				}
+				// Redirecionamento para fora do site ou para o mesmo lugar: não há onde
+				// somar, e afirmar qualquer coisa sobre ele seria inventar.
+				$estado = 'unknown';
+			}
+			$por_caminho[ $c['path'] ]['state'] = in_array( $estado, array( 'ok', 'not_found' ), true ) ? $estado : 'unknown';
+		}
+
+		$saida = array();
+		foreach ( $ordenar( array_values( $por_caminho ) ) as $linha ) {
+			if ( count( $saida ) >= $limit ) {
+				break;
+			}
+			// Destino que recebeu soma mas não estava entre as candidatas ainda não teve
+			// o status conferido. Confere agora, uma vez só.
+			if ( 'unchecked' === $linha['state'] ) {
+				$status         = call_user_func( $status_fn, $linha['path'] );
+				$estado         = is_array( $status ) && isset( $status['state'] ) ? (string) $status['state'] : 'unknown';
+				$linha['state'] = in_array( $estado, array( 'ok', 'not_found' ), true ) ? $estado : 'unknown';
+			}
+			$linha['label'] = 'ok' === $linha['state'] ? (string) call_user_func( $labeler, $linha['path'] ) : $linha['path'];
+			$saida[]        = $linha;
+		}
+
+		$base['available'] = array() !== $saida;
+		$base['reason']    = array() === $saida ? 'pages_empty' : '';
+		$base['rows']      = $saida;
+
+		return $base;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_executive_fetch_gsc_pages' ) ) {
+	/**
+	 * Até 100 páginas da Search Console na janela pedida, com o caminho normalizado.
+	 *
+	 * @return array<int, array{page: string, impressions: float, clicks: float}>|WP_Error
+	 */
+	function uonix_intelligence_executive_fetch_gsc_pages( $config, $period ) {
+		if ( ! function_exists( 'uonix_analytics_metrics_get_access_token' ) || ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
+			return uonix_analytics_metrics_error( 'analytics_layer_missing' );
+		}
+		$token = uonix_analytics_metrics_get_access_token( $config );
+		if ( is_wp_error( $token ) ) {
+			return $token;
+		}
+		$bruto = uonix_analytics_metrics_search_console_rows(
+			$token,
+			isset( $config['search_console_site_url'] ) ? (string) $config['search_console_site_url'] : '',
+			$period,
+			'page',
+			100
 		);
+		if ( is_wp_error( $bruto ) ) {
+			return $bruto;
+		}
+		$decodificado = uonix_analytics_metrics_decode_search_console_report( $bruto, true );
+		if ( is_wp_error( $decodificado ) ) {
+			return $decodificado;
+		}
+
+		$saida = array();
+		foreach ( isset( $decodificado['rows'] ) && is_array( $decodificado['rows'] ) ? $decodificado['rows'] : array() as $r ) {
+			$caminho = uonix_analytics_metrics_normalize_path( isset( $r['keys'][0] ) ? (string) $r['keys'][0] : '' );
+			if ( '' === $caminho ) {
+				continue;
+			}
+			$saida[] = array( 'page' => $caminho, 'impressions' => (float) $r['impressions'], 'clicks' => (float) $r['clicks'] );
+		}
+
+		return $saida;
 	}
 }
 
@@ -706,10 +907,12 @@ if ( ! function_exists( 'uonix_intelligence_executive_collect' ) ) {
 	/**
 	 * Reúne as entradas reais e devolve o que o e-mail renderiza.
 	 *
-	 * Duas chamadas de rede: a série diária do GA4 e a série diária da Search
-	 * Console (esta via `uonix_intelligence_anomaly_organic_drop()`). O relatório sai
-	 * uma vez por semana, então o custo é irrelevante; o que importa é que falha de
-	 * rede degrada a caixa para "indisponível" e o e-mail sai mesmo assim.
+	 * Três chamadas às APIs do Google — série diária do GA4, série diária da Search
+	 * Console (via `uonix_intelligence_anomaly_organic_drop()`) e a lista de páginas —
+	 * mais até ~10 requisições HEAD ao próprio site para conferir o status das páginas.
+	 * O relatório sai uma vez por semana, então o custo é irrelevante; o que importa é
+	 * que falha de rede degrada a caixa ou o bloco para "indisponível" e o e-mail sai
+	 * mesmo assim.
 	 *
 	 * Tudo é injetável por `$args`, do mesmo jeito que `uonix_analytics_metrics_sync()`
 	 * aceita um fetcher, para o teste exercitar o caminho inteiro sem rede.
@@ -762,14 +965,32 @@ if ( ! function_exists( 'uonix_intelligence_executive_collect' ) ) {
 			)
 		);
 
-		$snapshot = array_key_exists( 'snapshot', $args )
-			? $args['snapshot']
-			: ( function_exists( 'uonix_analytics_metrics_get_snapshot' ) ? uonix_analytics_metrics_get_snapshot( 30 ) : false );
+		// Páginas: janela ASSENTADA de 28 dias, terminando no mesmo dia que a semana das
+		// impressões. A Search Console publica com ~3 dias de atraso, e o bloco é ranking
+		// — mas somar dias ainda não publicados como zero mudaria a ordem entre páginas de
+		// volume próximo, então a janela nem os inclui.
+		$atraso  = function_exists( 'uonix_intelligence_anomaly_rules' ) ? (int) uonix_intelligence_anomaly_rules()['organic_settle_lag_days'] : 4;
+		$fim_pag = DateTimeImmutable::createFromFormat( '!Y-m-d', $hoje, new DateTimeZone( 'UTC' ) );
+		$janela_paginas = false === $fim_pag ? array() : array(
+			'start' => $fim_pag->modify( '-' . ( $atraso + (int) $regras['pages_days'] - 1 ) . ' days' )->format( 'Y-m-d' ),
+			'end'   => $fim_pag->modify( '-' . $atraso . ' days' )->format( 'Y-m-d' ),
+		);
+		if ( null === $config || array() === $janela_paginas ) {
+			$paginas = uonix_analytics_metrics_error( 'config_missing' );
+		} else {
+			$fetcher_pag = isset( $args['pages_fetcher'] ) && is_callable( $args['pages_fetcher'] ) ? $args['pages_fetcher'] : 'uonix_intelligence_executive_fetch_gsc_pages';
+			$paginas     = call_user_func( $fetcher_pag, $config, $janela_paginas );
+		}
 
 		return array(
 			'scorecard'    => $placar,
 			'insights'     => uonix_intelligence_executive_insights( $placar, isset( $args['seo'] ) ? $args['seo'] : null ),
-			'top_pages'    => uonix_intelligence_executive_top_pages( $snapshot, null, isset( $args['labeler'] ) ? $args['labeler'] : null ),
+			'top_pages'    => uonix_intelligence_executive_top_pages(
+				$paginas,
+				$janela_paginas,
+				isset( $args['status_fetcher'] ) ? $args['status_fetcher'] : null,
+				isset( $args['labeler'] ) ? $args['labeler'] : null
+			),
 			'generated_on' => $hoje,
 		);
 	}
