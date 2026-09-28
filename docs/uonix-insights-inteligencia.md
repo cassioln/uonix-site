@@ -372,9 +372,29 @@ A primeira versão lia as 10 páginas do snapshot, e a revisão do PR #301 encon
 - **Três das cinco linhas não eram páginas do site.** Conferido por HTTP em 2026-09-28: `/olhal-de-ancoragem/` dava **404** com 327 impressões, e `/projeto-de-balancim` e `/projeto-de-ancoragem` eram **301** para `/servico/...`. O bloco os apresentava como páginas, e os 301 dividiam as impressões entre o endereço antigo e o novo.
 - **O ranking dependia da ordem errada.** O snapshot guarda as 10 páginas de mais **cliques**, porque a API ordena por cliques. Reordenar essas 10 por impressões perdia justamente as páginas de muita impressão e pouco clique — a quinta posição daquele dia dependia disso por 9 impressões.
 
-Agora o bloco busca até 100 páginas numa janela **assentada** de 28 dias (terminando no mesmo dia que a semana das impressões) e confere o status HTTP das 10 de mais impressão, sem seguir redirecionamento. **Redirecionamento é somado ao destino**, que passa a declarar quantos endereços antigos inclui. **404 entra marcado em vermelho**: página que o Google mostra e não existe é o achado mais acionável do bloco. Status que não pôde ser conferido fica como "não verificado", nunca como página existente — requisição de loopback pode ser bloqueada em alguns hosts. Redirecionamento para fora do site não é somado a nada.
+Agora o bloco busca até **1000** páginas (`pages_rows`) numa janela **assentada** de 28 dias, terminando no mesmo dia que a semana das impressões. A revisão mediu 78 páginas em 30 dias. O limite é alto porque a API corta por cliques: se o universo passasse dele, o defeito voltaria na cauda. Resposta que chega exatamente no limite de linhas **cruas** é declarada no e-mail como "lista pode estar incompleta". A contagem é crua porque a propriedade é de domínio (`sc-domain:`): ela pode trazer subdomínio, que a normalização descarta, e contar depois esconderia o corte.
 
-São até ~10 requisições HEAD ao próprio site por semana.
+O status HTTP das 10 de mais impressão é conferido **sem que o cliente siga o redirecionamento**. Quem segue é o próprio código, salto a salto, até `max_hops` = 3.
+
+- **Redirecionamento é somado ao destino final da cadeia**, que passa a declarar quantos endereços antigos inclui. A procedência do bloco só diz que houve soma quando houve.
+- **404 entra marcado em vermelho**: página que o Google mostra e não existe é o achado mais acionável do bloco.
+- **Status que não pôde ser conferido fica como "não verificado"**, nunca como página existente. Isso inclui falha de rede, loopback bloqueado, ciclo, redirecionamento para fora do site, saltos demais e teto de consultas atingido. Nesses casos nada é somado.
+
+**A soma é feita em duas fases, e a ordem não altera o resultado.** Primeiro cada cadeia é seguida até o fim, com memória por endereço; só depois as impressões **originais** são somadas no destino final de cada uma. A segunda revisão do PR #301 mostrou que a versão anterior somava durante o laço. Com `/b` (300) → `/c` e `/a` (100) → `/b`, o e-mail mostrava `/c` com 350 e, embaixo, `/b` com 100: a mesma cadeia partida em duas linhas. O comentário da época afirmava o contrário. Quando uma cadeia passa de `max_hops`, só o endereço de partida fica "não verificado". Os intermediários, partindo deles mesmos, cabem no limite e são resolvidos. Endereço que chega ao topo sem ter sido candidato também é conferido e somado.
+
+**O custo tem teto explícito, não estimativa.** A primeira versão deste contrato dizia "até ~10 requisições", e a revisão mediu que o teto real era 15. Agora:
+
+| Regra | Valor | O que garante |
+|---|---|---|
+| `head_max` | 20 | Teto **rígido** de requisições HEAD por execução, contando os saltos. |
+| `head_timeout` | 8 s | Limite por requisição. Medido em produção: raiz 133 ms, serviço ~80 ms (cache), 301 2,2 s, 404 4,2 s; a revisão mediu um 301 frio em 6,81 s. Nenhum número fixo tem folga contra essa variação. O que torna 8 s defensável é o modo de falha: estourar dá "não verificado", nunca "ok". |
+| `head_budget` | 20 s | Orçamento de tempo, conferido **antes** de cada requisição. Por isso o total pode passar dele por até um `head_timeout`: ~28 s no pior caso. |
+
+O orçamento **não** existe por causa do `max_execution_time`: no Linux ele conta tempo de CPU, não espera de rede. O limite de relógio real vem do servidor web e do PHP-FPM, e não foi medido. O orçamento existe para o botão "Enviar Teste Agora" não depender desse limite desconhecido. Fora dele ficam as três chamadas ao Google (GA4, série e páginas), cada uma com o próprio pedido de token e timeout de 20 s: até 120 s no pior caso.
+
+A requisição passa pelo Rank Math e conta no contador de acessos do redirecionamento; com o monitor de 404 ligado, registra um 404 por semana. Por isso ela se identifica com o User-Agent `Uonix-Relatorio-Executivo/1.0`, para quem ler esses contadores separar o acesso dos visitantes.
+
+**Motivos de indisponibilidade têm texto de leitor.** Os motivos da Search Console vêm do Módulo 5, mas o texto da aba Anomalias fala com o operador ("o gatilho tenta de novo na próxima verificação"). A primeira versão delegava a ele, e o e-mail imprimia essa frase. Agora o 57 tem tradução própria para cada motivo, e o teste extrai do código do 58 e do 59 todos os motivos que chegam a uma caixa e exige texto não genérico para cada um. Sem credencial do Google, o motivo é `config_missing`, e não "a consulta falhou": nenhuma consulta foi feita.
 
 ### O que o Módulo 4 ainda não entrega
 

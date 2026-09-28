@@ -26,8 +26,31 @@ if ( ! function_exists( 'uonix_intelligence_executive_rules' ) ) {
 	 *
 	 * `top_pages` = 5 é tamanho de digest, não medição: o bloco é informativo e não
 	 * decide nada. `page_candidates` = 10 é quantas páginas têm o status HTTP
-	 * conferido — o dobro do que se exibe, porque cada redirecionamento somado libera
-	 * uma posição. São no máximo ~10 requisições HEAD por semana.
+	 * conferido de saída — o dobro do que se exibe, porque cada redirecionamento somado
+	 * libera uma posição.
+	 *
+	 * `head_max` = 20 é o teto RÍGIDO de requisições HEAD por execução, contando cada
+	 * salto de cadeia e cada endereço que chega ao topo depois da soma. Não é "~10": a
+	 * primeira versão do contrato dizia isso, e a revisão do PR #301 mediu que o teto
+	 * real era 15. Com o teto explícito, o número é o que está escrito aqui.
+	 *
+	 * `head_budget` = 20 s é o orçamento de tempo, conferido ANTES de cada requisição.
+	 * Por isso o tempo total pode passar dele por até um `head_timeout` (8 s): ~28 s no
+	 * pior caso. O motivo NÃO é o `max_execution_time` do PHP — no Linux ele conta
+	 * tempo de CPU e não espera de rede. O limite de relógio real vem do servidor web e
+	 * do PHP-FPM, e não foi medido. O orçamento existe para o botão "Enviar Teste Agora"
+	 * não depender de um limite que ninguém mediu. As três chamadas ao Google, com os
+	 * seus três pedidos de token, têm timeout de 20 s cada em `53` e somam até 120 s no
+	 * pior caso, fora deste orçamento.
+	 *
+	 * `max_hops` = 3: medido pela revisão do PR #301, nenhum dos 12 endereços de
+	 * produção conferidos passa de um salto. Três é margem; acima disso, o endereço fica
+	 * como "não verificado" em vez de ser somado a um destino incerto.
+	 *
+	 * `pages_rows` = 1000. A API ordena por CLIQUES, então se o universo de páginas
+	 * passasse do limite o corte voltaria a ser por cliques e o defeito que a busca
+	 * própria corrigiu reapareceria na cauda. A revisão mediu 78 páginas em 30 dias; o
+	 * bloco sinaliza se o limite for atingido.
 	 */
 	function uonix_intelligence_executive_rules() {
 		return array(
@@ -37,6 +60,11 @@ if ( ! function_exists( 'uonix_intelligence_executive_rules' ) ) {
 			'top_pages'       => 5,
 			'page_candidates' => 10,
 			'pages_days'      => 28,
+			'pages_rows'      => 1000,
+			'head_timeout'    => 8,
+			'head_max'        => 20,
+			'head_budget'     => 20.0,
+			'max_hops'        => 3,
 		);
 	}
 }
@@ -294,6 +322,17 @@ if ( ! function_exists( 'uonix_intelligence_executive_history_covers' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_executive_ga4_error_reason' ) ) {
+	/**
+	 * Motivo de um erro do GA4. Sem credencial não é "a consulta falhou": nenhuma
+	 * consulta foi feita, e o e-mail de um ambiente sem credencial não pode dizer que
+	 * foi.
+	 */
+	function uonix_intelligence_executive_ga4_error_reason( $erro ) {
+		return is_wp_error( $erro ) && 'config_missing' === $erro->get_error_code() ? 'config_missing' : 'ga4_fetch_failed';
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_executive_visits_box' ) ) {
 	/**
 	 * Visitas da semana contra a semana anterior (GA4).
@@ -307,7 +346,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_visits_box' ) ) {
 	 */
 	function uonix_intelligence_executive_visits_box( $ga4, $w ) {
 		if ( is_wp_error( $ga4 ) ) {
-			return uonix_intelligence_executive_unavailable_box( 'visits', 'ga4_fetch_failed' );
+			return uonix_intelligence_executive_unavailable_box( 'visits', uonix_intelligence_executive_ga4_error_reason( $ga4 ) );
 		}
 		if ( ! is_array( $ga4 ) || ! isset( $ga4['per_day'] ) || ! isset( $w['week'], $w['prev_week'] ) ) {
 			return uonix_intelligence_executive_unavailable_box( 'visits', 'ga4_missing' );
@@ -442,7 +481,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_conversion_box' ) ) {
 			return uonix_intelligence_executive_unavailable_box( 'conversion', 'submissions_table_missing' );
 		}
 		if ( is_wp_error( $ga4 ) ) {
-			return uonix_intelligence_executive_unavailable_box( 'conversion', 'ga4_fetch_failed' );
+			return uonix_intelligence_executive_unavailable_box( 'conversion', uonix_intelligence_executive_ga4_error_reason( $ga4 ) );
 		}
 		if ( ! is_array( $ga4 ) || ! isset( $ga4['per_day'] ) || ! isset( $w['month'], $w['prev_month'] ) ) {
 			return uonix_intelligence_executive_unavailable_box( 'conversion', 'ga4_missing' );
@@ -671,31 +710,39 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_status' ) ) {
 	 * Falha de rede devolve `unknown`, nunca `ok`: não saber o status não é saber que
 	 * a página existe.
 	 *
-	 * **Medido em produção em 2026-09-28**, por SSH: o loopback funciona na Locaweb, e
-	 * os tempos variam muito. A raiz respondeu em 133 ms e as páginas de serviço em
-	 * ~80 ms (vêm do cache); o 301 levou 2,2 s e o **404 levou 4,2 s** — páginas que o
-	 * cache não guarda. O limite por requisição é 8 s por causa disso: com 5 s, que foi
-	 * o primeiro valor, o 404 ficava a 0,8 s de virar "não verificado".
+	 * **O limite de 8 s por requisição**, e o argumento que o sustenta. Medido em
+	 * produção em 2026-09-28: o loopback funciona na Locaweb, e os tempos variam muito
+	 * — raiz em 133 ms, páginas de serviço em ~80 ms (cache), 301 em 2,2 s, 404 em
+	 * 4,2 s; e a revisão do PR #301 mediu um 301 frio em 6,81 s. Com esses números, 8 s
+	 * não é margem folgada, e nenhum número fixo seria. O que o torna defensável é o
+	 * modo de falha: estourar o limite dá `unknown` — "status não verificado" —, nunca
+	 * `ok`. O limite troca completude por tempo; não troca verdade por tempo.
 	 *
-	 * E há um **orçamento total de 20 s** por execução. O botão "Enviar Teste Agora"
-	 * roda tudo dentro de uma requisição do painel, e dez páginas lentas somadas podem
-	 * estourar o tempo máximo de execução do PHP. Estourado o orçamento, as restantes
-	 * ficam como `unknown` sem fazer requisição: o e-mail sai, com o bloco honesto sobre
-	 * o que não conferiu.
+	 * O orçamento de tempo e o teto de consultas moram em
+	 * `uonix_intelligence_executive_top_pages()`, que é quem chama esta função em laço.
+	 * Aqui não há estado: a versão anterior guardava o tempo gasto numa variável
+	 * `static`, e uma segunda chamada no mesmo processo devolvia "não verificado" sem
+	 * fazer requisição nenhuma.
+	 *
+	 * O User-Agent identificável existe porque a requisição passa pelo Rank Math: ela
+	 * conta como acesso no contador do redirecionamento e, com o monitor de 404 ligado,
+	 * registra um 404 por semana. Quem olhar esses contadores precisa conseguir separar
+	 * este acesso dos visitantes (achado BAIXO da revisão do PR #301).
 	 *
 	 * @return array{state: string, code: int, location: string}
 	 */
 	function uonix_intelligence_executive_page_status( $path ) {
-		static $gasto = 0.0;
 		if ( ! function_exists( 'wp_remote_head' ) || ! function_exists( 'home_url' ) ) {
 			return array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
 		}
-		if ( $gasto >= 20.0 ) {
-			return array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
-		}
-		$inicio   = microtime( true );
-		$resposta = wp_remote_head( home_url( (string) $path ), array( 'redirection' => 0, 'timeout' => 8 ) );
-		$gasto   += microtime( true ) - $inicio;
+		$resposta = wp_remote_head(
+			home_url( (string) $path ),
+			array(
+				'redirection' => 0,
+				'timeout'     => (int) uonix_intelligence_executive_rules()['head_timeout'],
+				'user-agent'  => 'Uonix-Relatorio-Executivo/1.0 (conferencia semanal de status de pagina)',
+			)
+		);
 		if ( is_wp_error( $resposta ) ) {
 			return array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
 		}
@@ -725,22 +772,25 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 	 * procurados — e página é a unidade de produto e serviço no site. As consultas já
 	 * aparecem no bloco de oportunidades de SEO.
 	 *
-	 * **A lista vem de uma busca própria de até 100 páginas, não do snapshot.** O
-	 * snapshot guarda só as 10 páginas de mais CLIQUES, porque a API ordena por cliques;
-	 * reordenar essas 10 por impressões perdia justamente as páginas de muita
-	 * impressão e pouco clique. A revisão do PR #301 mediu que a quinta posição de hoje
-	 * dependia disso por 9 impressões.
+	 * **A lista vem de uma busca própria, não do snapshot.** O snapshot guarda só as 10
+	 * páginas de mais CLIQUES, porque a API ordena por cliques; reordenar essas 10 por
+	 * impressões perdia justamente as páginas de muita impressão e pouco clique. A
+	 * revisão do PR #301 mediu que a quinta posição daquele dia dependia disso por 9
+	 * impressões.
 	 *
-	 * Cada uma das `$candidates` páginas de mais impressão tem o status conferido:
+	 * As `$candidates` páginas de mais impressão têm o status conferido, e cada
+	 * redirecionamento é seguido até o fim da cadeia (até `max_hops` saltos):
 	 *
 	 * - **ok** — entra com o título do post;
-	 * - **redirect** — as impressões e cliques são SOMADOS ao destino, porque o Google
-	 *   ainda contabiliza o endereço antigo e o visitante chega no novo;
+	 * - **redirect** — as impressões e cliques são SOMADOS ao destino final, porque o
+	 *   Google ainda contabiliza o endereço antigo e o visitante chega no novo;
 	 * - **not_found** — entra marcada. Página que o Google mostra e não existe é
 	 *   informação que o executivo precisa ver, não esconder;
-	 * - **unknown** — entra marcada como "status não verificado".
+	 * - **unknown** — entra marcada como "status não verificado". Inclui ciclo,
+	 *   redirecionamento para fora do site, saltos demais e teto de consultas atingido.
 	 *
-	 * Função pura: linhas, conferência de status e rótulo entram por parâmetro.
+	 * Função pura: linhas, conferência de status e rótulo entram por parâmetro. Devolve
+	 * também `head_count`, o número de conferências feitas, para o teto ser verificável.
 	 *
 	 * @param array<int, array{page: string, impressions: float, clicks: float}>|WP_Error|null $rows
 	 */
@@ -751,10 +801,16 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 		$status_fn  = is_callable( $status_fetcher ) ? $status_fetcher : 'uonix_intelligence_executive_page_status';
 		$labeler    = is_callable( $labeler ) ? $labeler : 'uonix_intelligence_executive_page_label';
 
-		$base = array( 'available' => false, 'reason' => '', 'rows' => array(), 'window' => is_array( $window ) ? $window : array() );
+		$base = array( 'available' => false, 'reason' => '', 'rows' => array(), 'window' => is_array( $window ) ? $window : array(), 'truncated' => false, 'head_count' => 0 );
 		if ( is_wp_error( $rows ) ) {
 			$base['reason'] = 'pages_fetch_failed';
 			return $base;
+		}
+		// O formato de `uonix_intelligence_executive_fetch_gsc_pages()`, que sabe se a
+		// resposta veio cortada; ou uma lista simples de linhas.
+		if ( is_array( $rows ) && isset( $rows['rows'] ) && is_array( $rows['rows'] ) ) {
+			$base['truncated'] = ! empty( $rows['truncated'] );
+			$rows              = $rows['rows'];
 		}
 		if ( ! is_array( $rows ) ) {
 			$base['reason'] = 'pages_missing';
@@ -793,53 +849,162 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 			return $lista;
 		};
 
-		foreach ( array_slice( $ordenar( array_values( $por_caminho ) ), 0, $candidates ) as $c ) {
-			$status = call_user_func( $status_fn, $c['path'] );
-			$estado = is_array( $status ) && isset( $status['state'] ) ? (string) $status['state'] : 'unknown';
+		// ---- Consulta de status: memória, teto de consultas e orçamento de tempo. ----
+		//
+		// Estado LOCAL, e não `static`: cada chamada desta função começa do zero.
+		$memo_status = array();
+		$consultas   = 0;
+		$gasto       = 0.0;
+		$consultar   = static function ( $caminho ) use ( &$memo_status, &$consultas, &$gasto, $status_fn, $regras ) {
+			if ( isset( $memo_status[ $caminho ] ) ) {
+				return $memo_status[ $caminho ];
+			}
+			if ( $consultas >= (int) $regras['head_max'] || $gasto >= (float) $regras['head_budget'] ) {
+				return array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
+			}
+			++$consultas;
+			$inicio = microtime( true );
+			$status = call_user_func( $status_fn, $caminho );
+			$gasto += microtime( true ) - $inicio;
+			$status = is_array( $status ) ? $status : array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
+			$memo_status[ $caminho ] = $status;
+			return $status;
+		};
 
-			if ( 'redirect' === $estado ) {
-				$destino = function_exists( 'uonix_analytics_metrics_normalize_path' )
-					? uonix_analytics_metrics_normalize_path( isset( $status['location'] ) ? (string) $status['location'] : '' )
-					: '';
-				if ( '' !== $destino && $destino !== $c['path'] ) {
-					if ( ! isset( $por_caminho[ $destino ] ) ) {
-						$por_caminho[ $destino ] = array( 'path' => $destino, 'impressions' => 0.0, 'clicks' => 0.0, 'state' => 'unchecked', 'merged' => 0 );
+		$destino_de = static function ( $location ) {
+			$location = (string) $location;
+			$destino  = function_exists( 'uonix_analytics_metrics_normalize_path' ) ? uonix_analytics_metrics_normalize_path( $location ) : '';
+			// `Location` apontando para a raiz sem caminho normaliza para vazio; sem isto,
+			// o redirecionamento para a página inicial não seria somado a ela.
+			if ( '' === $destino && 1 === preg_match( '#^https?://(www\.)?uonix\.com\.br/?$#iD', $location ) ) {
+				$destino = '/';
+			}
+			return $destino;
+		};
+
+		// ---- Fase 1: seguir cada cadeia até o FIM, antes de somar qualquer coisa. ----
+		//
+		// A versão anterior somava durante o laço, e o resultado dependia da ordem. A
+		// revisão do PR #301 rodou `/b` (300) → `/c` e `/a` (100) → `/b`: o e-mail
+		// mostrava `/c` com 350 e, embaixo, `/b` com 100 — a mesma cadeia partida em
+		// duas linhas, e o comentário da época afirmava que a soma "seguia junto até o
+		// destino final". Resolvendo primeiro e somando depois, a ordem deixa de existir.
+		//
+		// `terminal` separa quem chegou a um fim conhecido de quem não chegou (ciclo,
+		// destino fora do site, saltos demais). Quem não chegou não é somado a nada e
+		// fica como "não verificado": somar a um destino incerto seria inventar.
+		$resolvido = array();
+		$resolver  = static function ( $caminho ) use ( &$resolvido, $consultar, $destino_de, $regras ) {
+			if ( isset( $resolvido[ $caminho ] ) ) {
+				return $resolvido[ $caminho ];
+			}
+			$cadeia    = array( $caminho );
+			$atual     = $caminho;
+			$resultado = null;
+			for ( $salto = 0; $salto <= (int) $regras['max_hops']; $salto++ ) {
+				if ( $atual !== $caminho && isset( $resolvido[ $atual ] ) ) {
+					// Trecho já resolvido por outra cadeia: reusa, se ele chegou a um fim.
+					$resultado = $resolvido[ $atual ]['terminal'] ? $resolvido[ $atual ] : null;
+					break;
+				}
+				$status = $consultar( $atual );
+				$estado = isset( $status['state'] ) ? (string) $status['state'] : 'unknown';
+				if ( 'redirect' === $estado ) {
+					$destino = $destino_de( isset( $status['location'] ) ? $status['location'] : '' );
+					if ( '' === $destino || in_array( $destino, $cadeia, true ) ) {
+						break; // fora do site, ou ciclo
 					}
-					// O valor ATUAL da entrada, e não o da candidata: se algo já tinha sido
-					// somado neste caminho, a soma segue junto até o destino final.
-					$atual = $por_caminho[ $c['path'] ];
-					$por_caminho[ $destino ]['impressions'] += $atual['impressions'];
-					$por_caminho[ $destino ]['clicks']      += $atual['clicks'];
-					$por_caminho[ $destino ]['merged']      += 1 + (int) $atual['merged'];
-					unset( $por_caminho[ $c['path'] ] );
+					$cadeia[] = $destino;
+					$atual    = $destino;
 					continue;
 				}
-				// Redirecionamento para fora do site ou para o mesmo lugar: não há onde
-				// somar, e afirmar qualquer coisa sobre ele seria inventar.
-				$estado = 'unknown';
-			}
-			$por_caminho[ $c['path'] ]['state'] = in_array( $estado, array( 'ok', 'not_found' ), true ) ? $estado : 'unknown';
-		}
-
-		$saida = array();
-		foreach ( $ordenar( array_values( $por_caminho ) ) as $linha ) {
-			if ( count( $saida ) >= $limit ) {
+				// Parou num nó com status próprio: ok, 404, ou desconhecido. Em todos, o
+				// endereço de partida chega ali, e é ali que a soma cai.
+				$resultado = array(
+					'final'    => $atual,
+					'state'    => in_array( $estado, array( 'ok', 'not_found' ), true ) ? $estado : 'unknown',
+					'terminal' => true,
+				);
 				break;
 			}
-			// Destino que recebeu soma mas não estava entre as candidatas ainda não teve
-			// o status conferido. Confere agora, uma vez só.
-			if ( 'unchecked' === $linha['state'] ) {
-				$status         = call_user_func( $status_fn, $linha['path'] );
-				$estado         = is_array( $status ) && isset( $status['state'] ) ? (string) $status['state'] : 'unknown';
-				$linha['state'] = in_array( $estado, array( 'ok', 'not_found' ), true ) ? $estado : 'unknown';
+			// Saltos demais: só o endereço de partida fica sem fim. O último nó nem foi
+			// consultado, e os intermediários, partindo deles mesmos, cabem no limite — marcá-
+			// los aqui seria dar "não verificado" a quem tem resposta.
+			if ( null === $resultado && $salto > (int) $regras['max_hops'] ) {
+				$cadeia = array( $caminho );
 			}
+			// Com fim conhecido, todo nó da cadeia aponta para ele. Sem fim — ciclo ou
+			// destino fora do site —, nenhum nó da cadeia chega a lugar nenhum: cada um fica
+			// por conta própria, como "não verificado", e nada é somado.
+			foreach ( $cadeia as $no ) {
+				if ( null !== $resultado ) {
+					$resolvido[ $no ] = $resultado;
+				} elseif ( ! isset( $resolvido[ $no ] ) ) {
+					$resolvido[ $no ] = array( 'final' => $no, 'state' => 'unknown', 'terminal' => false );
+				}
+			}
+			return $resolvido[ $caminho ];
+		};
+
+		foreach ( array_slice( $ordenar( array_values( $por_caminho ) ), 0, $candidates ) as $c ) {
+			$resolver( $c['path'] );
+		}
+
+		// ---- Fase 2: somar cada endereço no destino final da própria cadeia. ----
+		//
+		// A partir dos valores ORIGINAIS de `$por_caminho`, que não mudam: por isso a
+		// ordem de processamento não altera o resultado. `merged` conta endereços
+		// originais somados, então um ciclo — que não é somado — não conta a si mesmo.
+		$agregar = static function () use ( &$por_caminho, &$resolvido ) {
+			$agregado = array();
+			foreach ( $por_caminho as $caminho => $entrada ) {
+				$r    = isset( $resolvido[ $caminho ] ) ? $resolvido[ $caminho ] : null;
+				$alvo = ( null !== $r && ! empty( $r['terminal'] ) ) ? (string) $r['final'] : $caminho;
+				if ( ! isset( $agregado[ $alvo ] ) ) {
+					$agregado[ $alvo ] = array(
+						'path'        => $alvo,
+						'impressions' => 0.0,
+						'clicks'      => 0.0,
+						'merged'      => 0,
+						'state'       => isset( $resolvido[ $alvo ] ) ? (string) $resolvido[ $alvo ]['state'] : 'unchecked',
+					);
+				}
+				$agregado[ $alvo ]['impressions'] += $entrada['impressions'];
+				$agregado[ $alvo ]['clicks']      += $entrada['clicks'];
+				if ( $alvo !== $caminho ) {
+					++$agregado[ $alvo ]['merged'];
+				}
+			}
+			return $agregado;
+		};
+
+		// Endereço que chegou ao topo sem ter sido candidato — por exemplo porque um
+		// redirecionamento liberou posição — ainda não foi conferido. Confere e soma de
+		// novo, até o topo ficar todo conferido. Termina: cada volta resolve ao menos um
+		// caminho novo, e o teto de consultas corta o resto como "não verificado".
+		do {
+			$topo      = array_slice( $ordenar( array_values( $agregar() ) ), 0, $limit );
+			$pendentes = array();
+			foreach ( $topo as $linha ) {
+				if ( 'unchecked' === $linha['state'] ) {
+					$pendentes[] = $linha['path'];
+				}
+			}
+			foreach ( $pendentes as $pendente ) {
+				$resolver( $pendente );
+			}
+		} while ( array() !== $pendentes );
+
+		$saida = array();
+		foreach ( $topo as $linha ) {
 			$linha['label'] = 'ok' === $linha['state'] ? (string) call_user_func( $labeler, $linha['path'] ) : $linha['path'];
 			$saida[]        = $linha;
 		}
 
-		$base['available'] = array() !== $saida;
-		$base['reason']    = array() === $saida ? 'pages_empty' : '';
-		$base['rows']      = $saida;
+		$base['available']  = array() !== $saida;
+		$base['reason']     = array() === $saida ? 'pages_empty' : '';
+		$base['rows']       = $saida;
+		$base['head_count'] = $consultas;
 
 		return $base;
 	}
@@ -847,25 +1012,39 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_executive_fetch_gsc_pages' ) ) {
 	/**
-	 * Até 100 páginas da Search Console na janela pedida, com o caminho normalizado.
+	 * Até `pages_rows` páginas da Search Console na janela pedida, com o caminho
+	 * normalizado.
 	 *
-	 * @return array<int, array{page: string, impressions: float, clicks: float}>|WP_Error
+	 * `$query` é injetável para o teste exercitar esta função de verdade: a revisão do
+	 * PR #301 mostrou que ela nunca executava na suíte, e que trocar o limite de linhas
+	 * de volta para 10 — desfazendo a correção — ou tirar a normalização passavam com
+	 * tudo verde.
+	 *
+	 * @param callable|null $query `( $config, $period, $dimension, $row_limit )` que
+	 *                             devolve o corpo cru da resposta, ou WP_Error.
+	 * @return array{rows: array<int, array{page: string, impressions: float, clicks: float}>, truncated: bool}|WP_Error
 	 */
-	function uonix_intelligence_executive_fetch_gsc_pages( $config, $period ) {
-		if ( ! function_exists( 'uonix_analytics_metrics_get_access_token' ) || ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
-			return uonix_analytics_metrics_error( 'analytics_layer_missing' );
+	function uonix_intelligence_executive_fetch_gsc_pages( $config, $period, $query = null ) {
+		if ( ! is_callable( $query ) ) {
+			if ( ! function_exists( 'uonix_analytics_metrics_get_access_token' ) || ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
+				return uonix_analytics_metrics_error( 'analytics_layer_missing' );
+			}
+			$query = static function ( $config, $period, $dimension, $row_limit ) {
+				$token = uonix_analytics_metrics_get_access_token( $config );
+				if ( is_wp_error( $token ) ) {
+					return $token;
+				}
+				return uonix_analytics_metrics_search_console_rows(
+					$token,
+					isset( $config['search_console_site_url'] ) ? (string) $config['search_console_site_url'] : '',
+					$period,
+					$dimension,
+					$row_limit
+				);
+			};
 		}
-		$token = uonix_analytics_metrics_get_access_token( $config );
-		if ( is_wp_error( $token ) ) {
-			return $token;
-		}
-		$bruto = uonix_analytics_metrics_search_console_rows(
-			$token,
-			isset( $config['search_console_site_url'] ) ? (string) $config['search_console_site_url'] : '',
-			$period,
-			'page',
-			100
-		);
+		$limite = (int) uonix_intelligence_executive_rules()['pages_rows'];
+		$bruto  = call_user_func( $query, $config, $period, 'page', $limite );
 		if ( is_wp_error( $bruto ) ) {
 			return $bruto;
 		}
@@ -875,7 +1054,8 @@ if ( ! function_exists( 'uonix_intelligence_executive_fetch_gsc_pages' ) ) {
 		}
 
 		$saida = array();
-		foreach ( isset( $decodificado['rows'] ) && is_array( $decodificado['rows'] ) ? $decodificado['rows'] : array() as $r ) {
+		$crus  = isset( $decodificado['rows'] ) && is_array( $decodificado['rows'] ) ? $decodificado['rows'] : array();
+		foreach ( $crus as $r ) {
 			$caminho = uonix_analytics_metrics_normalize_path( isset( $r['keys'][0] ) ? (string) $r['keys'][0] : '' );
 			if ( '' === $caminho ) {
 				continue;
@@ -883,7 +1063,14 @@ if ( ! function_exists( 'uonix_intelligence_executive_fetch_gsc_pages' ) ) {
 			$saida[] = array( 'page' => $caminho, 'impressions' => (float) $r['impressions'], 'clicks' => (float) $r['clicks'] );
 		}
 
-		return $saida;
+		// Resposta com o limite de linhas pode ter cortado a cauda, e o corte da API é
+		// por cliques, não por impressões. Conta as linhas CRUAS: a propriedade é de
+		// domínio (`sc-domain:`), então a resposta pode trazer subdomínio que a
+		// normalização descarta, e contar depois dela esconderia o corte.
+		return array(
+			'rows'      => $saida,
+			'truncated' => count( $crus ) >= $limite,
+		);
 	}
 }
 
@@ -926,10 +1113,10 @@ if ( ! function_exists( 'uonix_intelligence_executive_collect' ) ) {
 	 *
 	 * Três chamadas às APIs do Google — série diária do GA4, série diária da Search
 	 * Console (via `uonix_intelligence_anomaly_organic_drop()`) e a lista de páginas —
-	 * mais até ~10 requisições HEAD ao próprio site para conferir o status das páginas.
-	 * O relatório sai uma vez por semana, então o custo é irrelevante; o que importa é
-	 * que falha de rede degrada a caixa ou o bloco para "indisponível" e o e-mail sai
-	 * mesmo assim.
+	 * mais até `head_max` requisições HEAD ao próprio site para conferir o status das
+	 * páginas, dentro do orçamento `head_budget`. O relatório sai uma vez por semana,
+	 * então o custo é irrelevante; o que importa é que falha de rede degrada a caixa ou
+	 * o bloco para "indisponível" e o e-mail sai mesmo assim.
 	 *
 	 * Tudo é injetável por `$args`, do mesmo jeito que `uonix_analytics_metrics_sync()`
 	 * aceita um fetcher, para o teste exercitar o caminho inteiro sem rede.

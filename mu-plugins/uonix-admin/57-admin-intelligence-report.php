@@ -112,9 +112,14 @@ if ( ! function_exists( 'uonix_intelligence_report_executive_reason' ) ) {
 	/**
 	 * Motivo de indisponibilidade de uma caixa, em linguagem de leitor.
 	 *
-	 * Motivos da Search Console vêm do Módulo 5 e já têm tradução em
-	 * `uonix_intelligence_anomaly_reason_message()`; os próprios deste módulo ficam
-	 * aqui. Motivo desconhecido cai num texto honestamente vago.
+	 * Os motivos da Search Console vêm do Módulo 5, mas a tradução deles fica AQUI, e
+	 * não em `uonix_intelligence_anomaly_reason_message()`. Aquela fala com o operador
+	 * da aba Anomalias — "o gatilho tenta de novo na próxima verificação" — e o leitor
+	 * deste e-mail não tem gatilho nenhum. A versão anterior delegava, e o e-mail
+	 * imprimia essa frase (achado BAIXO da revisão do PR #301).
+	 *
+	 * O teste confere que todo motivo produzido pelo 58 e pelo 59 tem entrada aqui.
+	 * Motivo desconhecido cai num texto honestamente vago.
 	 */
 	function uonix_intelligence_report_executive_reason( $reason ) {
 		$mapa = array(
@@ -125,15 +130,16 @@ if ( ! function_exists( 'uonix_intelligence_report_executive_reason' ) ) {
 			'no_sessions'               => 'nenhuma visita registrada no período.',
 			'organic_missing'           => 'os dados da Search Console não estão disponíveis.',
 			'windows_invalid'           => 'o período do relatório é inválido.',
+			// Motivos da Search Console, produzidos por `uonix_intelligence_anomaly_organic_drop()`.
+			'series_fetch_failed'       => 'a consulta à Search Console falhou nesta execução.',
+			'series_invalid'            => 'a Search Console respondeu num formato inesperado.',
+			'series_dates_invalid'      => 'a Search Console devolveu datas inconsistentes.',
+			'series_too_short'          => 'a Search Console ainda não tem as duas semanas necessárias para comparar.',
+			'baseline_too_small'        => 'a semana anterior teve poucas impressões; nesse volume a variação é ruído, não sinal.',
+			'comparison_failed'         => 'a comparação entre as duas semanas não produziu número válido.',
 		);
-		if ( isset( $mapa[ $reason ] ) ) {
-			return $mapa[ $reason ];
-		}
-		if ( function_exists( 'uonix_intelligence_anomaly_reason_message' ) ) {
-			return uonix_intelligence_anomaly_reason_message( (string) $reason );
-		}
 
-		return 'o dado não está disponível nesta semana.';
+		return isset( $mapa[ $reason ] ) ? $mapa[ $reason ] : 'o dado não está disponível nesta semana.';
 	}
 }
 
@@ -319,7 +325,23 @@ if ( ! function_exists( 'uonix_intelligence_report_executive_pages_html' ) ) {
 		if ( '' !== $janela ) {
 			$procedencia .= ' · ' . $janela . ' (28 dias, sem os dias ainda não publicados)';
 		}
-		$procedencia .= ' · endereços antigos que redirecionam foram somados ao destino';
+		// Só declara a soma quando ela aconteceu. Afirmar sempre seria dizer ao leitor
+		// que há endereço antigo somado numa semana em que não há nenhum.
+		$houve_soma = false;
+		foreach ( isset( $paginas['rows'] ) && is_array( $paginas['rows'] ) ? $paginas['rows'] : array() as $linha ) {
+			if ( is_array( $linha ) && isset( $linha['merged'] ) && (int) $linha['merged'] > 0 ) {
+				$houve_soma = true;
+				break;
+			}
+		}
+		if ( $houve_soma ) {
+			$procedencia .= ' · endereços antigos que redirecionam foram somados ao destino';
+		}
+		// A API corta por cliques, então lista cheia pode ter perdido página de muita
+		// impressão e pouco clique na cauda.
+		if ( ! empty( $paginas['truncated'] ) ) {
+			$procedencia .= ' · a Search Console devolveu o limite de páginas, e a lista pode estar incompleta';
+		}
 
 		$html  = '<tr><td style="padding:8px 28px 8px 28px;">';
 		$html .= '<div style="color:#0e3780;font-size:16px;font-weight:bold;">Páginas mais encontradas na busca</div>';
