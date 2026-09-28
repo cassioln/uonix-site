@@ -669,16 +669,33 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_status' ) ) {
 	 * `.htaccess` ou do próprio WordPress, e só a resposta HTTP conhece os três.
 	 *
 	 * Falha de rede devolve `unknown`, nunca `ok`: não saber o status não é saber que
-	 * a página existe. Requisição de loopback pode ser bloqueada em alguns hosts, e aí
-	 * o bloco declara "status não verificado" em vez de afirmar.
+	 * a página existe.
+	 *
+	 * **Medido em produção em 2026-09-28**, por SSH: o loopback funciona na Locaweb, e
+	 * os tempos variam muito. A raiz respondeu em 133 ms e as páginas de serviço em
+	 * ~80 ms (vêm do cache); o 301 levou 2,2 s e o **404 levou 4,2 s** — páginas que o
+	 * cache não guarda. O limite por requisição é 8 s por causa disso: com 5 s, que foi
+	 * o primeiro valor, o 404 ficava a 0,8 s de virar "não verificado".
+	 *
+	 * E há um **orçamento total de 20 s** por execução. O botão "Enviar Teste Agora"
+	 * roda tudo dentro de uma requisição do painel, e dez páginas lentas somadas podem
+	 * estourar o tempo máximo de execução do PHP. Estourado o orçamento, as restantes
+	 * ficam como `unknown` sem fazer requisição: o e-mail sai, com o bloco honesto sobre
+	 * o que não conferiu.
 	 *
 	 * @return array{state: string, code: int, location: string}
 	 */
 	function uonix_intelligence_executive_page_status( $path ) {
+		static $gasto = 0.0;
 		if ( ! function_exists( 'wp_remote_head' ) || ! function_exists( 'home_url' ) ) {
 			return array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
 		}
-		$resposta = wp_remote_head( home_url( (string) $path ), array( 'redirection' => 0, 'timeout' => 5 ) );
+		if ( $gasto >= 20.0 ) {
+			return array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
+		}
+		$inicio   = microtime( true );
+		$resposta = wp_remote_head( home_url( (string) $path ), array( 'redirection' => 0, 'timeout' => 8 ) );
+		$gasto   += microtime( true ) - $inicio;
 		if ( is_wp_error( $resposta ) ) {
 			return array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
 		}

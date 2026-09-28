@@ -100,8 +100,17 @@ function wp_timezone() { return new DateTimeZone( $GLOBALS['uox_timezone'] ); }
 function wp_date( $format, $ts = null ) { return gmdate( $format, null === $ts ? time() : (int) $ts ); }
 function wp_remote_post( $url, $args = array() ) { return array(); }
 function wp_remote_get( $url, $args = array() ) { return array(); }
-function wp_remote_retrieve_response_code( $r ) { return 0; }
+function wp_remote_retrieve_response_code( $r ) { return is_array( $r ) && isset( $r['response']['code'] ) ? (int) $r['response']['code'] : 0; }
 function wp_remote_retrieve_body( $r ) { return ''; }
+function wp_remote_retrieve_header( $r, $name ) { return is_array( $r ) && isset( $r['headers'][ strtolower( $name ) ] ) ? $r['headers'][ strtolower( $name ) ] : ''; }
+function home_url( $path = '' ) { return 'https://uonix.com.br' . $path; }
+// Respostas HTTP por URL, e registro dos argumentos de cada HEAD.
+$GLOBALS['uox_http']      = array();
+$GLOBALS['uox_http_args'] = array();
+function wp_remote_head( $url, $args = array() ) {
+	$GLOBALS['uox_http_args'][] = $args;
+	return array_key_exists( $url, $GLOBALS['uox_http'] ) ? $GLOBALS['uox_http'][ $url ] : new WP_Error( 'http_request_failed' );
+}
 
 $RAIZ = dirname( __DIR__, 2 );
 require_once $RAIZ . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
@@ -464,6 +473,29 @@ uox_assert( 'unknown' === ( $externo['rows'][0]['state'] ?? '' ), 'e fica como s
 
 uox_assert( 'Página inicial' === uonix_intelligence_executive_page_label( '/' ), 'a raiz deve ser rotulada como Página inicial' );
 uox_assert( 'pages_fetch_failed' === ( uonix_intelligence_executive_top_pages( new WP_Error( 'x' ), $janelaPag )['reason'] ?? '' ), 'falha de busca deixa o bloco indisponível com motivo' );
+
+// A conferência HTTP de VERDADE, com as respostas que a produção deu em 2026-09-28.
+$GLOBALS['uox_http'] = array(
+	'https://uonix.com.br/'                     => array( 'response' => array( 'code' => 200 ), 'headers' => array() ),
+	'https://uonix.com.br/olhal-de-ancoragem/'  => array( 'response' => array( 'code' => 404 ), 'headers' => array() ),
+	'https://uonix.com.br/projeto-de-balancim'  => array( 'response' => array( 'code' => 301 ), 'headers' => array( 'location' => 'https://uonix.com.br/servico/projeto-balancim/' ) ),
+	'https://uonix.com.br/sumiu'                => array( 'response' => array( 'code' => 410 ), 'headers' => array() ),
+	'https://uonix.com.br/quebrada'             => array( 'response' => array( 'code' => 500 ), 'headers' => array() ),
+	'https://uonix.com.br/sem-destino'          => array( 'response' => array( 'code' => 301 ), 'headers' => array() ),
+);
+uox_assert( 'ok' === uonix_intelligence_executive_page_status( '/' )['state'], '200 é página existente' );
+uox_assert( 'not_found' === uonix_intelligence_executive_page_status( '/olhal-de-ancoragem/' )['state'], '404 é página inexistente' );
+uox_assert( 'not_found' === uonix_intelligence_executive_page_status( '/sumiu' )['state'], '410 também é página inexistente' );
+$st301 = uonix_intelligence_executive_page_status( '/projeto-de-balancim' );
+uox_assert( 'redirect' === $st301['state'] && 'https://uonix.com.br/servico/projeto-balancim/' === $st301['location'], '301 com destino é redirecionamento, e o destino é devolvido' );
+uox_assert( 'unknown' === uonix_intelligence_executive_page_status( '/sem-destino' )['state'], '301 sem cabeçalho Location não tem destino onde somar' );
+uox_assert( 'unknown' === uonix_intelligence_executive_page_status( '/quebrada' )['state'], 'erro 500 não é página existente nem inexistente' );
+uox_assert( 'unknown' === uonix_intelligence_executive_page_status( '/nao-responde' )['state'], 'falha de rede nunca vira página existente' );
+// Sem seguir redirecionamento — senão o 301 viraria o 200 do destino e nada seria
+// somado — e com o limite medido de 8 s.
+$argsHead = end( $GLOBALS['uox_http_args'] );
+uox_assert( 0 === ( $argsHead['redirection'] ?? -1 ), 'a conferência não pode seguir redirecionamento' );
+uox_assert( 8 === ( $argsHead['timeout'] ?? -1 ), 'o limite por requisição é 8 s: o 404 de produção levou 4,2 s, e 5 s deixava margem de 0,8 s' );
 
 // ---------------------------------------------------------------------------
 // 11. collect(): o caminho inteiro, com rede injetada.
