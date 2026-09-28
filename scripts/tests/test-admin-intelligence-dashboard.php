@@ -309,10 +309,9 @@ ob_start();
 uonix_intelligence_render_settings_panel( 'settings' );
 $cfg_ro = (string) ob_get_clean();
 uox_assert( false === strpos( $cfg_ro, '<form' ), 'Sem manage_options o formulário não é renderizado' );
-uox_assert( false !== strpos( $cfg_ro, 'exige permissão de administrador' ), 'Sem manage_options a tela explica por que não há formulário' );
-uox_assert( false === strpos( $cfg_ro, 'cassio@uonix.com.br' ), 'Sem manage_options o endereço completo não vai para o HTML' );
-uox_assert( false !== strpos( $cfg_ro, 'c*****@uonix.com.br' ), 'Sem manage_options o endereço é mascarado preservando inicial e domínio' );
-uox_assert( false !== strpos( $cfg_ro, 'parcialmente ocultos' ), 'A tela avisa que os endereços estão mascarados' );
+// Os endereços não são segredo: quem só pode VISUALIZAR o painel (a governança do
+// ksio.dev já decide quem chega até aqui) vê a lista completa, sem máscara.
+uox_assert( false !== strpos( $cfg_ro, 'cassio@uonix.com.br' ), 'Sem manage_options o endereço completo continua visível: não é segredo' );
 
 // ---------------------------------------------------------------------------
 // Nome do evento de cron vem de acessor, não de string solta em dois arquivos.
@@ -343,4 +342,4 @@ if ( $failures > 0 ) {
 	exit( 1 );
 }
 
-echo "PASS: abas da Central de Inteligência renderizadas com procedência, escape e destinatários protegidos.\n";
+echo "PASS: abas da Central de Inteligência renderizadas com procedência, escape e edição de destinatários protegida.\n";

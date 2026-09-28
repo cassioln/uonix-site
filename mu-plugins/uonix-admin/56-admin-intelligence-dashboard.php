@@ -106,24 +106,6 @@ if ( ! function_exists( 'uonix_intelligence_format_ctr' ) ) {
 	}
 }
 
-if ( ! function_exists( 'uonix_intelligence_mask_email' ) ) {
-	/**
-	 * Mascara um endereço preservando a inicial e o domínio.
-	 *
-	 * A lista de destinatários é impressa em toda carga do painel, porque os painéis
-	 * são renderizados sempre e apenas escondidos. Quem não pode alterar a lista não
-	 * precisa ver os endereços completos da diretoria no código-fonte da página.
-	 */
-	function uonix_intelligence_mask_email( $email ) {
-		$partes = explode( '@', (string) $email, 2 );
-		if ( 2 !== count( $partes ) || '' === $partes[0] ) {
-			return '***';
-		}
-		$oculto = str_repeat( '*', max( 1, strlen( $partes[0] ) - 1 ) );
-		return substr( $partes[0], 0, 1 ) . $oculto . '@' . $partes[1];
-	}
-}
-
 if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 	/**
 	 * Painel da aba "Oportunidades SEO".
@@ -467,12 +449,9 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 			<?php else : ?>
 				<ul>
 					<?php foreach ( $recipients as $email ) : ?>
-						<li><code><?php echo esc_html( $pode_editar ? $email : uonix_intelligence_mask_email( $email ) ); ?></code></li>
+						<li><code><?php echo esc_html( $email ); ?></code></li>
 					<?php endforeach; ?>
 				</ul>
-				<?php if ( ! $pode_editar ) : ?>
-					<p class="description">Endereços parcialmente ocultos: só quem pode alterar a lista vê os endereços completos.</p>
-				<?php endif; ?>
 			<?php endif; ?>
 
 			<?php if ( $pode_editar ) : ?>
@@ -492,8 +471,6 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 					</table>
 					<p class="submit"><button type="submit" class="button button-primary">Salvar destinatários</button></p>
 				</form>
-			<?php else : ?>
-				<p class="description">Alterar a lista de destinatários exige permissão de administrador.</p>
 			<?php endif; ?>
 
 			<?php if ( $pode_editar ) : ?>
