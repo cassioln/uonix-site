@@ -486,6 +486,15 @@ if ( ! function_exists( 'uonix_intelligence_executive_num' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_executive_plural' ) ) {
+	/**
+	 * "1 orçamento", "0 orçamentos", "4 orçamentos". Texto para diretoria não leva "(s)".
+	 */
+	function uonix_intelligence_executive_plural( $n, $singular, $plural ) {
+		return (int) $n . ' ' . ( 1 === (int) $n ? $singular : $plural );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_executive_insights' ) ) {
 	/**
 	 * Até três destaques, por regra determinística. Nunca enchimento.
@@ -519,7 +528,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_insights' ) ) {
 			} elseif ( 'down' === $leads['direction'] ) {
 				$texto = sprintf( 'Orçamentos caíram de forma detectável: %d nas últimas 4 semanas, contra %d nas 4 anteriores.', $a, $b );
 			} else {
-				$texto = sprintf( '%d orçamento(s) nas últimas 4 semanas, contra %d nas 4 anteriores: sem mudança detectável, porque com este volume a diferença cabe no acaso.', $a, $b );
+				$texto = sprintf( '%s nas últimas 4 semanas, contra %d nas 4 anteriores: sem mudança detectável, porque com este volume a diferença cabe no acaso.', uonix_intelligence_executive_plural( $a, 'orçamento', 'orçamentos' ), $b );
 			}
 			$saida[] = array( 'kind' => 'leads', 'text' => $texto );
 		}

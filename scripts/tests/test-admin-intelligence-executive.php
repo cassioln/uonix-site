@@ -301,11 +301,24 @@ $convCmp  = uonix_intelligence_executive_conversion_box( array_merge( uox_leads(
 uox_assert( ! empty( $convCmp['comparable'] ), 'com histórico completo a conversão é comparável' );
 uox_assert( 'up' === $convCmp['direction'], '9 contra 1 com visitas iguais é aumento detectável' );
 
-// Mesmos orçamentos, mas o DOBRO de visitas no período atual: a taxa é a mesma dos
-// dois lados. Sem usar a exposição, o teste diria "aumento".
+// O DOBRO de orçamentos e o DOBRO de visitas: a taxa é a mesma dos dois lados.
+//
+// O volume é alto de propósito. A primeira versão deste fixture usava 8 contra 4, e a
+// verificação por mutação mostrou que ele não distinguia nada: com contagens tão
+// pequenas o teste dá "sem mudança" com ou sem a exposição, e trocar p0 por 0,5
+// sobrevivia. Com 40 contra 20 a diferença existe — e a contraprova abaixo prova isso.
+$leadsExp = array();
+$cursor   = new DateTimeImmutable( '2026-09-01', $fusoUtc );
+for ( $i = 0; $i < 20; $i++ ) { $leadsExp[ $cursor->format( 'Y-m-d' ) ] = 2; $cursor = $cursor->modify( '+1 day' ); }
+$cursor = new DateTimeImmutable( '2026-08-05', $fusoUtc );
+for ( $i = 0; $i < 20; $i++ ) { $leadsExp[ $cursor->format( 'Y-m-d' ) ] = 1; $cursor = $cursor->modify( '+1 day' ); }
 $ga4Dobro = uonix_intelligence_executive_ga4_per_day( uox_ga4_rows( '2026-07-20', '2026-09-27', static function ( $d ) { return $d >= '2026-08-31' ? 20 : 10; } ) );
-$convExp  = uonix_intelligence_executive_conversion_box( array_merge( uox_leads( '2026-09-01', 8 ), uox_leads( '2026-08-05', 4 ) ), $ga4Dobro, $W, $ALFA );
+$convExp  = uonix_intelligence_executive_conversion_box( $leadsExp, $ga4Dobro, $W, $ALFA );
+uox_assert( 40 === $convExp['leads'] && 560 === $convExp['sessions'], 'o fixture deveria ter 40 orçamentos em 560 visitas, obteve ' . $convExp['leads'] . ' em ' . $convExp['sessions'] );
 uox_assert( $quase( $convExp['rate'], $convExp['prev_rate'] ), 'o fixture deveria ter a mesma taxa nos dois períodos' );
+// Contraprova: SEM a exposição, 40 contra 20 seria detectável. Se isto falhar, a
+// asserção seguinte fica vácua e não prova que a exposição é usada.
+uox_assert( uonix_intelligence_executive_binomial_p( 40, 60, 0.5 ) < $ALFA, 'contraprova: 40 contra 20 com exposição igual precisa ser detectável, senão o fixture não discrimina' );
 uox_assert( 'flat' === $convExp['direction'], 'taxa igual NÃO pode ser mudança: o teste precisa usar a exposição proporcional às visitas' );
 
 uox_assert( 'no_sessions' === ( uonix_intelligence_executive_conversion_box( $leadsFlat, array( 'per_day' => array(), 'first_day' => '' ), $W, $ALFA )['reason'] ?? '' ), 'sem visitas não há taxa' );
@@ -428,7 +441,8 @@ uox_assert( false !== strpos( $cOrg, '+30,0%' ), 'a caixa de impressões deve ex
 uox_assert( false !== strpos( $cOrg, '18/09 a 24/09' ), 'a caixa de impressões deve declarar a própria semana, que termina antes das outras' );
 
 uox_assert( false !== strpos( $cConv, 'até 1,4%' ), 'a conversão deve aparecer como teto: até 1,4% (4/294), obteve ' . strip_tags( $cConv ) );
-uox_assert( false !== strpos( $cConv, '4 orçamento(s) em 294 visitas' ), 'a conversão deve exibir numerador e denominador' );
+uox_assert( false !== strpos( $cConv, '4 orçamentos em 294 visitas' ), 'a conversão deve exibir numerador e denominador, com o plural flexionado' );
+uox_assert( '1 orçamento' === uonix_intelligence_executive_plural( 1, 'orçamento', 'orçamentos' ) && '0 orçamentos' === uonix_intelligence_executive_plural( 0, 'orçamento', 'orçamentos' ), 'o plural deve ser singular só para 1' );
 uox_assert( false !== strpos( $cConv, 'sem histórico do GA4 para comparar' ), 'sem histórico a conversão deve dizer que não compara' );
 
 // Ordem dos blocos: o leitor executivo lê o resumo primeiro.

@@ -59,6 +59,7 @@ Módulos novos seguem `NN-slug.php` dentro de `mu-plugins/uonix-<domínio>/`, in
 | `mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php` | Render: abas `intelligence`, `anomalies` e `settings` |
 | `mu-plugins/uonix-admin/57-admin-intelligence-report.php` | Relatório executivo semanal por e-mail e seu agendamento |
 | `mu-plugins/uonix-admin/58-admin-intelligence-anomalies.php` | Módulo 5: detecção de anomalias, estado, alerta e verificação diária |
+| `mu-plugins/uonix-admin/59-admin-intelligence-executive.php` | Módulo 4: scorecard, destaques e páginas mais encontradas do e-mail semanal |
 
 Dados precedem render no array. Não inflar o `52`, que já tem mais de 1.500 linhas com CSS inline.
 
@@ -310,6 +311,56 @@ A justificativa é factual e verificável no código: a única cópia é o *snap
 Então o residual é **≥ 10 consultas com texto**, e o número exato depende da distribuição do período. Confundir os dois conjuntos subestima a superfície remanescente, e é justamente ela que o ROPA precisa declarar.
 
 **O filtro de PII não foi ampliado** — ver a rejeição da heurística de nome próprio acima.
+
+## Módulo 4 — Relatório Executivo
+
+O e-mail semanal existente (`57`) passa a abrir com um scorecard de quatro caixas e até três destaques, e ganha um bloco de páginas mais encontradas na busca. A camada de dados é o `59`, que não renderiza e não grava nada. Sem ela carregada, o e-mail sai exatamente como antes.
+
+Decisões do Cassio em 2026-09-28: estender o e-mail semanal em vez de criar um segundo; destaques por **regra determinística**, não por LLM; **cortar o Custo por Lead** enquanto não houver fonte de gasto; e comparar orçamentos em **número absoluto** com janela de 4 semanas. O espaço do CPL no scorecard é ocupado por **Visitas**, que é o pilar 1 (volume de demanda).
+
+### Cada caixa tem o próprio relógio, e declara
+
+| Caixa | Fonte | Janela | Comparação |
+|---|---|---|---|
+| Orçamentos | Fluent Forms (form 3 e 4, sem spam) | 7 dias até ontem | 28 dias contra os 28 anteriores, **só em número absoluto** e pelo teste de diferença |
+| Visitas | GA4, série diária | 7 dias até ontem | semana contra semana, em % |
+| Impressões na busca | Search Console, via `organic_drop()` do Módulo 5 | semana **assentada**, ~4 dias antes de hoje | semana contra semana, em % |
+| Conversão | orçamentos ÷ visitas | 28 dias até ontem | 28 contra 28, pelo teste de diferença com exposição |
+
+As janelas terminam **ontem** porque o relatório sai segunda às 08:00, e "hoje" teria oito horas. Isso é seguro para o GA4 porque a defasagem dele é de **horas** — medido em 2026-09-28: às 13:00 já havia dado parcial do próprio dia. Não vale para a Search Console, que segue com ~3 dias de atraso (medido de novo no mesmo dia), e por isso a caixa de impressões reusa as janelas assentadas do Módulo 5 em vez de somar a série de novo. Reimplementar ali seria reabrir os pontos cegos que duas revisões fecharam.
+
+### "Mudança detectável" é um teste, não um limiar
+
+Orçamentos nunca aparecem em porcentagem. Com ~1 por semana, "▲ +100%" é um orçamento a mais. A caixa mostra o número absoluto e o resultado de um **teste binomial exato** de duas contagens de Poisson: condicionado ao total, a primeira contagem segue Binomial(n, p0), com p0 = 0,5 para janelas iguais e p0 proporcional às visitas quando se comparam taxas. O nível é o convencional, α = 0,05 — o único número do módulo que não vem de medição do site.
+
+**Exato, e não a aproximação normal**, porque ela erra justo no volume deste site: 0 contra 5 passa em `|a − b| > 2√(a+b)` e tem valor-p exato de 0,0625.
+
+A alternativa rejeitada era um limiar fixo de diferença. Com este volume, qualquer limiar fixo ou calaria sempre ou dispararia sempre — a lição do limiar de silêncio do Módulo 5, que a própria tela reprovou na primeira execução.
+
+### Duas recusas que a medição obrigou
+
+- **Sem histórico do GA4, não há comparação.** O snapshot de 30 dias gravava `sessions.previous = 0, state = new`: o GA4 deste site não tem dado antes de ~29/08. Uma janela anterior que começa antes disso soma menos dias do que tem e acusaria um crescimento que é só a instalação. A cobertura exige dado **estritamente antes** do início da janela; para verificar isso, a série é pedida desde 7 dias antes da janela mais antiga. Em 2026-09-28, a semana anterior tem cobertura e as 4 semanas anteriores não.
+- **Com dia imputado, a porcentagem de impressões é recusada.** A imputação otimista do Módulo 5 produz um **limite** construído para o alerta, não uma medição. O relatório mostra os números observados e declara quantos dias faltaram.
+
+### A conversão é um teto
+
+O GA4 roda com Consent Mode v2 e só conta, nos relatórios, as visitas com consentimento de estatística. Os orçamentos contam todos. O denominador fica menor que o real e a divisão fica **maior**, então a caixa mostra "até X%". O sentido do erro é conhecido e vai escrito na própria caixa.
+
+### Destaques
+
+Até três, e nunca enchimento: cada um só existe se o dado que o sustenta está disponível. Descrevem, não explicam — "a visibilidade cresceu mais que a demanda" é uma constatação sobre dois números; causa, nada aqui mede.
+
+O limiar de variação de impressões reusa `organic_drop_percent` do Módulo 5 (35%), para as duas superfícies nunca discordarem sobre o que é relevante.
+
+### Páginas mais encontradas
+
+Do snapshot de 30 dias, ordenadas por **impressões** — é o que a Search Console mede de procura. Páginas, e não consultas: as consultas de alto volume fora da faixa de oportunidade têm o texto minimizado no snapshot (#278). O bloco é só ranking e declara a janela; a defasagem muda os totais e pode trocar de lugar páginas próximas, mas nenhum número do bloco depende de o dia ausente ser zero.
+
+### O que o Módulo 4 ainda não entrega
+
+- **Custo por Lead**, até existir fonte de gasto de anúncio.
+- **Destaques por LLM.** Integração com Gemini é fatia separada e exige migrar `GEMINI_API_KEY` para o `wp-config.php`.
+- **Painel.** Nesta fatia o relatório executivo existe só no e-mail; o botão "Enviar Teste Agora" é a forma de vê-lo sob demanda.
 
 ## Ordem de entrega dos módulos
 

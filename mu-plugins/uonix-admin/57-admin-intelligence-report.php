@@ -226,7 +226,14 @@ if ( ! function_exists( 'uonix_intelligence_report_box_html' ) ) {
 			$fonte = 'Fonte: Search Console · a semana termina antes de hoje porque os dados chegam com ~3 dias de atraso';
 		} elseif ( 'conversion' === $chave ) {
 			$valor    = 'até ' . number_format( (float) $box['rate'] * 100, 1, ',', '.' ) . '%';
-			$linhas[] = esc_html( sprintf( '%d orçamento(s) em %s visitas · 4 semanas (%s)', (int) $box['leads'], number_format( (float) $box['sessions'], 0, ',', '.' ), uonix_intelligence_report_window_label( $box['window'] ) ) );
+			$linhas[] = esc_html( sprintf(
+				'%d %s em %s %s · 4 semanas (%s)',
+				(int) $box['leads'],
+				1 === (int) $box['leads'] ? 'orçamento' : 'orçamentos',
+				number_format( (float) $box['sessions'], 0, ',', '.' ),
+				1 === (int) $box['sessions'] ? 'visita' : 'visitas',
+				uonix_intelligence_report_window_label( $box['window'] )
+			) );
 			if ( ! empty( $box['comparable'] ) ) {
 				$linhas[] = esc_html( 'antes: até ' . number_format( (float) $box['prev_rate'] * 100, 1, ',', '.' ) . '% · ' ) . uonix_intelligence_report_detect_html( (string) $box['direction'] );
 			} elseif ( 'no_history' === ( $box['note'] ?? '' ) ) {
