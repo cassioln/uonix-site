@@ -81,6 +81,7 @@ function wp_remote_retrieve_body( $response ) { return ''; }
 function wp_remote_post( $url, $args ) { return array(); }
 function wp_remote_get( $url, $args = array() ) { return array(); }
 function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) { $GLOBALS['uonix_metrics_actions'][] = array( $hook, $callback ); }
+function add_filter( $hook, $callback = null, $priority = 10, $args = 1 ) { return true; }
 function wp_next_scheduled( $hook ) { return $GLOBALS['uonix_metrics_cron'][ $hook ] ?? false; }
 function wp_schedule_event( $timestamp, $recurrence, $hook ) { $GLOBALS['uonix_metrics_cron'][ $hook ] = $timestamp; return true; }
 function current_user_can( $capability ) { return 'manage_options' === $capability; }

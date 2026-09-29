@@ -20,9 +20,9 @@
  *
  * A opção só é gravada pelo dono: `uonix_intelligence_license_guard_write()` barra
  * qualquer outro usuário, inclusive por `/wp-admin/options.php`. O WP-CLI passa, porque
- * quem tem SSH já altera o `wp-config.php`. Não há filtro de leitura, então nenhum
- * plugin reverte a suspensão. Decisão e motivos: docs/uonix-insights-inteligencia.md,
- * seção *Licenciamento*.
+ * quem tem SSH já altera o `wp-config.php`. Não há filtro de leitura sobre a
+ * constante, então nenhum plugin reverte a suspensão dela. Decisão e motivos:
+ * docs/uonix-insights-inteligencia.md, seção *Licenciamento*.
  *
  * Quem consulta: `uonix_intelligence_send_report()` (57), inclusive no envio de
  * teste, e `uonix_intelligence_anomaly_send_alert()` (58). Os dois tratam a
@@ -104,7 +104,8 @@ if ( ! function_exists( 'uonix_intelligence_license_panel_evaluate' ) ) {
 	 *
 	 * `null` é opção ausente: o painel não restringe. Opção presente que não seja
 	 * `{status, valid_until}` com valores reconhecidos pausa, como constante inválida.
-	 * `valid_until` vazio é "sem data-limite".
+	 * As duas chaves são obrigatórias: `valid_until` ausente, nulo ou com o nome
+	 * errado pausa com `invalid`. Só a string vazia é "sem data-limite".
 	 *
 	 * @param mixed             $gravado Valor da opção, ou null se ela não existe.
 	 * @param DateTimeInterface $today   Hoje, no fuso do site.
@@ -117,8 +118,14 @@ if ( ! function_exists( 'uonix_intelligence_license_panel_evaluate' ) ) {
 			return uonix_intelligence_license_evaluate( '', null, $today );
 		}
 
+		// Chave da data ausente, com o nome errado ou nula não é "sem data-limite": é
+		// opção malformada, e pausa com `invalid` qualquer que seja o status gravado.
+		if ( ! array_key_exists( 'valid_until', $gravado ) || null === $gravado['valid_until'] ) {
+			return uonix_intelligence_license_evaluate( '', null, $today );
+		}
+
 		$status = array_key_exists( 'status', $gravado ) ? $gravado['status'] : '';
-		$data   = array_key_exists( 'valid_until', $gravado ) && '' !== $gravado['valid_until'] ? $gravado['valid_until'] : null;
+		$data   = '' !== $gravado['valid_until'] ? $gravado['valid_until'] : null;
 
 		// Status ausente não é "só a data": no painel o status é sempre escolhido.
 		return uonix_intelligence_license_evaluate( null === $status ? '' : $status, $data, $today );
@@ -387,7 +394,7 @@ if ( ! function_exists( 'uonix_intelligence_license_guard_write' ) ) {
 	 * Devolver o valor antigo faz o WordPress desistir da gravação.
 	 *
 	 * O WP-CLI passa: quem tem SSH já altera o `wp-config.php`, que é a trava forte.
-	 * Roda por último no filtro, para decidir sobre o valor final.
+	 * Roda por último no filtro específico da opção.
 	 */
 	function uonix_intelligence_license_guard_write( $value, $old_value ) {
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {

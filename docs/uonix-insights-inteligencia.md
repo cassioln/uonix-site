@@ -100,6 +100,7 @@ Lista em `wp_options`. E-mail de destinatário não é segredo; token de API é 
   - Vale para os três handlers da aba Configurações: salvar destinatários (`55`), **Enviar Teste Agora** (`57`) e a licença (`50`).
   - A checagem vem antes do `check_admin_referer`, e sem o 49 os três recusam com 403.
   - Esconder o formulário não bastaria: um POST direto chegaria ao handler.
+  - **Trava da opção**, igual à da licença: o filtro `pre_update_option_uonix_executive_report_recipients`, na prioridade `PHP_INT_MAX`, devolve o valor antigo para quem não é o dono, e o WordPress desiste da gravação. Cobre qualquer `update_option()`, inclusive `/wp-admin/options.php`; o WP-CLI passa. O handler acima é o único gravador legítimo.
 - **Leitura e visualização**: `edit_posts`, como o resto do Insights. Os demais usuários, administradores ou editores, veem a aba Configurações só para leitura: a lista de destinatários, o agendamento e o aviso de licença, sem formulário nem botão de teste.
 - **Anti-padrão a não replicar**: `mu-plugins/uonix-admin/40-admin-dados-globais-rfq.php:39-43` grava sem nonce e sem re-checagem de capability, e — o defeito mais grave — **o nome da option vem de input do usuário** (`update_option( 'uox_' . $chave, … )`) sem allowlist de chave. Os valores passam por `sanitize_text_field()`, então o problema **não** é falta de sanitização: é ausência de verificação de intenção e de allowlist. Rastreado na issue #249.
 
@@ -509,7 +510,8 @@ Erro no **nome** da constante não é detectado. `KSIODEV_INTELIGENCE_STATUS` de
 
 - **opção ausente** é "sem controle", como constante ausente;
 - **opção que não seja `{status, valid_until}`** com valores reconhecidos pausa, com `invalid`;
-- **status ausente ou nulo** também pausa. No painel o status é sempre escolhido, então não existe o caso "só a data".
+- **as duas chaves são obrigatórias.** Status ausente ou nulo pausa: no painel o status é sempre escolhido, então não existe o caso "só a data". `valid_until` ausente, nulo ou com o nome errado (`valid_untill`) também pausa, mesmo com `status` válido;
+- **só `valid_until` vazio (`''`)** é "sem data-limite".
 
 ### Combinação das camadas
 
@@ -543,6 +545,7 @@ Erro no **nome** da constante não é detectado. `KSIODEV_INTELIGENCE_STATUS` de
   - O `root` pode trocar a senha do `ksiodev` pela tela de Usuários (limite da #310) e depois gravar como dono.
   - Acesso ao banco ou a arquivos também contorna o painel.
 - **A trava cobre `update_option()`, e não `delete_option()` nem `add_option()`.** Fora do handler do dono, os dois só são alcançáveis por código no servidor. Apagar a opção só tira a restrição do painel: a constante continua valendo.
+  - O mesmo limite vale para a trava dos destinatários (`uonix_executive_report_recipients`, ver *Destinatários do relatório*): cobre `update_option()`, não `delete_option()` nem `add_option()`.
 - **A suspensão definitiva é pela constante.**
 
 ### O que pausa e o que não pausa
@@ -585,7 +588,7 @@ wp option update uonix_intelligence_license '{"status":"suspended","valid_until"
 wp option delete uonix_intelligence_license
 ```
 
-A opção por WP-CLI não passa pela validação do formulário. Um valor fora da regra pausa, com `invalid`.
+A opção por WP-CLI não passa pela validação do formulário. Um valor fora da regra pausa, com `invalid`, inclusive sem a chave `valid_until`: grave sempre as duas chaves, com `"valid_until":""` para "sem data-limite".
 
 **Depois de cada `wp config set`, `wp config delete` ou `wp option`, confira.** É a única forma de pegar erro no nome da constante:
 

@@ -217,7 +217,6 @@ uox_assert( true === $r['sending'] && false === $r['configured'], 'opção ausen
 
 $painel_envia = array(
 	'active sem data'           => array( 'status' => 'active', 'valid_until' => '' ),
-	'active sem a chave da data' => array( 'status' => 'active' ),
 	'active no prazo'           => array( 'status' => 'active', 'valid_until' => '2026-09-29' ),
 	'trial no prazo'            => array( 'status' => 'trial', 'valid_until' => '2026-10-31' ),
 );
@@ -231,14 +230,23 @@ $painel_pausa = array(
 	'active vencido'            => array( array( 'status' => 'active', 'valid_until' => '2026-09-28' ), 'expired' ),
 	'trial sem data'            => array( array( 'status' => 'trial', 'valid_until' => '' ), 'invalid' ),
 	'sem a chave do status'     => array( array( 'valid_until' => '2026-12-31' ), 'invalid' ),
-	'status nulo'               => array( array( 'status' => null ), 'invalid' ),
-	'status desconhecido'       => array( array( 'status' => 'suspenso' ), 'invalid' ),
+	'status nulo'               => array( array( 'status' => null, 'valid_until' => '' ), 'invalid' ),
+	'status desconhecido'       => array( array( 'status' => 'suspenso', 'valid_until' => '' ), 'invalid' ),
 	'data que é array'          => array( array( 'status' => 'active', 'valid_until' => array() ), 'invalid' ),
 	'data inexistente'          => array( array( 'status' => 'active', 'valid_until' => '2026-02-30' ), 'invalid' ),
 	'array vazio'               => array( array(), 'invalid' ),
 	'texto'                     => array( 'suspended', 'invalid' ),
 	'string vazia'              => array( '', 'invalid' ),
 	'false'                     => array( false, 'invalid' ),
+	// Chave da data ausente, nula, ou com o nome errado: opção malformada, e o
+	// motivo é `invalid` mesmo quando o status sozinho seria `suspended` — a forma
+	// errada da opção pesa mais do que o status que ela traz.
+	'active sem a chave da data'      => array( array( 'status' => 'active' ), 'invalid' ),
+	'active com valid_until nulo'     => array( array( 'status' => 'active', 'valid_until' => null ), 'invalid' ),
+	'nome da chave errado (valid_untill)' => array( array( 'status' => 'active', 'valid_untill' => '2026-12-31' ), 'invalid' ),
+	'suspended sem a chave da data'   => array( array( 'status' => 'suspended' ), 'invalid' ),
+	'valid_until booleano'            => array( array( 'status' => 'active', 'valid_until' => false ), 'invalid' ),
+	'valid_until inteiro'             => array( array( 'status' => 'active', 'valid_until' => 20261231 ), 'invalid' ),
 );
 foreach ( $painel_pausa as $caso => $par ) {
 	$r = uox_painel( $par[0] );
