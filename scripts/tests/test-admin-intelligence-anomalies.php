@@ -956,8 +956,15 @@ $GLOBALS['uox_schedules'] = $guardadas;
 
 // ---------------------------------------------------------------------------
 // 11. Licença suspensa: nada sai, nada se gasta, e a detecção continua.
-// Fica no fim porque constante não se desfaz.
+// Primeiro pelo painel, que é opção e se desfaz; depois pela constante, que não se
+// desfaz e por isso fica no fim.
 // ---------------------------------------------------------------------------
+
+$GLOBALS['uox_options']['uonix_intelligence_license'] = array( 'status' => 'suspended', 'valid_until' => '' );
+$GLOBALS['uox_mail_calls'] = array();
+$pelo_painel = uonix_intelligence_anomaly_send_alert( array( uox_achado( 'lead_silence', true, true ) ), array( 'operador@ksio.dev' ) );
+uox_assert( 'license_inactive' === $pelo_painel['reason'] && array() === $GLOBALS['uox_mail_calls'], 'com a licença suspensa no painel o alerta não é enviado; obteve ' . var_export( $pelo_painel, true ) );
+unset( $GLOBALS['uox_options']['uonix_intelligence_license'] );
 
 define( 'KSIODEV_INTELLIGENCE_STATUS', 'suspended' );
 unset( $GLOBALS['uox_options']['uonix_intelligence_anomaly_state'] );

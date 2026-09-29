@@ -163,6 +163,7 @@ restauradas depois da importação:
 | E-mail e integrações | `%fluentmail%`, `%mailchimp%`, `%smtp%`, `mailserver_%` |
 | Desafios antirrobô | `%turnstile%`, `%captcha%`, `%recaptcha%`, `%hcaptcha%`, `%wp_captcha%` |
 | Logs e backup | `%wp_mail_logging%`, `%mail_logging%`, `%wpvivid%` |
+| Uônix Insights | `uonix_executive_report_recipients`, `uonix_intelligence_anomaly_state`, `uonix_intelligence_license` |
 
 Os sublinhados escapados no predicado SQL representam caracteres literais. Essa
 proteção é deliberadamente específica: opções que não estejam nessa lista vêm da
@@ -595,7 +596,8 @@ O menu `ksio.dev` é **exclusivo do usuário `ksiodev`**, nem outro administrado
 
 - **O `ksiodev` vê o menu `ksio.dev`** com Visão Geral, Limpeza de Conteúdo, Clone de Ambientes, Uônix Insights e **Visibilidade para usuários**.
 - **Os demais só veem uma ferramenta se o `ksiodev` a liberar** na tela Visibilidade para usuários. A ferramenta liberada aparece como **item próprio** do menu, nunca como submenu de `ksio.dev`, e exige a capacidade de sempre: `manage_options` para Limpeza e Clone, e `edit_posts` para o Uônix Insights.
-- **O padrão é tudo oculto.** Ferramenta oculta não tem página registrada para o usuário, então a URL direta responde "sem permissão". Os handlers `admin_post` do Insights (salvar destinatários, envio de teste e atualização de métricas) recusam do mesmo jeito.
+- **O padrão é tudo oculto.** Ferramenta oculta não tem página registrada para o usuário, então a URL direta responde "sem permissão". O handler `admin_post` de atualização de métricas do Insights recusa do mesmo jeito.
+- **A aba Configurações do Insights só é alterada pelo `ksiodev`,** mesmo com o Insights liberado. Os demais a veem só para leitura, e os handlers de destinatários, envio de teste e licença recusam com 403 — ver [uonix-insights-inteligencia.md](uonix-insights-inteligencia.md#destinatários-do-relatório).
 - **A escolha fica na opção `uonix_ksio_tools_visibility`**, com as chaves `limpeza`, `clone` e `analytics`.
 
 **Ambiente sem o usuário `ksiodev`** (QA ou local clonado sem substituir usuários): ninguém vê o menu. Há duas saídas:

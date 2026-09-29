@@ -16,6 +16,12 @@ $failures = 0;
 $GLOBALS['uonix_metrics_options'] = array();
 $GLOBALS['uonix_metrics_actions'] = array();
 $GLOBALS['uonix_metrics_cron'] = array();
+$GLOBALS['uonix_metrics_filtros'] = array();
+
+// Quem grava a opção dos destinatários: só o dono (49). Interruptor para os testes
+// da trava de gravação.
+$GLOBALS['uox_dono'] = false;
+function uonix_ksio_can_configure_insights() { return $GLOBALS['uox_dono']; }
 
 function uonix_intel_assert( $condition, $message ) {
 	global $failures;
@@ -40,7 +46,19 @@ function wp_json_encode( $value ) { return json_encode( $value ); }
 function wp_unslash( $value ) { return $value; }
 function sanitize_key( $value ) { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $value ) ); }
 function get_option( $key, $default = false ) { return array_key_exists( $key, $GLOBALS['uonix_metrics_options'] ) ? $GLOBALS['uonix_metrics_options'][ $key ] : $default; }
-function update_option( $key, $value ) { $GLOBALS['uonix_metrics_options'][ $key ] = $value; return true; }
+// Segue o core: aplica `pre_update_option_{$nome}` e desiste se o valor voltar igual
+// ao antigo, inclusive na primeira gravação, em que o antigo é `false`.
+function update_option( $key, $value, $autoload = null ) {
+	$antigo = get_option( $key );
+	foreach ( $GLOBALS['uonix_metrics_filtros'][ 'pre_update_option_' . $key ] ?? array() as $filtro ) {
+		$value = call_user_func( $filtro[0], $value, $antigo, $key );
+	}
+	if ( $value === $antigo || serialize( $value ) === serialize( $antigo ) ) {
+		return false;
+	}
+	$GLOBALS['uonix_metrics_options'][ $key ] = $value;
+	return true;
+}
 function add_option( $key, $value ) { if ( array_key_exists( $key, $GLOBALS['uonix_metrics_options'] ) ) return false; $GLOBALS['uonix_metrics_options'][ $key ] = $value; return true; }
 function delete_option( $key ) { unset( $GLOBALS['uonix_metrics_options'][ $key ] ); return true; }
 function get_transient( $key ) { return false; }
@@ -51,14 +69,22 @@ function wp_remote_retrieve_body( $response ) { return ''; }
 function wp_remote_post( $url, $args ) { return array(); }
 function wp_remote_get( $url, $args = array() ) { return array(); }
 function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) { $GLOBALS['uonix_metrics_actions'][] = array( $hook, $callback ); }
+function add_filter( $hook, $callback = null, $priority = 10, $args = 1 ) {
+	$GLOBALS['uonix_metrics_filtros'][ $hook ][] = array( $callback, $priority, $args );
+	return true;
+}
 function wp_next_scheduled( $hook ) { return $GLOBALS['uonix_metrics_cron'][ $hook ] ?? false; }
 function wp_schedule_event( $timestamp, $recurrence, $hook ) { $GLOBALS['uonix_metrics_cron'][ $hook ] = $timestamp; return true; }
 function current_user_can( $capability ) { return 'manage_options' === $capability; }
 function check_admin_referer() { return true; }
 function esc_html__( $text ) { return $text; }
 function wp_die( $text ) { throw new RuntimeException( $text ); }
-function wp_safe_redirect() { return true; }
+// Lança, em vez de só devolver true, para o handler de destinatários não chegar ao
+// `exit;` que vem depois do redirect e derrubar o próprio processo do teste.
+class Uox_Metrics_Redirect_Exception extends RuntimeException {}
+function wp_safe_redirect( $url ) { throw new Uox_Metrics_Redirect_Exception( (string) $url ); }
 function admin_url( $path ) { return 'https://uonix.com.br/wp-admin/' . $path; }
+function add_query_arg( $args, $url ) { return $url . '?' . http_build_query( $args ); }
 
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
@@ -265,6 +291,64 @@ uonix_intel_assert( array() === uonix_intelligence_title_suggestion( '' ), 'Cons
 
 $row_suggestion = $fresh['rows'][0]['suggestion'];
 uonix_intel_assert( is_array( $row_suggestion ) && array() !== $row_suggestion, 'Cada linha devolvida carrega sua sugestão determinística' );
+
+// ---------------------------------------------------------------------------
+// Trava de gravação dos destinatários (#318): só o dono muda a opção, por
+// qualquer caminho que passe por update_option(), inclusive /wp-admin/options.php.
+// ---------------------------------------------------------------------------
+$filtro_destinatarios = $GLOBALS['uonix_metrics_filtros'][ 'pre_update_option_' . uonix_intelligence_recipients_option() ][0] ?? array( null, 0, 0 );
+uonix_intel_assert(
+	'uonix_intelligence_recipients_guard_write' === $filtro_destinatarios[0] && PHP_INT_MAX === $filtro_destinatarios[1] && 2 === $filtro_destinatarios[2],
+	'a trava dos destinatários roda por último no filtro e recebe valor novo e antigo; obteve ' . var_export( $filtro_destinatarios, true )
+);
+
+$GLOBALS['uonix_metrics_options'] = array();
+$GLOBALS['uox_dono'] = false;
+uonix_intel_assert( false === update_option( uonix_intelligence_recipients_option(), array( 'a@uonix.test' ) ), 'quem não é o dono não cria a opção dos destinatários' );
+uonix_intel_assert( ! array_key_exists( uonix_intelligence_recipients_option(), $GLOBALS['uonix_metrics_options'] ), 'a primeira gravação também é barrada' );
+
+$GLOBALS['uonix_metrics_options'][ uonix_intelligence_recipients_option() ] = array( 'antigo@uonix.test' );
+update_option( uonix_intelligence_recipients_option(), array( 'novo@uonix.test' ) );
+uonix_intel_assert( array( 'antigo@uonix.test' ) === get_option( uonix_intelligence_recipients_option() ), 'quem não é o dono não muda a lista existente pelo update_option (caminho do options.php)' );
+
+$GLOBALS['uox_dono'] = true;
+update_option( uonix_intelligence_recipients_option(), array( 'novo@uonix.test' ) );
+uonix_intel_assert( array( 'novo@uonix.test' ) === get_option( uonix_intelligence_recipients_option() ), 'o dono muda a lista dos destinatários pelo update_option' );
+$GLOBALS['uox_dono'] = false;
+$GLOBALS['uonix_metrics_options'] = array();
+
+// O handler do dono continua gravando a lista, com a trava de update_option ativa:
+// a checagem do handler e a trava do filtro não podem se atropelar.
+$GLOBALS['uox_dono'] = true;
+$_POST = array( 'uonix_recipients' => 'dono@uonix.test' );
+try {
+	uonix_intelligence_save_recipients();
+	uonix_intel_assert( false, 'o handler do dono deveria redirecionar' );
+} catch ( Uox_Metrics_Redirect_Exception $e ) {
+	uonix_intel_assert( false !== strpos( $e->getMessage(), 'uonix_recipients_saved=1' ), 'o redirect do dono informa que salvou; obteve ' . $e->getMessage() );
+}
+uonix_intel_assert( array( 'dono@uonix.test' ) === get_option( uonix_intelligence_recipients_option() ), 'o handler do dono grava a lista com a trava de update_option ativa' );
+$GLOBALS['uox_dono'] = false;
+$GLOBALS['uonix_metrics_options'] = array();
+
+// Em processo separado, a trava carregada sozinha, com o arquivo real do 55: sem o
+// 49 (e fora do WP-CLI) ela recusa; no WP-CLI ela passa.
+function uonix_intel_sub( $prefixo, $expressao, $arquivo ) {
+	$codigo = 'define("ABSPATH", 1); function add_action() {} function add_filter() {} ' . $prefixo
+		. ' require ' . var_export( $arquivo, true ) . '; echo json_encode(' . $expressao . ');';
+	$saida = shell_exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg( $codigo ) . ' 2>&1' );
+	return json_decode( (string) $saida, true );
+}
+$arquivo_55 = dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
+
+$r = uonix_intel_sub( '', 'uonix_intelligence_recipients_guard_write("novo", "velho")', $arquivo_55 );
+uonix_intel_assert( 'velho' === $r, 'sem o 49 a trava dos destinatários mantém o valor antigo; obteve ' . var_export( $r, true ) );
+$r = uonix_intel_sub( 'define("WP_CLI", true);', 'uonix_intelligence_recipients_guard_write("novo", "velho")', $arquivo_55 );
+uonix_intel_assert( 'novo' === $r, 'no WP-CLI a trava dos destinatários deixa gravar; obteve ' . var_export( $r, true ) );
+$r = uonix_intel_sub( 'define("WP_CLI", false);', 'uonix_intelligence_recipients_guard_write("novo", "velho")', $arquivo_55 );
+uonix_intel_assert( 'velho' === $r, 'WP_CLI definida como false não libera a trava dos destinatários; obteve ' . var_export( $r, true ) );
+$r = uonix_intel_sub( 'function uonix_ksio_can_configure_insights() { return false; }', 'uonix_intelligence_recipients_guard_write("novo", "velho")', $arquivo_55 );
+uonix_intel_assert( 'velho' === $r, 'o 49 dizendo que não é o dono mantém o valor antigo na trava dos destinatários; obteve ' . var_export( $r, true ) );
 
 if ( $failures > 0 ) {
 	fwrite( STDERR, "FALHAS: {$failures}\n" );

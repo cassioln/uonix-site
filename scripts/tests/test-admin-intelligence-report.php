@@ -147,6 +147,13 @@ function uonix_ksio_can_access_tool( $chave ) {
 	$GLOBALS['uox_ksio_chaves'][] = $chave;
 	return (bool) $GLOBALS['uox_ksio_pode'];
 }
+// Quem altera as Configurações, inclusive o envio de teste: só o dono (49).
+$GLOBALS['uox_dono']           = true;
+$GLOBALS['uox_dono_consultas'] = 0;
+function uonix_ksio_can_configure_insights() {
+	++$GLOBALS['uox_dono_consultas'];
+	return (bool) $GLOBALS['uox_dono'];
+}
 
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
@@ -392,36 +399,16 @@ uonix_intelligence_send_report( array( 'outro@uonix.com.br' ) );
 uox_assert( array( 'outro@uonix.com.br' ) === $GLOBALS['uox_mail_calls'][0]['to'], 'Lista informada explicitamente é usada' );
 
 // ---------------------------------------------------------------------------
-// Handler do envio de teste: capability e nonce.
+// Handler do envio de teste: só o dono do ksio.dev, e nonce.
 // ---------------------------------------------------------------------------
-$GLOBALS['uox_can'] = false;
-$GLOBALS['uox_referer_ok'] = true;
-$GLOBALS['uox_mail_calls'] = array();
-try {
-	uonix_intelligence_handle_test_send();
-	uox_assert( false, 'Envio de teste sem manage_options deveria interromper' );
-} catch ( Uox_Die_Exception $e ) {
-	uox_assert( true, 'Envio de teste sem manage_options interrompe' );
-}
-uox_assert( array() === $GLOBALS['uox_mail_calls'], 'Envio de teste sem manage_options não dispara e-mail' );
-
-$GLOBALS['uox_can'] = true;
-$GLOBALS['uox_referer_ok'] = false;
-$GLOBALS['uox_mail_calls'] = array();
-try {
-	uonix_intelligence_handle_test_send();
-	uox_assert( false, 'Envio de teste sem nonce deveria interromper' );
-} catch ( Uox_Die_Exception $e ) {
-	uox_assert( true, 'Envio de teste sem nonce interrompe' );
-}
-uox_assert( array() === $GLOBALS['uox_mail_calls'], 'Envio de teste sem nonce não dispara e-mail' );
-
-// Com manage_options e nonce, mas com o Insights oculto pela governança do ksio.dev.
-$GLOBALS['uox_can']         = true;
-$GLOBALS['uox_referer_ok']  = true;
-$GLOBALS['uox_mail_calls']  = array();
-$GLOBALS['uox_ksio_pode']   = false;
-$GLOBALS['uox_ksio_chaves'] = array();
+// Administrador com o Insights liberado, mas que não é o dono.
+$GLOBALS['uox_can']            = true;
+$GLOBALS['uox_ksio_pode']      = true;
+$GLOBALS['uox_dono']           = false;
+$GLOBALS['uox_dono_consultas'] = 0;
+$GLOBALS['uox_referer_ok']     = true;
+$GLOBALS['uox_referer_action'] = null;
+$GLOBALS['uox_mail_calls']     = array();
 // Sem a guarda o handler enviaria e redirecionaria; o teste precisa reprovar pela
 // asserção, não por exceção não capturada.
 $interrompeu = false;
@@ -432,10 +419,21 @@ try {
 } catch ( Uox_Redirect_Exception $e ) {
 	$interrompeu = false;
 }
-uox_assert( $interrompeu, 'Envio de teste com o Insights oculto deveria interromper' );
-uox_assert( array() === $GLOBALS['uox_mail_calls'], 'Envio de teste com o Insights oculto não dispara e-mail' );
-uox_assert( in_array( 'analytics', $GLOBALS['uox_ksio_chaves'], true ), 'Envio de teste consulta a governança com a chave analytics' );
-$GLOBALS['uox_ksio_pode'] = true;
+uox_assert( $interrompeu, 'Envio de teste de quem não é o dono deveria interromper' );
+uox_assert( array() === $GLOBALS['uox_mail_calls'], 'Envio de teste de quem não é o dono não dispara e-mail' );
+uox_assert( $GLOBALS['uox_dono_consultas'] > 0, 'Envio de teste consulta a regra do dono' );
+uox_assert( null === $GLOBALS['uox_referer_action'], 'A guarda do dono vem antes do nonce' );
+$GLOBALS['uox_dono'] = true;
+
+$GLOBALS['uox_referer_ok'] = false;
+$GLOBALS['uox_mail_calls'] = array();
+try {
+	uonix_intelligence_handle_test_send();
+	uox_assert( false, 'Envio de teste sem nonce deveria interromper' );
+} catch ( Uox_Die_Exception $e ) {
+	uox_assert( true, 'Envio de teste sem nonce interrompe' );
+}
+uox_assert( array() === $GLOBALS['uox_mail_calls'], 'Envio de teste sem nonce não dispara e-mail' );
 
 $GLOBALS['uox_can'] = true;
 $GLOBALS['uox_referer_ok'] = true;
@@ -473,11 +471,13 @@ uox_assert( false === strpos( $cfg, 'uonix-license-notice' ), 'Sem constante de 
 uox_assert( in_array( 'uonix_intelligence_send_test', $GLOBALS['uox_nonce_actions'], true ), 'O formulário de teste emite a ação de nonce que o handler verifica' );
 uox_assert( 'uonix_intelligence_send_test' === $GLOBALS['uox_referer_action'], 'O handler de envio de teste verifica a própria ação, não a de outro formulário' );
 
-$GLOBALS['uox_can'] = false;
+$GLOBALS['uox_can']  = true;
+$GLOBALS['uox_dono'] = false;
 ob_start();
 uonix_intelligence_render_settings_panel( 'settings' );
 $cfg_ro = (string) ob_get_clean();
-uox_assert( false === strpos( $cfg_ro, 'uonix_intelligence_send_test' ), 'Sem manage_options o botão de envio não é renderizado' );
+uox_assert( false === strpos( $cfg_ro, 'uonix_intelligence_send_test' ), 'Administrador que não é o dono não vê o botão de envio' );
+$GLOBALS['uox_dono'] = true;
 
 // Aviso de falha do envio de teste é exibido a partir da query.
 $GLOBALS['uox_can'] = true;
@@ -487,6 +487,28 @@ uonix_intelligence_render_settings_panel( 'settings' );
 $cfg_falha = (string) ob_get_clean();
 uox_assert( false !== strpos( $cfg_falha, 'UONIX_NONPROD_EMAIL_TO' ), 'Falha do envio de teste é explicada na tela' );
 $_GET = array();
+
+// ---------------------------------------------------------------------------
+// Licença suspensa no painel: a opção basta para nada sair, nem o envio de teste.
+// ---------------------------------------------------------------------------
+$GLOBALS['uox_options']     = array(
+	uonix_intelligence_recipients_option() => array( 'cassio@uonix.com.br' ),
+	'uonix_intelligence_license'           => array( 'status' => 'suspended', 'valid_until' => '' ),
+);
+$GLOBALS['uox_mail_result'] = true;
+$GLOBALS['uox_mail_calls']  = array();
+$suspenso_painel = uonix_intelligence_send_report();
+uox_assert( 'license_inactive' === $suspenso_painel['reason'] && array() === $GLOBALS['uox_mail_calls'], 'Com a licença suspensa no painel o relatório não é enviado; obteve ' . var_export( $suspenso_painel, true ) );
+$redirect = '';
+try {
+	uonix_intelligence_handle_test_send();
+} catch ( Uox_Redirect_Exception $e ) {
+	$redirect = (string) $e->url;
+}
+uox_assert( array() === $GLOBALS['uox_mail_calls'] && false !== strpos( $redirect, 'uonix_test_reason=license_inactive' ), 'Com a licença suspensa no painel o envio de teste também não sai; redirect: ' . $redirect );
+unset( $GLOBALS['uox_options']['uonix_intelligence_license'] );
+uonix_intelligence_send_report();
+uox_assert( 1 === count( $GLOBALS['uox_mail_calls'] ), 'Sem a opção do painel o relatório volta a sair' );
 
 // ---------------------------------------------------------------------------
 // Licença suspensa: nada sai, nem o envio de teste, e a tela diz por quê.
@@ -527,4 +549,4 @@ if ( $failures > 0 ) {
 	exit( 1 );
 }
 
-echo "PASS: relatório executivo montado com procedência e enviado apenas com destinatário, capability e nonce.\n";
+echo "PASS: relatório executivo montado com procedência e enviado apenas com destinatário, licença, dono e nonce.\n";

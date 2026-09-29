@@ -134,6 +134,19 @@ if ( ! function_exists( 'uonix_ksio_can_access_tool' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_ksio_can_configure_insights' ) ) {
+	/**
+	 * Quem altera as Configurações do Uônix Insights: destinatários, envio de teste e
+	 * licença. Só o dono, e com `manage_options`, para que a constante
+	 * UONIX_KSIO_OWNER_LOGIN apontada para um editor não lhe dê escrita.
+	 *
+	 * Ver o Insights liberado não basta: os demais leem a aba, e não a alteram.
+	 */
+	function uonix_ksio_can_configure_insights() {
+		return uonix_ksio_is_owner() && function_exists( 'current_user_can' ) && current_user_can( 'manage_options' );
+	}
+}
+
 if ( ! function_exists( 'uonix_ksio_register_menus' ) ) {
 	/**
 	 * Registra o menu conforme quem está logado.

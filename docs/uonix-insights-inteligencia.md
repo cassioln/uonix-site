@@ -18,7 +18,7 @@ Specs que governam código pertencem a `docs/`, versionadas e revisadas.
 
 | Peça | Onde | Estado |
 |---|---|---|
-| Painel e menu | Página em `mu-plugins/uonix-admin/52-admin-analytics-dashboard.php`; menu registrado em `49-admin-ksio-governanca.php` (PR #310) | Slug `uonix-analytics`, capability `edit_posts`. Para o usuário `ksiodev`, é **submenu de `ksio.dev`**. Para os demais, é **item próprio do menu, só se liberado** na tela "Visibilidade para usuários" (padrão: oculto). Oculto, a página e os três `admin_post` do Insights recusam — ver [clone-ambientes.md](clone-ambientes.md#como-usar-o-painel-ksiodev) |
+| Painel e menu | Página em `mu-plugins/uonix-admin/52-admin-analytics-dashboard.php`; menu registrado em `49-admin-ksio-governanca.php` (PR #310) | Slug `uonix-analytics`, capability `edit_posts`. Para o usuário `ksiodev`, é **submenu de `ksio.dev`**. Para os demais, é **item próprio do menu, só se liberado** na tela "Visibilidade para usuários" (padrão: oculto). Oculto, a página e a atualização de métricas (`53`) recusam — ver [clone-ambientes.md](clone-ambientes.md#como-usar-o-painel-ksiodev). A aba Configurações só é alterada pelo `ksiodev`, mesmo com o Insights liberado — ver *Destinatários do relatório* |
 | Abas | `52` (tablist) + allowlist em `53-admin-analytics-metrics.php:673-708` | Três níveis: `?tab=` → `?subtab=` → `?catalog_tab=`, validados por `sanitize_key` contra listas fechadas |
 | Camada de dados GA4/GSC | `mu-plugins/uonix-admin/53-admin-analytics-metrics.php` | OAuth2 JWT RS256 escrito à mão, sem bibliotecas; escopos read-only; 8 chamadas por sync |
 | Cache | `53`, `uonix_analytics_metrics_snapshot_option()` e `…_get_snapshot()` | Snapshot em `wp_options`, **sem TTL sobre a geração corrente**, por desenho; validade por frescor de 24h; snapshot velho é preservado como `stale` (fail-soft). Gerações **inalcançáveis** pela cascata de leitura são coletadas — ver *Coleta das gerações mortas de snapshot* |
@@ -55,7 +55,7 @@ Módulos novos seguem `NN-slug.php` dentro de `mu-plugins/uonix-<domínio>/`, in
 
 | Arquivo | Papel |
 |---|---|
-| `mu-plugins/uonix-admin/50-admin-intelligence-license.php` | Licença: lê as constantes do `wp-config.php` e decide se o envio automático sai. Só define funções, sem hook |
+| `mu-plugins/uonix-admin/50-admin-intelligence-license.php` | Licença: combina as constantes do `wp-config.php` com a licença do painel e decide se o envio automático sai. Registra só dois hooks: o handler que grava a licença do painel e a trava de gravação da opção |
 | `mu-plugins/uonix-admin/55-admin-intelligence-metrics.php` | Camada de dados: regras de detecção, normalização e procedência |
 | `mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php` | Render: abas `intelligence`, `anomalies` e `settings` |
 | `mu-plugins/uonix-admin/57-admin-intelligence-report.php` | Relatório executivo semanal por e-mail e seu agendamento |
@@ -96,8 +96,12 @@ Todo valor vindo do banco sai por `esc_html`/`esc_attr`/`esc_url`, e isso é **a
 
 Lista em `wp_options`. E-mail de destinatário não é segredo; token de API é — e por isso os dois vivem em lugares diferentes.
 
-- **Escrita**: `admin-post` + `check_admin_referer` + `current_user_can('manage_options')`, espelhando `53:736-748`.
-- **Leitura e visualização**: `edit_posts`, como o resto do Insights.
+- **Escrita: só o dono do ksio.dev** (#318). A regra é `uonix_ksio_can_configure_insights()`, em `49`: o login do dono **e** `manage_options`.
+  - Vale para os três handlers da aba Configurações: salvar destinatários (`55`), **Enviar Teste Agora** (`57`) e a licença (`50`).
+  - A checagem vem antes do `check_admin_referer`, e sem o 49 os três recusam com 403.
+  - Esconder o formulário não bastaria: um POST direto chegaria ao handler.
+  - **Trava da opção**, igual à da licença: o filtro `pre_update_option_uonix_executive_report_recipients`, na prioridade `PHP_INT_MAX`, devolve o valor antigo para quem não é o dono, e o WordPress desiste da gravação. Cobre qualquer `update_option()`, inclusive `/wp-admin/options.php`; o WP-CLI passa. O handler acima é o único gravador legítimo.
+- **Leitura e visualização**: `edit_posts`, como o resto do Insights. Os demais usuários, administradores ou editores, veem a aba Configurações só para leitura: a lista de destinatários, o agendamento e o aviso de licença, sem formulário nem botão de teste.
 - **Anti-padrão a não replicar**: `mu-plugins/uonix-admin/40-admin-dados-globais-rfq.php:39-43` grava sem nonce e sem re-checagem de capability, e — o defeito mais grave — **o nome da option vem de input do usuário** (`update_option( 'uox_' . $chave, … )`) sem allowlist de chave. Os valores passam por `sanitize_text_field()`, então o problema **não** é falta de sanitização: é ausência de verificação de intenção e de allowlist. Rastreado na issue #249.
 
 ### Agendamento
@@ -457,25 +461,35 @@ A porta de ativação do Módulo 3 foi atravessada em 2026-09-22 (ver *Registro 
 
 ## Licenciamento
 
-O envio automático da Central depende de uma licença, lida de duas constantes do `wp-config.php` por `mu-plugins/uonix-admin/50-admin-intelligence-license.php`.
+O envio automático da Central depende de uma licença em duas camadas, combinadas por `mu-plugins/uonix-admin/50-admin-intelligence-license.php`:
+
+- **as constantes do `wp-config.php`,** a trava forte (#312);
+- **a licença do painel,** na aba Configurações, que só o dono do ksio.dev altera e que **só restringe** (#318).
+
+**Vale a mais restritiva.** O painel nunca religa o que a constante pausou.
 
 | Constante | Valores | Papel |
 |---|---|---|
 | `KSIODEV_INTELLIGENCE_STATUS` | `active`, `trial` ou `suspended` | `active` é contratado, `trial` é cortesia e `suspended` pausa |
 | `KSIODEV_INTELLIGENCE_VALID_UNTIL` | `AAAA-MM-DD` | Último dia com envio, inclusive, no fuso do site (`wp_timezone()`) |
 
-### Decisão: constante, não opção no banco
+A licença do painel fica na opção `uonix_intelligence_license`, com as chaves `status` e `valid_until` e os mesmos valores das constantes. `valid_until` vazio é "sem data-limite".
 
-Escolhida em 2026-09-29, na #312.
+### Decisão: a constante é a trava forte, e o painel só restringe
 
-- **Mesmo custo de operação.** As duas saídas exigem SSH: `wp config set` ou `wp option update`. A opção não é mais rápida.
-- **A opção se reverte pelo painel.** Um administrador do site edita qualquer opção em `/wp-admin/options.php`. A constante só muda com acesso ao servidor.
-- **A opção viaja em clone e backup.** Um clone não copia `wp-config.php` (ver `docs/ambientes.md`), então a licença de um ambiente não vaza para outro.
+A constante foi escolhida em 2026-09-29, na #312:
+
+- **A constante só muda com acesso ao servidor.** Uma opção no banco fica ao alcance de outro administrador, mesmo com a trava — ver *Limites*.
+- **Um clone não copia `wp-config.php`** (ver `docs/ambientes.md`), então a constante de um ambiente não vaza para outro.
 - **É o canal que o PHP já usa** para configuração por ambiente: `define()` no `wp-config.php`, como os segredos.
 
-Não há filtro. Um filtro deixaria qualquer plugin reverter a suspensão.
+A licença do painel veio no mesmo dia, na #318, para o dono suspender ou pôr prazo sem SSH. Por isso ela só restringe: quem grava a opção sem ser o dono, trocando a senha do `ksiodev` ou pelo banco, consegue no máximo tirar a restrição do painel, nunca a da constante.
 
-### Regra
+Não há filtro sobre o estado. Um filtro deixaria qualquer plugin reverter a suspensão.
+
+### Regra de cada camada
+
+A tabela vale para as constantes e, com as diferenças listadas depois dela, para a licença do painel.
 
 | Constantes | Envio | Motivo |
 |---|---|---|
@@ -492,12 +506,54 @@ O último caso cobre erro de digitação no **valor**: `suspenso`, `Active` ou `
 
 Erro no **nome** da constante não é detectado. `KSIODEV_INTELIGENCE_STATUS` deixa a constante certa ausente, e ausente é o padrão: o envio segue. Por isso a conferência da *Operação* é obrigatória.
 
+**Na licença do painel:**
+
+- **opção ausente** é "sem controle", como constante ausente;
+- **opção que não seja `{status, valid_until}`** com valores reconhecidos pausa, com `invalid`;
+- **as duas chaves são obrigatórias.** Status ausente ou nulo pausa: no painel o status é sempre escolhido, então não existe o caso "só a data". `valid_until` ausente, nulo ou com o nome errado (`valid_untill`) também pausa, mesmo com `status` válido;
+- **só `valid_until` vazio (`''`)** é "sem data-limite".
+
+### Combinação das camadas
+
+- **Se uma camada pausa,** o envio pausa, e o estado é o dela. Se as duas pausam, vale o da constante.
+- **Se as duas enviam,** vale o prazo mais curto entre as camadas configuradas. Camada sem controle não entra. Sem prazo em nenhuma, ou com prazos iguais, vale a constante.
+- **Sem nenhuma das duas,** o envio segue como sempre, e o deploy não muda produção.
+
+`uonix_intelligence_license_state()` devolve o estado combinado e mais três chaves:
+
+- `source`: `constant`, `panel` ou `''`, quando nenhuma camada está configurada;
+- `constant` e `panel`: o que cada camada diz sozinha.
+
+### Gravação da licença do painel
+
+- **Tela:** o bloco *Licença da Central*, na aba Configurações, só para o dono. Mostra o estado que vale, com a origem, e o que diz cada camada.
+- **Handler** `admin_post_uonix_intelligence_save_license`: só o dono (403 antes do nonce), e com nonce.
+- **Validação antes de gravar.** São recusados, com aviso e sem gravar nada:
+  - status fora de `active`, `trial` e `suspended`;
+  - data que não seja um `AAAA-MM-DD` real;
+  - `trial` sem data.
+- **"Sem controle pelo painel"** apaga a opção.
+- **Só `status` e `valid_until` são gravados.** Campo extra no POST é ignorado.
+- **Trava da opção:** o filtro `pre_update_option_uonix_intelligence_license`, na prioridade `PHP_INT_MAX`, devolve o valor antigo para quem não é o dono, e o WordPress desiste da gravação.
+  - Vale para qualquer `update_option()`, inclusive `/wp-admin/options.php`.
+  - O WP-CLI passa, porque quem tem SSH já altera o `wp-config.php`.
+- **Clone:** a opção está em `protected_options_where()`, e o destino fica com a licença que já tinha. `scripts/tests/test-clone-activation-options.sh` reprova se ela sair da lista.
+
+### Limites
+
+- **O painel não é barreira contra outro administrador.**
+  - O `root` pode trocar a senha do `ksiodev` pela tela de Usuários (limite da #310) e depois gravar como dono.
+  - Acesso ao banco ou a arquivos também contorna o painel.
+- **A trava cobre `update_option()`, e não `delete_option()` nem `add_option()`.** Fora do handler do dono, os dois só são alcançáveis por código no servidor. Apagar a opção só tira a restrição do painel: a constante continua valendo.
+  - O mesmo limite vale para a trava dos destinatários (`uonix_executive_report_recipients`, ver *Destinatários do relatório*): cobre `update_option()`, não `delete_option()` nem `add_option()`.
+- **A suspensão definitiva é pela constante.**
+
 ### O que pausa e o que não pausa
 
 **Pausa:**
 
 - o relatório semanal, em `uonix_intelligence_send_report()` (57);
-- o **Enviar Teste Agora**, que passa pela mesma função. Sem isso, um administrador contornaria a suspensão pelo botão;
+- o **Enviar Teste Agora**, que passa pela mesma função. Sem isso, o botão contornaria a suspensão;
 - o alerta de anomalia, em `uonix_intelligence_anomaly_send_alert()` (58).
 
 Os dois pontos devolvem o motivo `license_inactive` e tratam a ausência do 50 como licença inativa.
@@ -506,7 +562,7 @@ Os dois pontos devolvem o motivo `license_inactive` e tratam a ausência do 50 c
 
 - o agendamento: os eventos continuam registrados, e só o envio devolve `license_inactive`;
 - a detecção de anomalias e o badge do painel;
-- a loja e o site: o 50 só define funções e não registra hook.
+- a loja e o site: os dois hooks do 50 só agem na gravação da licença do painel.
 
 **A suspensão não gasta as tentativas do alerta.** `license_inactive` segue a regra de `no_recipients`: não conta como tentativa e o estado não avança. Reativada a licença com a anomalia em curso, o aviso sai na verificação seguinte.
 
@@ -514,11 +570,13 @@ Os dois pontos devolvem o motivo `license_inactive` e tratam a ausência do 50 c
 
 Com o envio pausado, as abas **Anomalias** e **Configurações** mostram um aviso de contato com a ksio.dev, com o motivo e, no vencimento, a data. Com o envio ativo não há aviso. Se o 50 não carregar, o aviso diz que o controle não carregou.
 
-A Visão Geral do menu ksio.dev, que só o dono vê, tem o cartão **Licença da Central de Inteligência** com o estado lido das constantes. É só leitura.
+A Visão Geral do menu ksio.dev, que só o dono vê, tem o cartão **Licença da Central de Inteligência**. Ele mostra o estado que vale e a origem, `wp-config.php` ou painel, e o botão **Alterar no painel** leva ao bloco da licença.
 
 ### Operação
 
-No servidor, a partir da raiz do WordPress:
+**Pelo painel,** logado como `ksiodev`: aba Configurações do Uônix Insights, bloco *Licença da Central*.
+
+**No servidor,** a partir da raiz do WordPress:
 
 ```bash
 wp config set KSIODEV_INTELLIGENCE_STATUS suspended --type=constant
@@ -526,16 +584,20 @@ wp config set KSIODEV_INTELLIGENCE_STATUS trial --type=constant
 wp config set KSIODEV_INTELLIGENCE_VALID_UNTIL 2026-12-31 --type=constant
 wp config delete KSIODEV_INTELLIGENCE_STATUS --type=constant
 wp config delete KSIODEV_INTELLIGENCE_VALID_UNTIL --type=constant
+wp option update uonix_intelligence_license '{"status":"suspended","valid_until":""}' --format=json
+wp option delete uonix_intelligence_license
 ```
 
-**Depois de cada `wp config set` ou `wp config delete`, confira.** É a única forma de pegar erro no nome da constante:
+A opção por WP-CLI não passa pela validação do formulário. Um valor fora da regra pausa, com `invalid`, inclusive sem a chave `valid_until`: grave sempre as duas chaves, com `"valid_until":""` para "sem data-limite".
+
+**Depois de cada `wp config set`, `wp config delete` ou `wp option`, confira.** É a única forma de pegar erro no nome da constante:
 
 ```bash
 wp eval 'var_export( uonix_intelligence_license_state() );'
 ```
 
-- **Com constante definida,** o resultado tem de trazer `'configured' => true`. `false` significa que o nome não bate.
-- **Ao suspender,** tem de trazer `'sending' => false` e `'reason' => 'suspended'`.
+- **Com constante definida,** a chave `constant` tem de trazer `'configured' => true`. `false` significa que o nome não bate. O `configured` de fora não serve para isso, porque a licença do painel também o liga.
+- **Ao suspender,** o resultado tem de trazer `'sending' => false`, `'reason' => 'suspended'` e, em `source`, a camada que suspendeu.
 
 O mesmo estado aparece no cartão da Visão Geral do ksio.dev.
 
