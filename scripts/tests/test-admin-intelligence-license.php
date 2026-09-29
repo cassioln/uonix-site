@@ -160,9 +160,9 @@ foreach ( $pausa as $caso => $trio ) {
 // ---------------------------------------------------------------------------
 // 3. Leitura das constantes, em processo separado porque constante não se redefine.
 // ---------------------------------------------------------------------------
-function uox_sub( $prefixo, $expressao ) {
+function uox_sub( $prefixo, $expressao, $arquivo = null ) {
 	$codigo = 'define("ABSPATH", 1); function add_action() {} function add_filter() {} ' . $prefixo
-		. ' require ' . var_export( $GLOBALS['ARQUIVO'], true ) . '; echo json_encode(' . $expressao . ');';
+		. ' require ' . var_export( null === $arquivo ? $GLOBALS['ARQUIVO'] : $arquivo, true ) . '; echo json_encode(' . $expressao . ');';
 	$saida = shell_exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg( $codigo ) . ' 2>&1' );
 	return json_decode( (string) $saida, true );
 }
@@ -442,9 +442,17 @@ uox_assert( 'velho' === $r, 'WP_CLI definida como false não libera; obteve ' . 
 $r = uox_sub( 'function uonix_ksio_can_configure_insights() { return false; }', 'uonix_intelligence_license_guard_write("novo", "velho")' );
 uox_assert( 'velho' === $r, 'o 49 dizendo que não é o dono mantém o valor antigo; obteve ' . var_export( $r, true ) );
 
-// Sem o 49 o handler recusa.
-$r = uox_sub( 'class E extends Exception {} function wp_die($m = "", $t = "", $a = array()) { throw new E("die " . ($a["response"] ?? 0)); } function esc_html__($t) { return $t; } function check_admin_referer() { throw new E("nonce"); }', '(function () { try { uonix_intelligence_save_license(); return "retornou"; } catch (E $e) { return $e->getMessage(); } })()' );
-uox_assert( 'die 403' === $r, 'sem o 49 o handler recusa com 403 antes do nonce; obteve ' . var_export( $r, true ) );
+// Sem o 49 os três handlers de gravação da aba Configurações recusam, cada um
+// carregado sozinho: o da licença, o dos destinatários (55) e o do envio de teste (57).
+$handlers = array(
+	'uonix_intelligence_save_license'     => $GLOBALS['ARQUIVO'],
+	'uonix_intelligence_save_recipients'  => dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php',
+	'uonix_intelligence_handle_test_send' => dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/57-admin-intelligence-report.php',
+);
+foreach ( $handlers as $handler => $arquivo ) {
+	$r = uox_sub( 'class E extends Exception {} function wp_die($m = "", $t = "", $a = array()) { throw new E("die " . ($a["response"] ?? 0)); } function esc_html__($t) { return $t; } function check_admin_referer() { throw new E("nonce"); }', '(function () { try { ' . $handler . '(); return "retornou"; } catch (E $e) { return $e->getMessage(); } })()', $arquivo );
+	uox_assert( 'die 403' === $r, "sem o 49, {$handler} recusa com 403 antes do nonce; obteve " . var_export( $r, true ) );
+}
 
 // O leitor combina com a constante também no processo real: a constante suspende
 // e o painel ativo não religa.
