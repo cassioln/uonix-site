@@ -11,7 +11,9 @@
  *
  * Sem nenhuma das duas, o envio segue como sempre. Com qualquer uma definida, vale
  * `uonix_intelligence_license_evaluate()`, e valor que ela não reconhece pausa o
- * envio: um erro de digitação ao suspender não pode deixar o envio ligado.
+ * envio. Isso cobre erro no valor, não no nome: constante com nome errado é
+ * constante ausente, e o envio segue. A doc manda conferir com `wp eval` depois de
+ * cada mudança.
  *
  * Não há filtro nem opção no banco, então nem um plugin nem um administrador do site
  * revertem a suspensão pelo painel. Decisão e motivos: docs/uonix-insights-inteligencia.md,

@@ -488,7 +488,9 @@ Não há filtro. Um filtro deixaria qualquer plugin reverter a suspensão.
 | `trial` sem data | **Pausado** | `invalid`: cortesia sem fim é configuração incompleta |
 | Status ou data que a regra não reconhece | **Pausado** | `invalid` |
 
-O último caso cobre erro de digitação: `suspenso`, `Active` ou `31/12/2026` pausam, porque um erro ao suspender não pode deixar o envio ligado. A data é validada de ida e volta, então `2026-02-30` é inválida em vez de virar 2 de março.
+O último caso cobre erro de digitação no **valor**: `suspenso`, `Active` ou `31/12/2026` pausam. A data é validada de ida e volta, então `2026-02-30` é inválida em vez de virar 2 de março.
+
+Erro no **nome** da constante não é detectado. `KSIODEV_INTELIGENCE_STATUS` deixa a constante certa ausente, e ausente é o padrão: o envio segue. Por isso a conferência da *Operação* é obrigatória.
 
 ### O que pausa e o que não pausa
 
@@ -526,11 +528,16 @@ wp config delete KSIODEV_INTELLIGENCE_STATUS --type=constant
 wp config delete KSIODEV_INTELLIGENCE_VALID_UNTIL --type=constant
 ```
 
-Para conferir sem abrir o painel:
+**Depois de cada `wp config set` ou `wp config delete`, confira.** É a única forma de pegar erro no nome da constante:
 
 ```bash
 wp eval 'var_export( uonix_intelligence_license_state() );'
 ```
+
+- **Com constante definida,** o resultado tem de trazer `'configured' => true`. `false` significa que o nome não bate.
+- **Ao suspender,** tem de trazer `'sending' => false` e `'reason' => 'suspended'`.
+
+O mesmo estado aparece no cartão da Visão Geral do ksio.dev.
 
 O controle é a alavanca de suspensão para destinatário externo. Antes do primeiro envio a um, a licença do ambiente deve estar configurada com o status e a data combinados.
 
