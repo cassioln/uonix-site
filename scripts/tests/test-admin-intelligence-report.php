@@ -148,11 +148,17 @@ function uonix_ksio_can_access_tool( $chave ) {
 	return (bool) $GLOBALS['uox_ksio_pode'];
 }
 
-require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/50-admin-intelligence-license.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/57-admin-intelligence-report.php';
+
+// Sem o 50 a licença conta como inativa: nada sai. Só dá para provar antes de carregá-lo.
+$GLOBALS['uox_mail_result'] = true;
+$GLOBALS['uox_mail_calls']  = array();
+$sem_licenca = uonix_intelligence_send_report( array( 'cassio@uonix.com.br' ) );
+uox_assert( 'license_inactive' === $sem_licenca['reason'] && array() === $GLOBALS['uox_mail_calls'], 'Sem o arquivo da licença o relatório não é enviado; obteve ' . var_export( $sem_licenca, true ) );
+require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/50-admin-intelligence-license.php';
 
 function uox_q( $query, $position, $impressions, $ctr ) {
 	return array( 'query' => $query, 'clicks' => 1, 'impressions' => $impressions, 'ctr' => $ctr, 'position' => $position );

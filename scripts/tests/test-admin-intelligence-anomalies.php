@@ -186,10 +186,16 @@ function wp_remote_retrieve_body( $r ) { return ''; }
 
 $GLOBALS['uox_cron_calls'] = 0;
 
-require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/50-admin-intelligence-license.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/58-admin-intelligence-anomalies.php';
+
+// Sem o 50 a licença conta como inativa: o alerta não sai. Só dá para provar antes de
+// carregá-lo. `uox_achado()` é declarada adiante, no nível do arquivo, e já existe aqui.
+$GLOBALS['uox_mail_calls'] = array();
+$sem_licenca = uonix_intelligence_anomaly_send_alert( array( uox_achado( 'lead_silence', true, true ) ), array( 'operador@ksio.dev' ) );
+uox_assert( 'license_inactive' === $sem_licenca['reason'] && array() === $GLOBALS['uox_mail_calls'], 'sem o arquivo da licença o alerta não é enviado; obteve ' . var_export( $sem_licenca, true ) );
+require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/50-admin-intelligence-license.php';
 
 // ---------------------------------------------------------------------------
 // Auxiliares de fixture.
