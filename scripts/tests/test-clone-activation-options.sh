@@ -94,6 +94,21 @@ for option in "${state_options[@]}"; do
   fi
 done
 
+# Opções de LICENÇA, terceira categoria: decidem se o envio sai, e valem por
+# ambiente, como um contrato. `uonix_intelligence_license` é a licença gravada pelo
+# dono no painel (50-admin-intelligence-license.php). Herdada num clone, a licença
+# da origem substitui a do destino: um destino suspenso volta a enviar, ou um
+# destino contratado para de enviar, sem que ninguém tenha mudado nada nele.
+license_options=(
+  'uonix_intelligence_license'
+)
+
+for option in "${license_options[@]}"; do
+  if ! printf '%s' "$protected_sql" | grep -qE "IN \([^)]*'$option'"; then
+    report "opção de licença '$option' NÃO está na lista IN de protected_options_where(); clonar trocaria a licença do destino pela da origem."
+  fi
+done
+
 # Quem consome o invariante precisa continuar amarrando agendamento a
 # destinatário. Se essa amarração sair, proteger a opção deixa de bastar.
 REPORT_MODULE="$ROOT_DIR/mu-plugins/uonix-admin/57-admin-intelligence-report.php"
@@ -110,4 +125,4 @@ if [ "$failures" -ne 0 ]; then
   exit 1
 fi
 
-printf 'PASS: %s opção(ões) de ativação e %s de estado protegida(s) no clone, e o invariante segue no lugar.\n' "${#activation_options[@]}" "${#state_options[@]}"
+printf 'PASS: %s opção(ões) de ativação, %s de estado e %s de licença protegida(s) no clone, e o invariante segue no lugar.\n' "${#activation_options[@]}" "${#state_options[@]}" "${#license_options[@]}"

@@ -71,7 +71,12 @@ function uox_content_render_ksio_tools_home() {
 					);
 					?>
 				</p>
-				<p class="description">Lida das constantes KSIODEV_INTELLIGENCE_STATUS e KSIODEV_INTELLIGENCE_VALID_UNTIL do wp-config.php. Não há como mudar por esta tela.</p>
+				<p class="description">Duas camadas, e vale a mais restritiva: as constantes KSIODEV_INTELLIGENCE_STATUS e KSIODEV_INTELLIGENCE_VALID_UNTIL do wp-config.php, e a licença do painel, que só restringe.</p>
+				<p>
+					<a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=uonix-analytics&tab=settings#uonix-license-settings' ) ); ?>">
+						Alterar no painel
+					</a>
+				</p>
 			</div>
 		</div>
 	</div>

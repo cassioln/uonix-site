@@ -361,14 +361,14 @@ if ( ! function_exists( 'uonix_intelligence_save_recipients' ) ) {
 	/**
 	 * Persiste a lista de destinatários.
 	 *
-	 * Escrita exige `manage_options` e nonce, espelhando o refresh manual das
-	 * métricas em 53. A visualização do painel segue `edit_posts`, como o resto do
-	 * Insights: ler quem recebe é diferente de mudar quem recebe.
+	 * Escrita é só do dono do ksio.dev, com nonce. A visualização do painel segue
+	 * `edit_posts`, como o resto do Insights: ler quem recebe é diferente de mudar
+	 * quem recebe.
 	 */
 	function uonix_intelligence_save_recipients() {
-		// O Uônix Insights oculto para este usuário bloqueia também o POST direto
-		// (governança em 49-admin-ksio-governanca.php).
-		if ( ! current_user_can( 'manage_options' ) || ( function_exists( 'uonix_ksio_can_access_tool' ) && ! uonix_ksio_can_access_tool( 'analytics' ) ) ) {
+		// Esconder o formulário não bloqueia um POST direto. Sem o 49 não há como
+		// reconhecer o dono, e a gravação é recusada.
+		if ( ! function_exists( 'uonix_ksio_can_configure_insights' ) || ! uonix_ksio_can_configure_insights() ) {
 			wp_die( esc_html__( 'Sem permissão para alterar os destinatários do relatório.', 'uonix' ), '', array( 'response' => 403 ) );
 		}
 

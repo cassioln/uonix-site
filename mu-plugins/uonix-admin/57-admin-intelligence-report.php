@@ -649,13 +649,13 @@ if ( ! function_exists( 'uonix_intelligence_handle_test_send' ) ) {
 	/**
 	 * Envio de teste sob demanda, a partir da aba de configurações.
 	 *
-	 * Mesmas guardas da gravação de destinatários: `manage_options` e nonce. Disparar
-	 * e-mail para a lista é ação de efeito externo, não leitura.
+	 * Mesmas guardas da gravação de destinatários: só o dono do ksio.dev, com nonce.
+	 * Disparar e-mail para a lista é ação de efeito externo, não leitura.
 	 */
 	function uonix_intelligence_handle_test_send() {
-		// O Uônix Insights oculto para este usuário bloqueia também o POST direto
-		// (governança em 49-admin-ksio-governanca.php).
-		if ( ! current_user_can( 'manage_options' ) || ( function_exists( 'uonix_ksio_can_access_tool' ) && ! uonix_ksio_can_access_tool( 'analytics' ) ) ) {
+		// Esconder o botão não bloqueia um POST direto. Sem o 49 não há como
+		// reconhecer o dono, e o envio é recusado.
+		if ( ! function_exists( 'uonix_ksio_can_configure_insights' ) || ! uonix_ksio_can_configure_insights() ) {
 			wp_die( esc_html__( 'Sem permissão para enviar o relatório.', 'uonix' ), '', array( 'response' => 403 ) );
 		}
 

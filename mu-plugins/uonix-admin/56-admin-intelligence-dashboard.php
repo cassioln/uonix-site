@@ -3,9 +3,10 @@
  * Central de Inteligência — render.
  *
  * Renderiza os painéis das abas `intelligence`, `anomalies` e `settings` do menu
- * Uônix Insights. Consome apenas o que 55-admin-intelligence-metrics.php e
- * 58-admin-intelligence-anomalies.php devolvem; não consulta API, não grava nada
- * e não agenda nada.
+ * Uônix Insights. Consome apenas o que 55-admin-intelligence-metrics.php,
+ * 58-admin-intelligence-anomalies.php e 50-admin-intelligence-license.php devolvem;
+ * não consulta API, não grava nada e não agenda nada. Os formulários da aba
+ * Configurações postam para os handlers de 55, 57 e 50, que fazem a própria guarda.
  *
  * Reaproveita as classes de CSS já declaradas em 52-admin-analytics-dashboard.php
  * e as do core (`wp-list-table`, `form-table`), para não crescer o bloco de estilo
@@ -434,12 +435,15 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 	/**
-	 * Painel da aba "Configurações": destinatários e agendamento.
+	 * Painel da aba "Configurações": destinatários, agendamento e licença.
+	 *
+	 * Só o dono do ksio.dev vê os formulários (49). Os demais, administradores ou
+	 * editores, leem a mesma aba sem poder alterá-la.
 	 */
 	function uonix_intelligence_render_settings_panel( $active_tab ) {
 		$is_active   = 'settings' === $active_tab;
 		$recipients  = function_exists( 'uonix_intelligence_get_recipients' ) ? uonix_intelligence_get_recipients() : array();
-		$pode_editar = current_user_can( 'manage_options' );
+		$pode_editar = function_exists( 'uonix_ksio_can_configure_insights' ) && uonix_ksio_can_configure_insights();
 		$salvos      = isset( $_GET['uonix_recipients_saved'] ) ? (int) $_GET['uonix_recipients_saved'] : -1;
 		$recusados   = isset( $_GET['uonix_recipients_rejected'] ) ? (int) $_GET['uonix_recipients_rejected'] : 0;
 		$hook        = function_exists( 'uonix_intelligence_report_hook' ) ? uonix_intelligence_report_hook() : '';
@@ -454,6 +458,10 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 			</div>
 
 			<?php uonix_intelligence_render_license_notice(); ?>
+
+			<?php if ( ! $pode_editar ) : ?>
+				<p class="description uonix-settings-readonly">Somente leitura: estas configurações são alteradas pela ksio.dev.</p>
+			<?php endif; ?>
 
 			<?php if ( $salvos >= 0 ) : ?>
 				<div class="notice notice-success inline"><p><?php echo esc_html( sprintf( '%d destinatário(s) salvo(s).', $salvos ) ); ?></p></div>
@@ -531,7 +539,106 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 				O envio é disparado pelo agendador do WordPress, que depende de tráfego no site e não de relógio.
 				Por isso esta tela informa a frequência e o próximo disparo realmente agendado, e não promete um horário fixo.
 			</p>
+
+			<?php
+			if ( $pode_editar ) {
+				uonix_intelligence_render_license_settings();
+			}
+			?>
 		</section>
+		<?php
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_render_license_settings' ) ) {
+	/**
+	 * Bloco da licença na aba Configurações. Quem chama decide se o usuário é o dono.
+	 *
+	 * O painel é uma segunda camada, que só restringe: a constante do wp-config.php
+	 * continua valendo, e o que ela pausa o painel não religa (50). Sem o 50 não há
+	 * regra para mostrar nem handler para receber o formulário, e o bloco some.
+	 */
+	function uonix_intelligence_render_license_settings() {
+		if ( ! function_exists( 'uonix_intelligence_license_state' ) || ! function_exists( 'uonix_intelligence_license_option' ) ) {
+			return;
+		}
+
+		$estado  = uonix_intelligence_license_state();
+		$gravado = get_option( uonix_intelligence_license_option(), null );
+		$status  = is_array( $gravado ) && isset( $gravado['status'] ) && is_string( $gravado['status'] ) ? $gravado['status'] : '';
+		$data    = is_array( $gravado ) && isset( $gravado['valid_until'] ) && is_string( $gravado['valid_until'] ) ? $gravado['valid_until'] : '';
+		$salvo   = isset( $_GET['uonix_license_saved'] ) ? (string) $_GET['uonix_license_saved'] : '';
+		$erro    = isset( $_GET['uonix_license_error'] ) ? (string) $_GET['uonix_license_error'] : '';
+
+		// Textos fixos: o que vem da URL só escolhe a chave.
+		$avisos_salvo = array(
+			'1'       => 'Licença do painel salva.',
+			'cleared' => 'Licença do painel removida: o painel não restringe mais o envio.',
+		);
+		$avisos_erro  = array(
+			'status' => 'Nada foi salvo: status desconhecido.',
+			'date'   => 'Nada foi salvo: a data-limite precisa ser um dia que exista, no formato AAAA-MM-DD.',
+			'trial'  => 'Nada foi salvo: cortesia (trial) exige data-limite.',
+		);
+		$opcoes = array(
+			''          => 'Sem controle pelo painel',
+			'active'    => 'Contratada (active)',
+			'trial'     => 'Cortesia (trial)',
+			'suspended' => 'Suspensa (suspended)',
+		);
+		?>
+		<h3 id="uonix-license-settings">Licença da Central</h3>
+
+		<?php if ( isset( $avisos_salvo[ $salvo ] ) ) : ?>
+			<div class="notice notice-success inline"><p><?php echo esc_html( $avisos_salvo[ $salvo ] ); ?></p></div>
+		<?php endif; ?>
+		<?php if ( isset( $avisos_erro[ $erro ] ) ) : ?>
+			<div class="notice notice-error inline"><p><?php echo esc_html( $avisos_erro[ $erro ] ); ?></p></div>
+		<?php endif; ?>
+
+		<table class="form-table" role="presentation">
+			<tr>
+				<th scope="row">Estado que vale</th>
+				<td><?php echo esc_html( uonix_intelligence_license_summary( $estado ) ); ?></td>
+			</tr>
+			<tr>
+				<th scope="row">wp-config.php</th>
+				<td><?php echo esc_html( uonix_intelligence_license_layer_summary( isset( $estado['constant'] ) ? $estado['constant'] : null ) ); ?></td>
+			</tr>
+			<tr>
+				<th scope="row">Painel</th>
+				<td><?php echo esc_html( uonix_intelligence_license_layer_summary( isset( $estado['panel'] ) ? $estado['panel'] : null ) ); ?></td>
+			</tr>
+		</table>
+
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<input type="hidden" name="action" value="uonix_intelligence_save_license" />
+			<?php wp_nonce_field( 'uonix_intelligence_save_license' ); ?>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="uonix-license-status">Status no painel</label></th>
+					<td>
+						<select id="uonix-license-status" name="uonix_license_status">
+							<?php foreach ( $opcoes as $valor => $rotulo ) : ?>
+								<option value="<?php echo esc_attr( $valor ); ?>"<?php echo $valor === $status ? ' selected' : ''; ?>><?php echo esc_html( $rotulo ); ?></option>
+							<?php endforeach; ?>
+						</select>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="uonix-license-valid-until">Último dia com envio</label></th>
+					<td>
+						<input type="date" id="uonix-license-valid-until" name="uonix_license_valid_until" value="<?php echo esc_attr( $data ); ?>" aria-describedby="uonix-license-valid-until-help" />
+						<p class="description" id="uonix-license-valid-until-help">Inclusive, no fuso do site. Vazio é sem data-limite; a cortesia exige data.</p>
+					</td>
+				</tr>
+			</table>
+			<p class="description">
+				O painel só restringe. A constante do wp-config.php continua valendo, e o que ela pausa o painel não religa.
+				Vale a mais restritiva das duas e, se as duas permitem o envio, o prazo mais curto.
+			</p>
+			<p class="submit"><button type="submit" class="button">Salvar licença</button></p>
+		</form>
 		<?php
 	}
 }
