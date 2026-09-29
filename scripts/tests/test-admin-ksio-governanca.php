@@ -44,6 +44,8 @@ function current_user_can( $cap ) { return in_array( $cap, $GLOBALS['uox_caps'],
 function get_option( $key, $default = false ) { return array_key_exists( $key, $GLOBALS['uox_options'] ) ? $GLOBALS['uox_options'][ $key ] : $default; }
 function update_option( $key, $value, $autoload = null ) { $GLOBALS['uox_options'][ $key ] = $value; return true; }
 function add_action( $hook, $callback, $priority = 10, $args = 1 ) { $GLOBALS['uox_actions'][] = array( $hook, $callback, $priority ); return true; }
+// O 50 registra a trava de gravação da licença; aqui ela não entra em jogo.
+function add_filter( $hook, $callback, $priority = 10, $args = 1 ) { return true; }
 function add_menu_page( $page_title, $menu_title, $cap, $slug, $callback = '', $icon = '', $position = null ) {
 	$GLOBALS['uox_menus'][] = compact( 'menu_title', 'cap', 'slug', 'callback', 'icon', 'position' );
 }
@@ -204,6 +206,24 @@ $sub = shell_exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg(
 ) );
 uox_assert( 'operador-qa' === $sub, 'UONIX_KSIO_OWNER_LOGIN sobrescreve o dono; obteve ' . var_export( $sub, true ) );
 
+// Quem altera as Configurações do Insights: o dono, e com manage_options. Ver o
+// Insights liberado não basta.
+uox_liberar( array( 'analytics' ) );
+$configura = array(
+	'dono administrador'                  => array( 'ksiodev', $ADMIN, true ),
+	'dono sem manage_options'             => array( 'ksiodev', $EDITOR, false ),
+	'administrador com Insights liberado' => array( 'root', $ADMIN, false ),
+	'editor com Insights liberado'        => array( 'marketing', $EDITOR, false ),
+	'login parecido, administrador'       => array( 'KSIODEV', $ADMIN, false ),
+	'deslogado'                           => array( null, $ADMIN, false ),
+);
+foreach ( $configura as $caso => $linha ) {
+	$GLOBALS['uox_user'] = $linha[0];
+	$GLOBALS['uox_caps'] = $linha[1];
+	uox_assert( $linha[2] === uonix_ksio_can_configure_insights(), "configura o Insights, {$caso}: esperado " . var_export( $linha[2], true ) );
+}
+$GLOBALS['uox_options'] = array();
+
 // ---------------------------------------------------------------------------
 // 6. Handler de salvar: só o dono, com nonce, e só as chaves do registro.
 // ---------------------------------------------------------------------------
@@ -349,6 +369,14 @@ function uox_home_do_dono() {
 $home = uox_home_do_dono();
 uox_assert( false !== strpos( $home, 'uonix-license-card' ), 'a Visão Geral do dono traz o cartão da licença' );
 uox_assert( false !== strpos( $home, 'Sem controle configurado' ), 'sem constante o cartão diz que não há controle configurado' );
+uox_assert( false !== strpos( $home, 'admin.php?page=uonix-analytics&tab=settings#uonix-license-settings' ), 'o cartão leva ao bloco da licença na aba Configurações' );
+uox_assert( false === strpos( $home, 'Não há como mudar por esta tela' ), 'o cartão não diz mais que a licença só muda pelo wp-config.php' );
+
+// A licença do painel também aparece no cartão, com a origem.
+$GLOBALS['uox_options']['uonix_intelligence_license'] = array( 'status' => 'suspended', 'valid_until' => '' );
+$home_painel = uox_home_do_dono();
+uox_assert( false !== strpos( $home_painel, 'está suspenso' ) && false !== strpos( $home_painel, 'Origem: painel do Uônix Insights.' ), 'com o painel suspenso o cartão diz que está suspenso, e por onde' );
+unset( $GLOBALS['uox_options']['uonix_intelligence_license'] );
 
 define( 'KSIODEV_INTELLIGENCE_STATUS', 'suspended' );
 uox_assert( false !== strpos( uox_home_do_dono(), 'está suspenso' ), 'com a licença suspensa o cartão diz que está suspenso' );

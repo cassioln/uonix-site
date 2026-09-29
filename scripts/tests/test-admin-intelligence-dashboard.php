@@ -98,6 +98,14 @@ function uonix_ksio_can_access_tool( $chave ) {
 	$GLOBALS['uox_ksio_chaves'][] = $chave;
 	return (bool) $GLOBALS['uox_ksio_pode'];
 }
+// Quem altera as Configurações: só o dono (49). Aqui, outro interruptor, com a contagem
+// de consultas para provar que handler e painel perguntam a regra.
+$GLOBALS['uox_dono']           = true;
+$GLOBALS['uox_dono_consultas'] = 0;
+function uonix_ksio_can_configure_insights() {
+	++$GLOBALS['uox_dono_consultas'];
+	return (bool) $GLOBALS['uox_dono'];
+}
 
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
@@ -201,38 +209,17 @@ uox_assert( 3 === $n_limite['rejected'], 'Excedentes do teto são contabilizados
 uox_assert( array() === uonix_intelligence_sanitize_recipients( array( array( 'aninhado' ) ) )['recipients'], 'Valor não escalar é recusado' );
 
 // ---------------------------------------------------------------------------
-// Handler de destinatários: capability, nonce, persistência.
+// Handler de destinatários: só o dono do ksio.dev, nonce, persistência.
 // ---------------------------------------------------------------------------
-$GLOBALS['uox_can'] = false;
-$GLOBALS['uox_referer_ok'] = true;
-$GLOBALS['uox_options'] = array();
-$_POST = array( 'uonix_recipients' => 'intruso@example.test' );
-try {
-	uonix_intelligence_save_recipients();
-	uox_assert( false, 'Handler sem manage_options deveria interromper' );
-} catch ( Uox_Die_Exception $e ) {
-	uox_assert( true, 'Handler sem manage_options interrompe' );
-}
-uox_assert( array() === $GLOBALS['uox_options'], 'Handler sem manage_options não grava' );
-
-$GLOBALS['uox_can'] = true;
-$GLOBALS['uox_referer_ok'] = false;
-$GLOBALS['uox_options'] = array();
-try {
-	uonix_intelligence_save_recipients();
-	uox_assert( false, 'Handler sem nonce deveria interromper' );
-} catch ( Uox_Die_Exception $e ) {
-	uox_assert( true, 'Handler sem nonce interrompe' );
-}
-uox_assert( array() === $GLOBALS['uox_options'], 'Handler sem nonce não grava' );
-
-// Com manage_options e nonce, mas com o Insights oculto pela governança do ksio.dev:
-// esconder o menu não bloqueia um POST direto, então o handler recusa.
-$GLOBALS['uox_can']         = true;
-$GLOBALS['uox_referer_ok']  = true;
-$GLOBALS['uox_options']     = array();
-$GLOBALS['uox_ksio_pode']   = false;
-$GLOBALS['uox_ksio_chaves'] = array();
+// Administrador com o Insights liberado, mas que não é o dono: esconder o formulário
+// não bloqueia um POST direto, então o handler recusa.
+$GLOBALS['uox_can']            = true;
+$GLOBALS['uox_ksio_pode']      = true;
+$GLOBALS['uox_dono']           = false;
+$GLOBALS['uox_dono_consultas'] = 0;
+$GLOBALS['uox_referer_ok']     = true;
+$GLOBALS['uox_referer_action'] = null;
+$GLOBALS['uox_options']        = array();
 $_POST = array( 'uonix_recipients' => 'intruso@example.test' );
 // Sem a guarda o handler seguiria até o redirect; o teste precisa reprovar pela
 // asserção, não por exceção não capturada.
@@ -244,10 +231,21 @@ try {
 } catch ( Uox_Redirect_Exception $e ) {
 	$interrompeu = false;
 }
-uox_assert( $interrompeu, 'Handler com o Insights oculto deveria interromper' );
-uox_assert( array() === $GLOBALS['uox_options'], 'Handler com o Insights oculto não grava' );
-uox_assert( in_array( 'analytics', $GLOBALS['uox_ksio_chaves'], true ), 'Handler consulta a governança com a chave analytics' );
-$GLOBALS['uox_ksio_pode'] = true;
+uox_assert( $interrompeu, 'Handler de quem não é o dono deveria interromper' );
+uox_assert( array() === $GLOBALS['uox_options'], 'Handler de quem não é o dono não grava' );
+uox_assert( $GLOBALS['uox_dono_consultas'] > 0, 'Handler consulta a regra do dono' );
+uox_assert( null === $GLOBALS['uox_referer_action'], 'A guarda do dono vem antes do nonce' );
+$GLOBALS['uox_dono'] = true;
+
+$GLOBALS['uox_referer_ok'] = false;
+$GLOBALS['uox_options'] = array();
+try {
+	uonix_intelligence_save_recipients();
+	uox_assert( false, 'Handler sem nonce deveria interromper' );
+} catch ( Uox_Die_Exception $e ) {
+	uox_assert( true, 'Handler sem nonce interrompe' );
+}
+uox_assert( array() === $GLOBALS['uox_options'], 'Handler sem nonce não grava' );
 
 $GLOBALS['uox_can'] = true;
 $GLOBALS['uox_referer_ok'] = true;
@@ -266,9 +264,10 @@ uox_assert( false !== strpos( $redirect, 'uonix_recipients_rejected=1' ), 'Redir
 uox_assert( false !== strpos( $redirect, 'tab=settings' ), 'Redirect volta para a aba de configurações' );
 
 // ---------------------------------------------------------------------------
-// Painel de configurações: formulário apenas para quem pode alterar.
+// Painel de configurações: formulário apenas para o dono.
 // ---------------------------------------------------------------------------
-$GLOBALS['uox_can'] = true;
+$GLOBALS['uox_can']  = true;
+$GLOBALS['uox_dono'] = true;
 $_GET = array( 'uonix_recipients_saved' => '2', 'uonix_recipients_rejected' => '1' );
 ob_start();
 uonix_intelligence_render_settings_panel( 'settings' );
@@ -286,6 +285,9 @@ uox_assert( 1 === preg_match( '#<section(?=[^>]*id="uonix-panel-settings")[^>]*>
 // Este teste não carrega o 50, e 57 e 58 não enviam sem ele: a tela tem de dizer isso,
 // sem erro de PHP.
 uox_assert( false !== strpos( $cfg, 'uonix-license-notice' ) && false !== strpos( $cfg, 'não carregou' ), 'Sem o arquivo da licença o painel avisa que o envio está pausado' );
+// Sem o 50 não há regra nem handler: o bloco da licença some, mesmo para o dono.
+uox_assert( false === strpos( $cfg, 'uonix_intelligence_save_license' ) && false === strpos( $cfg, 'uonix-license-settings' ), 'Sem o arquivo da licença o bloco da licença não é renderizado' );
+uox_assert( false === strpos( $cfg, 'Somente leitura' ), 'O dono não vê o aviso de somente leitura' );
 
 // A ação do nonce tem que ser a mesma nas duas pontas, senão nenhuma gravação
 // legítima passa e a tela recusa tudo em silêncio.
@@ -307,14 +309,20 @@ $cfg_cron = (string) ob_get_clean();
 uox_assert( false === strpos( $cfg_cron, 'Não agendado' ), 'Com cron registrado, o painel mostra o próximo disparo real' );
 uox_assert( false !== strpos( $cfg_cron, '<time datetime=' ), 'Próximo disparo é exibido como horário legível por máquina' );
 
-$GLOBALS['uox_can'] = false;
+// Administrador que não é o dono lê a aba como o editor: sem formulário nenhum.
+$GLOBALS['uox_can']  = true;
+$GLOBALS['uox_dono'] = false;
 ob_start();
 uonix_intelligence_render_settings_panel( 'settings' );
 $cfg_ro = (string) ob_get_clean();
-uox_assert( false === strpos( $cfg_ro, '<form' ), 'Sem manage_options o formulário não é renderizado' );
+uox_assert( false === strpos( $cfg_ro, '<form' ), 'Administrador que não é o dono não vê formulário' );
+uox_assert( false === strpos( $cfg_ro, 'Enviar Teste Agora' ), 'Administrador que não é o dono não vê o envio de teste' );
+uox_assert( false !== strpos( $cfg_ro, 'Somente leitura' ), 'Quem não é o dono vê que a aba é somente leitura' );
 // Os endereços não são segredo: quem só pode VISUALIZAR o painel (a governança do
 // ksio.dev já decide quem chega até aqui) vê a lista completa, sem máscara.
-uox_assert( false !== strpos( $cfg_ro, 'cassio@uonix.com.br' ), 'Sem manage_options o endereço completo continua visível: não é segredo' );
+uox_assert( false !== strpos( $cfg_ro, 'cassio@uonix.com.br' ), 'Quem não é o dono continua vendo o endereço completo: não é segredo' );
+uox_assert( false !== strpos( $cfg_ro, 'Agendamento' ), 'Quem não é o dono continua vendo o agendamento' );
+$GLOBALS['uox_dono'] = true;
 
 // ---------------------------------------------------------------------------
 // Nome do evento de cron vem de acessor, não de string solta em dois arquivos.
@@ -340,9 +348,81 @@ try {
 }
 uox_assert( array( 'novo@uonix.com.br' ) === get_option( uonix_intelligence_recipients_option() ), 'POST em array é aceito e não apaga a lista silenciosamente' );
 
+// ---------------------------------------------------------------------------
+// Bloco da licença, com o 50 carregado: só o dono vê, e o formulário casa com o handler.
+// ---------------------------------------------------------------------------
+require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/50-admin-intelligence-license.php';
+
+function uox_render_settings() {
+	ob_start();
+	uonix_intelligence_render_settings_panel( 'settings' );
+	return (string) ob_get_clean();
+}
+
+$GLOBALS['uox_options']       = array( 'uonix_intelligence_license' => array( 'status' => 'trial', 'valid_until' => '2099-10-31' ) );
+$GLOBALS['uox_nonce_actions'] = array();
+$GLOBALS['uox_dono']          = true;
+$_GET                         = array();
+$lic = uox_render_settings();
+uox_assert( false !== strpos( $lic, 'id="uonix-license-settings"' ), 'O dono vê o bloco da licença' );
+uox_assert( false !== strpos( $lic, 'name="action" value="uonix_intelligence_save_license"' ), 'O formulário da licença declara a ação do handler' );
+uox_assert( in_array( 'uonix_intelligence_save_license', $GLOBALS['uox_nonce_actions'], true ), 'O formulário da licença emite o nonce da ação' );
+uox_assert( 1 === preg_match( '#<option value="trial" selected>#', $lic ), 'O status gravado vem selecionado' );
+uox_assert( 1 === substr_count( $lic, ' selected>' ), 'Só um status vem selecionado' );
+uox_assert( 4 === preg_match_all( '#<option value="(|active|trial|suspended)"#', $lic ), 'O seletor oferece sem controle, active, trial e suspended' );
+uox_assert( false !== strpos( $lic, 'type="date" id="uonix-license-valid-until" name="uonix_license_valid_until" value="2099-10-31"' ), 'A data gravada vem no campo de data' );
+uox_assert( false !== strpos( $lic, 'Cortesia (trial) até 31/10/2099, pelo painel do Uônix Insights.' ), 'O estado que vale diz de onde vem' );
+uox_assert( false !== strpos( $lic, '<th scope="row">wp-config.php</th>' ) && false !== strpos( $lic, 'Sem controle.' ), 'A linha da constante aparece separada da do painel' );
+uox_assert( false !== strpos( $lic, 'O painel só restringe.' ), 'O bloco explica que o painel só restringe' );
+uox_assert( false === strpos( $lic, 'não carregou' ), 'Com o 50 carregado, o aviso de controle ausente some' );
+
+// O handler verifica o mesmo nonce que o formulário emite.
+$GLOBALS['uox_referer_action'] = null;
+$GLOBALS['uox_referer_ok']     = true;
+$_POST = array( 'uonix_license_status' => 'active', 'uonix_license_valid_until' => '' );
+try {
+	uonix_intelligence_save_license();
+} catch ( Uox_Redirect_Exception $e ) {
+	// esperado
+}
+uox_assert( in_array( $GLOBALS['uox_referer_action'], $GLOBALS['uox_nonce_actions'], true ), 'A ação verificada pelo handler da licença é uma das emitidas pelo painel' );
+
+// Avisos vêm de mapa fixo; o valor da URL nunca é impresso.
+$avisos = array(
+	'salvo'       => array( array( 'uonix_license_saved' => '1' ), 'Licença do painel salva.' ),
+	'removido'    => array( array( 'uonix_license_saved' => 'cleared' ), 'Licença do painel removida' ),
+	'erro status' => array( array( 'uonix_license_error' => 'status' ), 'status desconhecido' ),
+	'erro data'   => array( array( 'uonix_license_error' => 'date' ), 'formato AAAA-MM-DD' ),
+	'erro trial'  => array( array( 'uonix_license_error' => 'trial' ), 'cortesia (trial) exige data-limite' ),
+);
+foreach ( $avisos as $caso => $par ) {
+	$_GET = $par[0];
+	uox_assert( false !== strpos( uox_render_settings(), $par[1] ), "Aviso da licença, {$caso}" );
+}
+$_GET = array( 'uonix_license_saved' => '<script>x</script>', 'uonix_license_error' => '<b>y</b>' );
+$lic_xss = uox_render_settings();
+uox_assert( false === strpos( $lic_xss, '<script>x' ) && false === strpos( $lic_xss, '<b>y' ) && false === strpos( $lic_xss, 'Nada foi salvo' ) && false === strpos( $lic_xss, 'Licença do painel' ), 'Chave desconhecida na URL não gera aviso nem é impressa' );
+
+// Opção malformada: o seletor cai em "sem controle", sem erro, e o estado diz inválido.
+$GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => 'lixo' );
+$_GET = array();
+$lic_ruim = uox_render_settings();
+uox_assert( 1 === preg_match( '#<option value="" selected>#', $lic_ruim ), 'Opção malformada: o seletor mostra sem controle' );
+uox_assert( false !== strpos( $lic_ruim, 'Configuração inválida. Pausa o envio.' ), 'Opção malformada: a linha do painel diz que pausa' );
+
+// Quem não é o dono não vê o bloco, com ou sem manage_options.
+foreach ( array( true, false ) as $pode ) {
+	$GLOBALS['uox_can']  = $pode;
+	$GLOBALS['uox_dono'] = false;
+	$lic_ro = uox_render_settings();
+	uox_assert( false === strpos( $lic_ro, 'uonix-license-settings' ) && false === strpos( $lic_ro, 'uonix_intelligence_save_license' ), 'Quem não é o dono não vê o bloco da licença (manage_options: ' . var_export( $pode, true ) . ')' );
+}
+$GLOBALS['uox_can']  = true;
+$GLOBALS['uox_dono'] = true;
+
 if ( $failures > 0 ) {
 	fwrite( STDERR, "FALHAS: {$failures}\n" );
 	exit( 1 );
 }
 
-echo "PASS: abas da Central de Inteligência renderizadas com procedência, escape e edição de destinatários protegida.\n";
+echo "PASS: abas da Central de Inteligência renderizadas com procedência, escape, e configurações e licença só para o dono.\n";
