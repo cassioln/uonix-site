@@ -153,6 +153,13 @@ require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intellige
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/57-admin-intelligence-report.php';
 
+// Sem o 50 a licença conta como inativa: nada sai. Só dá para provar antes de carregá-lo.
+$GLOBALS['uox_mail_result'] = true;
+$GLOBALS['uox_mail_calls']  = array();
+$sem_licenca = uonix_intelligence_send_report( array( 'cassio@uonix.com.br' ) );
+uox_assert( 'license_inactive' === $sem_licenca['reason'] && array() === $GLOBALS['uox_mail_calls'], 'Sem o arquivo da licença o relatório não é enviado; obteve ' . var_export( $sem_licenca, true ) );
+require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/50-admin-intelligence-license.php';
+
 function uox_q( $query, $position, $impressions, $ctr ) {
 	return array( 'query' => $query, 'clicks' => 1, 'impressions' => $impressions, 'ctr' => $ctr, 'position' => $position );
 }
@@ -460,6 +467,7 @@ uonix_intelligence_render_settings_panel( 'settings' );
 $cfg = (string) ob_get_clean();
 uox_assert( false !== strpos( $cfg, 'name="action" value="uonix_intelligence_send_test"' ), 'Aba de configurações traz o botão de envio de teste' );
 uox_assert( false !== strpos( $cfg, 'Enviar Teste Agora' ), 'Botão usa o rótulo definido no plano' );
+uox_assert( false === strpos( $cfg, 'uonix-license-notice' ), 'Sem constante de licença a aba de configurações não mostra aviso de licença' );
 // A ação do nonce do envio de teste tem que ser a mesma nas duas pontas, senão o
 // botão recusa todo envio legítimo em silêncio.
 uox_assert( in_array( 'uonix_intelligence_send_test', $GLOBALS['uox_nonce_actions'], true ), 'O formulário de teste emite a ação de nonce que o handler verifica' );
@@ -479,6 +487,40 @@ uonix_intelligence_render_settings_panel( 'settings' );
 $cfg_falha = (string) ob_get_clean();
 uox_assert( false !== strpos( $cfg_falha, 'UONIX_NONPROD_EMAIL_TO' ), 'Falha do envio de teste é explicada na tela' );
 $_GET = array();
+
+// ---------------------------------------------------------------------------
+// Licença suspensa: nada sai, nem o envio de teste, e a tela diz por quê.
+// Fica no fim porque constante não se desfaz.
+// ---------------------------------------------------------------------------
+define( 'KSIODEV_INTELLIGENCE_STATUS', 'suspended' );
+$GLOBALS['uox_options']     = array( uonix_intelligence_recipients_option() => array( 'cassio@uonix.com.br' ) );
+$GLOBALS['uox_mail_result'] = true;
+$GLOBALS['uox_mail_calls']  = array();
+$suspenso = uonix_intelligence_send_report();
+uox_assert( false === $suspenso['sent'] && 'license_inactive' === $suspenso['reason'], 'Com a licença suspensa o relatório não é enviado; obteve ' . var_export( $suspenso, true ) );
+uox_assert( array() === $GLOBALS['uox_mail_calls'], 'Com a licença suspensa wp_mail não é chamado' );
+
+$GLOBALS['uox_can']        = true;
+$GLOBALS['uox_referer_ok'] = true;
+$GLOBALS['uox_ksio_pode']  = true;
+$GLOBALS['uox_mail_calls'] = array();
+$redirect                  = '';
+try {
+	uonix_intelligence_handle_test_send();
+} catch ( Uox_Redirect_Exception $e ) {
+	$redirect = (string) $e->url;
+}
+uox_assert( array() === $GLOBALS['uox_mail_calls'], 'Com a licença suspensa o envio de teste também não dispara e-mail' );
+uox_assert( false !== strpos( $redirect, 'uonix_test_sent=0' ) && false !== strpos( $redirect, 'uonix_test_reason=license_inactive' ), 'O envio de teste volta com o motivo license_inactive; redirect: ' . $redirect );
+
+$_GET = array( 'uonix_test_sent' => '0', 'uonix_test_reason' => 'license_inactive' );
+ob_start();
+uonix_intelligence_render_settings_panel( 'settings' );
+$cfg_suspenso = (string) ob_get_clean();
+$_GET         = array();
+uox_assert( false !== strpos( $cfg_suspenso, 'uonix-license-notice' ), 'Com a licença suspensa a aba de configurações mostra o aviso' );
+uox_assert( false !== strpos( $cfg_suspenso, 'fale com a ksio.dev' ), 'O aviso manda falar com a ksio.dev' );
+uox_assert( false !== strpos( $cfg_suspenso, 'a licença da Central de Inteligência está inativa' ), 'O resultado do envio de teste explica que a licença está inativa' );
 
 if ( $failures > 0 ) {
 	fwrite( STDERR, "FALHAS: {$failures}\n" );

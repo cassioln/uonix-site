@@ -20,6 +20,7 @@ uonix_mu_require_files(
 		'47-admin-curriculos-recebidos.php',
 		'48-admin-clone-ambientes.php',
 		'49-admin-ksio-governanca.php',
+		'50-admin-intelligence-license.php',
 		'51-login-turnstile.php',
 		'53-admin-analytics-metrics.php',
 		'55-admin-intelligence-metrics.php',

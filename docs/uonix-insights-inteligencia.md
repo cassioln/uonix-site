@@ -55,6 +55,7 @@ Módulos novos seguem `NN-slug.php` dentro de `mu-plugins/uonix-<domínio>/`, in
 
 | Arquivo | Papel |
 |---|---|
+| `mu-plugins/uonix-admin/50-admin-intelligence-license.php` | Licença: lê as constantes do `wp-config.php` e decide se o envio automático sai. Só define funções, sem hook |
 | `mu-plugins/uonix-admin/55-admin-intelligence-metrics.php` | Camada de dados: regras de detecção, normalização e procedência |
 | `mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php` | Render: abas `intelligence`, `anomalies` e `settings` |
 | `mu-plugins/uonix-admin/57-admin-intelligence-report.php` | Relatório executivo semanal por e-mail e seu agendamento |
@@ -456,9 +457,89 @@ A porta de ativação do Módulo 3 foi atravessada em 2026-09-22 (ver *Registro 
 
 ## Licenciamento
 
-O controle de licença da Central (status e data-limite) é configurado por constante no `wp-config.php` e ainda não existe no código. Comportamento exigido quando suspenso ou expirado: disparo automático de e-mail e alertas pausa silenciosamente, a interface exibe aviso de contato, e **nenhuma funcionalidade essencial da loja ou do site é afetada** — sem erro de PHP, sem quebra de página.
+O envio automático da Central depende de uma licença, lida de duas constantes do `wp-config.php` por `mu-plugins/uonix-admin/50-admin-intelligence-license.php`.
 
-Implementação obrigatória **antes** do primeiro envio a destinatário externo. Enquanto o único leitor do relatório é o operador, o controle não protege nada; a partir do momento em que há destinatário externo, ele é a única alavanca de suspensão.
+| Constante | Valores | Papel |
+|---|---|---|
+| `KSIODEV_INTELLIGENCE_STATUS` | `active`, `trial` ou `suspended` | `active` é contratado, `trial` é cortesia e `suspended` pausa |
+| `KSIODEV_INTELLIGENCE_VALID_UNTIL` | `AAAA-MM-DD` | Último dia com envio, inclusive, no fuso do site (`wp_timezone()`) |
+
+### Decisão: constante, não opção no banco
+
+Escolhida em 2026-09-29, na #312.
+
+- **Mesmo custo de operação.** As duas saídas exigem SSH: `wp config set` ou `wp option update`. A opção não é mais rápida.
+- **A opção se reverte pelo painel.** Um administrador do site edita qualquer opção em `/wp-admin/options.php`. A constante só muda com acesso ao servidor.
+- **A opção viaja em clone e backup.** Um clone não copia `wp-config.php` (ver `docs/ambientes.md`), então a licença de um ambiente não vaza para outro.
+- **É o canal que o PHP já usa** para configuração por ambiente: `define()` no `wp-config.php`, como os segredos.
+
+Não há filtro. Um filtro deixaria qualquer plugin reverter a suspensão.
+
+### Regra
+
+| Constantes | Envio | Motivo |
+|---|---|---|
+| Nenhuma das duas | Segue como sempre | Sem controle configurado; o deploy não muda produção |
+| `active` sem data | Ativo | |
+| `active` ou `trial` com data de hoje ou futura | Ativo | |
+| Só a data, de hoje ou futura | Ativo | Conta como `active` com prazo |
+| `suspended`, com ou sem data | **Pausado** | `suspended` |
+| Data já passada, com `active`, `trial` ou sem status | **Pausado** | `expired` |
+| `trial` sem data | **Pausado** | `invalid`: cortesia sem fim é configuração incompleta |
+| Status ou data que a regra não reconhece | **Pausado** | `invalid` |
+
+O último caso cobre erro de digitação no **valor**: `suspenso`, `Active` ou `31/12/2026` pausam. A data é validada de ida e volta, então `2026-02-30` é inválida em vez de virar 2 de março.
+
+Erro no **nome** da constante não é detectado. `KSIODEV_INTELIGENCE_STATUS` deixa a constante certa ausente, e ausente é o padrão: o envio segue. Por isso a conferência da *Operação* é obrigatória.
+
+### O que pausa e o que não pausa
+
+**Pausa:**
+
+- o relatório semanal, em `uonix_intelligence_send_report()` (57);
+- o **Enviar Teste Agora**, que passa pela mesma função. Sem isso, um administrador contornaria a suspensão pelo botão;
+- o alerta de anomalia, em `uonix_intelligence_anomaly_send_alert()` (58).
+
+Os dois pontos devolvem o motivo `license_inactive` e tratam a ausência do 50 como licença inativa.
+
+**Não pausa:**
+
+- o agendamento: os eventos continuam registrados, e só o envio devolve `license_inactive`;
+- a detecção de anomalias e o badge do painel;
+- a loja e o site: o 50 só define funções e não registra hook.
+
+**A suspensão não gasta as tentativas do alerta.** `license_inactive` segue a regra de `no_recipients`: não conta como tentativa e o estado não avança. Reativada a licença com a anomalia em curso, o aviso sai na verificação seguinte.
+
+### Aviso na interface
+
+Com o envio pausado, as abas **Anomalias** e **Configurações** mostram um aviso de contato com a ksio.dev, com o motivo e, no vencimento, a data. Com o envio ativo não há aviso. Se o 50 não carregar, o aviso diz que o controle não carregou.
+
+A Visão Geral do menu ksio.dev, que só o dono vê, tem o cartão **Licença da Central de Inteligência** com o estado lido das constantes. É só leitura.
+
+### Operação
+
+No servidor, a partir da raiz do WordPress:
+
+```bash
+wp config set KSIODEV_INTELLIGENCE_STATUS suspended --type=constant
+wp config set KSIODEV_INTELLIGENCE_STATUS trial --type=constant
+wp config set KSIODEV_INTELLIGENCE_VALID_UNTIL 2026-12-31 --type=constant
+wp config delete KSIODEV_INTELLIGENCE_STATUS --type=constant
+wp config delete KSIODEV_INTELLIGENCE_VALID_UNTIL --type=constant
+```
+
+**Depois de cada `wp config set` ou `wp config delete`, confira.** É a única forma de pegar erro no nome da constante:
+
+```bash
+wp eval 'var_export( uonix_intelligence_license_state() );'
+```
+
+- **Com constante definida,** o resultado tem de trazer `'configured' => true`. `false` significa que o nome não bate.
+- **Ao suspender,** tem de trazer `'sending' => false` e `'reason' => 'suspended'`.
+
+O mesmo estado aparece no cartão da Visão Geral do ksio.dev.
+
+O controle é a alavanca de suspensão para destinatário externo. Antes do primeiro envio a um, a licença do ambiente deve estar configurada com o status e a data combinados.
 
 ## Validação dos números
 
@@ -492,7 +573,7 @@ As cinco oportunidades que o primeiro relatório levou:
 
 Este é o **baseline**. Um relatório futuro que chegue com zero linhas, sem que o site tenha perdido tráfego, é regressão — não ausência de oportunidade. Foi exatamente assim que o limiar antigo falhou em silêncio, e é contra estes números que a próxima revisão do piso deve ser conferida.
 
-O destinatário registrado é a caixa do operador. O controle de licença da Central ainda não existe no código; enquanto não existir, o destinatário não pode deixar de ser o operador — ver *Licenciamento*.
+O destinatário registrado é a caixa do operador. O controle de licença da Central existe desde a #312; antes de um destinatário externo, a licença do ambiente tem de estar configurada — ver *Licenciamento*.
 
 ### O que este registro não prova
 

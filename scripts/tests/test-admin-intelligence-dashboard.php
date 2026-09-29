@@ -283,6 +283,9 @@ uox_assert( false !== strpos( $cfg, 'Não agendado' ), 'Sem cron registrado, o p
 uox_assert( false !== strpos( $cfg, 'Semanal' ), 'Painel declara a frequência' );
 uox_assert( false === strpos( $cfg, 'manhã' ) && false === strpos( $cfg, 'segunda-feira às' ), 'Painel não promete período do dia nem dia fixo, apenas a frequência' );
 uox_assert( 1 === preg_match( '#<section(?=[^>]*id="uonix-panel-settings")[^>]*>#', $cfg ), 'Painel de configurações usa o id que a aba referencia' );
+// Este teste não carrega o 50, e 57 e 58 não enviam sem ele: a tela tem de dizer isso,
+// sem erro de PHP.
+uox_assert( false !== strpos( $cfg, 'uonix-license-notice' ) && false !== strpos( $cfg, 'não carregou' ), 'Sem o arquivo da licença o painel avisa que o envio está pausado' );
 
 // A ação do nonce tem que ser a mesma nas duas pontas, senão nenhuma gravação
 // legítima passa e a tela recusa tudo em silêncio.
