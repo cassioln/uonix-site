@@ -47,10 +47,33 @@ if ( ! function_exists( 'uonix_intelligence_test_send_message' ) ) {
 	 */
 	function uonix_intelligence_test_send_message( $reason ) {
 		$mapa = array(
-			'no_recipients' => 'Nenhum destinatário cadastrado, então nada foi enviado. Salve ao menos um endereço acima.',
-			'mail_failed'   => 'O envio falhou. Em QA e DEV isso é esperado quando UONIX_NONPROD_EMAIL_TO não está configurado: o guard de ambiente bloqueia envio sem caixa segura.',
+			'no_recipients'    => 'Nenhum destinatário cadastrado, então nada foi enviado. Salve ao menos um endereço acima.',
+			'mail_failed'      => 'O envio falhou. Em QA e DEV isso é esperado quando UONIX_NONPROD_EMAIL_TO não está configurado: o guard de ambiente bloqueia envio sem caixa segura.',
+			'license_inactive' => 'Nada foi enviado: a licença da Central de Inteligência está inativa, e o envio de teste segue a mesma regra do automático. Veja o aviso acima.',
 		);
 		return isset( $mapa[ $reason ] ) ? $mapa[ $reason ] : 'O envio não foi concluído.';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_render_license_notice' ) ) {
+	/**
+	 * Aviso de contato quando a licença pausa o envio (50-admin-intelligence-license.php).
+	 * Com o envio ativo, não imprime nada.
+	 */
+	function uonix_intelligence_render_license_notice() {
+		if ( function_exists( 'uonix_intelligence_license_state' ) && function_exists( 'uonix_intelligence_license_message' ) ) {
+			$texto = uonix_intelligence_license_message( uonix_intelligence_license_state() );
+		} else {
+			// 57 e 58 não enviam sem o 50, e o aviso diz isso.
+			$texto = 'O controle de licença da Central de Inteligência não carregou, e o envio automático do relatório semanal e dos alertas de anomalia está pausado. Fale com a ksio.dev.';
+		}
+
+		if ( '' === $texto ) {
+			return;
+		}
+		?>
+		<div class="notice notice-warning inline uonix-license-notice"><p><?php echo esc_html( $texto ); ?></p></div>
+		<?php
 	}
 }
 
@@ -268,6 +291,8 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 				</div>
 			</div>
 
+			<?php uonix_intelligence_render_license_notice(); ?>
+
 			<?php if ( false === $momento ) : ?>
 				<div class="notice notice-info inline">
 					<p>A primeira verificação ainda não rodou. Ela é disparada pelo agendador do WordPress, que depende de tráfego no site — então acontece na primeira visita depois do horário agendado, e não em horário fixo.</p>
@@ -427,6 +452,8 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 					<p>Quem recebe o relatório executivo por e-mail, e quando ele é enviado.</p>
 				</div>
 			</div>
+
+			<?php uonix_intelligence_render_license_notice(); ?>
 
 			<?php if ( $salvos >= 0 ) : ?>
 				<div class="notice notice-success inline"><p><?php echo esc_html( sprintf( '%d destinatário(s) salvo(s).', $salvos ) ); ?></p></div>

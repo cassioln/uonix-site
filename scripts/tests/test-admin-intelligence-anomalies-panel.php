@@ -113,6 +113,7 @@ function wp_remote_retrieve_response_code( $r ) { return 0; }
 function wp_remote_retrieve_body( $r ) { return ''; }
 
 $RAIZ = dirname( __DIR__, 2 );
+require_once $RAIZ . '/mu-plugins/uonix-admin/50-admin-intelligence-license.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
@@ -371,6 +372,20 @@ uox_assert( false !== strpos( uox_render( 'metrics' ), 'hidden' ), 'em outra aba
 // sai sempre com `hidden` e o módulo inteiro fica invisível. Propriedade afirmada em
 // prosa e asserida pela metade — mesma classe do grep por nome solto no 52.
 uox_assert( false === strpos( uox_render( 'anomalies' ), ' hidden>' ), 'na aba DELE o painel não pode sair escondido, senão a aba abre em branco' );
+
+// ---------------------------------------------------------------------------
+// 10. Aviso de licença: só com o envio pausado. Fica no fim porque constante não se desfaz.
+// ---------------------------------------------------------------------------
+
+uox_semear( array( uox_finding() ), 1, 0 );
+uox_assert( false === strpos( uox_render( 'anomalies' ), 'uonix-license-notice' ), 'sem constante de licença o painel não mostra aviso de licença' );
+
+define( 'KSIODEV_INTELLIGENCE_STATUS', 'active' );
+define( 'KSIODEV_INTELLIGENCE_VALID_UNTIL', '2000-01-01' );
+$vencido = uox_render( 'anomalies' );
+uox_assert( false !== strpos( $vencido, 'uonix-license-notice' ) && false !== strpos( $vencido, 'venceu em 01/01/2000' ), 'com a licença vencida o painel de anomalias mostra o aviso com a data' );
+// A detecção não para: o painel continua mostrando o achado.
+uox_assert( false !== strpos( $vencido, 'Nenhum orçamento recebido há 12 dias.' ), 'com a licença vencida o painel continua mostrando as anomalias' );
 
 // ---------------------------------------------------------------------------
 

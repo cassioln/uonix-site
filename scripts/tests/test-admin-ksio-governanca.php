@@ -77,6 +77,7 @@ $GLOBALS['wpdb'] = new Uox_Wpdb_Mudo();
 
 $RAIZ = dirname( __DIR__, 2 );
 require_once $RAIZ . '/mu-plugins/uonix-admin/49-admin-ksio-governanca.php';
+require_once $RAIZ . '/mu-plugins/uonix-admin/50-admin-intelligence-license.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/46-admin-limpeza-conteudo.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/48-admin-clone-ambientes.php';
 
@@ -333,6 +334,25 @@ try {
 	uox_assert( true, '' );
 }
 ob_end_clean();
+
+// ---------------------------------------------------------------------------
+// 9. A Visão Geral mostra ao dono o estado da licença. Fica no fim porque constante
+// não se desfaz.
+// ---------------------------------------------------------------------------
+/** HTML da Visão Geral renderizada pelo dono. */
+function uox_home_do_dono() {
+	$GLOBALS['uox_user'] = 'ksiodev';
+	ob_start();
+	uox_content_render_ksio_tools_home();
+	return (string) ob_get_clean();
+}
+$home = uox_home_do_dono();
+uox_assert( false !== strpos( $home, 'uonix-license-card' ), 'a Visão Geral do dono traz o cartão da licença' );
+uox_assert( false !== strpos( $home, 'Sem controle configurado' ), 'sem constante o cartão diz que não há controle configurado' );
+
+define( 'KSIODEV_INTELLIGENCE_STATUS', 'suspended' );
+uox_assert( false !== strpos( uox_home_do_dono(), 'está suspenso' ), 'com a licença suspensa o cartão diz que está suspenso' );
+$GLOBALS['uox_user'] = 'root';
 
 // ---------------------------------------------------------------------------
 

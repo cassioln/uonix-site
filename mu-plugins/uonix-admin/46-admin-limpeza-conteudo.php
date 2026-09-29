@@ -59,6 +59,20 @@ function uox_content_render_ksio_tools_home() {
 					</a>
 				</p>
 			</div>
+
+			<div class="card uonix-license-card" style="max-width:none;">
+				<h2>Licença da Central de Inteligência</h2>
+				<p>
+					<?php
+					echo esc_html(
+						function_exists( 'uonix_intelligence_license_summary' ) && function_exists( 'uonix_intelligence_license_state' )
+							? uonix_intelligence_license_summary( uonix_intelligence_license_state() )
+							: 'O controle de licença não carregou, e o envio automático do relatório e dos alertas está pausado.'
+					);
+					?>
+				</p>
+				<p class="description">Lida das constantes KSIODEV_INTELLIGENCE_STATUS e KSIODEV_INTELLIGENCE_VALID_UNTIL do wp-config.php. Não há como mudar por esta tela.</p>
+			</div>
 		</div>
 	</div>
 	<?php

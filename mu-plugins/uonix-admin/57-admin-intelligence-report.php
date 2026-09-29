@@ -510,9 +510,17 @@ if ( ! function_exists( 'uonix_intelligence_send_report' ) ) {
 	 * pendente, não erro de transporte. O resultado é sempre um array, nunca um
 	 * booleano solto, para o chamador poder registrar o motivo.
 	 *
+	 * Com a licença inativa também não envia, e isso vale para o envio de teste,
+	 * que passa por aqui.
+	 *
 	 * @return array{sent: bool, reason: string, recipients: int}
 	 */
 	function uonix_intelligence_send_report( $recipients = null ) {
+		// Sem o 50 carregado, a licença conta como inativa (50-admin-intelligence-license.php).
+		if ( ! function_exists( 'uonix_intelligence_license_state' ) || empty( uonix_intelligence_license_state()['sending'] ) ) {
+			return array( 'sent' => false, 'reason' => 'license_inactive', 'recipients' => 0 );
+		}
+
 		$lista = null === $recipients && function_exists( 'uonix_intelligence_get_recipients' )
 			? uonix_intelligence_get_recipients()
 			: $recipients;

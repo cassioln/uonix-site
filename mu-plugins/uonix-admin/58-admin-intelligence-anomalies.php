@@ -1385,6 +1385,11 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_send_alert' ) ) {
 			return array( 'sent' => false, 'reason' => 'no_transition', 'recipients' => 0 );
 		}
 
+		// Sem o 50 carregado, a licença conta como inativa (50-admin-intelligence-license.php).
+		if ( ! function_exists( 'uonix_intelligence_license_state' ) || empty( uonix_intelligence_license_state()['sending'] ) ) {
+			return array( 'sent' => false, 'reason' => 'license_inactive', 'recipients' => 0 );
+		}
+
 		$lista = null === $recipients && function_exists( 'uonix_intelligence_get_recipients' )
 			? uonix_intelligence_get_recipients()
 			: $recipients;
@@ -1436,7 +1441,9 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_run_check' ) ) {
 	 * - **Lista vazia** (`no_recipients`). Nada foi tentado, então não conta
 	 *   tentativa e o sinalizador não avança. É o caso em que a retentativa é
 	 *   provadamente inofensiva, e o desejado: quem cadastrar o endereço com uma
-	 *   anomalia em curso recebe o aviso na verificação seguinte.
+	 *   anomalia em curso recebe o aviso na verificação seguinte. Licença inativa
+	 *   (`license_inactive`) segue a mesma regra: reativada com a anomalia em curso,
+	 *   o aviso sai na verificação seguinte.
 	 * - **Falha de envio** (`mail_failed`). Pode ter entregado em parte, então a
 	 *   retentativa tem TETO (`alert_max_attempts`). Esgotado o teto, o sinalizador
 	 *   avança e o episódio fica marcado `undelivered`, para o painel poder dizer
@@ -1489,7 +1496,7 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_run_check' ) ) {
 					continue;
 				}
 
-				if ( 'no_recipients' === $envio['reason'] ) {
+				if ( 'no_recipients' === $envio['reason'] || 'license_inactive' === $envio['reason'] ) {
 					// Nada foi tentado: não conta tentativa, e o sinalizador não avança.
 					$novo[ $gatilho ] = isset( $anterior[ $gatilho ] ) ? (bool) $anterior[ $gatilho ] : false;
 					continue;

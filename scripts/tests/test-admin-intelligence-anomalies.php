@@ -186,6 +186,7 @@ function wp_remote_retrieve_body( $r ) { return ''; }
 
 $GLOBALS['uox_cron_calls'] = 0;
 
+require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/50-admin-intelligence-license.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/58-admin-intelligence-anomalies.php';
@@ -946,6 +947,35 @@ unset( $GLOBALS['uox_schedules']['daily'] );
 uox_assert( false === uonix_intelligence_anomaly_maybe_schedule(), 'sem a recorrência daily o agendamento deve falhar fechado' );
 uox_assert( ! isset( $GLOBALS['uox_cron'][ $hook ] ), 'nada deveria ter sido agendado sem a recorrência' );
 $GLOBALS['uox_schedules'] = $guardadas;
+
+// ---------------------------------------------------------------------------
+// 11. Licença suspensa: nada sai, nada se gasta, e a detecção continua.
+// Fica no fim porque constante não se desfaz.
+// ---------------------------------------------------------------------------
+
+define( 'KSIODEV_INTELLIGENCE_STATUS', 'suspended' );
+unset( $GLOBALS['uox_options']['uonix_intelligence_anomaly_state'] );
+$GLOBALS['uox_options']['uonix_executive_report_recipients'] = array( 'operador@ksio.dev' );
+$GLOBALS['uox_mail_result'] = true;
+$GLOBALS['uox_mail_calls']  = array();
+
+$suspenso = uonix_intelligence_anomaly_run_check( $anomalia, $hoje );
+uox_assert( 0 === count( $GLOBALS['uox_mail_calls'] ), 'com a licença suspensa o alerta não é enviado, enviou ' . count( $GLOBALS['uox_mail_calls'] ) );
+uox_assert( 'license_inactive' === ( $suspenso['send']['reason'] ?? '' ), 'o motivo deveria ser license_inactive, obteve ' . ( $suspenso['send']['reason'] ?? '(nada)' ) );
+uox_assert( 1 === uonix_intelligence_anomaly_get_summary()['anomalous'], 'com a licença suspensa o badge continua: o resumo conta a anomalia' );
+uox_assert( false === ( uonix_intelligence_anomaly_get_state()['lead_silence'] ?? null ), 'com a licença suspensa o estado não avança, para o aviso sair na reativação' );
+
+// Suspensão longa não pode gastar o teto: reativada, a anomalia em curso ainda avisa.
+for ( $i = 0; $i < $teto + 1; $i++ ) {
+	$suspenso = uonix_intelligence_anomaly_run_check( $anomalia, $hoje );
+}
+uox_assert( 0 === (int) ( $suspenso['meta']['lead_silence']['attempts'] ?? 0 ), 'com a licença suspensa nenhuma tentativa pode ser contada, obteve ' . ( $suspenso['meta']['lead_silence']['attempts'] ?? '(ausente)' ) );
+uox_assert( empty( $suspenso['meta']['lead_silence']['undelivered'] ), 'com a licença suspensa o episódio nunca é marcado como aviso não entregue' );
+uox_assert( 0 === count( $GLOBALS['uox_mail_calls'] ), 'nem depois de várias rodadas suspensas sai e-mail' );
+
+// O agendamento não muda: a verificação segue diária e só o envio fica pausado.
+wp_clear_scheduled_hook( $hook );
+uox_assert( true === uonix_intelligence_anomaly_maybe_schedule(), 'com a licença suspensa a verificação continua agendada' );
 
 // ---------------------------------------------------------------------------
 
