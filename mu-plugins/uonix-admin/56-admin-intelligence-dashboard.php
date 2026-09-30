@@ -646,7 +646,7 @@ if ( ! function_exists( 'uonix_intelligence_render_license_settings' ) ) {
 				<tr>
 					<th scope="row"><label for="uonix-license-status">Status no painel</label></th>
 					<td>
-						<select id="uonix-license-status" name="uonix_license_status" required>
+						<select id="uonix-license-status" name="uonix_license_status"<?php echo '' === $status ? ' required' : ''; ?>>
 							<?php if ( '' === $status ) : ?>
 								<option value="" disabled selected>Escolha o status</option>
 							<?php endif; ?>

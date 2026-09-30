@@ -609,10 +609,11 @@ O menu `ksio.dev` é **exclusivo do usuário `ksiodev`**, nem outro administrado
 wp option update uonix_ksio_tools_visibility '{"limpeza":false,"clone":false,"analytics":true}' --format=json
 ```
 
-**A opção só é gravada pelo `ksiodev` ou pelo WP-CLI.** O filtro `pre_update_option_uonix_ksio_tools_visibility`, na prioridade `PHP_INT_MAX`, devolve o valor antigo para qualquer outro usuário (#323).
+**Por `update_option()`, a opção só é gravada pelo `ksiodev` ou pelo WP-CLI.** O filtro `pre_update_option_uonix_ksio_tools_visibility`, na prioridade `PHP_INT_MAX`, devolve o valor antigo para qualquer outro usuário (#323).
 - Vale para qualquer `update_option()`, inclusive o `/wp-admin/options.php`.
-- Vale também para criar a opção.
+- Vale também para criar a opção por esse caminho.
 - O comando de WP-CLI acima continua funcionando.
+- A trava não cobre um `add_option()` direto. Nenhum código do repositório faz isso: o único gravador é o handler da tela de visibilidade.
 
 **Isto é governança de interface, não barreira contra outro administrador.** Quem tem `manage_options` pode editar o usuário `ksiodev` pela tela de Usuários. A trava fecha só o caminho silencioso, que não deixa rastro na conta do dono.
 

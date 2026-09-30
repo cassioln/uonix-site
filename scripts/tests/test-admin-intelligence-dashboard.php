@@ -371,7 +371,7 @@ uox_assert( 1 === preg_match( '#<option value="trial" selected>#', $lic ), 'O st
 uox_assert( 1 === substr_count( $lic, ' selected>' ), 'Só um status vem selecionado' );
 uox_assert( 4 === preg_match_all( '#<option value="(none|active|trial|suspended)"#', $lic ), 'O seletor oferece sem controle (none), active, trial e suspended' );
 uox_assert( false === strpos( $lic, '<option value=""' ), 'Com a opção válida, não há opção de status vazio' );
-uox_assert( false !== strpos( $lic, 'name="uonix_license_status" required' ), 'O status é obrigatório no formulário' );
+uox_assert( false === strpos( $lic, ' required' ), 'Com a opção válida, sempre há um status real marcado, e o seletor não precisa de required' );
 uox_assert( false === strpos( $lic, 'está malformada' ), 'Com a opção válida, não há aviso de opção malformada' );
 uox_assert( false !== strpos( $lic, 'type="date" id="uonix-license-valid-until" name="uonix_license_valid_until" value="2099-10-31"' ), 'A data gravada vem no campo de data' );
 uox_assert( false !== strpos( $lic, 'Cortesia (trial) até 31/10/2099, pelo painel do Uônix Insights.' ), 'O estado que vale diz de onde vem' );
@@ -448,7 +448,22 @@ foreach ( $malformadas as $caso => $gravada ) {
 	$lic_ruim = uox_render_settings();
 	uox_assert( false !== strpos( $lic_ruim, 'A licença gravada no painel está malformada e pausa o envio.' ), "Opção malformada ({$caso}): aviso acima do formulário" );
 	uox_assert( 1 === preg_match( '#<option value="" disabled selected>#', $lic_ruim ) && 1 === substr_count( $lic_ruim, ' selected>' ), "Opção malformada ({$caso}): só o marcador vazio vem selecionado" );
+	uox_assert( false !== strpos( $lic_ruim, 'name="uonix_license_status" required' ), "Opção malformada ({$caso}): o seletor exige escolher o status" );
 	uox_assert( false !== strpos( $lic_ruim, 'Configuração inválida. Pausa o envio.' ), "Opção malformada ({$caso}): a linha do painel diz que pausa" );
+}
+
+// Opção válida que pausa (vencida ou suspensa) NÃO é malformada: sem aviso, e o
+// status gravado vem marcado. O detector não pode tratar toda pausa como defeito.
+$pausadas = array(
+	'vencida'  => array( array( 'status' => 'active', 'valid_until' => '2020-01-31' ), 'active' ),
+	'suspensa' => array( array( 'status' => 'suspended', 'valid_until' => '' ), 'suspended' ),
+);
+foreach ( $pausadas as $caso => $par ) {
+	$GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => $par[0] );
+	$_GET = array();
+	$lic_pausa = uox_render_settings();
+	uox_assert( false === strpos( $lic_pausa, 'está malformada' ) && false === strpos( $lic_pausa, '<option value=""' ), "Licença {$caso}: sem aviso de malformada e sem marcador vazio" );
+	uox_assert( 1 === preg_match( '#<option value="' . $par[1] . '" selected>#', $lic_pausa ) && 1 === substr_count( $lic_pausa, ' selected>' ), "Licença {$caso}: o status gravado vem marcado" );
 }
 
 // Sem opção gravada: "sem controle" vem marcado, sem aviso.

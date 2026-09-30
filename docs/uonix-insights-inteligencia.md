@@ -536,7 +536,7 @@ Erro no **nome** da constante não é detectado. `KSIODEV_INTELIGENCE_STATUS` de
 - **"Sem controle pelo painel"** apaga a opção, e só pelo valor explícito `none`. Até a #322, o status vazio também apagava. Assim, salvar o formulário com a opção malformada, ou mandar um POST sem o campo, tirava a pausa sem o dono pedir.
 - **Opção malformada** é a que existe e que o 50 lê como `invalid`, por exemplo `{"status":"active"}` sem `valid_until`. Nesse caso:
   - a tela mostra um aviso acima do formulário;
-  - o seletor vem só com o marcador "Escolha o status", vazio e obrigatório;
+  - o seletor vem com o marcador "Escolha o status" selecionado, vazio e obrigatório, além das quatro opções;
   - salvar exige escolher o status de novo.
 - **Só `status` e `valid_until` são gravados.** Campo extra no POST é ignorado.
 - **Trava da opção:** o filtro `pre_update_option_uonix_intelligence_license`, na prioridade `PHP_INT_MAX`, devolve o valor antigo para quem não é o dono, e o WordPress desiste da gravação.
