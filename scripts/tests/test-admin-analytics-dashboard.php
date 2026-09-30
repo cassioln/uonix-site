@@ -700,6 +700,26 @@ foreach ( array( 'destinations', 'intelligence', 'settings' ) as $outra_aba ) {
 	$auto_outra = (string) ob_get_clean();
 	uonix_dashboard_assert( false === strpos( $auto_outra, 'data-uonix-auto-refresh="1"' ), 'Auto-refresh de métricas não dispara na aba ' . $outra_aba );
 }
+// O marcador de sincronização já tentada segura o auto-refresh. Em array
+// (`?uonix_metrics_refresh[]=1`) não vale como tentativa e não emite Warning (#321).
+$_GET = array( 'uonix_metrics_refresh' => '1' );
+ob_start();
+uonix_render_analytics_dashboard_page();
+uonix_dashboard_assert( false === strpos( (string) ob_get_clean(), 'data-uonix-auto-refresh="1"' ), 'Sincronização já tentada não dispara o auto-refresh de novo' );
+$uonix_erros_php = array();
+set_error_handler(
+	static function ( $errno, $errstr ) use ( &$uonix_erros_php ) {
+		$uonix_erros_php[] = $errstr;
+		return true;
+	}
+);
+$_GET = array( 'uonix_metrics_refresh' => array( '1' ) );
+ob_start();
+uonix_render_analytics_dashboard_page();
+$auto_array = (string) ob_get_clean();
+restore_error_handler();
+uonix_dashboard_assert( array() === $uonix_erros_php, 'Marcador de sincronização em array não emite aviso do PHP: ' . implode( ' | ', $uonix_erros_php ) );
+uonix_dashboard_assert( false !== strpos( $auto_array, 'data-uonix-auto-refresh="1"' ), 'Marcador de sincronização em array não conta como tentativa' );
 $_GET = array();
 echo "ok   Auto-refresh de métricas restrito à própria aba\n";
 

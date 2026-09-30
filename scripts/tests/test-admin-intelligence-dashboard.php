@@ -403,6 +403,33 @@ $_GET = array( 'uonix_license_saved' => '<script>x</script>', 'uonix_license_err
 $lic_xss = uox_render_settings();
 uox_assert( false === strpos( $lic_xss, '<script>x' ) && false === strpos( $lic_xss, '<b>y' ) && false === strpos( $lic_xss, 'Nada foi salvo' ) && false === strpos( $lic_xss, 'Licença do painel' ), 'Chave desconhecida na URL não gera aviso nem é impressa' );
 
+// Aviso do envio de teste: sucesso e falha vêm dos textos fixos.
+$_GET = array( 'uonix_test_sent' => '1', 'uonix_test_recipients' => '2' );
+uox_assert( false !== strpos( uox_render_settings(), 'Relatório de teste enviado para 2 destinatário(s).' ), 'Aviso do envio de teste, sucesso' );
+$_GET = array( 'uonix_test_sent' => '0', 'uonix_test_reason' => 'no_recipients' );
+uox_assert( false !== strpos( uox_render_settings(), 'Nenhum destinatário cadastrado, então nada foi enviado.' ), 'Aviso do envio de teste, falha com motivo conhecido' );
+
+// Marcador em array na URL (`?uonix_license_saved[]=1`): nenhum Warning e nenhum
+// aviso escolhido (#321). O handler captura tudo, para não depender do error_reporting.
+$uox_erros_php = array();
+set_error_handler(
+	static function ( $errno, $errstr ) use ( &$uox_erros_php ) {
+		$uox_erros_php[] = $errstr;
+		return true;
+	}
+);
+$_GET = array(
+	'uonix_license_saved' => array( '1' ),
+	'uonix_license_error' => array( 'date' ),
+	'uonix_test_sent'     => array( '1' ),
+	'uonix_test_reason'   => array( 'no_recipients' ),
+);
+$lic_array = uox_render_settings();
+restore_error_handler();
+uox_assert( array() === $uox_erros_php, 'Marcador em array na URL não emite aviso do PHP: ' . implode( ' | ', $uox_erros_php ) );
+uox_assert( false === strpos( $lic_array, 'Licença do painel salva.' ) && false === strpos( $lic_array, 'formato AAAA-MM-DD' ), 'Marcador de licença em array não escolhe aviso' );
+uox_assert( false === strpos( $lic_array, 'Relatório de teste enviado' ) && false === strpos( $lic_array, 'Nenhum destinatário cadastrado, então' ), 'Marcador de envio de teste em array não vale como sucesso nem escolhe motivo' );
+
 // Opção malformada: o seletor cai em "sem controle", sem erro, e o estado diz inválido.
 $GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => 'lixo' );
 $_GET = array();
