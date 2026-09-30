@@ -322,13 +322,20 @@ if ( ! function_exists( 'uonix_intelligence_license_panel_input' ) ) {
 	 * Valida o formulário do painel antes de gravar. Nada inválido é gravado: o erro
 	 * volta para a tela, e a licença anterior fica como estava.
 	 *
-	 * @param mixed $status      Status enviado; `''` é "sem controle pelo painel".
+	 * Apagar exige o valor explícito `none` (#322). Status vazio ou ausente é erro:
+	 * antes era "sem controle", e salvar o formulário com a opção malformada, ou um
+	 * POST sem o campo, apagava a opção e tirava a pausa sem o dono pedir.
+	 *
+	 * @param mixed $status      Status enviado; `none` é "sem controle pelo painel", e `null` é campo ausente.
 	 * @param mixed $valid_until Data enviada; `''` é "sem data-limite".
 	 * @return array{error: string, value: array|null} `value` null sem erro: apagar a opção.
 	 */
 	function uonix_intelligence_license_panel_input( $status, $valid_until ) {
-		if ( '' === $status ) {
+		if ( 'none' === $status ) {
 			return array( 'error' => '', 'value' => null );
+		}
+		if ( null === $status || '' === $status ) {
+			return array( 'error' => 'missing', 'value' => null );
 		}
 		if ( ! is_string( $status ) || ! in_array( $status, array( 'active', 'trial', 'suspended' ), true ) ) {
 			return array( 'error' => 'status', 'value' => null );
@@ -364,7 +371,7 @@ if ( ! function_exists( 'uonix_intelligence_save_license' ) ) {
 
 		check_admin_referer( 'uonix_intelligence_save_license' );
 
-		$status = isset( $_POST['uonix_license_status'] ) ? wp_unslash( $_POST['uonix_license_status'] ) : '';
+		$status = isset( $_POST['uonix_license_status'] ) ? wp_unslash( $_POST['uonix_license_status'] ) : null;
 		$data   = isset( $_POST['uonix_license_valid_until'] ) ? wp_unslash( $_POST['uonix_license_valid_until'] ) : '';
 		$data   = is_string( $data ) ? trim( $data ) : $data;
 

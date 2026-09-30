@@ -329,8 +329,10 @@ uox_assert( '' === uonix_intelligence_license_source_label( 'outro' ) && '' === 
 // 8. Validação do formulário, antes de gravar.
 // ---------------------------------------------------------------------------
 $entradas = array(
-	'sem controle'            => array( '', '', '', null ),
-	'sem controle com data'   => array( '', '2026-10-31', '', null ),
+	'sem controle'            => array( 'none', '', '', null ),
+	'sem controle com data'   => array( 'none', '2026-10-31', '', null ),
+	'status vazio'            => array( '', '', 'missing', null ),
+	'status vazio com data'   => array( '', '2026-10-31', 'missing', null ),
 	'active sem data'         => array( 'active', '', '', array( 'status' => 'active', 'valid_until' => '' ) ),
 	'active com data passada' => array( 'active', '2026-09-01', '', array( 'status' => 'active', 'valid_until' => '2026-09-01' ) ),
 	'trial com data'          => array( 'trial', '2026-10-31', '', array( 'status' => 'trial', 'valid_until' => '2026-10-31' ) ),
@@ -338,7 +340,8 @@ $entradas = array(
 	'status desconhecido'     => array( 'suspenso', '', 'status', null ),
 	'status em maiúscula'     => array( 'Active', '', 'status', null ),
 	'status array'            => array( array( 'active' ), '', 'status', null ),
-	'status nulo'             => array( null, '', 'status', null ),
+	'status ausente'          => array( null, '', 'missing', null ),
+	'none em maiúscula'       => array( 'None', '', 'status', null ),
 	'data inexistente'        => array( 'active', '2026-02-30', 'date', null ),
 	'data sem zero'           => array( 'active', '2026-9-30', 'date', null ),
 	'data brasileira'         => array( 'active', '30/09/2026', 'date', null ),
@@ -384,7 +387,7 @@ $r = uox_salvar( array( 'uonix_license_status' => 'suspended', 'uonix_license_va
 uox_assert( 'die' === $r && 403 === $GLOBALS['uox_die_status'], 'quem não é o dono recebe 403; obteve ' . $r );
 uox_assert( array() === $GLOBALS['uox_nonce'], 'a guarda do dono vem antes do nonce' );
 uox_assert( $anterior === get_option( 'uonix_intelligence_license' ), 'quem não é o dono não altera a licença' );
-$r = uox_salvar( array( 'uonix_license_status' => '' ), false );
+$r = uox_salvar( array( 'uonix_license_status' => 'none' ), false );
 uox_assert( 'die' === $r && $anterior === get_option( 'uonix_intelligence_license' ), 'quem não é o dono também não apaga a licença' );
 
 // Dono com nonce inválido: nada muda.
@@ -404,6 +407,7 @@ foreach ( array(
 	'status'  => array( 'uonix_license_status' => 'suspenso', 'uonix_license_valid_until' => '' ),
 	'date'    => array( 'uonix_license_status' => 'active', 'uonix_license_valid_until' => '2026-02-30' ),
 	'trial'   => array( 'uonix_license_status' => 'trial', 'uonix_license_valid_until' => '' ),
+	'missing' => array( 'uonix_license_status' => '', 'uonix_license_valid_until' => '2026-10-31' ),
 ) as $erro => $post ) {
 	$GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => $anterior );
 	$r = uox_salvar( $post );
@@ -412,14 +416,24 @@ foreach ( array(
 	uox_assert( $anterior === get_option( 'uonix_intelligence_license' ), "entrada inválida ({$erro}) não altera a licença" );
 }
 
-// Sem status no POST é "sem controle": apaga.
+// "Sem controle" é o valor explícito `none`: apaga.
 $GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => $anterior );
-$r = uox_salvar( array( 'uonix_license_status' => '' ) );
+$r = uox_salvar( array( 'uonix_license_status' => 'none' ) );
 $q = uox_query( $GLOBALS['uox_redirect'] );
-uox_assert( 'redirect' === $r && ! array_key_exists( 'uonix_intelligence_license', $GLOBALS['uox_options'] ) && 'cleared' === ( $q['uonix_license_saved'] ?? '' ), '"sem controle" apaga a opção; obteve ' . var_export( $q, true ) );
-$GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => $anterior );
-uox_salvar( array() );
-uox_assert( ! array_key_exists( 'uonix_intelligence_license', $GLOBALS['uox_options'] ), 'POST sem o campo de status também é "sem controle"' );
+uox_assert( 'redirect' === $r && ! array_key_exists( 'uonix_intelligence_license', $GLOBALS['uox_options'] ) && 'cleared' === ( $q['uonix_license_saved'] ?? '' ), '"sem controle" (none) apaga a opção; obteve ' . var_export( $q, true ) );
+
+// POST sem o campo de status é erro, e não apaga (#322). Vale também com a opção
+// malformada, que pausa: salvar sem escolher não pode tirar a pausa.
+foreach ( array(
+	'válida'     => $anterior,
+	'malformada' => array( 'status' => 'active' ),
+) as $caso => $gravada ) {
+	$GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => $gravada );
+	$r = uox_salvar( array( 'uonix_license_valid_until' => '2026-10-31' ) );
+	$q = uox_query( $GLOBALS['uox_redirect'] );
+	uox_assert( 'redirect' === $r && 'missing' === ( $q['uonix_license_error'] ?? '' ) && ! isset( $q['uonix_license_saved'] ), "POST sem status, opção {$caso}: volta com erro; obteve " . var_export( $q, true ) );
+	uox_assert( $gravada === get_option( 'uonix_intelligence_license' ), "POST sem status, opção {$caso}: nada é apagado nem gravado" );
+}
 
 // ---------------------------------------------------------------------------
 // 10. Trava de gravação: `update_option` de quem não é o dono não muda nada.
