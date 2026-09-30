@@ -13,6 +13,8 @@
  *
  * Não é barreira contra outro administrador: quem tem `manage_options` pode editar o
  * usuário da ksio.dev pela tela de Usuários. O controle é de governança de interface.
+ * O que ele fecha é o caminho silencioso: a opção da visibilidade não é gravável por
+ * outro administrador via `/wp-admin/options.php`.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -245,3 +247,32 @@ if ( ! function_exists( 'uonix_ksio_save_visibility' ) ) {
 	}
 }
 add_action( 'admin_post_uonix_ksio_save_visibility', 'uonix_ksio_save_visibility' );
+
+if ( ! function_exists( 'uonix_ksio_visibility_guard_write' ) ) {
+	/**
+	 * Trava de gravação da visibilidade: quem não é o dono não muda o valor, nem cria
+	 * a opção, por caminho nenhum que passe por `update_option()`, inclusive
+	 * `/wp-admin/options.php` (#323). O único gravador legítimo é
+	 * `uonix_ksio_save_visibility()`, acima, que já exige o dono. Devolver o valor
+	 * antigo faz o WordPress desistir da gravação.
+	 *
+	 * O WP-CLI passa, como nas travas da licença (50) e dos destinatários (55): é a
+	 * receita de recuperação de docs/clone-ambientes.md para o ambiente sem o dono.
+	 * Roda por último no filtro específico da opção.
+	 *
+	 * Cada trava fica no próprio arquivo, e não num helper comum aqui: a do 50 e a do
+	 * 55 exigem `uonix_ksio_can_configure_insights()`, esta exige só o dono, como o
+	 * handler, e as duas primeiras precisam continuar fechadas sem o 49 carregado.
+	 */
+	function uonix_ksio_visibility_guard_write( $value, $old_value ) {
+		if ( defined( 'WP_CLI' ) && WP_CLI ) {
+			return $value;
+		}
+		if ( uonix_ksio_is_owner() ) {
+			return $value;
+		}
+
+		return $old_value;
+	}
+}
+add_filter( 'pre_update_option_' . uonix_ksio_visibility_option(), 'uonix_ksio_visibility_guard_write', PHP_INT_MAX, 2 );
