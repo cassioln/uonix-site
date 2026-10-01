@@ -176,9 +176,15 @@ if (!chromeBin) {
 const tmp = mkdtempSync(path.join(tmpdir(), 'uox-atualizacoes-'));
 const perfil = path.join(tmp, 'perfil');
 const cenarios = {};
-for (const nome of ['vazio', 'sete', 'paginado', 'fechado', 'longo', 'so-plugins']) {
-  cenarios[nome] = path.join(tmp, `${nome}.html`);
-  writeFileSync(cenarios[nome], execFileSync(php, [gerador, nome]));
+try {
+  for (const nome of ['vazio', 'sete', 'paginado', 'fechado', 'longo', 'longo-p2', 'so-plugins']) {
+    cenarios[nome] = path.join(tmp, `${nome}.html`);
+    writeFileSync(cenarios[nome], execFileSync(php, [gerador, nome]));
+  }
+} catch (erro) {
+  rmSync(tmp, { recursive: true, force: true });
+  console.error(`FAIL: não foi possível gerar os cenários com o PHP: ${erro.message}`);
+  process.exit(1);
 }
 
 const argumentos = [
@@ -187,6 +193,10 @@ const argumentos = [
   '--no-first-run',
   '--no-default-browser-check',
   '--disable-extensions',
+  // Nenhuma chamada de serviço do Google por conta própria: só file:// e 127.0.0.1.
+  '--disable-background-networking',
+  '--disable-component-update',
+  '--disable-sync',
   '--remote-debugging-port=0',
   `--user-data-dir=${perfil}`,
   '--window-size=1200,1600',
@@ -201,7 +211,11 @@ const chrome = spawn(chromeBin, argumentos, { stdio: ['ignore', 'ignore', 'pipe'
 const limite = setTimeout(() => {
   console.error('FAIL: teste de navegador passou de 120s');
   chrome.kill('SIGKILL');
-  process.exit(1);
+  // Sem o finally: dá ao Chrome um instante para soltar o perfil antes de apagá-lo.
+  setTimeout(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    process.exit(1);
+  }, 1000);
 }, 120000);
 
 let ws;
@@ -221,8 +235,18 @@ try {
 
   const porta = new URL(enderecoNavegador).port;
   const versao = await (await fetch(`http://127.0.0.1:${porta}/json/version`)).json();
-  const alvos = await (await fetch(`http://127.0.0.1:${porta}/json/list`)).json();
-  const pagina = alvos.find((alvo) => alvo.type === 'page');
+  // A aba inicial pode ainda não estar listada logo que o DevTools abre.
+  let pagina;
+  for (let tentativa = 0; tentativa < 50 && !pagina; tentativa += 1) {
+    const alvos = await (await fetch(`http://127.0.0.1:${porta}/json/list`)).json();
+    pagina = alvos.find((alvo) => alvo.type === 'page');
+    if (!pagina) {
+      await new Promise((resolver) => setTimeout(resolver, 100));
+    }
+  }
+  if (!pagina) {
+    throw new Error('o Chrome não listou nenhuma página em 5s');
+  }
 
   ws = new WebSocket(pagina.webSocketDebuggerUrl);
   await new Promise((resolver, rejeitar) => {
@@ -348,6 +372,10 @@ try {
   // Nome longo: uma página de categoria fica maior que a página 1 de Todos.
   await abrir('longo');
   checarLayoutEstavel(await naPagina((u) => u.percorrer()), 'longo');
+
+  // Nome longo numa página 2: a maior página não é uma página 1.
+  await abrir('longo-p2');
+  checarLayoutEstavel(await naPagina((u) => u.percorrer()), 'longo-p2');
 
   // Uma categoria só: sem a aba Todos, a aba única abre ativa.
   await abrir('so-plugins');

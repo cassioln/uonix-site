@@ -66,6 +66,12 @@ switch ( $cenario ) {
 		uox_cenario_plugins( 12, 8 );
 		$largura = 400;
 		break;
+	case 'longo-p2': // O nome longo (Plugin 10) cai na página 2 de Todos e de Plugins:
+		// a página mais alta não é uma página 1.
+		uox_cenario_nucleo();
+		uox_cenario_plugins( 25, 10 );
+		$largura = 400;
+		break;
 	case 'so-plugins': // Uma categoria só: sem a aba "Todos".
 		uox_cenario_plugins( 12 );
 		break;
