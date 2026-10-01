@@ -2,9 +2,10 @@
 /**
  * Teste da lista informativa de "Atualizações Sistêmicas" no card de manutenção.
  *
- * A lista é somente leitura: o papel editor vê o que está atrasado, separado em
- * abas (Plugins / WordPress / Tema), mas não pode receber link, formulário ou
- * botão que dispare atualização daqui — os únicos botões são os das abas.
+ * A lista é somente leitura: o papel editor vê o que está atrasado — na aba
+ * "Todos" (padrão) e por categoria, só as que têm pendência, paginado em 10 —
+ * mas não pode receber link, formulário ou botão que dispare atualização daqui.
+ * Os únicos botões são de navegação (abas e paginação).
  */
 
 declare( strict_types=1 );
@@ -89,21 +90,70 @@ function uox_atualizacoes_tag_painel( $html, $aba ) {
 	return preg_match( '#<div class="uox-atualizacoes-painel" data-uox-painel="' . $aba . '"[^>]*>#', $html, $m ) ? $m[0] : '';
 }
 
+// Conteúdo de um painel: da sua tag até o próximo painel ou o aviso de rodapé.
+function uox_atualizacoes_painel( $html, $aba ) {
+	$ini = strpos( $html, 'data-uox-painel="' . $aba . '"' );
+	if ( false === $ini ) {
+		return '';
+	}
+	$fim = strpos( $html, '<div class="uox-atualizacoes-painel"', $ini );
+	if ( false === $fim ) {
+		$fim = strpos( $html, 'uox-atualizacoes-aviso', $ini );
+	}
+	return substr( $html, $ini, false === $fim ? null : $fim - $ini );
+}
+
 // Tag de abertura do botão de uma aba.
 function uox_atualizacoes_tag_aba( $html, $aba ) {
 	return preg_match( '#<button[^>]*data-uox-aba="' . $aba . '"[^>]*>#', $html, $m ) ? $m[0] : '';
 }
 
-// Somente informativo: nenhum link/formulário, e os únicos <button> são as 3 abas.
+// Abas renderizadas, na ordem.
+function uox_atualizacoes_abas( $html ) {
+	preg_match_all( '#<button[^>]*data-uox-aba="([^"]+)"#', $html, $m );
+	return $m[1];
+}
+
+// Somente informativo: nenhum link/formulário, e todo <button> é type=button de
+// navegação (aba ou paginação). Devolve quantos botões há.
 function uox_atualizacoes_assert_informativo( $html, $contexto ) {
 	uox_atualizacoes_assert( 1 !== preg_match( '#<a[\s>]|<form|href=#i', $html ), "{$contexto}: não pode conter link ou formulário" );
-	$botoes = substr_count( $html, '<button' );
+	preg_match_all( '#<button[^>]*>#', $html, $m );
+	foreach ( $m[0] as $botao ) {
+		uox_atualizacoes_assert(
+			false !== strpos( $botao, 'type="button"' )
+				&& ( false !== strpos( $botao, 'data-uox-aba=' ) || false !== strpos( $botao, 'data-uox-pagina-acao=' ) ),
+			"{$contexto}: todo botão deve ser type=button de aba ou paginação ({$botao})"
+		);
+	}
+	return count( $m[0] );
+}
+
+function uox_atualizacoes_assert_aviso( $html, $contexto ) {
+	$aviso = preg_match( '#<p class="uox-atualizacoes-aviso"[^>]*>(.*?)</p>#s', $html, $m ) ? $m[1] : '';
 	uox_atualizacoes_assert(
-		3 === $botoes
-			&& 3 === substr_count( $html, 'data-uox-aba=' )
-			&& 3 === substr_count( $html, '<button type="button"' ),
-		"{$contexto}: os únicos botões devem ser as 3 abas type=button (achou {$botoes})"
+		false !== strpos( $aviso, 'administrador' ) && false !== strpos( $aviso, 'backup' ) && false !== stripos( $aviso, 'segurança' ),
+		"{$contexto}: o rodapé deve avisar sobre segurança, perfil de administrador e backup"
 	);
+	$pos_aviso  = strpos( $html, 'uox-atualizacoes-aviso' );
+	$pos_painel = strrpos( $html, '<div class="uox-atualizacoes-painel"' );
+	uox_atualizacoes_assert(
+		false !== $pos_aviso && false !== $pos_painel && $pos_aviso > $pos_painel && false !== strpos( substr( $html, $pos_aviso ), '</div>' ),
+		"{$contexto}: o aviso deve ficar no rodapé, depois dos painéis e dentro do bloco"
+	);
+}
+
+// Gera N plugins com salto de patch (gravidade baixa).
+function uox_atualizacoes_plugins_patch( $quantidade ) {
+	$resposta   = array();
+	$instalados = array();
+	for ( $i = 1; $i <= $quantidade; $i++ ) {
+		$arquivo                = sprintf( 'p%02d/p%02d.php', $i, $i );
+		$resposta[ $arquivo ]   = (object) array( 'new_version' => '1.0.1' );
+		$instalados[ $arquivo ] = array( 'Name' => sprintf( 'Plugin %02d', $i ), 'Version' => '1.0.0' );
+	}
+	$GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array( 'response' => $resposta );
+	$GLOBALS['uox_test_plugins']                           = $instalados;
 }
 
 // Gravidade por distância de versão: major → alta, minor → média, patch → baixa.
@@ -120,12 +170,8 @@ uox_atualizacoes_assert(
 	'ordem de gravidade deve ser crítica < alta < média < baixa < desconhecida'
 );
 
-// Sem pendências: mensagem de "tudo atualizado", sem abas nem itens.
-$vazio = uox_atualizacoes_render();
-uox_atualizacoes_assert( false !== strpos( $vazio, 'Atualizações Sistêmicas' ), 'o bloco deve ter o título "Atualizações Sistêmicas"' );
-uox_atualizacoes_assert( false !== strpos( $vazio, 'Tudo atualizado' ), 'sem pendências deve mostrar "Tudo atualizado"' );
-uox_atualizacoes_assert( false === strpos( $vazio, '<li' ), 'sem pendências não deve renderizar itens' );
-uox_atualizacoes_assert( false === strpos( $vazio, '<button' ), 'sem pendências não deve renderizar abas' );
+// Sem pendências: o bloco inteiro some.
+uox_atualizacoes_assert( '' === uox_atualizacoes_render(), 'sem pendências o bloco não deve ser renderizado' );
 
 // Núcleo com response "latest" não é pendência.
 $GLOBALS['uox_test_site_transients']['update_core'] = (object) array(
@@ -134,6 +180,7 @@ $GLOBALS['uox_test_site_transients']['update_core'] = (object) array(
 $grupos = uox_get_atualizacoes_pendentes();
 uox_atualizacoes_assert( array( 'plugins', 'core', 'temas' ) === array_keys( $grupos ), 'os grupos devem ser plugins, core e temas, nessa ordem' );
 uox_atualizacoes_assert( 0 === uox_atualizacoes_total( $grupos ), 'núcleo em "latest" não deve virar pendência' );
+uox_atualizacoes_assert( '' === uox_atualizacoes_render(), 'núcleo em "latest": o bloco não deve ser renderizado' );
 
 // Só o núcleo pendente: crítica mesmo num salto de patch, e a aba WordPress abre ativa.
 $GLOBALS['uox_test_site_transients']['update_core'] = (object) array(
@@ -148,13 +195,26 @@ uox_atualizacoes_assert(
 );
 
 $so_nucleo = uox_atualizacoes_render();
-uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $so_nucleo, 'core' ), 'is-active' ), 'só com o núcleo pendente, a aba WordPress deve abrir ativa' );
-uox_atualizacoes_assert( false === strpos( uox_atualizacoes_tag_aba( $so_nucleo, 'plugins' ), 'is-active' ), 'só com o núcleo pendente, a aba Plugins (vazia) não pode abrir ativa' );
-uox_atualizacoes_assert( false === strpos( uox_atualizacoes_tag_painel( $so_nucleo, 'core' ), 'hidden' ), 'só com o núcleo pendente, o painel do núcleo deve ficar visível' );
-uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_painel( $so_nucleo, 'plugins' ), 'hidden' ), 'só com o núcleo pendente, o painel de plugins deve ficar oculto' );
-uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'Crítica' ), 'o selo "Crítica" deve aparecer para o núcleo' );
+uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'id="uox-atualizacoes-sistemicas"' ), 'com pendência, o bloco deve ser renderizado' );
+uox_atualizacoes_assert( array( 'todos', 'core' ) === uox_atualizacoes_abas( $so_nucleo ), 'só com o núcleo pendente, as abas devem ser Todos e WordPress (vazias ocultas)' );
+uox_atualizacoes_assert( false === strpos( $so_nucleo, 'data-uox-painel="plugins"' ), 'categoria vazia não deve ter painel' );
+uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $so_nucleo, 'todos' ), 'is-active' ), 'a aba Todos deve abrir ativa por padrão' );
 uox_atualizacoes_assert( 1 === substr_count( $so_nucleo, 'class="uox-atualizacoes-tab is-active"' ), 'exatamente uma aba deve abrir ativa' );
-uox_atualizacoes_assert_informativo( $so_nucleo, 'só núcleo' );
+uox_atualizacoes_assert( false === strpos( uox_atualizacoes_tag_painel( $so_nucleo, 'todos' ), 'hidden' ), 'o painel Todos deve abrir visível' );
+uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_painel( $so_nucleo, 'core' ), 'hidden' ), 'o painel WordPress deve abrir oculto' );
+uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'Crítica' ), 'o selo "Crítica" deve aparecer para o núcleo' );
+uox_atualizacoes_assert( false === strpos( $so_nucleo, 'uox-atualizacoes-paginacao' ), 'até 10 itens não há paginação' );
+uox_atualizacoes_assert( false !== strpos( $so_nucleo, '#uox-atualizacoes-sistemicas [hidden]{display:none !important;}' ), 'o bloco deve garantir que [hidden] vença o display:flex inline' );
+// Altura fixa: todos os painéis dentro de um contêiner único, cuja altura o JS
+// trava na página 1 de "Todos" (comportamento conferido no navegador, não aqui).
+$pos_caixa = strpos( $so_nucleo, '<div class="uox-atualizacoes-paineis"' );
+uox_atualizacoes_assert(
+	false !== $pos_caixa && $pos_caixa < strpos( $so_nucleo, 'data-uox-painel=' ) && $pos_caixa > strpos( $so_nucleo, 'role="tablist"' ),
+	'os painéis devem ficar num contêiner único, abaixo das abas'
+);
+uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'function fixarAltura()' ), 'o JS deve travar a altura da área dos painéis' );
+uox_atualizacoes_assert( 2 === uox_atualizacoes_assert_informativo( $so_nucleo, 'só núcleo' ), 'só núcleo: os únicos botões devem ser as 2 abas' );
+uox_atualizacoes_assert_aviso( $so_nucleo, 'só núcleo' );
 
 // Núcleo, plugins (fora de ordem) e temas pendentes.
 $GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array(
@@ -162,6 +222,8 @@ $GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array(
 		'patch/patch.php' => (object) array( 'new_version' => '1.0.1' ),
 		'major/major.php' => (object) array( 'new_version' => '3.0.0' ),
 		'minor/minor.php' => (object) array( 'new_version' => '2.5.0' ),
+		// Ainda no transient, mas removido fora do WordPress: não pode listar.
+		'orfao/orfao.php' => (object) array( 'new_version' => '5.0.0' ),
 	),
 );
 $GLOBALS['uox_test_plugins'] = array(
@@ -185,8 +247,9 @@ $GLOBALS['uox_test_themes'] = array(
 
 $grupos = uox_get_atualizacoes_pendentes();
 uox_atualizacoes_assert( 1 === count( $grupos['core'] ), 'o núcleo deve continuar no grupo core' );
-uox_atualizacoes_assert( 3 === count( $grupos['plugins'] ), 'os 3 plugins devem ir para o grupo plugins' );
-uox_atualizacoes_assert( 3 === count( $grupos['temas'] ), 'os 3 temas devem ir para o grupo temas' );
+uox_atualizacoes_assert( 3 === count( $grupos['plugins'] ), 'os 3 plugins instalados devem ir para o grupo plugins (o órfão do cache fica de fora)' );
+uox_atualizacoes_assert( 2 === count( $grupos['temas'] ), 'os 2 temas instalados devem ir para o grupo temas (o órfão do cache fica de fora)' );
+uox_atualizacoes_assert( ! in_array( 'orfao/orfao.php', array_column( $grupos['plugins'], 'nome' ), true ), 'plugin no cache mas não instalado não deve listar' );
 uox_atualizacoes_assert(
 	array( 'alta', 'media', 'baixa' ) === array_column( $grupos['plugins'], 'gravidade' ),
 	'plugins devem sair ordenados alta → média → baixa'
@@ -205,38 +268,105 @@ uox_atualizacoes_assert(
 	'media' === ( $temas['Tema Filho']['gravidade'] ?? '' ) && '1.1.0' === ( $temas['Tema Filho']['versao_nova'] ?? '' ),
 	'tema com dados em objeto deve ler new_version (1.0.0 → 1.1.0 = média)'
 );
+uox_atualizacoes_assert( ! isset( $temas['sumido'] ), 'tema no cache mas não instalado não deve listar' );
 uox_atualizacoes_assert(
-	isset( $temas['sumido'] ) && '?' === $temas['sumido']['versao_atual'],
-	'tema não instalado deve cair para o stylesheet como nome e "?" como versão'
+	! in_array( '?', array_merge( array_column( $grupos['plugins'], 'versao_atual' ), array_column( $grupos['temas'], 'versao_atual' ) ), true ),
+	'nenhum item deve aparecer com versão atual "?"'
 );
 uox_atualizacoes_assert(
-	array( 'alta', 'alta', 'media' ) === array_column( $grupos['temas'], 'gravidade' ),
+	array( 'alta', 'media' ) === array_column( $grupos['temas'], 'gravidade' ),
 	'temas devem sair ordenados pela gravidade (alta primeiro)'
 );
 
 $lista = uox_atualizacoes_render();
-uox_atualizacoes_assert( 7 === substr_count( $lista, '<li' ), 'a lista deve renderizar um <li> por pendência (1 + 3 + 3)' );
+uox_atualizacoes_assert( array( 'todos', 'plugins', 'core', 'temas' ) === uox_atualizacoes_abas( $lista ), 'com tudo pendente, as abas devem ser Todos, Plugins, WordPress e Tema' );
+uox_atualizacoes_assert( false !== strpos( $lista, 'Todos (6)' ), 'a aba Todos deve somar todas as categorias' );
 uox_atualizacoes_assert( false !== strpos( $lista, 'Plugins (3)' ), 'a aba Plugins deve mostrar a contagem' );
 uox_atualizacoes_assert( false !== strpos( $lista, 'WordPress (1)' ), 'a aba WordPress deve mostrar a contagem' );
-uox_atualizacoes_assert( false !== strpos( $lista, 'Tema (3)' ), 'a aba Tema deve mostrar a contagem' );
-uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $lista, 'plugins' ), 'is-active' ), 'com plugins pendentes, a aba Plugins abre ativa' );
-uox_atualizacoes_assert( false === strpos( uox_atualizacoes_tag_painel( $lista, 'plugins' ), 'hidden' ), 'o painel ativo não pode sair com hidden' );
+uox_atualizacoes_assert( false !== strpos( $lista, 'Tema (2)' ), 'a aba Tema deve mostrar a contagem' );
+uox_atualizacoes_assert( 12 === substr_count( $lista, '<li' ), 'cada pendência aparece em Todos e na sua categoria (6 + 6)' );
+
+$painel_todos = uox_atualizacoes_painel( $lista, 'todos' );
+uox_atualizacoes_assert( 6 === substr_count( $painel_todos, '<li' ), 'o painel Todos deve listar as 6 pendências' );
+preg_match_all( '#>(Crítica|Alta|Média|Baixa)</span>#u', $painel_todos, $selos );
 uox_atualizacoes_assert(
-	false !== strpos( uox_atualizacoes_tag_painel( $lista, 'core' ), 'hidden' ) && false !== strpos( uox_atualizacoes_tag_painel( $lista, 'temas' ), 'hidden' ),
-	'os painéis inativos devem sair com hidden'
+	array( 'Crítica', 'Alta', 'Alta', 'Média', 'Média', 'Baixa' ) === $selos[1],
+	'Todos deve misturar as categorias da gravidade mais alta para a mais baixa'
+);
+uox_atualizacoes_assert(
+	0 === substr_count( $painel_todos, 'WordPress &middot;' ) && 3 === substr_count( $painel_todos, 'Plugin &middot;' ) && 2 === substr_count( $painel_todos, 'Tema &middot;' ),
+	'em Todos, plugins e temas indicam a categoria; o núcleo não repete "WordPress"'
+);
+uox_atualizacoes_assert( false === strpos( uox_atualizacoes_painel( $lista, 'plugins' ), '&middot;' ), 'na aba da própria categoria, o item não repete a categoria' );
+uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $lista, 'todos' ), 'is-active' ), 'com tudo pendente, Todos continua a aba padrão' );
+uox_atualizacoes_assert(
+	false !== strpos( uox_atualizacoes_tag_painel( $lista, 'plugins' ), 'hidden' )
+		&& false !== strpos( uox_atualizacoes_tag_painel( $lista, 'core' ), 'hidden' )
+		&& false !== strpos( uox_atualizacoes_tag_painel( $lista, 'temas' ), 'hidden' ),
+	'os painéis por categoria devem abrir ocultos'
 );
 uox_atualizacoes_assert( false !== strpos( $lista, 'Plugin &lt;Exemplo&gt;' ), 'o nome do plugin deve sair escapado' );
 uox_atualizacoes_assert( false === strpos( $lista, '<Exemplo>' ), 'o nome do plugin não pode sair cru' );
-uox_atualizacoes_assert_informativo( $lista, 'lista completa' );
+uox_atualizacoes_assert( 4 === uox_atualizacoes_assert_informativo( $lista, 'lista completa' ), 'lista completa: os únicos botões devem ser as 4 abas' );
 
-// Painel vazio dentro de um bloco com pendências.
+// ARIA de abas: cada aba aponta para o seu painel e vice-versa; só a ativa no Tab.
+foreach ( uox_atualizacoes_abas( $lista ) as $aba ) {
+	$tag_aba    = uox_atualizacoes_tag_aba( $lista, $aba );
+	$tag_painel = uox_atualizacoes_tag_painel( $lista, $aba );
+	uox_atualizacoes_assert(
+		false !== strpos( $tag_aba, 'id="uox-atualizacoes-tab-' . $aba . '"' ) && false !== strpos( $tag_aba, 'aria-controls="uox-atualizacoes-painel-' . $aba . '"' ),
+		"{$aba}: a aba deve ter id e aria-controls apontando para o painel"
+	);
+	uox_atualizacoes_assert(
+		false !== strpos( $tag_painel, 'id="uox-atualizacoes-painel-' . $aba . '"' )
+			&& false !== strpos( $tag_painel, 'role="tabpanel"' )
+			&& false !== strpos( $tag_painel, 'aria-labelledby="uox-atualizacoes-tab-' . $aba . '"' ),
+		"{$aba}: o painel deve ter id, role=tabpanel e aria-labelledby apontando para a aba"
+	);
+	uox_atualizacoes_assert(
+		false !== strpos( $tag_aba, 'todos' === $aba ? 'tabindex="0"' : 'tabindex="-1"' ),
+		"{$aba}: só a aba ativa entra na ordem do Tab (tabindex itinerante)"
+	);
+}
+uox_atualizacoes_assert( false !== strpos( $lista, "ArrowRight" ) && false !== strpos( $lista, "ArrowLeft" ), 'as abas devem responder às setas do teclado' );
+uox_atualizacoes_assert_aviso( $lista, 'lista completa' );
+
+// Categoria que zera some da barra de abas.
 unset( $GLOBALS['uox_test_site_transients']['update_themes'] );
 $sem_tema = uox_atualizacoes_render();
-uox_atualizacoes_assert( false !== strpos( $sem_tema, 'Tema (0)' ), 'aba sem pendência deve mostrar (0)' );
-uox_atualizacoes_assert( false !== strpos( $sem_tema, 'Nenhuma pendência nesta categoria.' ), 'painel vazio deve dizer que não há pendência' );
+uox_atualizacoes_assert( array( 'todos', 'plugins', 'core' ) === uox_atualizacoes_abas( $sem_tema ), 'sem tema pendente, a aba Tema deve sumir' );
+uox_atualizacoes_assert( false === strpos( $sem_tema, 'Tema (0)' ), 'nenhuma aba deve aparecer com (0)' );
+
+// Paginação: exatamente 10 itens cabem numa página só.
+unset( $GLOBALS['uox_test_site_transients']['update_core'] );
+uox_atualizacoes_plugins_patch( 10 );
+$dez = uox_atualizacoes_render();
+uox_atualizacoes_assert( false === strpos( $dez, 'uox-atualizacoes-paginacao' ), '10 itens não devem gerar paginação' );
+uox_atualizacoes_assert( 0 === preg_match( '#<li[^>]*hidden#', $dez ), '10 itens devem aparecer todos na primeira página' );
+
+// Paginação: 12 plugins + núcleo = Todos com 13 (2 páginas) e Plugins com 12 (2 páginas).
+$GLOBALS['uox_test_site_transients']['update_core'] = (object) array(
+	'updates' => array( (object) array( 'response' => 'upgrade', 'current' => '6.9' ) ),
+);
+uox_atualizacoes_plugins_patch( 12 );
+$paginado = uox_atualizacoes_render();
+
+foreach ( array( 'todos' => 13, 'plugins' => 12 ) as $aba => $quantidade ) {
+	$painel = uox_atualizacoes_painel( $paginado, $aba );
+	uox_atualizacoes_assert( false !== strpos( $painel, 'data-uox-paginas="2"' ), "{$aba}: {$quantidade} itens devem dar 2 páginas" );
+	uox_atualizacoes_assert( 10 === preg_match_all( '#<li data-uox-pagina="1" style=#', $painel ), "{$aba}: a página 1 deve mostrar 10 itens visíveis" );
+	uox_atualizacoes_assert( $quantidade - 10 === preg_match_all( '#<li data-uox-pagina="2" hidden#', $painel ), "{$aba}: os itens além de 10 devem ir para a página 2, ocultos" );
+	uox_atualizacoes_assert( false !== strpos( $painel, 'Página 1 de 2' ), "{$aba}: a paginação deve indicar \"Página 1 de 2\"" );
+	uox_atualizacoes_assert( 1 === preg_match( '#<button[^>]*data-uox-pagina-acao="anterior"[^>]*disabled#', $painel ), "{$aba}: \"Anterior\" deve abrir desabilitado" );
+	uox_atualizacoes_assert( 1 === preg_match( '#<button[^>]*data-uox-pagina-acao="proxima"(?![^>]*disabled)[^>]*>#', $painel ), "{$aba}: \"Próxima\" deve abrir habilitado" );
+}
+
+uox_atualizacoes_assert( false === strpos( uox_atualizacoes_painel( $paginado, 'core' ), 'uox-atualizacoes-paginacao' ), 'a aba com 1 item não deve ter paginação' );
+uox_atualizacoes_assert( 7 === uox_atualizacoes_assert_informativo( $paginado, 'paginado' ), 'paginado: 3 abas + 2 botões de paginação em 2 painéis' );
+uox_atualizacoes_assert_aviso( $paginado, 'paginado' );
 
 if ( 0 !== $failures ) {
 	exit( 1 );
 }
 
-echo "PASS: atualizações sistêmicas em abas, somente informativas\n";
+echo "PASS: atualizações sistêmicas em abas (Todos + categorias), paginadas e somente informativas\n";

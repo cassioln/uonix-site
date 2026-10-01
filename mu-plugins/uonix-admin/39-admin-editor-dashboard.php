@@ -1339,6 +1339,13 @@ function uox_get_atualizacoes_pendentes()
         $instalados = get_plugins();
 
         foreach ($plugin_updates->response as $arquivo_plugin => $dados) {
+            // O transient só é refeito pelo cron: um plugin apagado fora do
+            // WordPress (deploy, SSH) continuaria aparecendo como "? → x.y.z",
+            // com gravidade "Alta" (intval('?') = 0). Não instalado, não lista.
+            if (!isset($instalados[$arquivo_plugin])) {
+                continue;
+            }
+
             $versao_atual = $instalados[$arquivo_plugin]['Version'] ?? '?';
             $versao_nova = $dados->new_version ?? '?';
 
@@ -1358,12 +1365,18 @@ function uox_get_atualizacoes_pendentes()
     if (!empty($theme_updates->response) && is_array($theme_updates->response)) {
         foreach ($theme_updates->response as $stylesheet => $dados) {
             $tema = wp_get_theme($stylesheet);
-            $versao_atual = $tema->exists() ? $tema->get('Version') : '?';
+
+            // Mesmo caso dos plugins: tema removido fora do WordPress não lista.
+            if (!$tema->exists()) {
+                continue;
+            }
+
+            $versao_atual = $tema->get('Version');
             // A API de temas devolve array nativo (diferente de plugins, que usa objeto).
             $versao_nova = is_array($dados) ? ($dados['new_version'] ?? '?') : ($dados->new_version ?? '?');
 
             $grupos['temas'][] = array(
-                'nome' => $tema->exists() ? $tema->get('Name') : $stylesheet,
+                'nome' => $tema->get('Name'),
                 'versao_atual' => $versao_atual,
                 'versao_nova' => $versao_nova,
                 'gravidade' => uox_get_gravidade_atualizacao($versao_atual, $versao_nova),
@@ -1381,12 +1394,18 @@ function uox_get_atualizacoes_pendentes()
     return $grupos;
 }
 
-// Somente informativo: sem link, botão ou atalho para disparar atualização.
-// O papel editor não tem (e não deve ganhar aqui) a capability
+// Somente informativo: sem link, formulário ou atalho para disparar
+// atualização — os únicos botões são de navegação (abas e paginação). O papel
+// editor não tem (e não deve ganhar aqui) a capability
 // update_plugins/update_core/update_themes.
 function uox_render_lista_atualizacoes_pendentes()
 {
     $grupos = uox_get_atualizacoes_pendentes();
+
+    // Sem nenhuma pendência, o bloco inteiro some do card.
+    if (0 === array_sum(array_map('count', $grupos))) {
+        return;
+    }
 
     $cores_gravidade = array(
         'critica' => array('bg' => '#450a0a', 'cor' => '#ffffff', 'label' => 'Crítica'),
@@ -1395,87 +1414,130 @@ function uox_render_lista_atualizacoes_pendentes()
         'baixa' => array('bg' => '#dbeafe', 'cor' => '#1e40af', 'label' => 'Baixa'),
     );
 
-    $abas = array(
-        'plugins' => 'Plugins',
-        'core' => 'WordPress',
+    $rotulos_categoria = array(
+        'plugins' => 'Plugin',
+        'core' => null,
         'temas' => 'Tema',
     );
 
-    $total = array_sum(array_map('count', $grupos));
+    // "Todos" junta as categorias, da gravidade mais alta para a mais baixa;
+    // cada item leva a categoria para ser identificado fora da própria aba —
+    // menos o núcleo, cujo nome já diz "WordPress".
+    $todos = array();
 
-    echo '<div class="uox-atualizacoes-sistemicas" id="uox-atualizacoes-sistemicas" style="margin-top: 18px; padding-top: 15px; border-top: 1px solid #e2e8f0;">';
-    echo '<p style="font-size: 13px; font-weight: 600; color: #334155; margin: 0 0 10px 0;">Atualizações Sistêmicas</p>';
+    foreach (array('core', 'plugins', 'temas') as $chave) {
+        foreach ($grupos[$chave] as $item) {
+            if (null !== $rotulos_categoria[$chave]) {
+                $item['categoria'] = $rotulos_categoria[$chave];
+            }
 
-    if (0 === $total) {
-        echo '<p style="font-size: 13px; color: #16a34a; margin: 0;">Tudo atualizado — nenhuma pendência na última verificação.</p>';
-        echo '</div>';
-        return;
-    }
-
-    // Abre na primeira categoria com pendência — um núcleo "crítico" não pode
-    // ficar escondido atrás de uma aba "Plugins" vazia.
-    $aba_ativa = 'plugins';
-
-    foreach (array_keys($abas) as $chave) {
-        if (!empty($grupos[$chave])) {
-            $aba_ativa = $chave;
-            break;
+            $todos[] = $item;
         }
     }
 
-    echo '<div class="uox-atualizacoes-tabs" role="tablist" style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">';
+    usort($todos, function ($a, $b) {
+        return uox_ordem_gravidade($a['gravidade']) <=> uox_ordem_gravidade($b['gravidade']);
+    });
 
-    foreach ($abas as $chave => $rotulo) {
-        $ativa = $chave === $aba_ativa;
+    $paineis = array(
+        'todos' => array('rotulo' => 'Todos', 'itens' => $todos),
+        'plugins' => array('rotulo' => 'Plugins', 'itens' => $grupos['plugins']),
+        'core' => array('rotulo' => 'WordPress', 'itens' => $grupos['core']),
+        'temas' => array('rotulo' => 'Tema', 'itens' => $grupos['temas']),
+    );
+
+    // Categoria sem pendência não ganha aba.
+    $paineis = array_filter($paineis, function ($painel) {
+        return !empty($painel['itens']);
+    });
+
+    // Limite por página, para o card não crescer sem fim no dashboard.
+    $por_pagina = 10;
+    $estilo_botao_pagina = 'font-size:12px; padding:3px 10px; border-radius:6px; border:1px solid #cbd5e1; background:#ffffff; color:#334155; cursor:pointer;';
+
+    echo '<div class="uox-atualizacoes-sistemicas" id="uox-atualizacoes-sistemicas" style="margin-top: 18px; padding-top: 15px; border-top: 1px solid #e2e8f0;">';
+    // Os itens têm display:flex inline, que venceria o [hidden] do navegador —
+    // sem esta regra, as páginas 2+ e os painéis ocultos continuariam à vista.
+    echo '<style>#uox-atualizacoes-sistemicas [hidden]{display:none !important;}#uox-atualizacoes-sistemicas [data-uox-pagina-acao]:disabled{opacity:.45;cursor:default;}</style>';
+    echo '<p style="font-size: 13px; font-weight: 600; color: #334155; margin: 0 0 10px 0;">Atualizações Sistêmicas</p>';
+    echo '<div class="uox-atualizacoes-tabs" role="tablist" aria-label="Categorias de atualização" style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">';
+
+    foreach ($paineis as $chave => $painel) {
+        $ativa = 'todos' === $chave;
+
         printf(
-            '<button type="button" class="uox-atualizacoes-tab%s" data-uox-aba="%s" role="tab" aria-selected="%s" style="font-size:12px; font-weight:600; padding:5px 12px; border-radius:999px; border:1px solid #cbd5e1; background:%s; color:%s; cursor:pointer;">%s (%d)</button>',
+            '<button type="button" class="uox-atualizacoes-tab%1$s" id="uox-atualizacoes-tab-%2$s" data-uox-aba="%2$s" role="tab" aria-selected="%3$s" aria-controls="uox-atualizacoes-painel-%2$s" tabindex="%4$s" style="font-size:12px; font-weight:600; padding:5px 12px; border-radius:999px; border:1px solid #cbd5e1; background:%5$s; color:%6$s; cursor:pointer;">%7$s (%8$d)</button>',
             $ativa ? ' is-active' : '',
             esc_attr($chave),
             $ativa ? 'true' : 'false',
+            $ativa ? '0' : '-1',
             $ativa ? '#334155' : '#f1f5f9',
             $ativa ? '#ffffff' : '#334155',
-            esc_html($rotulo),
-            count($grupos[$chave])
+            esc_html($painel['rotulo']),
+            count($painel['itens'])
         );
     }
 
     echo '</div>';
 
-    foreach ($abas as $chave => $rotulo) {
+    // Altura travada pelo JS na página 1 de "Todos" (a maior possível, já que
+    // Todos contém as demais e nenhuma página passa de $por_pagina itens), para
+    // o card não mudar de tamanho ao trocar de aba ou de página.
+    echo '<div class="uox-atualizacoes-paineis" style="position: relative; overflow-y: auto;">';
+
+    foreach ($paineis as $chave => $painel) {
+        $paginas = (int) ceil(count($painel['itens']) / $por_pagina);
+
         printf(
-            '<div class="uox-atualizacoes-painel" data-uox-painel="%s"%s>',
+            '<div class="uox-atualizacoes-painel" data-uox-painel="%1$s" id="uox-atualizacoes-painel-%1$s" role="tabpanel" aria-labelledby="uox-atualizacoes-tab-%1$s" tabindex="0" data-uox-pagina-atual="1" data-uox-paginas="%2$d"%3$s>',
             esc_attr($chave),
-            $chave === $aba_ativa ? '' : ' hidden'
+            $paginas,
+            'todos' === $chave ? '' : ' hidden'
         );
 
-        if (empty($grupos[$chave])) {
-            echo '<p style="font-size: 13px; color: #16a34a; margin: 0;">Nenhuma pendência nesta categoria.</p>';
-        } else {
-            echo '<ul style="list-style: none; margin: 0; padding: 0; font-size: 13px; color: #334155;">';
+        echo '<ul style="list-style: none; margin: 0; padding: 0; font-size: 13px; color: #334155;">';
 
-            foreach ($grupos[$chave] as $item) {
-                $gravidade = $cores_gravidade[$item['gravidade']];
+        foreach (array_values($painel['itens']) as $indice => $item) {
+            $gravidade = $cores_gravidade[$item['gravidade']];
+            $pagina = intdiv($indice, $por_pagina) + 1;
 
-                printf(
-                    '<li style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 0; border-bottom:1px solid #f1f5f9;">
-                        <span>%s <span style="color:#94a3b8;">(%s &rarr; %s)</span></span>
-                        <span style="background:%s; color:%s; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; white-space:nowrap;">%s</span>
-                    </li>',
-                    esc_html($item['nome']),
-                    esc_html($item['versao_atual']),
-                    esc_html($item['versao_nova']),
-                    esc_attr($gravidade['bg']),
-                    esc_attr($gravidade['cor']),
-                    esc_html($gravidade['label'])
-                );
-            }
+            printf(
+                '<li data-uox-pagina="%d"%s style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 0; border-bottom:1px solid #f1f5f9;">
+                    <span>%s%s <span style="color:#94a3b8;">(%s &rarr; %s)</span></span>
+                    <span style="background:%s; color:%s; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; white-space:nowrap;">%s</span>
+                </li>',
+                $pagina,
+                $pagina > 1 ? ' hidden' : '',
+                isset($item['categoria']) ? '<span style="color:#94a3b8; font-size:11px;">' . esc_html($item['categoria']) . ' &middot;</span> ' : '',
+                esc_html($item['nome']),
+                esc_html($item['versao_atual']),
+                esc_html($item['versao_nova']),
+                esc_attr($gravidade['bg']),
+                esc_attr($gravidade['cor']),
+                esc_html($gravidade['label'])
+            );
+        }
 
-            echo '</ul>';
+        echo '</ul>';
+
+        if ($paginas > 1) {
+            printf(
+                '<div class="uox-atualizacoes-paginacao" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:#64748b;">
+                    <button type="button" data-uox-pagina-acao="anterior" disabled style="%1$s">&lsaquo; Anterior</button>
+                    <span data-uox-pagina-status aria-live="polite">Página 1 de %2$d</span>
+                    <button type="button" data-uox-pagina-acao="proxima" style="%1$s">Próxima &rsaquo;</button>
+                </div>',
+                esc_attr($estilo_botao_pagina),
+                $paginas
+            );
         }
 
         echo '</div>';
     }
 
+    echo '</div>';
+
+    echo '<p class="uox-atualizacoes-aviso" style="margin: 12px 0 0 0; padding: 8px 10px; border-left: 3px solid #b91c1c; background: #fef2f2; color: #7f1d1d; font-size: 12px; line-height: 1.5;"><strong>&#9888; Atenção:</strong> atualizações atrasadas deixam o site exposto a falhas de segurança e invasões. Elas devem ser aplicadas no perfil de <strong>administrador</strong>, sempre depois de um <strong>backup completo</strong>.</p>';
     echo '</div>';
     ?>
     <script>
@@ -1488,19 +1550,127 @@ function uox_render_lista_atualizacoes_pendentes()
 
             wrap.dataset.uoxTabsBound = '1';
 
-            wrap.addEventListener('click', function (event) {
-                var tab = event.target.closest('[data-uox-aba]');
+            var caixa = wrap.querySelector('.uox-atualizacoes-paineis');
+            var todos = wrap.querySelector('[data-uox-painel="todos"]');
 
-                if (!tab) {
+            // Mede um clone invisível de "Todos" na página 1 — sem mexer no que
+            // está à vista — e trava a altura da área dos painéis nesse valor.
+            function fixarAltura() {
+                if (!caixa || !todos) {
                     return;
                 }
 
+                var clone = todos.cloneNode(true);
+                clone.removeAttribute('data-uox-painel');
+                clone.removeAttribute('id');
+                clone.removeAttribute('tabindex');
+                clone.hidden = false;
+                clone.setAttribute('aria-hidden', 'true');
+                clone.style.cssText = 'position:absolute; top:0; left:0; right:0; visibility:hidden; pointer-events:none;';
+                clone.querySelectorAll('[data-uox-pagina]').forEach(function (item) {
+                    item.hidden = '1' !== item.dataset.uoxPagina;
+                });
+
+                caixa.appendChild(clone);
+                caixa.style.height = clone.offsetHeight + 'px';
+                caixa.removeChild(clone);
+            }
+
+            fixarAltura();
+            window.addEventListener('load', fixarAltura);
+
+            var aguardandoMedida = false;
+
+            // A largura do card muda a quebra de linha dos itens.
+            window.addEventListener('resize', function () {
+                if (aguardandoMedida) {
+                    return;
+                }
+
+                aguardandoMedida = true;
+                window.requestAnimationFrame(function () {
+                    aguardandoMedida = false;
+                    fixarAltura();
+                });
+            });
+
+            function irParaPagina(painel, pagina) {
+                var total = parseInt(painel.dataset.uoxPaginas, 10) || 1;
+                pagina = Math.min(Math.max(pagina, 1), total);
+                painel.dataset.uoxPaginaAtual = String(pagina);
+
+                painel.querySelectorAll('[data-uox-pagina]').forEach(function (item) {
+                    item.hidden = parseInt(item.dataset.uoxPagina, 10) !== pagina;
+                });
+
+                var status = painel.querySelector('[data-uox-pagina-status]');
+                var anterior = painel.querySelector('[data-uox-pagina-acao="anterior"]');
+                var proxima = painel.querySelector('[data-uox-pagina-acao="proxima"]');
+
+                if (status) {
+                    status.textContent = 'Página ' + pagina + ' de ' + total;
+                }
+
+                if (anterior) {
+                    anterior.disabled = pagina <= 1;
+                }
+
+                if (proxima) {
+                    proxima.disabled = pagina >= total;
+                }
+            }
+
+            wrap.addEventListener('click', function (event) {
+                var acao = event.target.closest('[data-uox-pagina-acao]');
+
+                if (acao) {
+                    var painelAtual = acao.closest('[data-uox-painel]');
+                    var atual = parseInt(painelAtual.dataset.uoxPaginaAtual, 10) || 1;
+                    irParaPagina(painelAtual, 'proxima' === acao.dataset.uoxPaginaAcao ? atual + 1 : atual - 1);
+                    return;
+                }
+
+                var tab = event.target.closest('[data-uox-aba]');
+
+                if (tab) {
+                    ativarAba(tab);
+                }
+            });
+
+            // Teclado no padrão ARIA de abas: setas, Home e End movem o foco e
+            // ativam a aba; só a aba ativa fica na ordem do Tab (tabindex 0).
+            wrap.querySelector('[role="tablist"]').addEventListener('keydown', function (event) {
+                var abas = Array.prototype.slice.call(wrap.querySelectorAll('[data-uox-aba]'));
+                var atual = abas.indexOf(document.activeElement);
+
+                if (-1 === atual) {
+                    return;
+                }
+
+                var destino = {
+                    ArrowRight: (atual + 1) % abas.length,
+                    ArrowLeft: (atual - 1 + abas.length) % abas.length,
+                    Home: 0,
+                    End: abas.length - 1
+                }[event.key];
+
+                if (undefined === destino) {
+                    return;
+                }
+
+                event.preventDefault();
+                ativarAba(abas[destino]);
+                abas[destino].focus();
+            });
+
+            function ativarAba(tab) {
                 var aba = tab.dataset.uoxAba;
 
                 wrap.querySelectorAll('[data-uox-aba]').forEach(function (botao) {
                     var ativo = botao === tab;
                     botao.classList.toggle('is-active', ativo);
                     botao.setAttribute('aria-selected', ativo ? 'true' : 'false');
+                    botao.tabIndex = ativo ? 0 : -1;
                     botao.style.background = ativo ? '#334155' : '#f1f5f9';
                     botao.style.color = ativo ? '#ffffff' : '#334155';
                 });
@@ -1508,7 +1678,7 @@ function uox_render_lista_atualizacoes_pendentes()
                 wrap.querySelectorAll('[data-uox-painel]').forEach(function (painel) {
                     painel.hidden = painel.dataset.uoxPainel !== aba;
                 });
-            });
+            }
         })();
     </script>
     <?php
