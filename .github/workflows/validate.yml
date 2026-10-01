@@ -77,6 +77,9 @@ jobs:
       - name: Test Uônix Insights intelligence metrics
         run: php scripts/tests/test-admin-intelligence-metrics.php
 
+      - name: Test Uônix Insights AI suggestion
+        run: php scripts/tests/test-admin-intelligence-ai.php
+
       - name: Test Uônix Insights intelligence dashboard
         run: php scripts/tests/test-admin-intelligence-dashboard.php
 

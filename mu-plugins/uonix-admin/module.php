@@ -23,6 +23,7 @@ uonix_mu_require_files(
 		'50-admin-intelligence-license.php',
 		'51-login-turnstile.php',
 		'53-admin-analytics-metrics.php',
+		'54-admin-intelligence-ai.php',
 		'55-admin-intelligence-metrics.php',
 		'56-admin-intelligence-dashboard.php',
 		'57-admin-intelligence-report.php',
