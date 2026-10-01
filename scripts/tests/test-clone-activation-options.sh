@@ -84,8 +84,12 @@ fi
 #
 # Diferente das de ativação, aqui o guard de e-mail não contém nada: o dano é na
 # afirmação da tela, não no envio.
+# `uonix_intelligence_page_status_cache` guarda o status HTTP das páginas conferido
+# pelo cron diário (#348). Herdado, o relatório do destino listaria como verificados
+# os status das páginas da ORIGEM.
 state_options=(
   'uonix_intelligence_anomaly_state'
+  'uonix_intelligence_page_status_cache'
 )
 
 for option in "${state_options[@]}"; do
