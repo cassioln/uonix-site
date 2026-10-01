@@ -131,6 +131,13 @@ uox_ai_assert( '' === $in_tpl['description'], 'Descrição vazia é aceita' );
 uox_ai_assert( null === uonix_intelligence_ai_input( uox_linha( 'x', '/olhal-de-ancoragem/' ) ), 'Sem post publicado, não há entrada' );
 uox_ai_assert( null === uonix_intelligence_ai_input( uox_linha( '', '/produtos/olhal-inox/' ) ), 'Sem consulta, não há entrada' );
 uox_ai_assert( uonix_intelligence_ai_input_hash( $in ) !== uonix_intelligence_ai_input_hash( array_merge( $in, array( 'title' => 'Outro' ) ) ), 'O hash muda quando o título atual muda' );
+foreach ( array(
+	'descrição atual' => array( 'description' => 'Outra descrição.' ),
+	'lista de diferenciais' => array( 'differentiators' => array( 'Aço Inox 304/316' ) ),
+	'modelo' => array( 'model' => 'gemini-9-flash' ),
+) as $campo => $troca ) {
+	uox_ai_assert( uonix_intelligence_ai_input_hash( $in ) !== uonix_intelligence_ai_input_hash( array_merge( $in, $troca ) ), "O hash muda quando muda: {$campo} (revisão do #329, M2)" );
+}
 uox_ai_assert( uonix_intelligence_ai_input_hash( $in ) === uonix_intelligence_ai_input_hash( array_merge( $in, array( 'impressions' => 56, 'position' => 6.3, 'ctr' => 0.01 ) ) ), 'O hash NÃO muda quando só as métricas mudam: a janela de 30 dias anda todo dia (revisão do #329, A1)' );
 uox_ai_assert( uonix_intelligence_ai_entry_key( 'a', '/b/' ) === hash( 'sha256', "a\n/b/" ), 'A chave da entrada é sha256 de consulta e caminho' );
 
@@ -272,6 +279,9 @@ $GLOBALS['uox_pedidos'] = array();
 uox_ai_assert( 0 === uonix_intelligence_ai_run( uox_analise( array( $dia_seguinte ) ), 0 )['called'] && 0 === count( $GLOBALS['uox_pedidos'] ), 'Só as métricas mudaram: o cron não chama o Gemini' );
 $GLOBALS['uox_posts'][10]['meta']['rank_math_title'] = 'Editado à mão | Uônix';
 uox_ai_assert( 'pending' === uonix_intelligence_ai_suggestion_for( uox_linha() )['status'], 'Título editado depois da geração: pending, nunca a sugestão antiga' );
+$GLOBALS['uox_posts'][10]['meta']['rank_math_title'] = 'Olhal de Ancoragem Inox | Uônix';
+$GLOBALS['uox_posts'][10]['meta']['rank_math_description'] = 'Descrição editada à mão.';
+uox_ai_assert( 'pending' === uonix_intelligence_ai_suggestion_for( uox_linha() )['status'], 'Descrição editada depois da geração: pending, nunca a sugestão antiga (revisão do #329, M2)' );
 uox_posts_padrao();
 $sem_mapa = uox_linha();
 $sem_mapa['target_page'] = null;
