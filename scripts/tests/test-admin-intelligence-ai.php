@@ -171,6 +171,122 @@ foreach ( $recusas as $caso => $dados ) {
 uox_ai_assert( null === uonix_intelligence_ai_validate( 'não é json', $P ) && null === uonix_intelligence_ai_validate( null, $P ), 'Recusa: texto que não é JSON, ou nulo' );
 uox_ai_assert( is_array( uonix_intelligence_ai_validate( json_encode( array( 'title' => str_repeat( 'á', 60 ), 'description' => 'ok', 'differentiators_used' => array() ) ), $P ) ), '60 caracteres acentuados cabem: a contagem é por caractere, não por byte' );
 
+// ---------------------------------------------------------------------------
+// 5. Chamada HTTP.
+// ---------------------------------------------------------------------------
+function uox_gemini( $dados, $finish = 'STOP', $code = 200 ) {
+	$texto = is_string( $dados ) ? $dados : json_encode( $dados, JSON_UNESCAPED_UNICODE );
+	return array( 'code' => $code, 'body' => json_encode( array( 'candidates' => array( array( 'finishReason' => $finish, 'content' => array( 'parts' => array( array( 'text' => $texto ) ) ) ) ), 'modelVersion' => 'gemini-3.8-flash' ) ) );
+}
+function uox_http( $code ) { return array( 'code' => $code, 'body' => '{"error":{"status":"X"}}' ); }
+
+$GLOBALS['uox_http']    = array( uox_gemini( $ok ) );
+$GLOBALS['uox_pedidos'] = array();
+$r = uonix_intelligence_ai_call( $in, 0 );
+$pedido = $GLOBALS['uox_pedidos'][0] ?? array();
+uox_ai_assert( 'ok' === $r['status'] && $ok['title'] === $r['suggestion']['title'], 'Resposta 200 válida vira ok' );
+uox_ai_assert( 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent' === ( $pedido['url'] ?? '' ), 'URL do modelo fixo, sem a chave' );
+uox_ai_assert( false === strpos( $pedido['url'] ?? '', 'chave-de-teste' ) && 'chave-de-teste' === ( $pedido['args']['headers']['x-goog-api-key'] ?? '' ), 'A chave vai no cabeçalho x-goog-api-key, nunca na URL' );
+uox_ai_assert( 15 === ( $pedido['args']['timeout'] ?? 0 ), 'Timeout de 15 s' );
+
+$casos_http = array(
+	'503 e depois 200 (uma nova tentativa)' => array( array( uox_http( 503 ), uox_gemini( $ok ) ), 'ok', 2 ),
+	'429 e depois 200'                     => array( array( uox_http( 429 ), uox_gemini( $ok ) ), 'ok', 2 ),
+	'503 duas vezes'                       => array( array( uox_http( 503 ), uox_http( 503 ) ), 'unavailable', 2 ),
+	'500 (sem nova tentativa)'             => array( array( uox_http( 500 ) ), 'unavailable', 1 ),
+	'erro de transporte'                   => array( array( new WP_Error( 'http_request_failed' ) ), 'unavailable', 1 ),
+	'404 do modelo'                        => array( array( uox_http( 404 ) ), 'model_missing', 1 ),
+	'MAX_TOKENS sem texto (medido)'        => array( array( uox_gemini( '', 'MAX_TOKENS' ) ), 'unavailable', 1 ),
+	'SAFETY'                               => array( array( uox_gemini( '', 'SAFETY' ) ), 'rejected', 1 ),
+	'200 com resposta inválida'            => array( array( uox_gemini( array( 'title' => str_repeat( 'a', 61 ), 'description' => 'x', 'differentiators_used' => array() ) ) ), 'rejected', 1 ),
+	'200 sem candidates'                   => array( array( array( 'code' => 200, 'body' => '{"promptFeedback":{}}' ) ), 'unavailable', 1 ),
+);
+foreach ( $casos_http as $caso => $c ) {
+	$GLOBALS['uox_http']    = $c[0];
+	$GLOBALS['uox_pedidos'] = array();
+	$r = uonix_intelligence_ai_call( $in, 0 );
+	uox_ai_assert( $c[1] === $r['status'] && $c[2] === count( $GLOBALS['uox_pedidos'] ), "HTTP {$caso}: status {$c[1]} com {$c[2]} pedido(s); obteve {$r['status']} com " . count( $GLOBALS['uox_pedidos'] ) );
+}
+$partes_com_pensamento = array( 'code' => 200, 'body' => json_encode( array( 'candidates' => array( array( 'finishReason' => 'STOP', 'content' => array( 'parts' => array( array( 'text' => 'pensando…', 'thought' => true ), array( 'text' => json_encode( $ok, JSON_UNESCAPED_UNICODE ) ) ) ) ) ) ) ) );
+$GLOBALS['uox_http'] = array( $partes_com_pensamento );
+uox_ai_assert( 'ok' === uonix_intelligence_ai_call( $in, 0 )['status'], 'Parte marcada como thought é ignorada' );
+
+// ---------------------------------------------------------------------------
+// 6. Execução com cache.
+// ---------------------------------------------------------------------------
+function uox_analise( array $linhas ) { return array( 'available' => true, 'rows' => $linhas ); }
+$GLOBALS['uox_options'] = array( 'page_on_front' => 14 );
+$GLOBALS['uox_http']    = array( uox_gemini( $ok ) );
+$GLOBALS['uox_pedidos'] = array();
+$res = uonix_intelligence_ai_run( uox_analise( array( uox_linha(), uox_linha( 'pagina morta', '/olhal-de-ancoragem/' ) ) ), 0 );
+$cache = get_option( uonix_intelligence_ai_option() );
+$k_ok  = uonix_intelligence_ai_entry_key( 'olhal de ancoragem inox', '/produtos/olhal-inox/' );
+$k_404 = uonix_intelligence_ai_entry_key( 'pagina morta', '/olhal-de-ancoragem/' );
+uox_ai_assert( 1 === $res['called'] && 'ok' === $cache[ $k_ok ]['status'] && 'no_page' === $cache[ $k_404 ]['status'], 'Primeira execução: uma chamada, página morta sem chamada (no_page)' );
+uox_ai_assert( false === $GLOBALS['uox_autoload'][ uonix_intelligence_ai_option() ], 'O cache é gravado sem autoload' );
+uox_ai_assert( false === strpos( serialize( $cache ), 'olhal de ancoragem inox' ) && false === strpos( serialize( $cache ), 'pagina morta' ), 'A consulta não fica em texto puro no cache (#253)' );
+
+$GLOBALS['uox_pedidos'] = array();
+$res2 = uonix_intelligence_ai_run( uox_analise( array( uox_linha() ) ), 0 );
+uox_ai_assert( 0 === $res2['called'] && 0 === count( $GLOBALS['uox_pedidos'] ), 'Mesma entrada: zero chamadas' );
+uox_ai_assert( ! isset( get_option( uonix_intelligence_ai_option() )[ $k_404 ] ), 'Oportunidade que saiu da lista é removida do cache' );
+
+$GLOBALS['uox_posts'][10]['meta']['rank_math_title'] = 'Olhal Inox Novo | Uônix';
+$GLOBALS['uox_http'] = array( uox_http( 503 ), uox_http( 503 ) );
+$res3 = uonix_intelligence_ai_run( uox_analise( array( uox_linha() ) ), 0 );
+uox_ai_assert( 1 === $res3['called'] && 'unavailable' === get_option( uonix_intelligence_ai_option() )[ $k_ok ]['status'] && ! isset( get_option( uonix_intelligence_ai_option() )[ $k_ok ]['suggestion'] ), 'Título mudou e o Gemini falhou: unavailable, e a sugestão antiga não sobrevive' );
+uox_posts_padrao();
+
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$seis = array();
+foreach ( range( 1, 6 ) as $n ) {
+	$seis[] = uox_linha( 'consulta ' . $n );
+}
+$GLOBALS['uox_http']    = array_fill( 0, 10, uox_gemini( $ok ) );
+$GLOBALS['uox_pedidos'] = array();
+uox_ai_assert( 5 === uonix_intelligence_ai_run( uox_analise( $seis ), 0 )['called'], 'Teto de 5 chamadas por execução' );
+uox_ai_assert( array( 'called' => 0, 'skipped' => 'no_opportunities' ) === uonix_intelligence_ai_run( array( 'available' => false, 'reason' => 'snapshot_missing' ), 0 ), 'Sem oportunidades disponíveis, nada é chamado' );
+
+// ---------------------------------------------------------------------------
+// 7. Leitor (foco de revisão 5: título editado depois da geração vira pending).
+// ---------------------------------------------------------------------------
+$GLOBALS['uox_options'] = array( 'page_on_front' => 14 );
+$GLOBALS['uox_http']    = array( uox_gemini( $ok ) );
+uonix_intelligence_ai_run( uox_analise( array( uox_linha() ) ), 0 );
+$s = uonix_intelligence_ai_suggestion_for( uox_linha() );
+uox_ai_assert( 'ok' === $s['status'] && $ok['title'] === $s['title'] && 'Olhal de Ancoragem Inox | Uônix' === $s['current_title'] && 10 === $s['post_id'] && '' !== $s['generated_at'], 'Leitor devolve a sugestão com o texto atual ao lado' );
+$GLOBALS['uox_posts'][10]['meta']['rank_math_title'] = 'Editado à mão | Uônix';
+uox_ai_assert( 'pending' === uonix_intelligence_ai_suggestion_for( uox_linha() )['status'], 'Título editado depois da geração: pending, nunca a sugestão antiga' );
+uox_posts_padrao();
+$sem_mapa = uox_linha();
+$sem_mapa['target_page'] = null;
+uox_ai_assert( 'pending' === uonix_intelligence_ai_suggestion_for( $sem_mapa )['status'], 'Página líder ainda não sincronizada: pending' );
+uox_ai_assert( 'no_page' === uonix_intelligence_ai_suggestion_for( uox_linha( 'x', '' ) )['status'] && 'no_page' === uonix_intelligence_ai_suggestion_for( uox_linha( 'x', '/olhal-de-ancoragem/' ) )['status'], 'Sem página, ou página morta: no_page' );
+uox_ai_assert( 'pending' === uonix_intelligence_ai_suggestion_for( uox_linha( 'nunca gerada' ) )['status'], 'Entrada sem cache: pending' );
+
+// Textos de estado: um texto próprio por estado, e nenhum vazio.
+$textos = array();
+foreach ( array( 'not_configured', 'pending', 'unavailable', 'rejected', 'no_page', 'model_missing' ) as $estado ) {
+	$textos[ $estado ] = uonix_intelligence_ai_state_message( $estado );
+	uox_ai_assert( '' !== trim( $textos[ $estado ] ), "Estado {$estado} tem texto" );
+}
+uox_ai_assert( count( $textos ) === count( array_unique( $textos ) ), 'Cada estado tem um texto diferente' );
+uox_ai_assert( false !== strpos( $textos['model_missing'], 'UONIX_GEMINI_MODEL' ) && false !== strpos( $textos['not_configured'], 'UONIX_GEMINI_API_KEY' ), 'Os textos de configuração nomeiam a constante' );
+
+// ---------------------------------------------------------------------------
+// 8. Agendamento, e sem a chave (processo separado: a constante não se redefine).
+// ---------------------------------------------------------------------------
+uonix_intelligence_ai_schedule();
+uox_ai_assert( 'daily' === ( $GLOBALS['uox_cron'][ uonix_intelligence_ai_hook() ][1] ?? '' ), 'O cron da IA é diário' );
+$registrado = array_filter( $GLOBALS['uox_actions'], static function ( $a ) { return uonix_intelligence_ai_hook() === $a[0] && 'uonix_intelligence_ai_run' === $a[1] && 0 === $a[3]; } );
+uox_ai_assert( 1 === count( $registrado ), 'O hook roda uonix_intelligence_ai_run sem argumentos' );
+
+$codigo = 'define("ABSPATH", 1); function add_action() {} function add_filter() {} function get_option($k, $d = false) { return $d; } function wp_remote_post() { echo "CHAMOU"; return null; } '
+	. 'require ' . var_export( $RAIZ . '/mu-plugins/uonix-admin/54-admin-intelligence-ai.php', true ) . '; '
+	. 'echo json_encode(array(uonix_intelligence_ai_run(array("available" => true, "rows" => array(array("query" => "x", "target_page" => "/a/")))), uonix_intelligence_ai_suggestion_for(array("query" => "x", "target_page" => "/a/"))));';
+$saida = (string) shell_exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg( $codigo ) . ' 2>&1' );
+uox_ai_assert( false === strpos( $saida, 'CHAMOU' ) && '[{"called":0,"skipped":"not_configured"},{"status":"not_configured"}]' === trim( $saida ), 'Sem UONIX_GEMINI_API_KEY: nenhuma chamada e estado not_configured; obteve ' . $saida );
+
 if ( $failures > 0 ) {
 	fwrite( STDERR, "FALHAS: {$failures}\n" );
 	exit( 1 );

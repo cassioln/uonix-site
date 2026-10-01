@@ -264,3 +264,203 @@ if ( ! function_exists( 'uonix_intelligence_ai_validate' ) ) {
 		return array( 'title' => $titulo, 'description' => $descricao, 'differentiators_used' => array_keys( $usados ) );
 	}
 }
+
+if ( ! function_exists( 'uonix_intelligence_ai_call' ) ) {
+	/**
+	 * Uma chamada ao Gemini para uma entrada.
+	 *
+	 * 429 e 503 ganham UMA nova tentativa após `$pause` segundos. Medido em
+	 * 2026-09-30: o gemini-3.8-flash respondeu 503 ("high demand") em 3 de 4
+	 * chamadas seguidas. Os demais erros não são repetidos: o próximo cron diário
+	 * tenta de novo.
+	 *
+	 * @return array{status: string, suggestion?: array}
+	 */
+	function uonix_intelligence_ai_call( array $input, $pause = 2 ) {
+		$chave = uonix_intelligence_ai_api_key();
+		if ( '' === $chave ) {
+			return array( 'status' => 'not_configured' );
+		}
+		$limites = uonix_intelligence_ai_limits();
+		$url     = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( (string) $input['model'] ) . ':generateContent';
+		$args    = array(
+			'timeout' => $limites['timeout'],
+			'headers' => array( 'x-goog-api-key' => $chave, 'Content-Type' => 'application/json' ),
+			'body'    => (string) wp_json_encode( uonix_intelligence_ai_request_body( $input ) ),
+		);
+
+		$codigo   = 0;
+		$resposta = null;
+		for ( $tentativa = 1; $tentativa <= 2; ++$tentativa ) {
+			$resposta = wp_remote_post( $url, $args );
+			$codigo   = is_wp_error( $resposta ) ? 0 : (int) wp_remote_retrieve_response_code( $resposta );
+			if ( 1 === $tentativa && in_array( $codigo, array( 429, 503 ), true ) ) {
+				if ( (int) $pause > 0 ) {
+					sleep( (int) $pause );
+				}
+				continue;
+			}
+			break;
+		}
+		if ( 404 === $codigo ) {
+			return array( 'status' => 'model_missing' );
+		}
+		if ( 200 !== $codigo ) {
+			return array( 'status' => 'unavailable' );
+		}
+
+		$corpo     = json_decode( (string) wp_remote_retrieve_body( $resposta ), true );
+		$candidato = is_array( $corpo ) && isset( $corpo['candidates'][0] ) && is_array( $corpo['candidates'][0] ) ? $corpo['candidates'][0] : array();
+		$fim       = isset( $candidato['finishReason'] ) && is_string( $candidato['finishReason'] ) ? $candidato['finishReason'] : '';
+		if ( 'STOP' !== $fim ) {
+			// Sem candidato, ou cortado por tamanho: transitório. Bloqueio por segurança e afins: recusa.
+			return array( 'status' => ( '' === $fim || 'MAX_TOKENS' === $fim ) ? 'unavailable' : 'rejected' );
+		}
+		$texto  = '';
+		$partes = isset( $candidato['content']['parts'] ) && is_array( $candidato['content']['parts'] ) ? $candidato['content']['parts'] : array();
+		foreach ( $partes as $parte ) {
+			if ( is_array( $parte ) && empty( $parte['thought'] ) && isset( $parte['text'] ) && is_string( $parte['text'] ) ) {
+				$texto .= $parte['text'];
+			}
+		}
+		$sugestao = uonix_intelligence_ai_validate( $texto, (array) $input['differentiators'] );
+
+		return null === $sugestao ? array( 'status' => 'rejected' ) : array( 'status' => 'ok', 'suggestion' => $sugestao );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
+	/**
+	 * Cron diário: gera ou mantém a sugestão de cada oportunidade.
+	 *
+	 * Entrada igual à da última sugestão aceita: nenhuma chamada. Entrada nova: uma
+	 * chamada, e o resultado substitui o anterior, inclusive quando falha. Assim, a
+	 * sugestão de um título que já não existe nunca sobrevive. Oportunidade que saiu
+	 * da lista sai do cache. Não toca o snapshot nem o e-mail.
+	 *
+	 * @param array|null $analysis Resultado de uonix_intelligence_seo_opportunities(), ou null para ler.
+	 * @return array{called: int, skipped: string}
+	 */
+	function uonix_intelligence_ai_run( $analysis = null, $pause = 2 ) {
+		if ( '' === uonix_intelligence_ai_api_key() ) {
+			return array( 'called' => 0, 'skipped' => 'not_configured' );
+		}
+		$limites = uonix_intelligence_ai_limits();
+		if ( null === $analysis ) {
+			$analysis = function_exists( 'uonix_intelligence_seo_opportunities' ) ? uonix_intelligence_seo_opportunities( null, $limites['per_run'] ) : array();
+		}
+		if ( ! is_array( $analysis ) || empty( $analysis['available'] ) || ! isset( $analysis['rows'] ) || ! is_array( $analysis['rows'] ) ) {
+			return array( 'called' => 0, 'skipped' => 'no_opportunities' );
+		}
+
+		$cache    = get_option( uonix_intelligence_ai_option(), array() );
+		$cache    = is_array( $cache ) ? $cache : array();
+		$novo     = array();
+		$chamadas = 0;
+		$agora    = gmdate( 'c' );
+		foreach ( array_slice( $analysis['rows'], 0, $limites['per_run'] ) as $row ) {
+			if ( ! is_array( $row ) || ! isset( $row['query'] ) || ! is_string( $row['query'] ) ) {
+				continue;
+			}
+			$path  = isset( $row['target_page'] ) && is_string( $row['target_page'] ) ? $row['target_page'] : '';
+			$chave = uonix_intelligence_ai_entry_key( $row['query'], $path );
+			$input = uonix_intelligence_ai_input( $row );
+			if ( null === $input ) {
+				$novo[ $chave ] = array( 'status' => 'no_page', 'attempted_at' => $agora );
+				continue;
+			}
+			$hash     = uonix_intelligence_ai_input_hash( $input );
+			$anterior = isset( $cache[ $chave ] ) && is_array( $cache[ $chave ] ) ? $cache[ $chave ] : array();
+			if ( 'ok' === ( $anterior['status'] ?? '' ) && $hash === ( $anterior['input_hash'] ?? '' ) ) {
+				$novo[ $chave ] = $anterior;
+				continue;
+			}
+			$resultado = uonix_intelligence_ai_call( $input, $pause );
+			++$chamadas;
+			$entrada = array( 'status' => $resultado['status'], 'input_hash' => $hash, 'attempted_at' => $agora, 'model' => $input['model'] );
+			if ( 'ok' === $resultado['status'] ) {
+				$entrada['suggestion']   = $resultado['suggestion'];
+				$entrada['generated_at'] = $agora;
+			}
+			$novo[ $chave ] = $entrada;
+		}
+		update_option( uonix_intelligence_ai_option(), $novo, false );
+
+		return array( 'called' => $chamadas, 'skipped' => '' );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_ai_suggestion_for' ) ) {
+	/**
+	 * Sugestão de uma oportunidade para o painel e o e-mail. Só lê o cache.
+	 *
+	 * A entrada é recalculada aqui. Se o título ou a descrição mudaram depois da
+	 * geração, o estado é `pending`, e a sugestão antiga não é exibida.
+	 */
+	function uonix_intelligence_ai_suggestion_for( $row ) {
+		if ( '' === uonix_intelligence_ai_api_key() ) {
+			return array( 'status' => 'not_configured' );
+		}
+		if ( ! is_array( $row ) || ! isset( $row['query'] ) || ! is_string( $row['query'] ) || ! array_key_exists( 'target_page', $row ) || null === $row['target_page'] ) {
+			return array( 'status' => 'pending' );
+		}
+		$input = uonix_intelligence_ai_input( $row );
+		if ( null === $input ) {
+			return array( 'status' => 'no_page' );
+		}
+		$cache   = get_option( uonix_intelligence_ai_option(), array() );
+		$chave   = uonix_intelligence_ai_entry_key( $row['query'], (string) $row['target_page'] );
+		$entrada = is_array( $cache ) && isset( $cache[ $chave ] ) && is_array( $cache[ $chave ] ) ? $cache[ $chave ] : array();
+		if ( ( $entrada['input_hash'] ?? '' ) !== uonix_intelligence_ai_input_hash( $input ) ) {
+			return array( 'status' => 'pending' );
+		}
+		$status = isset( $entrada['status'] ) && is_string( $entrada['status'] ) ? $entrada['status'] : 'pending';
+		if ( 'ok' !== $status ) {
+			return array( 'status' => in_array( $status, array( 'unavailable', 'rejected', 'model_missing' ), true ) ? $status : 'pending' );
+		}
+		$sugestao = $entrada['suggestion'] ?? null;
+		if ( ! is_array( $sugestao ) || ! isset( $sugestao['title'], $sugestao['description'] ) || ! is_string( $sugestao['title'] ) || ! is_string( $sugestao['description'] ) ) {
+			return array( 'status' => 'pending' );
+		}
+
+		return array(
+			'status'              => 'ok',
+			'title'               => $sugestao['title'],
+			'description'         => $sugestao['description'],
+			'current_title'       => $input['title'],
+			'current_description' => $input['description'],
+			'generated_at'        => isset( $entrada['generated_at'] ) && is_string( $entrada['generated_at'] ) ? $entrada['generated_at'] : '',
+			'post_id'             => $input['post_id'],
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_ai_state_message' ) ) {
+	/**
+	 * Texto para o operador de cada estado sem sugestão. Estado desconhecido cai em
+	 * "aguardando", que é honesto: nada foi gerado para esta entrada.
+	 */
+	function uonix_intelligence_ai_state_message( $status ) {
+		$mapa = array(
+			'not_configured' => 'IA não configurada: defina UONIX_GEMINI_API_KEY no wp-config.php.',
+			'pending'        => 'Aguardando a próxima geração diária.',
+			'unavailable'    => 'O Gemini não respondeu. Nova tentativa na próxima geração diária.',
+			'rejected'       => 'Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista.',
+			'no_page'        => 'Sem página publicada para esta consulta: removida, redirecionada, categoria ou tag.',
+			'model_missing'  => 'Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php.',
+		);
+
+		return isset( $mapa[ $status ] ) ? $mapa[ $status ] : $mapa['pending'];
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_ai_schedule' ) ) {
+	function uonix_intelligence_ai_schedule() {
+		if ( ! wp_next_scheduled( uonix_intelligence_ai_hook() ) ) {
+			wp_schedule_event( time() + 2 * HOUR_IN_SECONDS, 'daily', uonix_intelligence_ai_hook() );
+		}
+	}
+}
+add_action( 'init', 'uonix_intelligence_ai_schedule', 10, 0 );
+// `accepted_args = 0`, como os irmãos de 53 e 57: o callback não usa argumento.
+add_action( uonix_intelligence_ai_hook(), 'uonix_intelligence_ai_run', 10, 0 );
