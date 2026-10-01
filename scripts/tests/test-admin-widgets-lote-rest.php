@@ -7,9 +7,10 @@
  * uonix/v1/lote atende o mesmo lote do núcleo por outro caminho.
  *
  * O teste falha se a rota não for registrada com os argumentos do lote do
- * núcleo, se não delegar a serve_batch_request_v1, se o caminho contiver
- * batch/v1, se o script carregar fora de widgets.php, ou se o módulo não for
- * carregado pelo loader.
+ * núcleo, se não delegar a serve_batch_request_v1, se aceitar quem não tem
+ * edit_theme_options ou negar quem tem, se o caminho contiver batch/v1, se o
+ * script carregar fora de widgets.php (nas telas testadas), ou se o módulo não
+ * for carregado pelo loader.
  */
 
 declare( strict_types=1 );
@@ -57,8 +58,10 @@ function register_rest_route( $namespace, $route, $args = array(), $override = f
 	return true;
 }
 
-function __return_true() {
-	return true;
+$GLOBALS['uox_test_caps'] = array();
+
+function current_user_can( $capability ) {
+	return in_array( $capability, $GLOBALS['uox_test_caps'], true );
 }
 
 function rest_get_server() {
@@ -119,7 +122,14 @@ uox_wl_assert( '/uonix/v1/lote' === $caminho, "caminho inesperado: {$caminho}" )
 uox_wl_assert( false === strpos( $caminho, 'batch/v1' ), 'o caminho não pode conter batch/v1' );
 uox_wl_assert( 'POST' === ( $def['methods'] ?? null ), 'rota deveria aceitar só POST' );
 uox_wl_assert( $args_nucleo === ( $def['args'] ?? null ), 'argumentos diferentes dos do lote do núcleo' );
-uox_wl_assert( isset( $def['permission_callback'] ) && is_callable( $def['permission_callback'] ), 'permission_callback ausente' );
+uox_wl_assert( 'uonix_admin_widgets_lote_permissao' === ( $def['permission_callback'] ?? null ), 'permission_callback deveria ser uonix_admin_widgets_lote_permissao' );
+$GLOBALS['uox_test_caps'] = array( 'edit_theme_options', 'edit_posts' );
+uox_wl_assert( true === uonix_admin_widgets_lote_permissao(), 'quem tem edit_theme_options deveria poder enviar o lote' );
+foreach ( array( array(), array( 'edit_posts' ), array( 'manage_woocommerce', 'read' ) ) as $caps ) {
+	$GLOBALS['uox_test_caps'] = $caps;
+	uox_wl_assert( false === uonix_admin_widgets_lote_permissao(), 'sem edit_theme_options o lote deveria ser negado: ' . implode( ',', $caps ) );
+}
+$GLOBALS['uox_test_caps'] = array();
 uox_wl_assert( ! isset( $def['allow_batch'] ), 'a rota de lote não pode aceitar lote aninhado' );
 
 $req = new WP_REST_Request();

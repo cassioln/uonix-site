@@ -8,7 +8,8 @@
  * com "A resposta não é um JSON válido". QA e local não têm esse bloqueio.
  *
  * A rota uonix/v1/lote usa os argumentos e o callback do lote do núcleo, e
- * o script desvia só o POST da tela de widgets para ela.
+ * o script desvia só o POST da tela de widgets para ela. Diferente do batch/v1,
+ * que é aberto, ela exige edit_theme_options, a capability da tela de widgets.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -33,13 +34,21 @@ function uonix_admin_widgets_lote_registrar_rota() {
 		array(
 			'methods'             => 'POST',
 			'callback'            => 'uonix_admin_widgets_lote_servir',
-			// Como no batch/v1 do núcleo: cada requisição do lote checa a própria permissão.
-			'permission_callback' => '__return_true',
+			'permission_callback' => 'uonix_admin_widgets_lote_permissao',
 			'args'                => $rotas['/batch/v1'][0]['args'],
 		)
 	);
 }
 add_action( 'rest_api_init', 'uonix_admin_widgets_lote_registrar_rota' );
+
+/**
+ * Só quem pode usar Aparência > Widgets envia lotes por esta rota.
+ *
+ * @return bool
+ */
+function uonix_admin_widgets_lote_permissao() {
+	return current_user_can( 'edit_theme_options' );
+}
 
 /**
  * Atende o lote pelo mesmo método do batch/v1 do núcleo.
