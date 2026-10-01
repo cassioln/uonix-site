@@ -125,6 +125,8 @@ function uonix_analytics_metrics_search_console_rows( $access_token, $site_url, 
 }
 
 $RAIZ = dirname( __DIR__, 2 );
+$GLOBALS['uox_ia'] = array();
+function uonix_intelligence_ai_suggestion_for( $row ) { return $GLOBALS['uox_ia'][ $row['query'] ?? '' ] ?? array( 'status' => 'pending' ); }
 require_once $RAIZ . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
@@ -371,7 +373,7 @@ uox_assert( 'no_sessions' === ( uonix_intelligence_executive_conversion_box( $le
 // 9. Destaques: determinísticos, até 3, e nunca enchimento.
 // ---------------------------------------------------------------------------
 
-$seo = array( 'available' => true, 'rows' => array( array( 'query' => 'olhal de ancoragem', 'impressions' => 55, 'position' => 11.2, 'clicks' => 0, 'ctr' => 0.0, 'suggestion' => array( 'Aço Inox 304/316' ) ) ) );
+$seo = array( 'available' => true, 'rows' => array( array( 'query' => 'olhal de ancoragem', 'impressions' => 55, 'position' => 11.2, 'clicks' => 0, 'ctr' => 0.0 ) ) );
 
 $placar = uonix_intelligence_executive_scorecard( array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'ga4' => $ga4Real, 'organic' => uonix_intelligence_anomaly_organic_drop( $fetcherGsc( 130 ), $CFG, $HOJE ) ) );
 $dest   = uonix_intelligence_executive_insights( $placar, $seo );
@@ -379,6 +381,11 @@ uox_assert( 3 === count( $dest ), 'com os três dados disponíveis devem sair tr
 uox_assert( false !== strpos( $dest[0]['text'] ?? '', 'sem mudança detectável' ), 'destaque de orçamentos deve dizer que 4 contra 3 não é mudança' );
 uox_assert( false !== strpos( $dest[1]['text'] ?? '', '+30,0%' ) && false !== strpos( $dest[1]['text'], 'abaixo do limiar de 35%' ), 'variação abaixo do limiar não é chamada de relevante, obteve: ' . ( $dest[1]['text'] ?? '' ) );
 uox_assert( false !== strpos( $dest[2]['text'] ?? '', 'olhal de ancoragem' ) && false !== strpos( $dest[2]['text'], 'nenhum clique' ), 'destaque de SEO deve nomear a consulta e a ausência de clique' );
+uox_assert( false === strpos( $dest[2]['text'], 'Acrescentar ao título' ) && false === strpos( $dest[2]['text'], 'sugerido' ), 'Sem sugestão de IA, o destaque de SEO não cita título' );
+$GLOBALS['uox_ia'] = array( 'olhal de ancoragem' => array( 'status' => 'ok', 'title' => 'Olhal de Ancoragem em Aço Inox 304/316', 'description' => 'x', 'current_title' => 'y', 'current_description' => '', 'generated_at' => '', 'post_id' => 1 ) );
+$dest_ia = uonix_intelligence_executive_insights( $placar, $seo );
+uox_assert( false !== strpos( $dest_ia[2]['text'] ?? '', 'Título sugerido (IA): “Olhal de Ancoragem em Aço Inox 304/316”.' ), 'Com sugestão de IA, o destaque de SEO cita o título sugerido; obteve ' . ( $dest_ia[2]['text'] ?? '' ) );
+$GLOBALS['uox_ia'] = array();
 
 // FRONTEIRA do limiar de impressões: exatamente +35% é relevante; +34,x% não.
 $placar35 = uonix_intelligence_executive_scorecard( array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'ga4' => $ga4Real, 'organic' => uonix_intelligence_anomaly_organic_drop( $fetcherGsc( 135 ), $CFG, $HOJE ) ) );

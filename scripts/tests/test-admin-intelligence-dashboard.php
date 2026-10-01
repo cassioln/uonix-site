@@ -107,6 +107,15 @@ function uonix_ksio_can_configure_insights() {
 	return (bool) $GLOBALS['uox_dono'];
 }
 
+// Sugestão por IA (54) substituída por interruptores: o 54 tem teste próprio, e aqui
+// importa que o painel exiba cada estado e escape o texto.
+$GLOBALS['uox_ia'] = array();
+function uonix_intelligence_ai_suggestion_for( $row ) { return $GLOBALS['uox_ia'][ $row['query'] ?? '' ] ?? array( 'status' => 'pending' ); }
+function uonix_intelligence_ai_state_message( $status ) { return 'ESTADO-IA:' . $status; }
+function uonix_intelligence_ai_page_post_id( $path ) { return '/produtos/olhal/' === $path ? 10 : 0; }
+function home_url( $p = '' ) { return 'https://uonix.com.br' . $p; }
+function get_edit_post_link( $id ) { return 'https://uonix.com.br/wp-admin/post.php?post=' . (int) $id . '&action=edit'; }
+
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
@@ -161,6 +170,27 @@ uox_assert( false !== strpos( $html, 'Dado atualizado' ), 'Snapshot fresco é ro
 $html_stale = uox_render_intelligence( 'intelligence', uox_snapshot( array( uox_q( 'olhal', 6.0, 500, .01 ) ), gmdate( 'c', time() - ( 4 * DAY_IN_SECONDS ) ) ) );
 uox_assert( false !== strpos( $html_stale, 'Dado desatualizado' ), 'Bloco com snapshot vencido se declara desatualizado' );
 uox_assert( false !== strpos( $html_stale, '<table' ), 'Bloco desatualizado ainda mostra o dado que tem' );
+
+// ---------------------------------------------------------------------------
+// Página Alvo e Sugestão (IA).
+// ---------------------------------------------------------------------------
+$snap_ia = uox_snapshot( array( uox_q( 'olhal inox', 6.0, 50, .0 ), uox_q( 'sem pagina', 7.0, 40, .0 ) ) );
+$snap_ia['search_console']['query_pages'] = array( 'olhal inox' => '/produtos/olhal/' );
+$GLOBALS['uox_ia'] = array(
+	'olhal inox' => array( 'status' => 'ok', 'title' => 'Olhal <script>x</script>', 'description' => 'Descrição sugerida', 'current_title' => 'Título atual', 'current_description' => '', 'generated_at' => '2026-10-01T09:00:00+00:00', 'post_id' => 10 ),
+	'sem pagina' => array( 'status' => 'no_page' ),
+);
+$html_ia = uox_render_intelligence( 'intelligence', $snap_ia );
+uox_assert( false !== strpos( $html_ia, '>Página Alvo<' ) && false !== strpos( $html_ia, '>Sugestão (IA)<' ), 'Tabela ganha as colunas Página Alvo e Sugestão (IA)' );
+// O stub de esc_url deste teste não converte `&`; o que importa aqui é o link existir.
+uox_assert( false !== strpos( $html_ia, 'href="https://uonix.com.br/produtos/olhal/"' ) && false !== strpos( $html_ia, 'post.php?post=10&action=edit' ), 'Página Alvo traz link para a página e para editar' );
+uox_assert( false !== strpos( $html_ia, 'Título atual' ) && false !== strpos( $html_ia, 'Descrição sugerida' ) && false !== strpos( $html_ia, 'revise antes de publicar' ), 'Sugestão mostra atual e sugerido, com o aviso de revisão' );
+uox_assert( false === strpos( $html_ia, '<script>x' ) && false !== strpos( $html_ia, '&lt;script&gt;' ), 'Texto vindo da IA sai escapado' );
+uox_assert( false !== strpos( $html_ia, 'ESTADO-IA:no_page' ) && false !== strpos( $html_ia, 'Não identificada' ), 'Sem página: estado da IA e Página Alvo não identificada' );
+uox_assert( false === strpos( $html_ia, 'Diferenciais a acrescentar' ), 'A coluna determinística saiu (#309)' );
+$html_sem_mapa = uox_render_intelligence( 'intelligence', uox_snapshot( array( uox_q( 'olhal inox', 6.0, 50, .0 ) ) ) );
+uox_assert( false !== strpos( $html_sem_mapa, 'Aguardando a próxima sincronização' ), 'Snapshot sem query_pages: Página Alvo aguardando a sincronização' );
+$GLOBALS['uox_ia'] = array();
 
 // ---------------------------------------------------------------------------
 // Escape: a consulta vem do Search Console, ou seja, de fora.
