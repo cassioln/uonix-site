@@ -51,20 +51,11 @@ if ( ! function_exists( 'uonix_intelligence_seo_rules' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_seo_differentiators' ) ) {
 	/**
-	 * Diferenciais técnicos sugeridos para Title/Description, e os termos cuja
-	 * presença na consulta indica que o diferencial já está coberto.
-	 *
-	 * Determinístico por desenho: nenhuma chamada a LLM nesta camada. Integração
-	 * com Gemini é escopo separado, conforme o contrato.
+	 * Diferenciais que a sugestão por IA (54) pode afirmar, e só eles. Confirmados
+	 * pela Uônix como verdadeiros e completos em 2026-09-30.
 	 */
 	function uonix_intelligence_seo_differentiators() {
-		return array(
-			array( 'label' => 'Aço Inox 304/316', 'covered_by' => array( 'inox', 'aco inox', 'aço inox', '304', '316' ) ),
-			array( 'label' => 'Laudo com ART', 'covered_by' => array( 'laudo', 'art', 'engenheiro' ) ),
-			array( 'label' => 'Conforme NBR 16325', 'covered_by' => array( 'nbr', 'norma', '16325', 'nr 35', 'nr35' ) ),
-			array( 'label' => 'Ensaio de Arrancamento', 'covered_by' => array( 'ensaio', 'arrancamento', 'teste de carga' ) ),
-			array( 'label' => 'Pronta Entrega', 'covered_by' => array( 'entrega', 'prazo', 'estoque' ) ),
-		);
+		return array( 'Aço Inox 304/316', 'Laudo com ART', 'Conforme NBR 16325', 'Ensaio de Arrancamento', 'Pronta Entrega' );
 	}
 }
 
@@ -84,41 +75,6 @@ if ( ! function_exists( 'uonix_intelligence_normalize_term' ) ) {
 			'ç' => 'c',
 		);
 		return strtr( $value, $map );
-	}
-}
-
-if ( ! function_exists( 'uonix_intelligence_title_suggestion' ) ) {
-	/**
-	 * Sugere até dois diferenciais ausentes da consulta, para entrar no Title.
-	 *
-	 * Determinístico: mesma consulta produz sempre a mesma sugestão, na ordem de
-	 * `uonix_intelligence_seo_differentiators()`. Devolve lista vazia quando a
-	 * consulta já cobre todos os diferenciais — nesse caso não há sugestão honesta
-	 * a dar, e a ausência é informação, não falha.
-	 */
-	function uonix_intelligence_title_suggestion( $query, $max = 2 ) {
-		$haystack = uonix_intelligence_normalize_term( $query );
-		if ( '' === $haystack ) {
-			return array();
-		}
-		$max = is_int( $max ) && $max > 0 ? $max : 2;
-		$suggestions = array();
-		foreach ( uonix_intelligence_seo_differentiators() as $differentiator ) {
-			$covered = false;
-			foreach ( $differentiator['covered_by'] as $token ) {
-				if ( false !== strpos( $haystack, uonix_intelligence_normalize_term( $token ) ) ) {
-					$covered = true;
-					break;
-				}
-			}
-			if ( ! $covered ) {
-				$suggestions[] = $differentiator['label'];
-			}
-			if ( count( $suggestions ) >= $max ) {
-				break;
-			}
-		}
-		return $suggestions;
 	}
 }
 
@@ -197,6 +153,12 @@ if ( ! function_exists( 'uonix_intelligence_seo_opportunities' ) ) {
 		}
 		$universe = $snapshot['search_console']['queries_extended'];
 
+		// Página líder por consulta (53). Ausente no snapshot é `null`, "aguardando a
+		// próxima sincronização"; presente sem a consulta é '', "não identificada".
+		$query_pages = isset( $snapshot['search_console']['query_pages'] ) && is_array( $snapshot['search_console']['query_pages'] )
+			? $snapshot['search_console']['query_pages']
+			: null;
+
 		$matches = array();
 		foreach ( $universe as $row ) {
 			if ( ! is_array( $row ) || ! isset( $row['query'], $row['impressions'], $row['ctr'], $row['position'] ) ) {
@@ -224,7 +186,7 @@ if ( ! function_exists( 'uonix_intelligence_seo_opportunities' ) ) {
 				'impressions' => $impressions,
 				'ctr'         => $ctr,
 				'clicks'      => isset( $row['clicks'] ) ? (float) $row['clicks'] : 0.0,
-				'suggestion'  => uonix_intelligence_title_suggestion( $query ),
+				'target_page' => null === $query_pages ? null : ( isset( $query_pages[ $query ] ) && is_string( $query_pages[ $query ] ) ? $query_pages[ $query ] : '' ),
 			);
 		}
 
