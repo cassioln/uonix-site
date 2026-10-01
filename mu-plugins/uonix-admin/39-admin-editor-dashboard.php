@@ -1,5 +1,5 @@
 <?php
-if ( ! defined( 'ABSPATH' ) ) {
+if (!defined('ABSPATH')) {
     exit;
 }
 
@@ -19,69 +19,69 @@ if ( ! defined( 'ABSPATH' ) ) {
 // =========================================================================
 // 1. LIMPEZA PRINCIPAL DO PAINEL (EDITOR)
 // =========================================================================
-add_action( 'admin_menu', function() {
+add_action('admin_menu', function () {
     $user = wp_get_current_user();
-    
-    if ( in_array( 'editor', (array) $user->roles ) ) {
+
+    if (in_array('editor', (array) $user->roles)) {
         // Remove lixo de plugins e menus intrusos
-        remove_menu_page( 'edit.php?post_type=wcps' );
-        remove_menu_page( 'kadence-blocks-home' );
-        remove_menu_page( 'kadence-blocks' ); 
-        remove_menu_page( 'kadence-starter-templates' ); // Remove Site Assist
-        remove_menu_page( 'maxmegamenu' ); 
-		remove_menu_page( 'wp-reviews-plugin-for-google/settings.php' ); 
-        remove_menu_page( 'pods' ); // Garantia contra o Pods
-        remove_menu_page( 'ai1wm_export' ); // Garantia contra All-in-One WP Migration
-        
+        remove_menu_page('edit.php?post_type=wcps');
+        remove_menu_page('kadence-blocks-home');
+        remove_menu_page('kadence-blocks');
+        remove_menu_page('kadence-starter-templates'); // Remove Site Assist
+        remove_menu_page('maxmegamenu');
+        remove_menu_page('wp-reviews-plugin-for-google/settings.php');
+        remove_menu_page('pods'); // Garantia contra o Pods
+        remove_menu_page('ai1wm_export'); // Garantia contra All-in-One WP Migration
+
         // Limpa WooCommerce
-        remove_menu_page( 'woocommerce' );
-        remove_menu_page( 'wc-admin' );
-        remove_menu_page( 'admin.php?page=wc-settings&tab=checkout&from=PAYMENTS_MENU_ITEM' );
-        
+        remove_menu_page('woocommerce');
+        remove_menu_page('wc-admin');
+        remove_menu_page('admin.php?page=wc-settings&tab=checkout&from=PAYMENTS_MENU_ITEM');
+
         // Adiciona atalho direto para Pedidos
-        add_menu_page( 'Pedidos', 'Pedidos', 'edit_shop_orders', 'edit.php?post_type=shop_order', '', 'dashicons-cart', 55 );
-        
+        add_menu_page('Pedidos', 'Pedidos', 'edit_shop_orders', 'edit.php?post_type=shop_order', '', 'dashicons-cart', 55);
+
         // Ajustes do Fluent Forms 
-        remove_submenu_page( 'fluent_forms', 'fluent_forms' ); // Remove a lista de Formulários
-        remove_submenu_page( 'fluent_forms', 'fluent_forms_docs' );
-        remove_submenu_page( 'fluent_forms', 'fluent_forms_reports' );
-        remove_submenu_page( 'fluent_forms', 'fluent_forms_settings' );
-        remove_submenu_page( 'fluent_forms', 'fluent_forms_transfer' );
-        remove_submenu_page( 'fluent_forms', 'fluent_forms_smtp' );
-        remove_submenu_page( 'fluent_forms', 'fluent_forms_add_ons' );
-        
+        remove_submenu_page('fluent_forms', 'fluent_forms'); // Remove a lista de Formulários
+        remove_submenu_page('fluent_forms', 'fluent_forms_docs');
+        remove_submenu_page('fluent_forms', 'fluent_forms_reports');
+        remove_submenu_page('fluent_forms', 'fluent_forms_settings');
+        remove_submenu_page('fluent_forms', 'fluent_forms_transfer');
+        remove_submenu_page('fluent_forms', 'fluent_forms_smtp');
+        remove_submenu_page('fluent_forms', 'fluent_forms_add_ons');
+
         global $menu, $submenu;
-        
+
         // Renomeia o menu principal
-        foreach ( $menu as $key => $item ) {
-            if ( $item[2] === 'fluent_forms' ) {
+        foreach ($menu as $key => $item) {
+            if ($item[2] === 'fluent_forms') {
                 $menu[$key][0] = 'Leads'; // Nome do menu principal
                 break;
             }
         }
 
         // Renomeia o submenu padrão "Entradas" para "Todas as Entradas"
-        if ( isset( $submenu['fluent_forms'] ) ) {
-            foreach ( $submenu['fluent_forms'] as $key => $item ) {
-                if ( $item[2] === 'fluent_forms_all_entries' ) {
+        if (isset($submenu['fluent_forms'])) {
+            foreach ($submenu['fluent_forms'] as $key => $item) {
+                if ($item[2] === 'fluent_forms_all_entries') {
                     $submenu['fluent_forms'][$key][0] = 'Todas as Entradas';
                 }
             }
         }
-        
+
         // INJETA OS LINKS DIRETOS COMO SUBMENUS EXTRAS
-        $submenu['fluent_forms'][] = array( 'Captura de Leads', 'read', 'admin.php?page=fluent_forms&route=entries&form_id=4' );
-        $submenu['fluent_forms'][] = array( 'Formulário de Contato', 'read', 'admin.php?page=fluent_forms&route=entries&form_id=3' );
-        $submenu['fluent_forms'][] = array( 'Assinantes Newsletters', 'read', 'admin.php?page=fluent_forms&route=entries&form_id=2' );
+        $submenu['fluent_forms'][] = array('Captura de Leads', 'read', 'admin.php?page=fluent_forms&route=entries&form_id=4');
+        $submenu['fluent_forms'][] = array('Formulário de Contato', 'read', 'admin.php?page=fluent_forms&route=entries&form_id=3');
+        $submenu['fluent_forms'][] = array('Assinantes Newsletters', 'read', 'admin.php?page=fluent_forms&route=entries&form_id=2');
     }
-}, 999 );
+}, 999);
 
 // =========================================================================
 // 2. OCULTAR MENUS NATIVOS COM SEGURANÇA (Via CSS)
 // =========================================================================
-add_action( 'admin_head', function() {
+add_action('admin_head', function () {
     $user = wp_get_current_user();
-    if ( in_array( 'editor', (array) $user->roles ) ) {
+    if (in_array('editor', (array) $user->roles)) {
         echo '<style>
             /* Oculta Ferramentas e Aparência VISUALMENTE para não confundir */
             #menu-tools, #menu-appearance { display: none !important; }
@@ -92,39 +92,40 @@ add_action( 'admin_head', function() {
 // =========================================================================
 // 3. LIMPEZA DE FEATURES DO WOOCOMMERCE
 // =========================================================================
-add_filter( 'woocommerce_admin_features', function( $features ) {
+add_filter('woocommerce_admin_features', function ($features) {
     $user = wp_get_current_user();
-    if ( in_array( 'editor', (array) $user->roles ) ) {
-        return array_values( array_diff( $features, [ 'marketing', 'payments', 'analytics', 'onboarding' ] ) );
+    if (in_array('editor', (array) $user->roles)) {
+        return array_values(array_diff($features, ['marketing', 'payments', 'analytics', 'onboarding']));
     }
     return $features;
-} );
+});
 
 // =========================================================================
 // 4. LIBERAR EDIÇÃO DA POLÍTICA DE PRIVACIDADE
 // =========================================================================
-add_filter( 'map_meta_cap', function( $caps, $cap, $user_id, $args ) {
-    if ( 'edit_post' !== $cap || empty( $args[0] ) ) return $caps;
-    
-    $post_id = (int) $args[0];
-    $policy_page_id = (int) get_option( 'wp_page_for_privacy_policy' );
+add_filter('map_meta_cap', function ($caps, $cap, $user_id, $args) {
+    if ('edit_post' !== $cap || empty($args[0]))
+        return $caps;
 
-    if ( $post_id === $policy_page_id && user_can( $user_id, 'editor' ) ) {
-        $caps = array( 'edit_pages' );
+    $post_id = (int) $args[0];
+    $policy_page_id = (int) get_option('wp_page_for_privacy_policy');
+
+    if ($post_id === $policy_page_id && user_can($user_id, 'editor')) {
+        $caps = array('edit_pages');
     }
     return $caps;
-}, 10, 4 );
+}, 10, 4);
 
 // =========================================================================
 // 5. REDIRECIONAMENTO DE LEADS 
 // =========================================================================
-add_action( 'admin_init', function() {
+add_action('admin_init', function () {
     // Se clicar no menu pai (fluent_forms) E NÃO tiver o parâmetro 'route' na URL
-    if ( isset( $_GET['page'] ) && $_GET['page'] === 'fluent_forms' && ! isset( $_GET['route'] ) ) {
+    if (isset($_GET['page']) && $_GET['page'] === 'fluent_forms' && !isset($_GET['route'])) {
         $user = wp_get_current_user();
-        if ( in_array( 'editor', (array) $user->roles ) ) {
+        if (in_array('editor', (array) $user->roles)) {
             // Redireciona de volta para a visão geral (Todas as Entradas)
-            wp_redirect( admin_url( 'admin.php?page=fluent_forms_all_entries' ) );
+            wp_redirect(admin_url('admin.php?page=fluent_forms_all_entries'));
             exit;
         }
     }
@@ -133,77 +134,78 @@ add_action( 'admin_init', function() {
 // =========================================================================
 // 6. REMOVER / AJUSTAR ITENS DA BARRA SUPERIOR PARA EDITOR
 // =========================================================================
-add_action( 'admin_bar_menu', function( $wp_admin_bar ) {
+add_action('admin_bar_menu', function ($wp_admin_bar) {
     $user = wp_get_current_user();
 
-    if ( ! in_array( 'editor', (array) $user->roles, true ) ) {
+    if (!in_array('editor', (array) $user->roles, true)) {
         return;
     }
 
     // Remove o botão "Personalizar"
-    $wp_admin_bar->remove_node( 'customize' );
+    $wp_admin_bar->remove_node('customize');
 
     // Remove submenus do nome do site na barra superior
-    $wp_admin_bar->remove_node( 'dashboard' );
-    $wp_admin_bar->remove_node( 'themes' );
-    $wp_admin_bar->remove_node( 'widgets' );
-    $wp_admin_bar->remove_node( 'menus' );
-    $wp_admin_bar->remove_node( 'appearance' );
+    $wp_admin_bar->remove_node('dashboard');
+    $wp_admin_bar->remove_node('themes');
+    $wp_admin_bar->remove_node('widgets');
+    $wp_admin_bar->remove_node('menus');
+    $wp_admin_bar->remove_node('appearance');
 
     // Garante que o nome do site continue clicável e com o link correto
     // Dentro do painel: leva para a HOME.
     // No frontend: leva para o painel.
-    $site_node = $wp_admin_bar->get_node( 'site-name' );
+    $site_node = $wp_admin_bar->get_node('site-name');
 
-    if ( $site_node ) {
+    if ($site_node) {
         $destino_site_name = is_admin()
-            ? home_url( '/' )
-            : admin_url( 'index.php' );
+            ? home_url('/')
+            : admin_url('index.php');
 
-        $existing_class = ! empty( $site_node->meta['class'] ) ? $site_node->meta['class'] : '';
-        $classes        = array_filter( array_unique( array_merge( explode( ' ', $existing_class ), array( 'uonix-editor-site-link' ) ) ) );
+        $existing_class = !empty($site_node->meta['class']) ? $site_node->meta['class'] : '';
+        $classes = array_filter(array_unique(array_merge(explode(' ', $existing_class), array('uonix-editor-site-link'))));
 
-        $meta          = (array) $site_node->meta;
-        $meta['class'] = implode( ' ', $classes );
+        $meta = (array) $site_node->meta;
+        $meta['class'] = implode(' ', $classes);
 
-        $wp_admin_bar->add_node( array(
-            'id'    => 'site-name',
+        $wp_admin_bar->add_node(array(
+            'id' => 'site-name',
             'title' => $site_node->title,
-            'href'  => $destino_site_name,
-            'meta'  => $meta,
-        ) );
+            'href' => $destino_site_name,
+            'meta' => $meta,
+        ));
     }
 
     // Remove o menu principal "Fluent Forms" da barra superior
-    $wp_admin_bar->remove_node( 'fluent_form' );
+    $wp_admin_bar->remove_node('fluent_form');
 
     // Remove subitens do Fluent Forms, caso algum seja inserido separado
-    $wp_admin_bar->remove_node( 'all_forms' );
-    $wp_admin_bar->remove_node( 'new_form' );
-    $wp_admin_bar->remove_node( 'fluent_forms_all_entries' );
-    $wp_admin_bar->remove_node( 'fluent_forms_community' );
-    $wp_admin_bar->remove_node( 'fluent_forms_doc' );
-    $wp_admin_bar->remove_node( 'fluent_forms_dev_doc' );
+    $wp_admin_bar->remove_node('all_forms');
+    $wp_admin_bar->remove_node('new_form');
+    $wp_admin_bar->remove_node('fluent_forms_all_entries');
+    $wp_admin_bar->remove_node('fluent_forms_community');
+    $wp_admin_bar->remove_node('fluent_forms_doc');
+    $wp_admin_bar->remove_node('fluent_forms_dev_doc');
 
     // Remove o menu "Novo" da barra superior
-    $wp_admin_bar->remove_node( 'new-content' );
+    $wp_admin_bar->remove_node('new-content');
 
-}, 999 );
+}, 999);
 
 // =========================================================================
 // CSS AJUSTE VISUAL DA BARRA SUPERIOR PARA EDITOR
 // =========================================================================
-add_action( 'wp_head', 'uonix_editor_admin_bar_front_css', 999 );
-add_action( 'admin_head', 'uonix_editor_admin_bar_front_css', 999 );
+add_action('wp_head', 'uonix_editor_admin_bar_front_css', 999);
+add_action('admin_head', 'uonix_editor_admin_bar_front_css', 999);
 
-function uonix_editor_admin_bar_front_css() {
-    if ( ! is_user_logged_in() ) {
+function uonix_editor_admin_bar_front_css()
+{
+    if (!is_user_logged_in()) {
         return;
     }
 
     $user = wp_get_current_user();
 
-    if ( ! in_array( 'editor', (array) $user->roles, true ) ) {
+    if (!in_array('editor', (array) $user->roles, true)) {
         return;
     }
 
@@ -231,10 +233,10 @@ function uonix_editor_admin_bar_front_css() {
 // =========================================================================
 // 7. OCULTAR BOTÃO "APRENDA MAIS SOBRE PEDIDOS" PARA EDITOR | MENU WOOCOMERCE/PEDIDOS
 // =========================================================================
-add_action( 'admin_head', function() {
+add_action('admin_head', function () {
     $user = wp_get_current_user();
 
-    if ( in_array( 'editor', (array) $user->roles, true ) ) {
+    if (in_array('editor', (array) $user->roles, true)) {
         echo '<style>
             body.post-type-shop_order a.woocommerce-BlankState-cta[href*="managing-orders"],
             body.woocommerce_page_wc-orders a.woocommerce-BlankState-cta[href*="managing-orders"],
@@ -244,15 +246,15 @@ add_action( 'admin_head', function() {
             }
         </style>';
     }
-}, 999 );
+}, 999);
 
 // =========================================================================
 // 8. FALLBACK JS PARA REMOVER BOTÃO DE DOCUMENTAÇÃO DE PEDIDOS
 // =========================================================================
-add_action( 'admin_footer', function() {
+add_action('admin_footer', function () {
     $user = wp_get_current_user();
 
-    if ( ! in_array( 'editor', (array) $user->roles, true ) ) {
+    if (!in_array('editor', (array) $user->roles, true)) {
         return;
     }
 
@@ -265,7 +267,7 @@ add_action( 'admin_footer', function() {
                     'a.woocommerce-BlankState-cta[href*="managing-orders"]'
                 );
 
-                buttons.forEach(function(button) {
+                buttons.forEach(function (button) {
                     var text = button.textContent ? button.textContent.trim().toLowerCase() : '';
 
                     if (
@@ -289,7 +291,7 @@ add_action( 'admin_footer', function() {
         })();
     </script>
     <?php
-}, 999 );
+}, 999);
 
 /**
  * DASHBOARD PAINEL PRINCIPAL
@@ -298,7 +300,8 @@ add_action( 'admin_footer', function() {
 // 1. REMOVE O PAINEL DE BOAS-VINDAS NATIVO E O TÍTULO PADRÃO
 // =========================================================================
 add_action('load-index.php', 'uonix_remove_default_welcome');
-function uonix_remove_default_welcome() {
+function uonix_remove_default_welcome()
+{
     $user = wp_get_current_user();
     if (in_array('editor', (array) $user->roles)) {
         remove_action('welcome_panel', 'wp_welcome_panel');
@@ -309,29 +312,30 @@ function uonix_remove_default_welcome() {
 // 2. CRIA O NOVO CABEÇALHO PREMIUM DA UÔNIX (Substitui o nativo)
 // =========================================================================
 add_action('welcome_panel', 'uonix_custom_welcome_panel');
-function uonix_custom_welcome_panel() {
-//     $user = wp_get_current_user();
+function uonix_custom_welcome_panel()
+{
+    //     $user = wp_get_current_user();
 //     if (!in_array('editor', (array) $user->roles)) return;
-    
-//     $primeiro_nome = $user->user_firstname ? $user->user_firstname : $user->display_name;
-	
-	// 1. Pegue o ID do usuário atual (ou defina o ID desejado)
-	$user_id = get_current_user_id(); // ou $user->ID
 
-	// 2. Obtenha o primeiro e o último nome
-	$first_name = get_user_meta( $user_id, 'first_name', true );
-	$last_name  = get_user_meta( $user_id, 'last_name', true );
+    //     $primeiro_nome = $user->user_firstname ? $user->user_firstname : $user->display_name;
 
-	// 3. Verifique se ambos estão preenchidos
-	if ( ! empty( $first_name ) && ! empty( $last_name ) ) {
-		$nome_completo = $first_name . ' ' . $last_name;
-	} elseif ( ! empty( $first_name ) ) {
-		$nome_completo = $first_name;
-	} else {
-		// Se não tiver nome cadastrado, usa o display_name
-		$user_info     = get_userdata( $user_id );
-		$nome_completo = $user_info->display_name; 
-	}
+    // 1. Pegue o ID do usuário atual (ou defina o ID desejado)
+    $user_id = get_current_user_id(); // ou $user->ID
+
+    // 2. Obtenha o primeiro e o último nome
+    $first_name = get_user_meta($user_id, 'first_name', true);
+    $last_name = get_user_meta($user_id, 'last_name', true);
+
+    // 3. Verifique se ambos estão preenchidos
+    if (!empty($first_name) && !empty($last_name)) {
+        $nome_completo = $first_name . ' ' . $last_name;
+    } elseif (!empty($first_name)) {
+        $nome_completo = $first_name;
+    } else {
+        // Se não tiver nome cadastrado, usa o display_name
+        $user_info = get_userdata($user_id);
+        $nome_completo = $user_info->display_name;
+    }
 
     ?>
     <div class="uox-premium-header">
@@ -340,7 +344,8 @@ function uonix_custom_welcome_panel() {
         </div>
         <div class="uox-header-text">
             <h2>Olá, <?php echo esc_html($nome_completo); ?>!</h2>
-            <p>Bem-vindo ao centro de controle do site da Uônix. Acompanhe os resultados e acesse os atalhos rápidos do site.</p>
+            <p>Bem-vindo ao centro de controle do site da Uônix. Acompanhe os resultados e acesse os atalhos rápidos do
+                site.</p>
         </div>
     </div>
     <?php
@@ -350,7 +355,8 @@ function uonix_custom_welcome_panel() {
 // 3. INJETA O CSS CUSTOMIZADO (Design System Premium)
 // =========================================================================
 add_action('admin_head', 'uonix_dashboard_css');
-function uonix_dashboard_css() {
+function uonix_dashboard_css()
+{
     $user = wp_get_current_user();
     if (in_array('editor', (array) $user->roles)) {
         echo '<style>
@@ -783,41 +789,44 @@ function uonix_dashboard_css() {
 // 4. REMOVE LIXO NATIVO E REGISTRA OS NOVOS WIDGETS
 // =========================================================================
 add_action('wp_dashboard_setup', 'uonix_modular_dashboard_setup', 999);
-function uonix_modular_dashboard_setup() {
+function uonix_modular_dashboard_setup()
+{
     $user = wp_get_current_user();
     if (in_array('editor', (array) $user->roles)) {
         remove_meta_box('welcome-panel-content', 'dashboard', 'side');
-//      remove_meta_box('dashboard_quick_press', 'dashboard', 'side');
+        //      remove_meta_box('dashboard_quick_press', 'dashboard', 'side');
         remove_meta_box('dashboard_primary', 'dashboard', 'side');
-//      remove_meta_box('dashboard_activity', 'dashboard', 'normal');
+        //      remove_meta_box('dashboard_activity', 'dashboard', 'normal');
         remove_meta_box('dashboard_right_now', 'dashboard', 'normal');
-//      remove_meta_box('dashboard_site_health', 'dashboard', 'normal');
+        //      remove_meta_box('dashboard_site_health', 'dashboard', 'normal');
         remove_meta_box('woocommerce_dashboard_status', 'dashboard', 'normal');
 
         // Blocos Modulares Padrão
 //      wp_add_dashboard_widget('uox_widget_leads', 'Volume de Leads', 'uox_render_leads');
         wp_add_dashboard_widget('uox_widget_origem_leads', 'Captura de Leads', 'uox_render_origem_leads');
         wp_add_dashboard_widget('uox_widget_newsletters', 'Origem das Newsletters', 'uox_render_newsletters_origem');
-//      wp_add_dashboard_widget('uox_widget_orcamentos', 'Orçamentos (Loja)', 'uox_render_orcamentos');
+        //      wp_add_dashboard_widget('uox_widget_orcamentos', 'Orçamentos (Loja)', 'uox_render_orcamentos');
         wp_add_dashboard_widget('uox_widget_blog', 'Engajamento do Blog', 'uox_render_blog');
         wp_add_dashboard_widget('uox_widget_trafego', 'Inteligência de Tráfego', 'uox_render_trafego');
-        
+
         // Novos Blocos Estratégicos
         wp_add_dashboard_widget('uox_widget_acesso_rapido', 'Acesso Rápido', 'uox_render_quick_links');
         wp_add_dashboard_widget('uox_widget_crm_orcamentos', 'Últimos Orçamentos Solicitados', 'uox_render_crm_orcamentos');
         wp_add_dashboard_widget('uox_widget_manutencao_cache', 'Manutenção do Sistema', 'uox_render_manutencao_cache');
-//         wp_add_dashboard_widget('uox_widget_suporte_vip', 'Suporte Técnico VIP', 'uox_render_suporte_vip');
+        //         wp_add_dashboard_widget('uox_widget_suporte_vip', 'Suporte Técnico VIP', 'uox_render_suporte_vip');
     }
 }
 
 // ================= FUNÇÕES DE RENDERIZAÇÃO =================
 
 // Bloco 1: Volume de Leads
-function uox_render_leads() {
+function uox_render_leads()
+{
     global $wpdb;
     $tabela_ff = $wpdb->prefix . 'fluentform_submissions';
-    $form4_leads = 0; $form3_contato = 0;
-    
+    $form4_leads = 0;
+    $form3_contato = 0;
+
     if ($wpdb->get_var("SHOW TABLES LIKE '$tabela_ff'") == $tabela_ff) {
         $form4_leads = $wpdb->get_var($wpdb->prepare("SELECT COUNT(id) FROM $tabela_ff WHERE form_id = %d", 4));
         $form3_contato = $wpdb->get_var($wpdb->prepare("SELECT COUNT(id) FROM $tabela_ff WHERE form_id = %d", 3));
@@ -834,7 +843,8 @@ function uox_render_leads() {
 }
 
 // Bloco 2: Ranking de Origem (Captura ID 4)
-function uox_render_ranking_origem_paginado($form_id, $chave_do_campo, $page_var) {
+function uox_render_ranking_origem_paginado($form_id, $chave_do_campo, $page_var)
+{
     global $wpdb;
 
     $tabela_ff = $wpdb->prefix . 'fluentform_submissions';
@@ -842,9 +852,9 @@ function uox_render_ranking_origem_paginado($form_id, $chave_do_campo, $page_var
     $itens_por_pagina = 4;
 
     if ($wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $tabela_ff)) === $tabela_ff) {
-		$respostas = $wpdb->get_col(
-			$wpdb->prepare(
-				"SELECT response 
+        $respostas = $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT response 
 				 FROM {$tabela_ff} 
 				 WHERE form_id = %d 
 				 AND (
@@ -852,9 +862,9 @@ function uox_render_ranking_origem_paginado($form_id, $chave_do_campo, $page_var
 					OR status = '' 
 					OR status NOT IN ('trashed', 'trash', 'spam')
 				 )",
-				$form_id
-			)
-		);
+                $form_id
+            )
+        );
 
         foreach ($respostas as $json) {
             $dados = json_decode($json, true);
@@ -906,13 +916,13 @@ function uox_render_ranking_origem_paginado($form_id, $chave_do_campo, $page_var
         echo '<div class="uox-pagination">';
 
         echo paginate_links(array(
-            'base'      => esc_url_raw(add_query_arg($page_var, '%#%')),
-            'format'    => '',
-            'current'   => $pagina_atual,
-            'total'     => $total_paginas,
+            'base' => esc_url_raw(add_query_arg($page_var, '%#%')),
+            'format' => '',
+            'current' => $pagina_atual,
+            'total' => $total_paginas,
             'prev_text' => '‹',
             'next_text' => '›',
-            'type'      => 'list',
+            'type' => 'list',
         ));
 
         echo '</div>';
@@ -920,7 +930,8 @@ function uox_render_ranking_origem_paginado($form_id, $chave_do_campo, $page_var
 }
 
 // Bloco 3: Ranking de Origem — Leads, Captura ID 4
-function uox_render_origem_leads() {
+function uox_render_origem_leads()
+{
     uox_render_ranking_origem_paginado(
         4,
         'capturalead_origem',
@@ -929,7 +940,8 @@ function uox_render_origem_leads() {
 }
 
 // Bloco 3: Ranking de Origem — Newsletters ID 2
-function uox_render_newsletters_origem() {
+function uox_render_newsletters_origem()
+{
     uox_render_ranking_origem_paginado(
         2,
         'newsletters_origem',
@@ -938,7 +950,8 @@ function uox_render_newsletters_origem() {
 }
 
 // Bloco 4: Orçamentos
-function uox_render_orcamentos() {
+function uox_render_orcamentos()
+{
     $pedidos_pendentes = function_exists('wc_orders_count') ? (wc_orders_count('wc-pending') + wc_orders_count('wc-on-hold')) : 0;
     ?>
     <div class="uox-stat-box">
@@ -952,14 +965,16 @@ function uox_render_orcamentos() {
 }
 
 // Bloco 5: Engajamento e Blog
-function uox_render_blog() {
+function uox_render_blog()
+{
     $comentarios_pendentes = wp_count_comments()->moderated;
     $comentarios_aprovados = wp_count_comments()->approved;
     ?>
     <ul class="uox-list">
         <li>
-            <span>Coment. Pendentes</span> 
-            <strong style="color: <?php echo $comentarios_pendentes > 0 ? '#dc2626' : '#0f172a'; ?>"><?php echo $comentarios_pendentes; ?></strong>
+            <span>Coment. Pendentes</span>
+            <strong
+                style="color: <?php echo $comentarios_pendentes > 0 ? '#dc2626' : '#0f172a'; ?>"><?php echo $comentarios_pendentes; ?></strong>
         </li>
         <li><span>Coment. Aprovados</span> <strong><?php echo $comentarios_aprovados; ?></strong></li>
     </ul>
@@ -971,10 +986,12 @@ function uox_render_blog() {
 }
 
 // Bloco 6: Tráfego (GA4 & Meta Pixel)
-function uox_render_trafego() {
+function uox_render_trafego()
+{
     ?>
     <p style="font-size: 13px; color: #64748b; margin-bottom: 12px; line-height: 1.5;">
-        O rastreamento de tráfego opera via Google Tag Manager (GTM), integrando <strong>Google Analytics 4</strong> e <strong>Meta Pixel</strong> sob governança e consentimento LGPD da AdOpt.
+        O rastreamento de tráfego opera via Google Tag Manager (GTM), integrando <strong>Google Analytics 4</strong> e
+        <strong>Meta Pixel</strong> sob governança e consentimento LGPD da AdOpt.
     </p>
     <div style="margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 6px;">
         <span class="uox-badge">Status LGPD: Blindado</span>
@@ -983,10 +1000,10 @@ function uox_render_trafego() {
     </div>
     <div class="uox-btn-group">
         <?php // Só para quem pode abrir o Uônix Insights; senão o botão levaria a "sem permissão". ?>
-        <?php if ( ! function_exists( 'uonix_ksio_can_access_tool' ) || uonix_ksio_can_access_tool( 'analytics' ) ) : ?>
-        <a href="<?php echo esc_url( admin_url( 'admin.php?page=uonix-analytics' ) ); ?>" class="uox-btn uox-btn-primary">
-            Central de Analytics
-        </a>
+        <?php if (!function_exists('uonix_ksio_can_access_tool') || uonix_ksio_can_access_tool('analytics')): ?>
+            <a href="<?php echo esc_url(admin_url('admin.php?page=uonix-analytics')); ?>" class="uox-btn uox-btn-primary">
+                Central de Analytics
+            </a>
         <?php endif; ?>
         <a href="https://business.facebook.com/events_manager2" target="_blank" rel="noopener noreferrer" class="uox-btn">
             Meta Events
@@ -996,34 +1013,41 @@ function uox_render_trafego() {
 }
 
 // Bloco 7: Acesso Rápido - Edição Uônix
-function uox_render_quick_links() {
+function uox_render_quick_links()
+{
     ?>
     <p style="font-size: 13px; color: #64748b; margin-top: 0; margin-bottom: 15px; line-height: 1.5;">
         Clique nos botões abaixo para editar as seções principais do site de forma direta, sem precisar navegar pelos menus.
     </p>
     <div class="uox-dashboard-grid">
-		<a href="URL-DO-SEU-LINK" target="_blank" rel="noopener noreferrer" class="uox-btn">
-			<span class="dashicons dashicons-format-image"></span> Banner Home
-		</a>
-		<a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F10973&canvas=edit" target="_blank" rel="noopener noreferrer" class="uox-btn">
+        <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F6130&canvas=edit" target="_blank" rel="noopener noreferrer"
+            class="uox-btn">
+            <span class="dashicons dashicons-format-image"></span> Banner Home
+        </a>
+        <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F10973&canvas=edit" target="_blank" rel="noopener noreferrer"
+            class="uox-btn">
             <span class="dashicons dashicons-buddicons-community"></span> Selo Aniverário
         </a>
-        <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F7255&canvas=edit" target="_blank" rel="noopener noreferrer" class="uox-btn">
+        <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F7255&canvas=edit" target="_blank" rel="noopener noreferrer"
+            class="uox-btn">
             <span class="dashicons dashicons-cart"></span> Banner Produtos
         </a>
-        <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F3631&canvas=edit" target="_blank" rel="noopener noreferrer" class="uox-btn">
+        <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F3631&canvas=edit" target="_blank" rel="noopener noreferrer"
+            class="uox-btn">
             <span class="dashicons dashicons-phone"></span> Topo (Contatos)
         </a>
-        <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F2859&canvas=edit" target="_blank" rel="noopener noreferrer" class="uox-btn">
+        <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F2859&canvas=edit" target="_blank" rel="noopener noreferrer"
+            class="uox-btn">
             <span class="dashicons dashicons-editor-help"></span> Dúvidas (FAQ)
         </a>
-		<a href="/wp-admin/upload.php?page=uonix-curriculos-recebidos" class="uox-btn">
+        <a href="/wp-admin/upload.php?page=uonix-curriculos-recebidos" class="uox-btn">
             <span class="dashicons dashicons-media-text"></span> Currículos Recebidos
         </a>
-		<a href="/wp-admin/admin.php?page=fluent_forms_all_entries" class="uox-btn">
+        <a href="/wp-admin/admin.php?page=fluent_forms_all_entries" class="uox-btn">
             <span class="dashicons dashicons-email-alt"></span> Leads
         </a>
-		<a href="https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags" target="_blank" rel="noopener noreferrer" class="uox-btn">
+        <a href="https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags" target="_blank" rel="noopener noreferrer"
+            class="uox-btn">
             <span class="dashicons dashicons-shield"></span> Adopt
         </a>
         <a href="/wp-admin/admin.php?page=uox-dados-globais" class="uox-btn uox-btn-primary uox-btn-full">
@@ -1034,34 +1058,35 @@ function uox_render_quick_links() {
 }
 
 // NOVO: Bloco 8 - Mini CRM de Orçamentos Recentes (Foco Operacional)
-function uox_render_crm_orcamentos() {
-    if ( ! function_exists( 'wc_get_orders' ) ) {
+function uox_render_crm_orcamentos()
+{
+    if (!function_exists('wc_get_orders')) {
         echo '<p style="color:#64748b; font-size:13px;">WooCommerce offline.</p>';
         return;
     }
-    
+
     // Busca os 4 pedidos mais recentes, INDEPENDENTE do status ('any')
-    $orders = wc_get_orders( array( 
-        'limit' => 4, 
-        'status' => 'any' 
-    ) );
-    
-    if ( empty( $orders ) ) {
+    $orders = wc_get_orders(array(
+        'limit' => 4,
+        'status' => 'any'
+    ));
+
+    if (empty($orders)) {
         echo '<ul class="uox-list"><li class="uox-empty"><span>Nenhum orçamento registrado no momento.</span></li></ul>';
         return;
     }
-    
+
     echo '<ul class="uox-list">';
-    foreach ( $orders as $order ) {
+    foreach ($orders as $order) {
         $responsavel = $order->get_meta('billing_complete_name') ?: trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
         $empresa = $order->get_meta('billing_company_name') ?: $order->get_billing_company();
-        
+
         $nome_exibir = $empresa ? $empresa : $responsavel;
-        $link_edit = esc_url( admin_url( 'post.php?post=' . $order->get_id() . '&action=edit' ) );
-        
+        $link_edit = esc_url(admin_url('post.php?post=' . $order->get_id() . '&action=edit'));
+
         // Exibe apenas o Link e o Nome Completo (limite de 3 palavras removido)
         echo '<li>
-                <span><a href="'.$link_edit.'" style="text-decoration:none; font-weight:600; color:#0e3780;">#' . $order->get_order_number() . '</a> - ' . esc_html($nome_exibir) . '</span> 
+                <span><a href="' . $link_edit . '" style="text-decoration:none; font-weight:600; color:#0e3780;">#' . $order->get_order_number() . '</a> - ' . esc_html($nome_exibir) . '</span> 
               </li>';
     }
     echo '</ul>';
@@ -1069,7 +1094,7 @@ function uox_render_crm_orcamentos() {
 }
 
 // NOVO: Bloco 9 - Botão de Limpeza do Cache Dinâmico
-if ( ! function_exists( 'uox_cache_flush_throttle_seconds' ) ) {
+if (!function_exists('uox_cache_flush_throttle_seconds')) {
     /**
      * Janela mínima entre duas purgas manuais de cache, em segundos.
      *
@@ -1088,14 +1113,15 @@ if ( ! function_exists( 'uox_cache_flush_throttle_seconds' ) ) {
      *
      * @return int
      */
-    function uox_cache_flush_throttle_seconds() {
-        $seconds = (int) apply_filters( 'uonix_cache_flush_throttle_seconds', 60 );
+    function uox_cache_flush_throttle_seconds()
+    {
+        $seconds = (int) apply_filters('uonix_cache_flush_throttle_seconds', 60);
 
         return $seconds > 0 ? $seconds : 0;
     }
 }
 
-if ( ! function_exists( 'uox_cache_flush_remaining_seconds' ) ) {
+if (!function_exists('uox_cache_flush_remaining_seconds')) {
     /**
      * Segundos restantes da janela de throttle, para o aviso ao editor.
      *
@@ -1109,22 +1135,23 @@ if ( ! function_exists( 'uox_cache_flush_remaining_seconds' ) ) {
      *
      * @return int
      */
-    function uox_cache_flush_remaining_seconds() {
+    function uox_cache_flush_remaining_seconds()
+    {
         $janela = uox_cache_flush_throttle_seconds();
 
-        if ( $janela <= 0 ) {
+        if ($janela <= 0) {
             return 0;
         }
 
-        $inicio = get_transient( 'uonix_cache_flush_lock' );
+        $inicio = get_transient('uonix_cache_flush_lock');
 
-        if ( ! is_numeric( $inicio ) ) {
+        if (!is_numeric($inicio)) {
             return $janela;
         }
 
-        $restante = $janela - ( time() - (int) $inicio );
+        $restante = $janela - (time() - (int) $inicio);
 
-        if ( $restante < 1 ) {
+        if ($restante < 1) {
             return 1;
         }
 
@@ -1132,27 +1159,28 @@ if ( ! function_exists( 'uox_cache_flush_remaining_seconds' ) ) {
     }
 }
 
-function uox_handle_flush_cache() {
-    if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
-        wp_die( 'Método inválido para limpar o cache.' );
+function uox_handle_flush_cache()
+{
+    if ('POST' !== ($_SERVER['REQUEST_METHOD'] ?? '')) {
+        wp_die('Método inválido para limpar o cache.');
     }
 
-    if ( ! current_user_can( 'edit_posts' ) ) {
-        wp_die( 'Você não tem permissão para limpar o cache.' );
+    if (!current_user_can('edit_posts')) {
+        wp_die('Você não tem permissão para limpar o cache.');
     }
 
-    check_admin_referer( 'uonix_flush_cache' );
+    check_admin_referer('uonix_flush_cache');
 
     // Throttle DEPOIS de método, capability e nonce: gravar o transient é efeito
     // colateral, e nenhum efeito colateral pode acontecer antes da autorização.
     // Também impede que a janela seja sondada por quem não passou pelos gates.
     $throttle_seconds = uox_cache_flush_throttle_seconds();
 
-    if ( $throttle_seconds > 0 && get_transient( 'uonix_cache_flush_lock' ) ) {
+    if ($throttle_seconds > 0 && get_transient('uonix_cache_flush_lock')) {
         // Redirect com estado próprio, não com sucesso: dizer "limpou" sem ter
         // limpado é o mesmo defeito que este bloco de código acabou de corrigir na
         // outra ponta.
-        wp_safe_redirect( add_query_arg( 'uonix_cache_flushed', 'aguarde', admin_url( 'index.php' ) ) );
+        wp_safe_redirect(add_query_arg('uonix_cache_flushed', 'aguarde', admin_url('index.php')));
         exit;
     }
 
@@ -1186,35 +1214,36 @@ function uox_handle_flush_cache() {
     //    produção; em QA e local o botão precisa seguir funcionando sem ele.
     //    Não há fallback para prune_super_cache(): as duas funções vivem no mesmo
     //    wp-cache-phase2.php, então um elseif entre elas seria inalcançável.
-    if ( function_exists( 'wp_cache_clear_cache' ) ) {
+    if (function_exists('wp_cache_clear_cache')) {
         wp_cache_clear_cache();
     }
 
-    if ( $throttle_seconds > 0 ) {
+    if ($throttle_seconds > 0) {
         // Guarda o INSTANTE da purga, não um booleano: é o que permite informar
         // quanto falta em vez de repetir a janela inteira. O TTL vem do throttle,
         // nunca 0 — no WordPress, expiração 0 significa transient SEM expiração, e o
         // botão viraria trava permanente de uso único.
-        set_transient( 'uonix_cache_flush_lock', time(), $throttle_seconds );
+        set_transient('uonix_cache_flush_lock', time(), $throttle_seconds);
     }
 
-    wp_safe_redirect( add_query_arg( 'uonix_cache_flushed', '1', admin_url( 'index.php' ) ) );
+    wp_safe_redirect(add_query_arg('uonix_cache_flushed', '1', admin_url('index.php')));
     exit;
 }
-add_action( 'admin_post_uonix_flush_cache', 'uox_handle_flush_cache' );
+add_action('admin_post_uonix_flush_cache', 'uox_handle_flush_cache');
 
-function uox_render_manutencao_cache() {
-    $flush_state = isset( $_GET['uonix_cache_flushed'] ) && is_string( $_GET['uonix_cache_flushed'] )
-        ? sanitize_key( wp_unslash( $_GET['uonix_cache_flushed'] ) )
+function uox_render_manutencao_cache()
+{
+    $flush_state = isset($_GET['uonix_cache_flushed']) && is_string($_GET['uonix_cache_flushed'])
+        ? sanitize_key(wp_unslash($_GET['uonix_cache_flushed']))
         : '';
 
-    if ( '1' === $flush_state ) {
+    if ('1' === $flush_state) {
         // O aviso descreve SOMENTE o que o botão realmente faz. Dizer "totalmente
         // limpa" era falso: a borda da Cloudflare fica intacta e continua servindo
         // HTML antigo por até ~1h, então o editor via conteúdo velho depois de um
         // "sucesso" e perdia confiança na ferramenta.
         echo '<div class="notice notice-success is-dismissible" style="margin: 0 0 15px 0; border-radius:6px;"><p>Cache do servidor limpo: memória de objetos e páginas gravadas em disco. A borda da Cloudflare não é limpa por aqui — ela expira sozinha, o que pode levar cerca de uma hora.</p></div>';
-    } elseif ( 'aguarde' === $flush_state && uox_cache_flush_throttle_seconds() > 0 ) {
+    } elseif ('aguarde' === $flush_state && uox_cache_flush_throttle_seconds() > 0) {
         // A guarda da janela > 0 evita "Aguarde 0 segundo(s)": com o throttle desligado
         // o handler nunca redireciona para este estado, então só se chega aqui por URL
         // obsoleta ou montada à mão.
@@ -1231,17 +1260,19 @@ function uox_render_manutencao_cache() {
         );
     }
 
-    if ( ! current_user_can( 'edit_posts' ) ) {
+    if (!current_user_can('edit_posts')) {
         echo '<p>Você não tem permissão para limpar o cache do site.</p>';
         return;
     }
     ?>
     <p style="font-size: 13px; color: #64748b; margin-top: 0; margin-bottom: 15px; line-height: 1.5;">
-        Caso faça alterações em textos, imagens ou banners e não consiga visualizar de imediato, limpe o cache do servidor clicando abaixo. Isso cobre a memória de objetos e as páginas gravadas em disco, mas não a borda da Cloudflare, que expira por conta própria.
+        Caso faça alterações em textos, imagens ou banners e não consiga visualizar de imediato, limpe o cache do servidor
+        clicando abaixo. Isso cobre a memória de objetos e as páginas gravadas em disco, mas não a borda da Cloudflare, que
+        expira por conta própria.
     </p>
     <div class="uox-btn-group">
-        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-            <?php wp_nonce_field( 'uonix_flush_cache' ); ?>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+            <?php wp_nonce_field('uonix_flush_cache'); ?>
             <input type="hidden" name="action" value="uonix_flush_cache">
             <button type="submit" class="uox-btn uox-btn-primary">Limpar Cache do Servidor</button>
         </form>
@@ -1250,7 +1281,8 @@ function uox_render_manutencao_cache() {
 }
 
 // NOVO: Bloco 10 - Suporte Técnico (Sua Assinatura)
-function uox_render_suporte_vip() {
+function uox_render_suporte_vip()
+{
     ?>
     <p style="font-size: 13px; color: #64748b; margin-top: 0; margin-bottom: 15px; line-height: 1.5;">
         Painel corporativo desenvolvido sob medida.<br>
@@ -1258,7 +1290,8 @@ function uox_render_suporte_vip() {
         <strong>Ambiente de Homologação:</strong> Monitorado 🔒
     </p>
     <div class="uox-btn-group">
-        <a href="https://wa.me/5511999999999?text=Oi%20Cassio,%20preciso%20de%20ajuda%20no%20painel%20da%20Uonix." target="_blank" class="uox-btn" style="background:#25d366; color:#ffffff; border-color:#25d366;">
+        <a href="https://wa.me/5511999999999?text=Oi%20Cassio,%20preciso%20de%20ajuda%20no%20painel%20da%20Uonix."
+            target="_blank" class="uox-btn" style="background:#25d366; color:#ffffff; border-color:#25d366;">
             Chamar Suporte Técnico
         </a>
     </div>
