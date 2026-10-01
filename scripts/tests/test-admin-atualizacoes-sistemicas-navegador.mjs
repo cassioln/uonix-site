@@ -207,21 +207,42 @@ if (process.platform === 'linux') {
   argumentos.unshift('--no-sandbox');
 }
 
-const chrome = spawn(chromeBin, argumentos, { stdio: ['ignore', 'ignore', 'pipe'] });
+// Grupo de processos próprio: os filhos do Chrome (renderer, GPU, crashpad) saem
+// junto quando for preciso matá-lo, em vez de seguirem gravando no perfil.
+const chrome = spawn(chromeBin, argumentos, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+
+function matarChrome() {
+  try {
+    process.kill(-chrome.pid, 'SIGKILL');
+  } catch {
+    chrome.kill('SIGKILL');
+  }
+}
+
+// No Linux, filhos do Chrome ainda podem estar soltando o perfil por alguns
+// instantes (ENOTEMPTY no runner). Limpeza que falha é aviso, não reprovação.
+function limparTmp() {
+  try {
+    rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (erro) {
+    console.warn(`AVISO: não foi possível remover ${tmp}: ${erro.code || erro.message}`);
+  }
+}
 const limite = setTimeout(() => {
   console.error('FAIL: teste de navegador passou de 120s');
-  chrome.kill('SIGKILL');
+  matarChrome();
   // Sem o finally: dá ao Chrome um instante para soltar o perfil antes de apagá-lo.
   setTimeout(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    limparTmp();
     process.exit(1);
   }, 1000);
 }, 120000);
 
 let ws;
+let enderecoNavegador;
 
 try {
-  const enderecoNavegador = await new Promise((resolver, rejeitar) => {
+  enderecoNavegador = await new Promise((resolver, rejeitar) => {
     let saida = '';
     chrome.stderr.on('data', (pedaco) => {
       saida += pedaco;
@@ -399,17 +420,31 @@ try {
   if (ws) {
     ws.close();
   }
-  // O perfil só sai depois que o Chrome soltar os arquivos dele.
-  await new Promise((resolver) => {
-    if (chrome.exitCode !== null || chrome.signalCode !== null) {
-      resolver();
-      return;
+  // O perfil só sai depois que o Chrome soltar os arquivos dele: primeiro pede
+  // para fechar (Browser.close, que encerra os filhos em ordem); se não sair em
+  // 5s, mata o grupo inteiro.
+  const saiu = () => chrome.exitCode !== null || chrome.signalCode !== null;
+  if (!saiu()) {
+    const saida = new Promise((resolver) => chrome.once('exit', resolver));
+    if (enderecoNavegador) {
+      try {
+        const navegador = new WebSocket(enderecoNavegador);
+        await new Promise((resolver, rejeitar) => {
+          navegador.addEventListener('open', resolver, { once: true });
+          navegador.addEventListener('error', rejeitar, { once: true });
+        });
+        navegador.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
+      } catch {
+        // Sem DevTools, cai no SIGKILL abaixo.
+      }
     }
-    chrome.once('exit', resolver);
-    chrome.kill('SIGKILL');
-    setTimeout(resolver, 5000);
-  });
-  rmSync(tmp, { recursive: true, force: true });
+    const tempo = await Promise.race([saida.then(() => 'saiu'), new Promise((r) => setTimeout(() => r('tempo'), 5000))]);
+    if ('tempo' === tempo) {
+      matarChrome();
+      await Promise.race([saida, new Promise((r) => setTimeout(r, 2000))]);
+    }
+  }
+  limparTmp();
 }
 
 process.exit(falhas === 0 ? 0 : 1);
