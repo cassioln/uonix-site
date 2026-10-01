@@ -1277,6 +1277,115 @@ function uox_render_manutencao_cache()
         </form>
     </div>
     <?php
+    uox_render_lista_atualizacoes_pendentes();
+}
+
+// Classifica a gravidade comparando major/minor: o WordPress não informa
+// "quantas versões atrasadas", só a versão atual e a mais nova disponível.
+function uox_get_gravidade_atualizacao($versao_atual, $versao_nova)
+{
+    $atual = array_pad(array_map('intval', explode('.', (string) $versao_atual)), 3, 0);
+    $nova = array_pad(array_map('intval', explode('.', (string) $versao_nova)), 3, 0);
+
+    if ($nova[0] > $atual[0]) {
+        return 'alta';
+    }
+
+    if ($nova[0] === $atual[0] && $nova[1] > $atual[1]) {
+        return 'media';
+    }
+
+    return 'baixa';
+}
+
+// Lê os transients que o próprio WordPress já mantém via cron de verificação
+// de atualizações (wp_version_check/wp_update_plugins) — sem chamada extra à
+// API do wordpress.org nesta função.
+function uox_get_atualizacoes_pendentes()
+{
+    $itens = array();
+
+    global $wp_version;
+    $core_updates = get_site_transient('update_core');
+
+    if (!empty($core_updates->updates[0]) && 'latest' !== $core_updates->updates[0]->response) {
+        $versao_nova = $core_updates->updates[0]->current;
+
+        $itens[] = array(
+            'nome' => 'WordPress (núcleo)',
+            'versao_atual' => $wp_version,
+            'versao_nova' => $versao_nova,
+            'gravidade' => uox_get_gravidade_atualizacao($wp_version, $versao_nova),
+        );
+    }
+
+    if (!function_exists('get_plugins')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    $plugin_updates = get_site_transient('update_plugins');
+
+    if (!empty($plugin_updates->response) && is_array($plugin_updates->response)) {
+        $instalados = get_plugins();
+
+        foreach ($plugin_updates->response as $arquivo_plugin => $dados) {
+            $versao_atual = $instalados[$arquivo_plugin]['Version'] ?? '?';
+            $versao_nova = $dados->new_version ?? '?';
+
+            $itens[] = array(
+                'nome' => $instalados[$arquivo_plugin]['Name'] ?? $arquivo_plugin,
+                'versao_atual' => $versao_atual,
+                'versao_nova' => $versao_nova,
+                'gravidade' => uox_get_gravidade_atualizacao($versao_atual, $versao_nova),
+            );
+        }
+    }
+
+    return $itens;
+}
+
+// Somente informativo: sem link, botão ou atalho para disparar atualização.
+// O papel editor não tem (e não deve ganhar aqui) a capability update_plugins/update_core.
+function uox_render_lista_atualizacoes_pendentes()
+{
+    $itens = uox_get_atualizacoes_pendentes();
+
+    $cores_gravidade = array(
+        'alta' => array('bg' => '#fee2e2', 'cor' => '#b91c1c', 'label' => 'Alta'),
+        'media' => array('bg' => '#fef3c7', 'cor' => '#92400e', 'label' => 'Média'),
+        'baixa' => array('bg' => '#dbeafe', 'cor' => '#1e40af', 'label' => 'Baixa'),
+    );
+
+    echo '<div style="margin-top: 18px; padding-top: 15px; border-top: 1px solid #e2e8f0;">';
+    echo '<p style="font-size: 13px; font-weight: 600; color: #334155; margin: 0 0 10px 0;">Atualizações pendentes (somente informativo)</p>';
+
+    if (empty($itens)) {
+        echo '<p style="font-size: 13px; color: #16a34a; margin: 0;">Tudo atualizado — nenhuma pendência na última verificação.</p>';
+        echo '</div>';
+        return;
+    }
+
+    echo '<ul style="list-style: none; margin: 0; padding: 0; font-size: 13px; color: #334155;">';
+
+    foreach ($itens as $item) {
+        $gravidade = $cores_gravidade[$item['gravidade']];
+
+        printf(
+            '<li style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 0; border-bottom:1px solid #f1f5f9;">
+                <span>%s <span style="color:#94a3b8;">(%s &rarr; %s)</span></span>
+                <span style="background:%s; color:%s; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; white-space:nowrap;">%s</span>
+            </li>',
+            esc_html($item['nome']),
+            esc_html($item['versao_atual']),
+            esc_html($item['versao_nova']),
+            esc_attr($gravidade['bg']),
+            esc_attr($gravidade['cor']),
+            esc_html($gravidade['label'])
+        );
+    }
+
+    echo '</ul>';
+    echo '</div>';
 }
 
 // NOVO: Bloco 10 - Suporte Técnico (Sua Assinatura)
