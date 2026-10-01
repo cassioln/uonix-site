@@ -13,7 +13,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  *
  * Os slides ficam empilhados na mesma célula de grid e nenhum nó é movido no DOM: o
  * slide 1 continua sendo o primeiro elemento do HTML — a imagem dele é o LCP da home.
- * O deslizamento é só `transform` inline em quem entra e em quem sai.
+ * O deslizamento é só `transform` inline em quem entra e em quem sai. Como `transform`
+ * faz `background-attachment: fixed` virar `scroll`, o fundo fixo das linhas Kadence
+ * (parallax do desktop) é desligado quando há 2+ slides; com um só, o parallax fica.
  *
  * O empilhamento é feito pelo CSS antes do JS rodar: sem flash do slide 2 abaixo do
  * slide 1 e sem layout shift na inicialização. Se o JS falhar, fica o slide 1 estático.
@@ -26,13 +28,18 @@ add_action( 'wp_head', function () {
     ?>
     <style id="uonix-hero-slider">
     .hero-slider { position: relative; }
-    .hero-slider > .kt-inside-inner-col { display: grid; }
+    .hero-slider > .kt-inside-inner-col { display: grid; grid-template-columns: 100%; }
     .hero-slider > .kt-inside-inner-col > * { grid-area: 1 / 1; min-width: 0; }
 
-    /* Antes do JS: só o primeiro slide aparece. */
-    .hero-slider:not(.uonix-hs-on) > .kt-inside-inner-col > :not(:first-child) {
+    /* Antes do JS: só o primeiro slide aparece. O Kadence pode emitir <style> como filho. */
+    .hero-slider:not(.uonix-hs-on) > .kt-inside-inner-col > :not(style, script, link) ~ :not(style, script, link) {
         opacity: 0;
         visibility: hidden;
+    }
+
+    /* Com 2+ slides o fundo fixo sai já antes do JS, para a imagem não pular ao iniciar. */
+    .hero-slider > .kt-inside-inner-col:has(> :not(style, script, link) ~ :not(style, script, link)) > * {
+        background-attachment: scroll;
     }
 
     /* visibility tira os links do slide oculto da ordem de tabulação e do leitor de tela. */
@@ -40,7 +47,6 @@ add_action( 'wp_head', function () {
     .hero-slider.uonix-hs-on > .kt-inside-inner-col > * {
         visibility: hidden;
         transition: transform .7s cubic-bezier(.65, 0, .35, 1);
-        will-change: transform;
     }
     .hero-slider.uonix-hs-on > .kt-inside-inner-col > .is-active,
     .hero-slider.uonix-hs-on > .kt-inside-inner-col > .is-saindo {
@@ -117,12 +123,15 @@ add_action( 'wp_footer', function () {
             var trilho = root.querySelector(':scope > .kt-inside-inner-col');
             if (!trilho) return;
 
-            var slides = Array.prototype.slice.call(trilho.children);
+            var slides = Array.prototype.filter.call(trilho.children, function (filho) {
+                return !/^(STYLE|SCRIPT|LINK)$/.test(filho.tagName);
+            });
             if (slides.length < 2) return; // Um único bloco não é slider: fica estático.
 
             var atual = 0;
             var timer = null;
             var pausadoHover = false;
+            var pausadoFoco = false;
             var visivel = true;
 
             root.setAttribute('role', 'region');
@@ -182,7 +191,7 @@ add_action( 'wp_footer', function () {
 
             function agendar() {
                 clearTimeout(timer);
-                if (reduzMovimento || pausadoHover || !visivel || document.hidden) return;
+                if (reduzMovimento || pausadoHover || pausadoFoco || !visivel || document.hidden) return;
                 timer = setTimeout(function () {
                     if (!menuAberto()) ir(1);
                     agendar();
@@ -204,11 +213,34 @@ add_action( 'wp_footer', function () {
             criarSeta('prev', 'Slide anterior', '15 18 9 12 15 6', -1);
             criarSeta('next', 'Próximo slide', '9 18 15 12 9 6', 1);
 
-            root.addEventListener('mouseenter', function () { pausadoHover = true; clearTimeout(timer); });
-            root.addEventListener('mouseleave', function () { pausadoHover = false; agendar(); });
+            // Só mouse: no toque, pointerenter sem pointerleave deixaria o autoplay parado.
+            root.addEventListener('pointerenter', function (e) {
+                if (e.pointerType !== 'mouse') return;
+                pausadoHover = true;
+                clearTimeout(timer);
+            });
+            root.addEventListener('pointerleave', function (e) {
+                if (e.pointerType !== 'mouse') return;
+                pausadoHover = false;
+                agendar();
+            });
+            // Foco de teclado dentro da hero pausa: o slide não pode sumir sob o link focado.
+            // Clique de mouse na seta também foca o botão, mas sem :focus-visible.
+            root.addEventListener('focusin', function (e) {
+                if (!e.target.matches(':focus-visible')) return;
+                pausadoFoco = true;
+                clearTimeout(timer);
+            });
+            root.addEventListener('focusout', function (e) {
+                if (root.contains(e.relatedTarget)) return;
+                pausadoFoco = false;
+                agendar();
+            });
             document.addEventListener('visibilitychange', agendar);
 
+            // Só com foco numa seta: trocar de slide com foco num link esconderia o link.
             root.addEventListener('keydown', function (e) {
+                if (!e.target.closest('.uonix-hs-arrow')) return;
                 if (e.key === 'ArrowLeft') { ir(-1); agendar(); }
                 if (e.key === 'ArrowRight') { ir(1); agendar(); }
             });
