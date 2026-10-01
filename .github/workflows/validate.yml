@@ -468,3 +468,28 @@ jobs:
 
       - name: Parse local Compose configuration
         run: podman-compose -p uonix-local -f local/compose.yml config
+
+  browser:
+    name: Browser (Chrome headless)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test Atualizações Sistêmicas in a real browser
+        # O Chrome já vem na imagem ubuntu-latest; sem ele o teste falha, não pula.
+        # O PHP gera o HTML real dos cenários; o Node 22 fala o protocolo DevTools
+        # pelo WebSocket nativo, sem dependências de npm.
+        run: node scripts/tests/test-admin-atualizacoes-sistemicas-navegador.mjs
