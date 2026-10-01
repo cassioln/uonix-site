@@ -661,8 +661,9 @@ if ( ! function_exists( 'uonix_intelligence_executive_insights' ) ) {
 				uonix_intelligence_executive_num( $r['position'], 1 ),
 				$cliques > 0 ? 'taxa de clique de ' . uonix_intelligence_executive_num( (float) ( $r['ctr'] ?? 0 ) * 100, 1 ) . '%' : 'nenhum clique'
 			);
-			if ( isset( $r['suggestion'] ) && is_array( $r['suggestion'] ) && array() !== $r['suggestion'] ) {
-				$texto .= ' Acrescentar ao título: ' . implode( ' · ', array_map( 'strval', $r['suggestion'] ) ) . '.';
+			$ia = function_exists( 'uonix_intelligence_ai_suggestion_for' ) ? uonix_intelligence_ai_suggestion_for( $r ) : array();
+			if ( isset( $ia['status'], $ia['title'] ) && 'ok' === $ia['status'] ) {
+				$texto .= ' Título sugerido (IA): “' . (string) $ia['title'] . '”.';
 			}
 			$saida[] = array( 'kind' => 'seo', 'text' => $texto );
 		}

@@ -155,6 +155,8 @@ function uonix_ksio_can_configure_insights() {
 	return (bool) $GLOBALS['uox_dono'];
 }
 
+$GLOBALS['uox_ia'] = array();
+function uonix_intelligence_ai_suggestion_for( $row ) { return $GLOBALS['uox_ia'][ $row['query'] ?? '' ] ?? array( 'status' => 'pending' ); }
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
@@ -304,7 +306,7 @@ uox_assert( false === strpos( $assunto_sem, '(' ), 'Assunto sem período não de
 // Corpo HTML com dados.
 // ---------------------------------------------------------------------------
 $html = uonix_intelligence_report_html( array(
-	'analysis' => uox_analysis( array( array( 'query' => 'linha de vida nbr', 'position' => 6.4, 'impressions' => 820, 'ctr' => .012, 'clicks' => 10, 'suggestion' => array( 'Aço Inox 304/316' ) ) ) ),
+	'analysis' => uox_analysis( array( array( 'query' => 'linha de vida nbr', 'position' => 6.4, 'impressions' => 820, 'ctr' => .012, 'clicks' => 10 ) ) ),
 	'period_label' => '23/08/2026 a 21/09/2026',
 	'environment' => 'production',
 	'panel_url' => 'https://uonix.com.br/wp-admin/admin.php?page=uonix-analytics',
@@ -312,7 +314,21 @@ $html = uonix_intelligence_report_html( array(
 uox_assert( false !== strpos( $html, '#0b1c2c' ), 'Cabeçalho usa a cor da identidade definida no contrato' );
 uox_assert( false !== strpos( $html, '23/08/2026 a 21/09/2026' ), 'Badge de período aparece no corpo' );
 uox_assert( false !== strpos( $html, 'linha de vida nbr' ), 'Consulta aparece na tabela do e-mail' );
-uox_assert( false !== strpos( $html, 'Aço Inox 304/316' ), 'Sugestão de título aparece no e-mail' );
+uox_assert( false === strpos( $html, 'Acrescentar ao título' ), 'A sugestão determinística não aparece mais no e-mail (#309)' );
+$GLOBALS['uox_ia'] = array( 'linha de vida nbr' => array( 'status' => 'ok', 'title' => 'Linha de Vida <b>NBR</b>', 'description' => 'x', 'current_title' => 'y', 'current_description' => '', 'generated_at' => '', 'post_id' => 1 ) );
+$html_ia = uonix_intelligence_report_html( array(
+	'analysis' => uox_analysis( array( array( 'query' => 'linha de vida nbr', 'position' => 6.4, 'impressions' => 820, 'ctr' => .012, 'clicks' => 10, 'target_page' => '/servico/linha-de-vida/' ) ) ),
+	'period_label' => '', 'environment' => 'production', 'panel_url' => 'https://uonix.com.br/wp-admin/admin.php?page=uonix-analytics',
+) );
+uox_assert( false !== strpos( $html_ia, 'Página: /servico/linha-de-vida/' ), 'E-mail mostra a página líder' );
+uox_assert( false !== strpos( $html_ia, 'Título sugerido (IA): Linha de Vida &lt;b&gt;NBR&lt;/b&gt;' ), 'E-mail mostra o título sugerido, escapado' );
+$GLOBALS['uox_ia'] = array( 'linha de vida nbr' => array( 'status' => 'unavailable' ) );
+$html_sem = uonix_intelligence_report_html( array(
+	'analysis' => uox_analysis( array( array( 'query' => 'linha de vida nbr', 'position' => 6.4, 'impressions' => 820, 'ctr' => .012, 'clicks' => 10, 'target_page' => null ) ) ),
+	'period_label' => '', 'environment' => 'production', 'panel_url' => '',
+) );
+uox_assert( false === strpos( $html_sem, 'Título sugerido' ) && false === strpos( $html_sem, 'Página:' ) && false === strpos( $html_sem, 'unavailable' ), 'Sem sugestão nem página, o e-mail omite as linhas, sem motivo técnico' );
+$GLOBALS['uox_ia'] = array();
 uox_assert( false !== strpos( $html, 'Fonte: Search Console' ), 'Bloco do e-mail declara a fonte' );
 uox_assert( false !== strpos( $html, 'sincronizado em' ), 'Bloco do e-mail declara o horário de sincronização' );
 uox_assert( false !== strpos( $html, '<table' ) && false !== strpos( $html, 'role="presentation"' ), 'Layout usa tabela, necessário para Outlook' );
@@ -344,7 +360,7 @@ uox_assert( false !== strpos( $html_qa, 'não produtiva' ), 'Fora de produção 
 // Escape: a consulta vem do Search Console.
 // ---------------------------------------------------------------------------
 $html_xss = uonix_intelligence_report_html( array(
-	'analysis' => uox_analysis( array( array( 'query' => 'olhal <script>alert(1)</script> "x"', 'position' => 6.0, 'impressions' => 500, 'ctr' => .01, 'clicks' => 1, 'suggestion' => array() ) ) ),
+	'analysis' => uox_analysis( array( array( 'query' => 'olhal <script>alert(1)</script> "x"', 'position' => 6.0, 'impressions' => 500, 'ctr' => .01, 'clicks' => 1 ) ) ),
 	'period_label' => '', 'environment' => 'production', 'panel_url' => '',
 ) );
 uox_assert( false === strpos( $html_xss, '<script>alert(1)</script>' ), 'Consulta com tag não vai crua para o e-mail' );

@@ -322,6 +322,27 @@ else
   fi
 fi
 
+# ===========================================================================
+# GRUPO 3 — DADO PESSOAL RESIDUAL: o cache da sugestão por IA
+#
+# `uonix_intelligence_ai_suggestions` (54-admin-intelligence-ai.php) guarda a
+# consulta só como hash, mas guarda o TEXTO da sugestão, que pode repetir palavras
+# da consulta do Search Console. A entrada 09 do ROPA afirma que esse dado não
+# atravessa ambientes; herdado num clone, ele atravessaria, e o QA exibiria as
+# sugestões geradas para a produção. Nome exato, ancorado dentro da lista IN.
+# ===========================================================================
+ai_cache_options=(
+  'uonix_intelligence_ai_suggestions'
+)
+for option in "${ai_cache_options[@]}"; do
+  if ! printf '%s' "$protected_sql" | grep -qE "IN \([^)]*'$option'"; then
+    report "opção '$option' NÃO está na lista IN de protected_options_where(); o cache de sugestões da origem desembarcaria no destino."
+  fi
+done
+if ! grep -q "'uonix_intelligence_ai_suggestions'" "$ROOT_DIR/mu-plugins/uonix-admin/54-admin-intelligence-ai.php"; then
+  report 'o nome da opção do cache em 54-admin-intelligence-ai.php mudou; atualize a proteção do clone junto.'
+fi
+
 if [ "$failures" -ne 0 ]; then
   printf 'FALHA: %s problema(s) na proteção de opções não herdáveis.\n' "$failures" >&2
   exit 1

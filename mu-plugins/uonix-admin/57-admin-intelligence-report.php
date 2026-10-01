@@ -463,14 +463,17 @@ if ( ! function_exists( 'uonix_intelligence_report_html' ) ) {
 			$html .= '<th align="right" style="padding:8px 10px;color:#334155;font-size:12px;border-bottom:1px solid #e2e8f0;">Impressões</th>';
 			$html .= '</tr>';
 			foreach ( $rows as $row ) {
-				$sugestao = isset( $row['suggestion'] ) && is_array( $row['suggestion'] ) && array() !== $row['suggestion']
-					? implode( ' · ', array_map( 'strval', $row['suggestion'] ) )
-					: '';
+				$ia   = function_exists( 'uonix_intelligence_ai_suggestion_for' ) ? uonix_intelligence_ai_suggestion_for( $row ) : array( 'status' => 'not_configured' );
+				$alvo = isset( $row['target_page'] ) && is_string( $row['target_page'] ) ? $row['target_page'] : '';
 				$html .= '<tr>';
 				$html .= '<td style="padding:10px;border-bottom:1px solid #f1f5f9;color:#1e293b;">';
 				$html .= '<strong>' . esc_html( (string) $row['query'] ) . '</strong>';
-				if ( '' !== $sugestao ) {
-					$html .= '<div style="color:#64748b;font-size:11px;padding-top:3px;">Acrescentar ao título: ' . esc_html( $sugestao ) . '</div>';
+				if ( '' !== $alvo ) {
+					$html .= '<div style="color:#64748b;font-size:11px;padding-top:3px;">Página: ' . esc_html( $alvo ) . '</div>';
+				}
+				// Sem sugestão, a linha some: o motivo interessa ao operador, que o vê no painel.
+				if ( isset( $ia['status'], $ia['title'] ) && 'ok' === $ia['status'] ) {
+					$html .= '<div style="color:#64748b;font-size:11px;padding-top:3px;">Título sugerido (IA): ' . esc_html( (string) $ia['title'] ) . '</div>';
 				}
 				$html .= '</td>';
 				$html .= '<td align="right" style="padding:10px;border-bottom:1px solid #f1f5f9;color:#1e293b;">' . esc_html( number_format( (float) $row['position'], 1, ',', '.' ) ) . '</td>';

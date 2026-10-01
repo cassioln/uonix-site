@@ -197,7 +197,8 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 								<th scope="col">Posição</th>
 								<th scope="col">Impressões</th>
 								<th scope="col">Taxa de clique</th>
-								<th scope="col">Diferenciais a acrescentar no título</th>
+								<th scope="col">Página Alvo</th>
+								<th scope="col">Sugestão (IA)</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -207,11 +208,31 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 									<td><?php echo esc_html( uonix_intelligence_number( $row['position'], 1 ) ); ?></td>
 									<td><?php echo esc_html( uonix_intelligence_number( $row['impressions'], 0 ) ); ?></td>
 									<td><?php echo esc_html( uonix_intelligence_format_ctr( $row['ctr'] ) ); ?></td>
+									<?php
+									$alvo     = array_key_exists( 'target_page', $row ) ? $row['target_page'] : null;
+									$post_id  = is_string( $alvo ) && '' !== $alvo && function_exists( 'uonix_intelligence_ai_page_post_id' ) ? uonix_intelligence_ai_page_post_id( $alvo ) : 0;
+									$ia       = function_exists( 'uonix_intelligence_ai_suggestion_for' ) ? uonix_intelligence_ai_suggestion_for( $row ) : array( 'status' => 'not_configured' );
+									$ia_texto = function_exists( 'uonix_intelligence_ai_state_message' ) ? uonix_intelligence_ai_state_message( isset( $ia['status'] ) ? (string) $ia['status'] : '' ) : 'IA não configurada.';
+									?>
 									<td>
-										<?php if ( empty( $row['suggestion'] ) ) : ?>
-											<em>A consulta já cobre os diferenciais mapeados.</em>
+										<?php if ( null === $alvo ) : ?>
+											<em>Aguardando a próxima sincronização.</em>
+										<?php elseif ( '' === $alvo ) : ?>
+											<em>Não identificada.</em>
 										<?php else : ?>
-											<?php echo esc_html( implode( ' · ', array_map( 'strval', (array) $row['suggestion'] ) ) ); ?>
+											<a href="<?php echo esc_url( home_url( $alvo ) ); ?>"><?php echo esc_html( $alvo ); ?></a>
+											<?php if ( $post_id > 0 && current_user_can( 'edit_post', $post_id ) ) : ?>
+												<br><a href="<?php echo esc_url( (string) get_edit_post_link( $post_id ) ); ?>">Editar página</a>
+											<?php endif; ?>
+										<?php endif; ?>
+									</td>
+									<td>
+										<?php if ( isset( $ia['status'] ) && 'ok' === $ia['status'] ) : ?>
+											<p><strong>Título</strong><br>Atual: <?php echo esc_html( (string) $ia['current_title'] ); ?><br>Sugerido: <?php echo esc_html( (string) $ia['title'] ); ?></p>
+											<p><strong>Descrição</strong><br>Atual: <?php echo esc_html( '' !== (string) $ia['current_description'] ? (string) $ia['current_description'] : '(vazia)' ); ?><br>Sugerida: <?php echo esc_html( (string) $ia['description'] ); ?></p>
+											<p class="description"><?php echo esc_html( 'Gerada por IA' . ( '' !== (string) $ia['generated_at'] && false !== strtotime( (string) $ia['generated_at'] ) ? ' em ' . wp_date( 'd/m', strtotime( (string) $ia['generated_at'] ) ) : '' ) . ' — revise antes de publicar.' ); ?></p>
+										<?php else : ?>
+											<em><?php echo esc_html( $ia_texto ); ?></em>
 										<?php endif; ?>
 									</td>
 								</tr>

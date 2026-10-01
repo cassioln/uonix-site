@@ -273,24 +273,27 @@ uonix_intel_assert( false === $legacy['available'] && 'snapshot_legacy' === $leg
 $GLOBALS['uonix_metrics_options'] = array();
 
 // ---------------------------------------------------------------------------
-// Sugestão determinística de Title.
+// Página líder (target_page) e lista de diferenciais permitidos à IA.
 // ---------------------------------------------------------------------------
-$plain = uonix_intelligence_title_suggestion( 'olhal de ancoragem' );
-uonix_intel_assert( array( 'Aço Inox 304/316', 'Laudo com ART' ) === $plain, 'Consulta sem diferencial recebe os dois primeiros da lista, em ordem fixa' );
-uonix_intel_assert( $plain === uonix_intelligence_title_suggestion( 'linha de vida' ), 'Sugestão depende da cobertura de diferenciais, não do texto da consulta' );
+uonix_intel_assert(
+	array( 'Aço Inox 304/316', 'Laudo com ART', 'Conforme NBR 16325', 'Ensaio de Arrancamento', 'Pronta Entrega' ) === uonix_intelligence_seo_differentiators(),
+	'Diferenciais são os cinco rótulos confirmados pela Uônix, em ordem fixa'
+);
+uonix_intel_assert( ! function_exists( 'uonix_intelligence_title_suggestion' ), 'A sugestão determinística saiu (#309)' );
 
-$has_inox = uonix_intelligence_title_suggestion( 'olhal de ancoragem inox' );
-uonix_intel_assert( ! in_array( 'Aço Inox 304/316', $has_inox, true ), 'Diferencial já presente na consulta não é sugerido' );
+$com_paginas = uonix_intel_snapshot( array( uonix_intel_query( 'olhal de ancoragem', 6.0, 50, .0, 0 ), uonix_intel_query( 'linha de vida', 7.0, 40, .0, 0 ) ) );
+$com_paginas['search_console']['query_pages'] = array( 'olhal de ancoragem' => '/produtos/olhal/' );
+$alvos = uonix_intelligence_seo_opportunities( $com_paginas, 5 );
+uonix_intel_assert( '/produtos/olhal/' === $alvos['rows'][0]['target_page'], 'Consulta com página líder traz o caminho' );
+uonix_intel_assert( '' === $alvos['rows'][1]['target_page'], 'Consulta sem página no mapa traz string vazia' );
+uonix_intel_assert( ! array_key_exists( 'suggestion', $alvos['rows'][0] ), 'A chave suggestion não existe mais' );
 
-$accented = uonix_intelligence_title_suggestion( 'OLHAL AÇO INOX 304' );
-uonix_intel_assert( ! in_array( 'Aço Inox 304/316', $accented, true ), 'Comparação ignora caixa e acento' );
+$sem_mapa = uonix_intelligence_seo_opportunities( uonix_intel_snapshot( array( uonix_intel_query( 'olhal de ancoragem', 6.0, 50, .0, 0 ) ) ), 5 );
+uonix_intel_assert( null === $sem_mapa['rows'][0]['target_page'], 'Snapshot sem query_pages (antes da primeira sincronização nova) traz null, não string vazia' );
 
-$covered = uonix_intelligence_title_suggestion( 'olhal inox com laudo art conforme nbr ensaio de arrancamento e prazo de entrega' );
-uonix_intel_assert( array() === $covered, 'Consulta que cobre todos os diferenciais não recebe sugestão inventada' );
-uonix_intel_assert( array() === uonix_intelligence_title_suggestion( '' ), 'Consulta vazia não gera sugestão' );
-
-$row_suggestion = $fresh['rows'][0]['suggestion'];
-uonix_intel_assert( is_array( $row_suggestion ) && array() !== $row_suggestion, 'Cada linha devolvida carrega sua sugestão determinística' );
+$mapa_ruim = uonix_intel_snapshot( array( uonix_intel_query( 'olhal de ancoragem', 6.0, 50, .0, 0 ) ) );
+$mapa_ruim['search_console']['query_pages'] = array( 'olhal de ancoragem' => array( 'x' ) );
+uonix_intel_assert( '' === uonix_intelligence_seo_opportunities( $mapa_ruim, 5 )['rows'][0]['target_page'], 'Valor não string no mapa vira string vazia' );
 
 // ---------------------------------------------------------------------------
 // Trava de gravação dos destinatários (#318): só o dono muda a opção, por
