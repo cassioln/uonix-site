@@ -1582,6 +1582,9 @@ function uox_render_lista_atualizacoes_pendentes()
                         clone.removeAttribute('tabindex');
                         clone.hidden = false;
                         clone.setAttribute('aria-hidden', 'true');
+                        // Atribuição (=), não concatenação: precisa descartar o
+                        // min-height:100% inline do painel, senão o clone mede ao
+                        // menos a altura já travada e a trava nunca encolhe.
                         clone.style.cssText = 'position:absolute; top:0; left:0; right:0; visibility:hidden; pointer-events:none;';
                         clone.querySelectorAll('[data-uox-pagina]').forEach(function (item) {
                             item.hidden = String(pagina) !== item.dataset.uoxPagina;

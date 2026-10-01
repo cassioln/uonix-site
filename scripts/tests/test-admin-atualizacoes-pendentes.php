@@ -204,7 +204,6 @@ uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $so_nucleo,
 uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $so_nucleo, 'core' ), 'tabindex="0"' ), 'a aba única deve estar na ordem do Tab' );
 uox_atualizacoes_assert( 1 === substr_count( $so_nucleo, 'class="uox-atualizacoes-tab is-active"' ), 'exatamente uma aba deve abrir ativa' );
 uox_atualizacoes_assert( false === strpos( uox_atualizacoes_tag_painel( $so_nucleo, 'core' ), 'hidden' ), 'o painel da aba única deve abrir visível' );
-uox_atualizacoes_assert( false === strpos( uox_atualizacoes_painel( $so_nucleo, 'core' ), '&middot;' ), 'na aba única, o item não repete a categoria' );
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'Crítica' ), 'o selo "Crítica" deve aparecer para o núcleo' );
 uox_atualizacoes_assert( false === strpos( $so_nucleo, 'uox-atualizacoes-paginacao' ), 'até 10 itens não há paginação' );
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, '#uox-atualizacoes-sistemicas [hidden]{display:none !important;}' ), 'o bloco deve garantir que [hidden] vença o display:flex inline' );
@@ -353,6 +352,7 @@ uox_atualizacoes_assert( false === strpos( $dez, 'uox-atualizacoes-paginacao' ),
 uox_atualizacoes_assert( 0 === preg_match( '#<li[^>]*hidden#', $dez ), '10 itens devem aparecer todos na primeira página' );
 uox_atualizacoes_assert( array( 'plugins' ) === uox_atualizacoes_abas( $dez ), 'só plugins pendentes: a única aba deve ser Plugins (sem Todos)' );
 uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $dez, 'plugins' ), 'is-active' ) && false === strpos( uox_atualizacoes_tag_painel( $dez, 'plugins' ), 'hidden' ), 'só plugins: a aba Plugins abre ativa e visível' );
+uox_atualizacoes_assert( false === strpos( $dez, 'Plugin &middot;' ), 'só plugins: sem "Todos", nenhum item repete a categoria' );
 
 // Paginação: 12 plugins + núcleo = Todos com 13 (2 páginas) e Plugins com 12 (2 páginas).
 $GLOBALS['uox_test_site_transients']['update_core'] = (object) array(
@@ -380,6 +380,18 @@ uox_atualizacoes_assert(
 uox_atualizacoes_assert(
 	1 === preg_match( "#if \\(!tab\\.classList\\.contains\\('is-active'\\)\\) \\{\\s*wrap\\.querySelectorAll\\('\\[data-uox-painel\\]'\\)\\.forEach\\(function \\(painel\\) \\{\\s*irParaPagina\\(painel, 1\\);#", $paginado ),
 	'trocar de aba deve voltar todas as abas para a página 1'
+);
+// O reset só funciona antes de a aba clicada virar is-active.
+$pos_ativar = strpos( $paginado, 'function ativarAba(tab)' );
+$pos_reset  = strpos( $paginado, "if (!tab.classList.contains('is-active'))", (int) $pos_ativar );
+$pos_toggle = strpos( $paginado, "botao.classList.toggle('is-active'", (int) $pos_ativar );
+uox_atualizacoes_assert(
+	false !== $pos_ativar && false !== $pos_reset && false !== $pos_toggle && $pos_reset < $pos_toggle,
+	'em ativarAba, o reset de página deve vir antes de alternar is-active'
+);
+uox_atualizacoes_assert(
+	false !== strpos( $paginado, "clone.style.cssText = 'position:absolute;" ),
+	'o clone de medição deve substituir (=) o estilo inline, descartando o min-height:100% do painel'
 );
 uox_atualizacoes_assert( 7 === uox_atualizacoes_assert_informativo( $paginado, 'paginado' ), 'paginado: 3 abas + 2 botões de paginação em 2 painéis' );
 uox_atualizacoes_assert_aviso( $paginado, 'paginado' );
