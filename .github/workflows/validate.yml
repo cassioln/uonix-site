@@ -217,6 +217,9 @@ jobs:
       - name: Test admin cache security
         run: php scripts/tests/test-admin-cache-security.php
 
+      - name: Test admin pending updates list
+        run: php scripts/tests/test-admin-atualizacoes-pendentes.php
+
       - name: Test admin dados globais write guards
         run: php scripts/tests/test-admin-dados-globais-rfq.php
 
