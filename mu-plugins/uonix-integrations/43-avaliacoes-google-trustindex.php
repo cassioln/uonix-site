@@ -246,6 +246,18 @@ add_action(
 							loadScript(node.dataset.src).catch(function () {});
 						}
 					});
+
+					// Scripts inseridos via innerHTML não executam; recriar o nó para que o loader do Trustindex rode.
+					content.querySelectorAll('script').forEach(function (oldScript) {
+						const newScript = document.createElement('script');
+
+						Array.from(oldScript.attributes).forEach(function (attr) {
+							newScript.setAttribute(attr.name, attr.value);
+						});
+
+						newScript.textContent = oldScript.textContent;
+						oldScript.replaceWith(newScript);
+					});
 				}
 
 				function loadTrustindexContent() {
