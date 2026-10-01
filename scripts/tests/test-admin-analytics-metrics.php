@@ -61,6 +61,10 @@ function wp_remote_post( $url, $args ) {
 		$GLOBALS['uonix_metrics_http_capture'] = array( 'url' => $url, 'args' => $args );
 		return array( 'response' => array( 'code' => 200 ), 'body' => '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"0"}' );
 	}
+	if ( null !== $GLOBALS['uonix_metrics_http_capture'] && str_contains( $url, 'searchAnalytics/query' ) ) {
+		$GLOBALS['uonix_metrics_http_capture'] = array( 'url' => $url, 'args' => $args );
+		return array( 'response' => array( 'code' => 200 ), 'body' => '{"responseAggregationType":"byProperty","rows":[]}' );
+	}
 	throw new RuntimeException( 'Unexpected network request' );
 }
 function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) { $GLOBALS['uonix_metrics_actions'][] = array( $hook, $callback, $priority, $accepted_args ); }
@@ -436,6 +440,21 @@ if ( function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
 	uonix_metrics_assert( is_array( $raw_fixture_sync ) && 'updated' === $raw_fixture_sync['status'], 'JSON bruto válido percorre montador e sincronização até o snapshot' );
 	$raw_invalid_sync = uonix_analytics_metrics_sync( static function () use ( $ga4_empty_raw, $gsc_empty_raw ) { return uonix_analytics_metrics_assemble_google_data( '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"1"}', $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw ); }, $raw_fixture_config );
 	uonix_metrics_assert( is_array( $raw_invalid_sync ) && 'stale' === $raw_invalid_sync['status'] && 'sync_failed' === $raw_invalid_sync['error'], 'JSON bruto inválido não persiste updated e preserva snapshot stale' );
+
+	// A chamada query+page falhando não derruba a sincronização: o snapshot sai sem query_pages.
+	$assembled_sem_query_pages = uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, null, uonix_analytics_metrics_error( 'google_http_500' ) );
+	uonix_metrics_assert( is_array( $assembled_sem_query_pages ) && ! array_key_exists( 'query_pages', $assembled_sem_query_pages['search_console'] ), 'Falha da chamada query+page não vira erro da sincronização' );
+	$gsc_qp_raw = '{"responseAggregationType":"byProperty","rows":[{"keys":["olhal inox","https://uonix.com.br/produtos/olhal-a/"],"clicks":0,"impressions":30,"ctr":0,"position":6}]}';
+	$assembled_com_query_pages = uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, null, $gsc_qp_raw );
+	uonix_metrics_assert( is_array( $assembled_com_query_pages ) && array( array( 'query' => 'olhal inox', 'page' => 'https://uonix.com.br/produtos/olhal-a/', 'impressions' => 30 ) ) === ( $assembled_com_query_pages['search_console']['query_pages'] ?? null ), 'assemble repassa as linhas de duas dimensões como query/page/impressions' );
+	$assembled_qp_uma_chave = uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, null, '{"responseAggregationType":"byProperty","rows":[{"keys":["so consulta"],"clicks":0,"impressions":3,"ctr":0,"position":6}]}' );
+	uonix_metrics_assert( is_array( $assembled_qp_uma_chave ) && array() === ( $assembled_qp_uma_chave['search_console']['query_pages'] ?? null ), 'Linha de query_pages sem a segunda chave é pulada' );
+
+	$GLOBALS['uonix_metrics_http_capture'] = array();
+	uonix_analytics_metrics_search_console_rows( 'tok', 'sc-domain:uonix.com.br', array( 'start' => '2026-09-01', 'end' => '2026-09-30' ), array( 'query', 'page' ), 1000 );
+	$corpo_qp = json_decode( (string) ( $GLOBALS['uonix_metrics_http_capture']['args']['body'] ?? '' ), true );
+	$GLOBALS['uonix_metrics_http_capture'] = null;
+	uonix_metrics_assert( is_array( $corpo_qp ) && array( 'query', 'page' ) === ( $corpo_qp['dimensions'] ?? null ) && 1000 === ( $corpo_qp['rowLimit'] ?? null ), 'search_console_rows aceita duas dimensões; obteve ' . var_export( $corpo_qp, true ) );
 }
 
 
@@ -569,6 +588,38 @@ if ( function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 	uonix_metrics_assert( is_array( $gsc_many ) && $gsc_many['queries'] === array_slice( $gsc_many['queries_extended'], 0, 10 ), 'Lista de exibição é prefixo do universo de mineração quando toda linha está na faixa de retenção' );
 	$extended_terms = implode( ' ', array_column( $gsc_many['queries_extended'], 'query' ) );
 	uonix_metrics_assert( false === strpos( $extended_terms, '@' ), 'Universo ampliado aplica a mesma remoção de PII da lista curta' );
+
+	// Página líder de cada consulta (sugestão por IA, #193). Só entra consulta cujo
+	// TEXTO o universo retém (#253), e a página de mais impressões vence; empate pelo caminho.
+	$gsc_paginas = uonix_analytics_metrics_normalize_search_console(
+		array(
+			'summary_current'  => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ),
+			'summary_previous' => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ),
+			'queries'          => array(
+				array( 'query' => 'olhal inox', 'clicks' => 0, 'impressions' => 40, 'ctr' => 0, 'position' => 6 ),
+				array( 'query' => 'cauda longa', 'clicks' => 0, 'impressions' => 1, 'ctr' => 0, 'position' => 40 ),
+			),
+			'pages'            => array(),
+			'query_pages'      => array(
+				array( 'query' => 'olhal inox', 'page' => 'https://uonix.com.br/produtos/olhal-b/', 'impressions' => 10 ),
+				array( 'query' => 'olhal inox', 'page' => 'https://uonix.com.br/produtos/olhal-a/', 'impressions' => 30 ),
+				array( 'query' => 'olhal inox', 'page' => 'https://uonix.com.br/produtos/olhal-c/', 'impressions' => 30 ),
+				array( 'query' => 'cauda longa', 'page' => 'https://uonix.com.br/x/', 'impressions' => 1 ),
+				array( 'query' => 'olhal inox', 'page' => 'https://outro-site.example/y/', 'impressions' => 99 ),
+				array( 'query' => 'orcamento cliente@example.test', 'page' => 'https://uonix.com.br/z/', 'impressions' => 99 ),
+			),
+		)
+	);
+	uonix_metrics_assert( is_array( $gsc_paginas ) && array( 'olhal inox' => '/produtos/olhal-a/' ) === ( $gsc_paginas['query_pages'] ?? null ), 'query_pages: página de mais impressões vence, empate pelo caminho, fora do domínio e PII descartados, e só consulta com texto retido entra; obteve ' . var_export( $gsc_paginas['query_pages'] ?? null, true ) );
+	$gsc_sem_paginas = uonix_analytics_metrics_normalize_search_console(
+		array(
+			'summary_current'  => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ),
+			'summary_previous' => array( 'clicks' => 1, 'impressions' => 2, 'ctr' => .5, 'position' => 3 ),
+			'queries'          => array(),
+			'pages'            => array(),
+		)
+	);
+	uonix_metrics_assert( is_array( $gsc_sem_paginas ) && ! array_key_exists( 'query_pages', $gsc_sem_paginas ), 'Sem o dado de página por consulta, a chave query_pages fica ausente, e não vazia' );
 
 	// -----------------------------------------------------------------------
 	// Minimização de PII no universo de mineração (issue #253).

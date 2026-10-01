@@ -320,6 +320,28 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 			if ( 10 === count( $pages ) ) break;
 		}
 
+		// Página líder de cada consulta: a de mais impressões, empate pelo caminho, para
+		// a escolha ser estável entre sincronizações. Só para consulta cujo TEXTO o
+		// universo já retém (#253): a lista não pode reter texto que `queries_extended`
+		// descartou. Fora do domínio e PII caem pelos mesmos filtros das outras listas.
+		$query_pages = null;
+		if ( isset( $data['query_pages'] ) && is_array( $data['query_pages'] ) ) {
+			$retidas = array_flip( array_column( $queries_extended, 'query' ) );
+			$melhor  = array();
+			foreach ( $data['query_pages'] as $row ) {
+				$query       = uonix_analytics_metrics_sanitize_query( isset( $row['query'] ) ? $row['query'] : '' );
+				$page        = uonix_analytics_metrics_normalize_path( isset( $row['page'] ) ? $row['page'] : '' );
+				$impressions = uonix_analytics_metrics_number( $row['impressions'] ?? null );
+				if ( '' === $query || '' === $page || null === $impressions || ! isset( $retidas[ $query ] ) ) {
+					continue;
+				}
+				if ( ! isset( $melhor[ $query ] ) || $impressions > $melhor[ $query ]['impressions'] || ( $impressions === $melhor[ $query ]['impressions'] && strcmp( $page, $melhor[ $query ]['page'] ) < 0 ) ) {
+					$melhor[ $query ] = array( 'page' => $page, 'impressions' => $impressions );
+				}
+			}
+			$query_pages = array_map( static function ( $m ) { return $m['page']; }, $melhor );
+		}
+
 		foreach ( array( 'clicks', 'impressions', 'ctr', 'position' ) as $metric ) {
 			if ( null === uonix_analytics_metrics_number( $current[ $metric ] ?? null ) || null === uonix_analytics_metrics_number( $previous[ $metric ] ?? null ) ) {
 				return uonix_analytics_metrics_error( 'search_console_metric_missing' );
@@ -333,7 +355,11 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 		);
 		foreach ( $summary as $comparison ) if ( is_wp_error( $comparison ) ) return $comparison;
 
-		return array( 'summary' => $summary, 'queries' => $queries, 'queries_extended' => $queries_extended, 'pages' => $pages );
+		$saida = array( 'summary' => $summary, 'queries' => $queries, 'queries_extended' => $queries_extended, 'pages' => $pages );
+		if ( null !== $query_pages ) {
+			$saida['query_pages'] = $query_pages;
+		}
+		return $saida;
 	}
 }
 
@@ -763,13 +789,13 @@ if ( ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
 		// A Search Console API aceita no máximo 25000 linhas por requisição.
 		$row_limit = is_int( $row_limit ) && $row_limit > 0 ? min( $row_limit, 25000 ) : 10;
 		$body = array( 'startDate' => $period['start'], 'endDate' => $period['end'], 'rowLimit' => null === $dimension ? 1 : $row_limit );
-		if ( null !== $dimension ) $body['dimensions'] = array( $dimension );
+		if ( null !== $dimension ) $body['dimensions'] = is_array( $dimension ) ? array_values( $dimension ) : array( $dimension );
 		return uonix_analytics_metrics_google_json( 'https://www.googleapis.com/webmasters/v3/sites/' . rawurlencode( $site_url ) . '/searchAnalytics/query', $access_token, $body );
 	}
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
-	function uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views = null ) {
+	function uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views = null, $gsc_query_pages = null ) {
 		$ga_current = uonix_analytics_metrics_decode_ga4_report( $ga_current );
 		$ga_previous = uonix_analytics_metrics_decode_ga4_report( $ga_previous );
 		$ga_pages = uonix_analytics_metrics_decode_ga4_report( $ga_pages, true );
@@ -778,13 +804,33 @@ if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
 		$gsc_queries = uonix_analytics_metrics_decode_search_console_report( $gsc_queries, true );
 		$gsc_pages = uonix_analytics_metrics_decode_search_console_report( $gsc_pages, true );
 		foreach ( array( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views ) as $report ) if ( is_wp_error( $report ) ) return $report;
+		// Página líder por consulta (sugestão por IA): dado ACESSÓRIO. Falha aqui não
+		// derruba a sincronização; o snapshot sai sem `query_pages`, e quem lê trata a
+		// ausência como "aguardando a próxima sincronização".
+		$query_pages = null;
+		if ( null !== $gsc_query_pages && ! is_wp_error( $gsc_query_pages ) ) {
+			$decoded_query_pages = uonix_analytics_metrics_decode_search_console_report( $gsc_query_pages, true );
+			if ( ! is_wp_error( $decoded_query_pages ) ) {
+				$query_pages = array();
+				foreach ( $decoded_query_pages['rows'] as $row ) {
+					if ( ! isset( $row['keys'][1] ) || ! is_string( $row['keys'][1] ) ) {
+						continue;
+					}
+					$query_pages[] = array( 'query' => $row['keys'][0], 'page' => $row['keys'][1], 'impressions' => $row['impressions'] );
+				}
+			}
+		}
 		if ( null === $ga_page_views ) $ga_page_views = array( 'rows' => array(), 'complete' => false );
 		if ( ! is_array( $ga_page_views ) || ! isset( $ga_page_views['rows'], $ga_page_views['complete'] ) || ! is_array( $ga_page_views['rows'] ) || ! is_bool( $ga_page_views['complete'] ) ) return uonix_analytics_metrics_error( 'ga4_page_views_bundle_invalid' );
 		$ga_current_rows = uonix_analytics_metrics_ga4_rows( $ga_current );
 		$ga_previous_rows = uonix_analytics_metrics_ga4_rows( $ga_previous );
+		$search_console = array( 'summary_current' => isset( $gsc_current['rows'][0] ) ? $gsc_current['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'summary_previous' => isset( $gsc_previous['rows'][0] ) ? $gsc_previous['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'queries' => array_map( function( $row ) { $row['query'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_queries['rows'] ), 'pages' => array_map( function( $row ) { $row['page'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_pages['rows'] ) );
+		if ( null !== $query_pages ) {
+			$search_console['query_pages'] = $query_pages;
+		}
 		return array(
 			'ga4' => array( 'summary_current' => isset( $ga_current_rows[0] ) ? $ga_current_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'summary_previous' => isset( $ga_previous_rows[0] ) ? $ga_previous_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'landing_pages' => array_map( function( $row ) { return array( 'path' => $row['path'], 'sessions' => $row['sessions'] ); }, uonix_analytics_metrics_ga4_rows( $ga_pages, 'path' ) ), 'page_views' => $ga_page_views['rows'], 'page_views_complete' => $ga_page_views['complete'] ),
-			'search_console' => array( 'summary_current' => isset( $gsc_current['rows'][0] ) ? $gsc_current['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'summary_previous' => isset( $gsc_previous['rows'][0] ) ? $gsc_previous['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'queries' => array_map( function( $row ) { $row['query'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_queries['rows'] ), 'pages' => array_map( function( $row ) { $row['page'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_pages['rows'] ) ),
+			'search_console' => $search_console,
 		);
 	}
 }
@@ -801,7 +847,8 @@ if ( ! function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
 		$gsc_previous = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['previous'] );
 		$gsc_queries = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'query', uonix_analytics_metrics_extended_query_limit() );
 		$gsc_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'page' );
-		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views );
+		$gsc_query_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], array( 'query', 'page' ), uonix_analytics_metrics_extended_query_limit() );
+		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views, $gsc_query_pages );
 	}
 }
 
