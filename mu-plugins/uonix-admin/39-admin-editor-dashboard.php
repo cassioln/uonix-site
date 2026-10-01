@@ -141,9 +141,6 @@ add_action('admin_bar_menu', function ($wp_admin_bar) {
         return;
     }
 
-    // Remove o botão "Personalizar"
-    $wp_admin_bar->remove_node('customize');
-
     // Remove submenus do nome do site na barra superior
     $wp_admin_bar->remove_node('dashboard');
     $wp_admin_bar->remove_node('themes');
@@ -210,10 +207,6 @@ function uonix_editor_admin_bar_front_css()
     }
 
     echo '<style>
-        #wpadminbar #wp-admin-bar-customize {
-            display: none !important;
-        }
-
         #wpadminbar #wp-admin-bar-site-name .ab-sub-wrapper {
             display: none !important;
         }
