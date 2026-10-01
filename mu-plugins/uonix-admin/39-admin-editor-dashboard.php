@@ -1273,8 +1273,9 @@ function uox_render_manutencao_cache()
     uox_render_lista_atualizacoes_pendentes();
 }
 
-// Classifica a gravidade comparando major/minor: o WordPress não informa
-// "quantas versões atrasadas", só a versão atual e a mais nova disponível.
+// Classifica a gravidade de plugins/temas comparando major/minor: o
+// WordPress não informa "quantas versões atrasadas", só a atual e a mais
+// nova disponível. O núcleo não passa por aqui — ver uox_get_atualizacoes_pendentes().
 function uox_get_gravidade_atualizacao($versao_atual, $versao_nova)
 {
     $atual = array_pad(array_map('intval', explode('.', (string) $versao_atual)), 3, 0);
@@ -1291,27 +1292,43 @@ function uox_get_gravidade_atualizacao($versao_atual, $versao_nova)
     return 'baixa';
 }
 
+// Ordem de prioridade das gravidades, da mais urgente para a mais branda.
+function uox_ordem_gravidade($gravidade)
+{
+    $ordem = array('critica' => 0, 'alta' => 1, 'media' => 2, 'baixa' => 3);
+
+    return $ordem[$gravidade] ?? 99;
+}
+
 // Lê os transients que o próprio WordPress já mantém via cron de verificação
-// de atualizações (wp_version_check/wp_update_plugins) — sem chamada extra à
-// API do wordpress.org nesta função.
+// de atualizações (wp_version_check/wp_update_plugins/wp_update_themes) —
+// sem chamada extra à API do wordpress.org nesta função. Retorna os itens já
+// agrupados por aba (plugins/core/temas) e ordenados da gravidade mais alta
+// para a mais baixa dentro de cada grupo.
 function uox_get_atualizacoes_pendentes()
 {
-    $itens = array();
+    $grupos = array(
+        'plugins' => array(),
+        'core' => array(),
+        'temas' => array(),
+    );
 
+    // WordPress (núcleo): gravidade sempre "crítica", fixa — é a base de todo
+    // o site e normalmente carrega correções de segurança, independente da
+    // distância numérica entre as versões.
     global $wp_version;
     $core_updates = get_site_transient('update_core');
 
     if (!empty($core_updates->updates[0]) && 'latest' !== $core_updates->updates[0]->response) {
-        $versao_nova = $core_updates->updates[0]->current;
-
-        $itens[] = array(
+        $grupos['core'][] = array(
             'nome' => 'WordPress (núcleo)',
             'versao_atual' => $wp_version,
-            'versao_nova' => $versao_nova,
-            'gravidade' => uox_get_gravidade_atualizacao($wp_version, $versao_nova),
+            'versao_nova' => $core_updates->updates[0]->current,
+            'gravidade' => 'critica',
         );
     }
 
+    // Plugins.
     if (!function_exists('get_plugins')) {
         require_once ABSPATH . 'wp-admin/includes/plugin.php';
     }
@@ -1325,7 +1342,7 @@ function uox_get_atualizacoes_pendentes()
             $versao_atual = $instalados[$arquivo_plugin]['Version'] ?? '?';
             $versao_nova = $dados->new_version ?? '?';
 
-            $itens[] = array(
+            $grupos['plugins'][] = array(
                 'nome' => $instalados[$arquivo_plugin]['Name'] ?? $arquivo_plugin,
                 'versao_atual' => $versao_atual,
                 'versao_nova' => $versao_nova,
@@ -1334,51 +1351,160 @@ function uox_get_atualizacoes_pendentes()
         }
     }
 
-    return $itens;
+    // Temas (todos os instalados com atualização pendente, não só o ativo —
+    // o site usa tema filho, então o pai também pode aparecer aqui).
+    $theme_updates = get_site_transient('update_themes');
+
+    if (!empty($theme_updates->response) && is_array($theme_updates->response)) {
+        foreach ($theme_updates->response as $stylesheet => $dados) {
+            $tema = wp_get_theme($stylesheet);
+            $versao_atual = $tema->exists() ? $tema->get('Version') : '?';
+            // A API de temas devolve array nativo (diferente de plugins, que usa objeto).
+            $versao_nova = is_array($dados) ? ($dados['new_version'] ?? '?') : ($dados->new_version ?? '?');
+
+            $grupos['temas'][] = array(
+                'nome' => $tema->exists() ? $tema->get('Name') : $stylesheet,
+                'versao_atual' => $versao_atual,
+                'versao_nova' => $versao_nova,
+                'gravidade' => uox_get_gravidade_atualizacao($versao_atual, $versao_nova),
+            );
+        }
+    }
+
+    foreach ($grupos as &$itens_grupo) {
+        usort($itens_grupo, function ($a, $b) {
+            return uox_ordem_gravidade($a['gravidade']) <=> uox_ordem_gravidade($b['gravidade']);
+        });
+    }
+
+    return $grupos;
 }
 
 // Somente informativo: sem link, botão ou atalho para disparar atualização.
-// O papel editor não tem (e não deve ganhar aqui) a capability update_plugins/update_core.
+// O papel editor não tem (e não deve ganhar aqui) a capability
+// update_plugins/update_core/update_themes.
 function uox_render_lista_atualizacoes_pendentes()
 {
-    $itens = uox_get_atualizacoes_pendentes();
+    $grupos = uox_get_atualizacoes_pendentes();
 
     $cores_gravidade = array(
+        'critica' => array('bg' => '#450a0a', 'cor' => '#ffffff', 'label' => 'Crítica'),
         'alta' => array('bg' => '#fee2e2', 'cor' => '#b91c1c', 'label' => 'Alta'),
         'media' => array('bg' => '#fef3c7', 'cor' => '#92400e', 'label' => 'Média'),
         'baixa' => array('bg' => '#dbeafe', 'cor' => '#1e40af', 'label' => 'Baixa'),
     );
 
-    echo '<div style="margin-top: 18px; padding-top: 15px; border-top: 1px solid #e2e8f0;">';
-    echo '<p style="font-size: 13px; font-weight: 600; color: #334155; margin: 0 0 10px 0;">Atualizações pendentes (somente informativo)</p>';
+    $abas = array(
+        'plugins' => 'Plugins',
+        'core' => 'WordPress',
+        'temas' => 'Tema',
+    );
 
-    if (empty($itens)) {
+    $total = array_sum(array_map('count', $grupos));
+
+    echo '<div class="uox-atualizacoes-sistemicas" id="uox-atualizacoes-sistemicas" style="margin-top: 18px; padding-top: 15px; border-top: 1px solid #e2e8f0;">';
+    echo '<p style="font-size: 13px; font-weight: 600; color: #334155; margin: 0 0 10px 0;">Atualizações Sistêmicas</p>';
+
+    if (0 === $total) {
         echo '<p style="font-size: 13px; color: #16a34a; margin: 0;">Tudo atualizado — nenhuma pendência na última verificação.</p>';
         echo '</div>';
         return;
     }
 
-    echo '<ul style="list-style: none; margin: 0; padding: 0; font-size: 13px; color: #334155;">';
+    echo '<div class="uox-atualizacoes-tabs" role="tablist" style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">';
 
-    foreach ($itens as $item) {
-        $gravidade = $cores_gravidade[$item['gravidade']];
+    $primeira_aba = true;
 
+    foreach ($abas as $chave => $rotulo) {
         printf(
-            '<li style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 0; border-bottom:1px solid #f1f5f9;">
-                <span>%s <span style="color:#94a3b8;">(%s &rarr; %s)</span></span>
-                <span style="background:%s; color:%s; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; white-space:nowrap;">%s</span>
-            </li>',
-            esc_html($item['nome']),
-            esc_html($item['versao_atual']),
-            esc_html($item['versao_nova']),
-            esc_attr($gravidade['bg']),
-            esc_attr($gravidade['cor']),
-            esc_html($gravidade['label'])
+            '<button type="button" class="uox-atualizacoes-tab%s" data-uox-aba="%s" role="tab" aria-selected="%s" style="font-size:12px; font-weight:600; padding:5px 12px; border-radius:999px; border:1px solid #cbd5e1; background:%s; color:%s; cursor:pointer;">%s (%d)</button>',
+            $primeira_aba ? ' is-active' : '',
+            esc_attr($chave),
+            $primeira_aba ? 'true' : 'false',
+            $primeira_aba ? '#334155' : '#f1f5f9',
+            $primeira_aba ? '#ffffff' : '#334155',
+            esc_html($rotulo),
+            count($grupos[$chave])
         );
+        $primeira_aba = false;
     }
 
-    echo '</ul>';
     echo '</div>';
+
+    $primeira_painel = true;
+
+    foreach ($abas as $chave => $rotulo) {
+        printf(
+            '<div class="uox-atualizacoes-painel" data-uox-painel="%s"%s>',
+            esc_attr($chave),
+            $primeira_painel ? '' : ' hidden'
+        );
+
+        if (empty($grupos[$chave])) {
+            echo '<p style="font-size: 13px; color: #16a34a; margin: 0;">Nenhuma pendência nesta categoria.</p>';
+        } else {
+            echo '<ul style="list-style: none; margin: 0; padding: 0; font-size: 13px; color: #334155;">';
+
+            foreach ($grupos[$chave] as $item) {
+                $gravidade = $cores_gravidade[$item['gravidade']];
+
+                printf(
+                    '<li style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 0; border-bottom:1px solid #f1f5f9;">
+                        <span>%s <span style="color:#94a3b8;">(%s &rarr; %s)</span></span>
+                        <span style="background:%s; color:%s; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; white-space:nowrap;">%s</span>
+                    </li>',
+                    esc_html($item['nome']),
+                    esc_html($item['versao_atual']),
+                    esc_html($item['versao_nova']),
+                    esc_attr($gravidade['bg']),
+                    esc_attr($gravidade['cor']),
+                    esc_html($gravidade['label'])
+                );
+            }
+
+            echo '</ul>';
+        }
+
+        echo '</div>';
+        $primeira_painel = false;
+    }
+
+    echo '</div>';
+    ?>
+    <script>
+        (function () {
+            var wrap = document.getElementById('uox-atualizacoes-sistemicas');
+
+            if (!wrap || wrap.dataset.uoxTabsBound) {
+                return;
+            }
+
+            wrap.dataset.uoxTabsBound = '1';
+
+            wrap.addEventListener('click', function (event) {
+                var tab = event.target.closest('[data-uox-aba]');
+
+                if (!tab) {
+                    return;
+                }
+
+                var aba = tab.dataset.uoxAba;
+
+                wrap.querySelectorAll('[data-uox-aba]').forEach(function (botao) {
+                    var ativo = botao === tab;
+                    botao.classList.toggle('is-active', ativo);
+                    botao.setAttribute('aria-selected', ativo ? 'true' : 'false');
+                    botao.style.background = ativo ? '#334155' : '#f1f5f9';
+                    botao.style.color = ativo ? '#ffffff' : '#334155';
+                });
+
+                wrap.querySelectorAll('[data-uox-painel]').forEach(function (painel) {
+                    painel.hidden = painel.dataset.uoxPainel !== aba;
+                });
+            });
+        })();
+    </script>
+    <?php
 }
 
 // NOVO: Bloco 10 - Suporte Técnico (Sua Assinatura)
