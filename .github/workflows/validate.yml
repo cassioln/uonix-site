@@ -226,6 +226,9 @@ jobs:
       - name: Test block widgets without content from Max Mega Menu
         run: php scripts/tests/test-navigation-mega-menu-widget-bloco.php
 
+      - name: Test dark footer widget areas in widgets editor
+        run: php scripts/tests/test-admin-widgets-rodape-fundo-escuro.php
+
       - name: Test admin dados globais write guards
         run: php scripts/tests/test-admin-dados-globais-rfq.php
 

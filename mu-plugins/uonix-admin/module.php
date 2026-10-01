@@ -31,6 +31,7 @@ uonix_mu_require_files(
 		'59-admin-intelligence-executive.php',
 		'52-admin-analytics-dashboard.php',
 		'60-admin-customizer-widgets-rodape.php',
+		'61-admin-widgets-rodape-fundo-escuro.php',
 	),
 	'uonix-admin'
 );
