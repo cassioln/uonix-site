@@ -37,6 +37,13 @@ Não declarar IDs GTM, GA4 ou `UONIX_ADOPT_WEBSITE_ID` em QA ou local. Os identi
 
 Exceção deliberada: `UONIX_ADOPT_CONSENT_TAG_IDS` tem um **padrão versionado no código** desde 2026-09-23, por não ser segredo e por existir uma única conta AdOpt — ver a seção abaixo. A constante de ambiente segue existindo, apenas como override opcional. Sem `UONIX_ADOPT_WEBSITE_ID`, a AdOpt não é carregada fora de produção, então o padrão não tem efeito em QA nem local.
 
+### Chave do Gemini (`UONIX_GEMINI_API_KEY`)
+
+A sugestão de Title/Description da Central de Inteligência (`54-admin-intelligence-ai.php`) lê duas constantes:
+
+- **`define( 'UONIX_GEMINI_API_KEY', '…' );`** é a chave da Generative Language API. **É segredo:** fica só no `wp-config.php` e nunca no repositório. Sem ela, nada chama o Gemini, e o painel diz "IA não configurada", que é o estado esperado em QA e local. Recomendado: uma chave por ambiente, restrita à Generative Language API, para revogar uma sem quebrar as outras.
+- **`define( 'UONIX_GEMINI_MODEL', 'gemini-3.8-flash' );`** é opcional. O padrão já é esse modelo fixo. Não use apelido `-latest`, porque ele muda de comportamento sem aviso.
+
 ### Tags AdOpt de consentimento (`UONIX_ADOPT_CONSENT_TAG_IDS`)
 
 Corrigido em 2026-09-23 (issue #264). A versão anterior desta seção descrevia um formato

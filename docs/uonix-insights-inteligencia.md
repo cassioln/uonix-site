@@ -252,7 +252,7 @@ Qualquer revisão futura deste piso deve ser feita contra a distribuição medid
 
 A consulta por `query` do Search Console precisa sair do limite de 10 linhas usado hoje para a ordem de mil, para que a mineração tenha universo. A sanitização de query existente em `53:117-132` — que rejeita padrão de e-mail, telefone e URL — continua valendo integralmente: ampliar o volume amplia a superfície de PII na mesma proporção.
 
-A sugestão de Title/Description é **determinística por regra** na primeira entrega. Integração com LLM é escopo separado.
+A sugestão de Title/Description é feita por IA (Gemini) desde 2026-09-30: ver "Sugestão de Title/Description por IA (Gemini)", abaixo. A regra determinística anterior saiu, junto com o defeito da #309.
 
 ### Minimização de PII no universo de mineração
 
@@ -316,6 +316,79 @@ A justificativa é factual e verificável no código: a única cópia é o *snap
 Então o residual é **≥ 10 consultas com texto**, e o número exato depende da distribuição do período. Confundir os dois conjuntos subestima a superfície remanescente, e é justamente ela que o ROPA precisa declarar.
 
 **O filtro de PII não foi ampliado** — ver a rejeição da heurística de nome próprio acima.
+
+### Sugestão de Title/Description por IA (Gemini)
+
+Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma sugestão de Title e Description **reescritos** pelo Gemini. Nada é aplicado no Rank Math: a sugestão é exibida para revisão humana.
+
+| Arquivo | Papel |
+|---|---|
+| `53` | A sincronização diária faz uma chamada a mais à Search Console, com `query` + `page`. Ela grava `search_console.query_pages`, que dá, para cada consulta, a página de mais impressões (empate pelo caminho). Só entra consulta cujo texto `queries_extended` já retém (#253). **O dado é acessório:** se a chamada falhar, o snapshot sai sem a chave, e a sincronização não cai. |
+| `55` | Cada oportunidade ganha `target_page`: `null` quando o snapshot não tem `query_pages`, `''` quando a consulta não tem página, ou o caminho. `uonix_intelligence_seo_differentiators()` é a lista dos cinco rótulos que a IA pode afirmar. |
+| `54` | O cliente do Gemini e o cron diário `uonix_intelligence_ai_daily`. Ele monta o pedido, valida a resposta e grava o cache `uonix_intelligence_ai_suggestions`, com autoload desligado. O leitor `uonix_intelligence_ai_suggestion_for()` é o que o painel e o e-mail usam. |
+| `56` | Colunas **Página Alvo**, com link para a página e para editá-la, e **Sugestão (IA)**, com o texto atual ao lado do sugerido e o aviso "revise antes de publicar", ou o texto do estado. |
+| `57` e `59` | O e-mail mostra "Página: /caminho" e "Título sugerido (IA): …", e o destaque de SEO cita o título sugerido. Sem sugestão, as linhas são omitidas. |
+
+**Configuração**, no `wp-config.php` de cada ambiente (ver [ambientes.md](ambientes.md)):
+- `UONIX_GEMINI_API_KEY`. Sem ela, nada chama o Gemini.
+- `UONIX_GEMINI_MODEL`, opcional, com o padrão fixo `gemini-3.8-flash`. Não usar apelido `-latest`.
+
+**O pedido:**
+- Uma chamada por oportunidade (até 5 por execução), e só quando a entrada mudou desde a última sugestão aceita.
+- A chave vai no cabeçalho `x-goog-api-key`, nunca na URL.
+- O corpo é montado chave por chave, com estes campos:
+  - a consulta, as impressões, a posição e o CTR;
+  - a URL da página, com o título e a descrição atuais;
+  - os diferenciais permitidos.
+- Nenhum dado de lead vai ao Gemini.
+- O título atual vem de `rank_math_title`, com as variáveis resolvidas pelo Rank Math quando ele expõe o resolvedor. Se sobrar variável sem resolver, vale o título do post.
+- A página líder precisa ter post **publicado**. A home vai para `page_on_front`, e endereço que dá 404 ou 301 vira `no_page`.
+
+**Texto da consulta ao Gemini.** Decisão do Cassio em 2026-09-30: o texto vai, **mesmo no plano gratuito** da API, o que aceita que o Google use o conteúdo para melhorar os produtos dele.
+- O que pesou: a consulta já vem do Google, pela Search Console, e já aparece no painel e no e-mail.
+- O filtro de PII continua **insuficiente por construção**, como está registrado acima.
+- Ver a entrada 09 do [ROPA](legal/ropa-inventario-dados-uonix.md).
+
+**Validação.** A sugestão só é aceita se tudo abaixo valer. Se algo falhar, o estado é `rejected`, e nada do texto recusado é exibido.
+1. A resposta é JSON com exatamente `title`, `description` e `differentiators_used`.
+2. O título tem de 1 a 60 caracteres, e a descrição de 1 a 155.
+3. Não há HTML.
+4. Todo diferencial declarado está na lista.
+5. Declarado é igual a presente no texto, comparado sem acento e sem caixa.
+
+**Limite declarado:** uma afirmação inventada fora da lista não é detectável pela validação. Na primeira chamada real, o modelo escreveu "máxima resistência e segurança". A proteção é a instrução do pedido e a revisão humana.
+
+**Cache e estados:**
+- Cada entrada do cache é chaveada por `sha256` de consulta + caminho, e a consulta não fica em texto puro.
+- Entrada nova faz uma chamada, e o resultado substitui o anterior, inclusive quando falha. Assim, a sugestão de um título que já não existe nunca sobrevive.
+- O leitor recalcula a entrada, e se o título ou a descrição mudaram depois da geração, o estado é `pending`.
+- Oportunidade que saiu da lista sai do cache.
+- O cache está em `protected_options_where()` e não atravessa ambientes no clone.
+
+| Estado | Painel |
+|---|---|
+| `ok` | atual e sugerido, com "Gerada por IA em DD/MM — revise antes de publicar" |
+| `not_configured` | IA não configurada: defina UONIX_GEMINI_API_KEY no wp-config.php. |
+| `pending` | Aguardando a próxima geração diária. |
+| `unavailable` | O Gemini não respondeu. Nova tentativa na próxima geração diária. |
+| `rejected` | Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista. |
+| `no_page` | Sem página publicada para esta consulta: removida, redirecionada, categoria ou tag. |
+| `model_missing` | Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php. |
+
+No e-mail, todo estado diferente de `ok` só omite a linha.
+
+**Medido em 2026-09-30:**
+- `thinkingBudget: 0` foi aceito pelo `gemini-3.8-flash`: `STOP`, sem token de raciocínio. Com `maxOutputTokens: 20` e o raciocínio ligado, o modelo voltou sem texto (`MAX_TOKENS`), e por isso o limite é 1024.
+- 503 ("high demand") em 3 de 4 chamadas seguidas. Por isso 429 e 503 ganham **uma** nova tentativa. Os demais erros esperam o cron do dia seguinte.
+- `gemini-2.5-flash` deu 404 para chave nova. Por isso existe o estado `model_missing`.
+
+**O que não entrega:**
+- destaques por IA no e-mail executivo;
+- o Radar de Pautas (Módulo 8);
+- categoria ou tag como página líder;
+- aplicar a sugestão no Rank Math;
+- botão para regenerar;
+- detecção automática de afirmação inventada fora da lista.
 
 ## Módulo 4 — Relatório Executivo
 
@@ -415,7 +488,7 @@ As duas coisas foram conferidas pela terceira revisão do PR #301 no código do 
 ### O que o Módulo 4 ainda não entrega
 
 - **Custo por Lead**, até existir fonte de gasto de anúncio.
-- **Destaques por LLM.** Integração com Gemini é fatia separada e exige migrar `GEMINI_API_KEY` para o `wp-config.php`.
+- **Destaques por LLM.** O cliente do Gemini existe (`54-admin-intelligence-ai.php`, usado pela sugestão de Title/Description do Módulo 3), mas os destaques do e-mail executivo continuam determinísticos.
 - **Painel.** Nesta fatia o relatório executivo existe só no e-mail; o botão "Enviar Teste Agora" é a forma de vê-lo sob demanda.
 
 ## Ordem de entrega dos módulos
