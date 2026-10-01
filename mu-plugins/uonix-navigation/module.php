@@ -16,6 +16,7 @@ uonix_mu_require_files(
 		'27-mega-menu-produtos-marcas.php',
 		'42-mega-menu-projetos.php',
 		'49-mobile-menu-indicator.php',
+		'50-mega-menu-widget-bloco.php',
 	),
 	'uonix-navigation'
 );
