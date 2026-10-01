@@ -1376,6 +1376,7 @@ function uox_get_atualizacoes_pendentes()
             return uox_ordem_gravidade($a['gravidade']) <=> uox_ordem_gravidade($b['gravidade']);
         });
     }
+    unset($itens_grupo);
 
     return $grupos;
 }
@@ -1411,33 +1412,40 @@ function uox_render_lista_atualizacoes_pendentes()
         return;
     }
 
+    // Abre na primeira categoria com pendência — um núcleo "crítico" não pode
+    // ficar escondido atrás de uma aba "Plugins" vazia.
+    $aba_ativa = 'plugins';
+
+    foreach (array_keys($abas) as $chave) {
+        if (!empty($grupos[$chave])) {
+            $aba_ativa = $chave;
+            break;
+        }
+    }
+
     echo '<div class="uox-atualizacoes-tabs" role="tablist" style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">';
 
-    $primeira_aba = true;
-
     foreach ($abas as $chave => $rotulo) {
+        $ativa = $chave === $aba_ativa;
         printf(
             '<button type="button" class="uox-atualizacoes-tab%s" data-uox-aba="%s" role="tab" aria-selected="%s" style="font-size:12px; font-weight:600; padding:5px 12px; border-radius:999px; border:1px solid #cbd5e1; background:%s; color:%s; cursor:pointer;">%s (%d)</button>',
-            $primeira_aba ? ' is-active' : '',
+            $ativa ? ' is-active' : '',
             esc_attr($chave),
-            $primeira_aba ? 'true' : 'false',
-            $primeira_aba ? '#334155' : '#f1f5f9',
-            $primeira_aba ? '#ffffff' : '#334155',
+            $ativa ? 'true' : 'false',
+            $ativa ? '#334155' : '#f1f5f9',
+            $ativa ? '#ffffff' : '#334155',
             esc_html($rotulo),
             count($grupos[$chave])
         );
-        $primeira_aba = false;
     }
 
     echo '</div>';
-
-    $primeira_painel = true;
 
     foreach ($abas as $chave => $rotulo) {
         printf(
             '<div class="uox-atualizacoes-painel" data-uox-painel="%s"%s>',
             esc_attr($chave),
-            $primeira_painel ? '' : ' hidden'
+            $chave === $aba_ativa ? '' : ' hidden'
         );
 
         if (empty($grupos[$chave])) {
@@ -1466,7 +1474,6 @@ function uox_render_lista_atualizacoes_pendentes()
         }
 
         echo '</div>';
-        $primeira_painel = false;
     }
 
     echo '</div>';
