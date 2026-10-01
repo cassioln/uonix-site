@@ -1020,8 +1020,7 @@ function uox_render_quick_links()
         Clique nos botões abaixo para editar as seções principais do site de forma direta, sem precisar navegar pelos menus.
     </p>
     <div class="uox-dashboard-grid">
-        <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F6130&canvas=edit" target="_blank" rel="noopener noreferrer"
-            class="uox-btn">
+        <a href="/wp-admin/post.php?post=6130&action=edit" target="_blank" rel="noopener noreferrer" class="uox-btn">
             <span class="dashicons dashicons-format-image"></span> Banner Home
         </a>
         <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F10973&canvas=edit" target="_blank" rel="noopener noreferrer"
