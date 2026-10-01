@@ -1361,37 +1361,91 @@ function uonix_gerar_mega_menu_v14()
 }
 
 // ==============================================================================
-// 3. SHORTCODE VITRINE DE MARCAS
+// 3. CONTROLE DE VISIBILIDADE DAS MARCAS NO MEGA MENU / VITRINE (ADMIN)
+// ==============================================================================
+// Substitui a whitelist/blacklist fixa no código por um campo em cada marca
+// (Produtos > Marcas > editar). Marca nasce visível: meta ausente = visível,
+// então toda marca nova aparece automaticamente até alguém desmarcar o campo.
+
+define('UONIX_META_MARCA_VISIVEL_MEGA_MENU', '_uonix_mega_menu_visivel');
+
+if (!function_exists('uonix_marca_visivel_mega_menu')) {
+    function uonix_marca_visivel_mega_menu($term_id)
+    {
+        $valor = get_term_meta($term_id, UONIX_META_MARCA_VISIVEL_MEGA_MENU, true);
+
+        return $valor !== '0';
+    }
+}
+
+add_action('product_brand_add_form_fields', 'uonix_campo_visibilidade_marca_add');
+function uonix_campo_visibilidade_marca_add()
+{
+    ?>
+    <div class="form-field">
+        <label for="uonix-mega-menu-visivel">
+            <input type="checkbox" name="uonix_mega_menu_visivel" id="uonix-mega-menu-visivel" value="1" checked="checked">
+            Mostrar esta marca no mega menu e na vitrine de marcas
+        </label>
+    </div>
+    <?php
+}
+
+add_action('product_brand_edit_form_fields', 'uonix_campo_visibilidade_marca_edit', 10, 1);
+function uonix_campo_visibilidade_marca_edit($term)
+{
+    $visivel = uonix_marca_visivel_mega_menu($term->term_id);
+    ?>
+    <tr class="form-field">
+        <th scope="row">
+            <label for="uonix-mega-menu-visivel">Mega menu / vitrine de marcas</label>
+        </th>
+        <td>
+            <label for="uonix-mega-menu-visivel">
+                <input type="checkbox" name="uonix_mega_menu_visivel" id="uonix-mega-menu-visivel" value="1" <?php checked($visivel); ?>>
+                Mostrar esta marca no mega menu e na vitrine de marcas
+            </label>
+        </td>
+    </tr>
+    <?php
+}
+
+add_action('create_product_brand', 'uonix_salvar_visibilidade_marca', 10, 1);
+add_action('edited_product_brand', 'uonix_salvar_visibilidade_marca', 10, 1);
+function uonix_salvar_visibilidade_marca($term_id)
+{
+    // create_product_brand/edited_product_brand também disparam em criação
+    // programática da marca (import, REST, sincronização de produto). Só
+    // gravar a partir da tela de edição evita apagar o padrão "visível".
+    if (!isset($_POST['action']) || !in_array($_POST['action'], ['add-tag', 'editedtag'], true)) {
+        return;
+    }
+
+    update_term_meta($term_id, UONIX_META_MARCA_VISIVEL_MEGA_MENU, isset($_POST['uonix_mega_menu_visivel']) ? '1' : '0');
+}
+
+// ==============================================================================
+// 4. SHORTCODE VITRINE DE MARCAS
 // ==============================================================================
 add_shortcode('uonix_vitrine_marcas', 'uonix_gerar_grid_marcas_premium_v14');
 
 function uonix_gerar_grid_marcas_premium_v14()
 {
-    // Marcas que podem aparecer, por slug
-    $marcas_visiveis = ['walsywa', 'ancora', 'tekbond', 'uonix'];
-
-    // Blacklist de marcas/fabricantes por ID
-    $fabricantes_blacklist = [72];
-
-    $taxonomy = 'product_brand';
-
-    $args = [
-        'taxonomy' => $taxonomy,
+    $terms = get_terms([
+        'taxonomy' => 'product_brand',
         'hide_empty' => false,
-    ];
-
-    if (!empty($marcas_visiveis)) {
-        $args['slug'] = $marcas_visiveis;
-        $args['orderby'] = 'slug__in';
-    }
-
-    if (!empty($fabricantes_blacklist)) {
-        $args['exclude'] = $fabricantes_blacklist;
-    }
-
-    $terms = get_terms($args);
+        'orderby' => 'name',
+    ]);
 
     if (empty($terms) || is_wp_error($terms)) {
+        return '';
+    }
+
+    $terms = array_filter($terms, function ($term) {
+        return uonix_marca_visivel_mega_menu($term->term_id);
+    });
+
+    if (empty($terms)) {
         return '';
     }
 
