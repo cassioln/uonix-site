@@ -19,6 +19,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+if ( ! function_exists( 'uonix_intelligence_query_flag' ) ) {
+	/**
+	 * Lê da URL um marcador de aviso (`uonix_test_sent`, `uonix_license_saved`...)
+	 * como string. Valor que não é string (`?x[]=1`) vira '', em vez do Warning
+	 * "Array to string conversion" que o cast direto produzia. Quem chama só usa o
+	 * resultado para escolher a chave de um mapa fixo.
+	 */
+	function uonix_intelligence_query_flag( $key ) {
+		return isset( $_GET[ $key ] ) && is_string( $_GET[ $key ] ) ? wp_unslash( $_GET[ $key ] ) : '';
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_unavailable_message' ) ) {
 	/**
 	 * Traduz o motivo técnico de indisponibilidade para linguagem de operador.
@@ -471,10 +483,10 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 			<?php endif; ?>
 
 			<?php if ( isset( $_GET['uonix_test_sent'] ) ) : ?>
-				<?php if ( '1' === (string) $_GET['uonix_test_sent'] ) : ?>
+				<?php if ( '1' === uonix_intelligence_query_flag( 'uonix_test_sent' ) ) : ?>
 					<div class="notice notice-success inline"><p><?php echo esc_html( sprintf( 'Relatório de teste enviado para %d destinatário(s).', isset( $_GET['uonix_test_recipients'] ) ? (int) $_GET['uonix_test_recipients'] : 0 ) ); ?></p></div>
 				<?php else : ?>
-					<div class="notice notice-error inline"><p><?php echo esc_html( uonix_intelligence_test_send_message( isset( $_GET['uonix_test_reason'] ) ? (string) $_GET['uonix_test_reason'] : '' ) ); ?></p></div>
+					<div class="notice notice-error inline"><p><?php echo esc_html( uonix_intelligence_test_send_message( uonix_intelligence_query_flag( 'uonix_test_reason' ) ) ); ?></p></div>
 				<?php endif; ?>
 			<?php endif; ?>
 
@@ -567,8 +579,19 @@ if ( ! function_exists( 'uonix_intelligence_render_license_settings' ) ) {
 		$gravado = get_option( uonix_intelligence_license_option(), null );
 		$status  = is_array( $gravado ) && isset( $gravado['status'] ) && is_string( $gravado['status'] ) ? $gravado['status'] : '';
 		$data    = is_array( $gravado ) && isset( $gravado['valid_until'] ) && is_string( $gravado['valid_until'] ) ? $gravado['valid_until'] : '';
-		$salvo   = isset( $_GET['uonix_license_saved'] ) ? (string) $_GET['uonix_license_saved'] : '';
-		$erro    = isset( $_GET['uonix_license_error'] ) ? (string) $_GET['uonix_license_error'] : '';
+
+		// Opção presente que o 50 lê como inválida pausa o envio. O seletor não vem
+		// pré-marcado nesse caso: mostrar o status que parece gravado (`active` sem a
+		// chave da data, por exemplo) e salvar tiraria a pausa sem o dono pedir (#322).
+		$painel     = isset( $estado['panel'] ) && is_array( $estado['panel'] ) ? $estado['panel'] : array();
+		$malformada = null !== $gravado && isset( $painel['reason'] ) && 'invalid' === $painel['reason'];
+		if ( null === $gravado ) {
+			$status = 'none';
+		} elseif ( $malformada ) {
+			$status = '';
+		}
+		$salvo   = uonix_intelligence_query_flag( 'uonix_license_saved' );
+		$erro    = uonix_intelligence_query_flag( 'uonix_license_error' );
 
 		// Textos fixos: o que vem da URL só escolhe a chave.
 		$avisos_salvo = array(
@@ -578,10 +601,11 @@ if ( ! function_exists( 'uonix_intelligence_render_license_settings' ) ) {
 		$avisos_erro  = array(
 			'status' => 'Nada foi salvo: status desconhecido.',
 			'date'   => 'Nada foi salvo: a data-limite precisa ser um dia que exista, no formato AAAA-MM-DD.',
-			'trial'  => 'Nada foi salvo: cortesia (trial) exige data-limite.',
+			'trial'   => 'Nada foi salvo: cortesia (trial) exige data-limite.',
+			'missing' => 'Nada foi salvo: escolha o status do painel.',
 		);
 		$opcoes = array(
-			''          => 'Sem controle pelo painel',
+			'none'      => 'Sem controle pelo painel',
 			'active'    => 'Contratada (active)',
 			'trial'     => 'Cortesia (trial)',
 			'suspended' => 'Suspensa (suspended)',
@@ -611,6 +635,10 @@ if ( ! function_exists( 'uonix_intelligence_render_license_settings' ) ) {
 			</tr>
 		</table>
 
+		<?php if ( $malformada ) : ?>
+			<div class="notice notice-warning inline"><p>A licença gravada no painel está malformada e pausa o envio. Salvar substitui o valor gravado: escolha o status de novo.</p></div>
+		<?php endif; ?>
+
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 			<input type="hidden" name="action" value="uonix_intelligence_save_license" />
 			<?php wp_nonce_field( 'uonix_intelligence_save_license' ); ?>
@@ -618,7 +646,10 @@ if ( ! function_exists( 'uonix_intelligence_render_license_settings' ) ) {
 				<tr>
 					<th scope="row"><label for="uonix-license-status">Status no painel</label></th>
 					<td>
-						<select id="uonix-license-status" name="uonix_license_status">
+						<select id="uonix-license-status" name="uonix_license_status"<?php echo '' === $status ? ' required' : ''; ?>>
+							<?php if ( '' === $status ) : ?>
+								<option value="" disabled selected>Escolha o status</option>
+							<?php endif; ?>
 							<?php foreach ( $opcoes as $valor => $rotulo ) : ?>
 								<option value="<?php echo esc_attr( $valor ); ?>"<?php echo $valor === $status ? ' selected' : ''; ?>><?php echo esc_html( $rotulo ); ?></option>
 							<?php endforeach; ?>

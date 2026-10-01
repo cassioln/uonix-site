@@ -369,7 +369,10 @@ uox_assert( false !== strpos( $lic, 'name="action" value="uonix_intelligence_sav
 uox_assert( in_array( 'uonix_intelligence_save_license', $GLOBALS['uox_nonce_actions'], true ), 'O formulário da licença emite o nonce da ação' );
 uox_assert( 1 === preg_match( '#<option value="trial" selected>#', $lic ), 'O status gravado vem selecionado' );
 uox_assert( 1 === substr_count( $lic, ' selected>' ), 'Só um status vem selecionado' );
-uox_assert( 4 === preg_match_all( '#<option value="(|active|trial|suspended)"#', $lic ), 'O seletor oferece sem controle, active, trial e suspended' );
+uox_assert( 4 === preg_match_all( '#<option value="(none|active|trial|suspended)"#', $lic ), 'O seletor oferece sem controle (none), active, trial e suspended' );
+uox_assert( false === strpos( $lic, '<option value=""' ), 'Com a opção válida, não há opção de status vazio' );
+uox_assert( false === strpos( $lic, ' required' ), 'Com a opção válida, sempre há um status real marcado, e o seletor não precisa de required' );
+uox_assert( false === strpos( $lic, 'está malformada' ), 'Com a opção válida, não há aviso de opção malformada' );
 uox_assert( false !== strpos( $lic, 'type="date" id="uonix-license-valid-until" name="uonix_license_valid_until" value="2099-10-31"' ), 'A data gravada vem no campo de data' );
 uox_assert( false !== strpos( $lic, 'Cortesia (trial) até 31/10/2099, pelo painel do Uônix Insights.' ), 'O estado que vale diz de onde vem' );
 uox_assert( false !== strpos( $lic, '<th scope="row">wp-config.php</th>' ) && false !== strpos( $lic, 'Sem controle.' ), 'A linha da constante aparece separada da do painel' );
@@ -389,11 +392,12 @@ uox_assert( in_array( $GLOBALS['uox_referer_action'], $GLOBALS['uox_nonce_action
 
 // Avisos vêm de mapa fixo; o valor da URL nunca é impresso.
 $avisos = array(
-	'salvo'       => array( array( 'uonix_license_saved' => '1' ), 'Licença do painel salva.' ),
-	'removido'    => array( array( 'uonix_license_saved' => 'cleared' ), 'Licença do painel removida' ),
-	'erro status' => array( array( 'uonix_license_error' => 'status' ), 'status desconhecido' ),
-	'erro data'   => array( array( 'uonix_license_error' => 'date' ), 'formato AAAA-MM-DD' ),
-	'erro trial'  => array( array( 'uonix_license_error' => 'trial' ), 'cortesia (trial) exige data-limite' ),
+	'salvo'        => array( array( 'uonix_license_saved' => '1' ), 'Licença do painel salva.' ),
+	'removido'     => array( array( 'uonix_license_saved' => 'cleared' ), 'Licença do painel removida' ),
+	'erro status'  => array( array( 'uonix_license_error' => 'status' ), 'status desconhecido' ),
+	'erro data'    => array( array( 'uonix_license_error' => 'date' ), 'formato AAAA-MM-DD' ),
+	'erro trial'   => array( array( 'uonix_license_error' => 'trial' ), 'cortesia (trial) exige data-limite' ),
+	'erro ausente' => array( array( 'uonix_license_error' => 'missing' ), 'escolha o status do painel' ),
 );
 foreach ( $avisos as $caso => $par ) {
 	$_GET = $par[0];
@@ -403,12 +407,71 @@ $_GET = array( 'uonix_license_saved' => '<script>x</script>', 'uonix_license_err
 $lic_xss = uox_render_settings();
 uox_assert( false === strpos( $lic_xss, '<script>x' ) && false === strpos( $lic_xss, '<b>y' ) && false === strpos( $lic_xss, 'Nada foi salvo' ) && false === strpos( $lic_xss, 'Licença do painel' ), 'Chave desconhecida na URL não gera aviso nem é impressa' );
 
-// Opção malformada: o seletor cai em "sem controle", sem erro, e o estado diz inválido.
-$GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => 'lixo' );
+// Aviso do envio de teste: sucesso e falha vêm dos textos fixos.
+$_GET = array( 'uonix_test_sent' => '1', 'uonix_test_recipients' => '2' );
+uox_assert( false !== strpos( uox_render_settings(), 'Relatório de teste enviado para 2 destinatário(s).' ), 'Aviso do envio de teste, sucesso' );
+$_GET = array( 'uonix_test_sent' => '0', 'uonix_test_reason' => 'no_recipients' );
+uox_assert( false !== strpos( uox_render_settings(), 'Nenhum destinatário cadastrado, então nada foi enviado.' ), 'Aviso do envio de teste, falha com motivo conhecido' );
+
+// Marcador em array na URL (`?uonix_license_saved[]=1`): nenhum Warning e nenhum
+// aviso escolhido (#321). O handler captura tudo, para não depender do error_reporting.
+$uox_erros_php = array();
+set_error_handler(
+	static function ( $errno, $errstr ) use ( &$uox_erros_php ) {
+		$uox_erros_php[] = $errstr;
+		return true;
+	}
+);
+$_GET = array(
+	'uonix_license_saved' => array( '1' ),
+	'uonix_license_error' => array( 'date' ),
+	'uonix_test_sent'     => array( '1' ),
+	'uonix_test_reason'   => array( 'no_recipients' ),
+);
+$lic_array = uox_render_settings();
+restore_error_handler();
+uox_assert( array() === $uox_erros_php, 'Marcador em array na URL não emite aviso do PHP: ' . implode( ' | ', $uox_erros_php ) );
+uox_assert( false === strpos( $lic_array, 'Licença do painel salva.' ) && false === strpos( $lic_array, 'formato AAAA-MM-DD' ), 'Marcador de licença em array não escolhe aviso' );
+uox_assert( false === strpos( $lic_array, 'Relatório de teste enviado' ) && false === strpos( $lic_array, 'Nenhum destinatário cadastrado, então' ), 'Marcador de envio de teste em array não vale como sucesso nem escolhe motivo' );
+
+// Opção malformada (#322): aviso acima do formulário, e o seletor não vem
+// pré-marcado. Salvar com "sem controle" ou com o status aparente tiraria a pausa.
+$malformadas = array(
+	'não é array'         => 'lixo',
+	'active sem a data'   => array( 'status' => 'active' ),
+	'status desconhecido' => array( 'status' => 'ativo', 'valid_until' => '' ),
+	'trial sem data'      => array( 'status' => 'trial', 'valid_until' => '' ),
+);
+foreach ( $malformadas as $caso => $gravada ) {
+	$GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => $gravada );
+	$_GET = array();
+	$lic_ruim = uox_render_settings();
+	uox_assert( false !== strpos( $lic_ruim, 'A licença gravada no painel está malformada e pausa o envio.' ), "Opção malformada ({$caso}): aviso acima do formulário" );
+	uox_assert( 1 === preg_match( '#<option value="" disabled selected>#', $lic_ruim ) && 1 === substr_count( $lic_ruim, ' selected>' ), "Opção malformada ({$caso}): só o marcador vazio vem selecionado" );
+	uox_assert( false !== strpos( $lic_ruim, 'name="uonix_license_status" required' ), "Opção malformada ({$caso}): o seletor exige escolher o status" );
+	uox_assert( false !== strpos( $lic_ruim, 'Configuração inválida. Pausa o envio.' ), "Opção malformada ({$caso}): a linha do painel diz que pausa" );
+}
+
+// Opção válida que pausa (vencida ou suspensa) NÃO é malformada: sem aviso, e o
+// status gravado vem marcado. O detector não pode tratar toda pausa como defeito.
+$pausadas = array(
+	'vencida'  => array( array( 'status' => 'active', 'valid_until' => '2020-01-31' ), 'active' ),
+	'suspensa' => array( array( 'status' => 'suspended', 'valid_until' => '' ), 'suspended' ),
+);
+foreach ( $pausadas as $caso => $par ) {
+	$GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => $par[0] );
+	$_GET = array();
+	$lic_pausa = uox_render_settings();
+	uox_assert( false === strpos( $lic_pausa, 'está malformada' ) && false === strpos( $lic_pausa, '<option value=""' ), "Licença {$caso}: sem aviso de malformada e sem marcador vazio" );
+	uox_assert( 1 === preg_match( '#<option value="' . $par[1] . '" selected>#', $lic_pausa ) && 1 === substr_count( $lic_pausa, ' selected>' ), "Licença {$caso}: o status gravado vem marcado" );
+}
+
+// Sem opção gravada: "sem controle" vem marcado, sem aviso.
+$GLOBALS['uox_options'] = array();
 $_GET = array();
-$lic_ruim = uox_render_settings();
-uox_assert( 1 === preg_match( '#<option value="" selected>#', $lic_ruim ), 'Opção malformada: o seletor mostra sem controle' );
-uox_assert( false !== strpos( $lic_ruim, 'Configuração inválida. Pausa o envio.' ), 'Opção malformada: a linha do painel diz que pausa' );
+$lic_sem = uox_render_settings();
+uox_assert( 1 === preg_match( '#<option value="none" selected>#', $lic_sem ) && 1 === substr_count( $lic_sem, ' selected>' ), 'Sem opção gravada: sem controle vem selecionado' );
+uox_assert( false === strpos( $lic_sem, 'está malformada' ) && false === strpos( $lic_sem, '<option value=""' ), 'Sem opção gravada: sem aviso e sem marcador vazio' );
 
 // Quem não é o dono não vê o bloco, com ou sem manage_options.
 foreach ( array( true, false ) as $pode ) {

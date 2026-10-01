@@ -42,10 +42,22 @@ function wp_get_current_user() {
 }
 function current_user_can( $cap ) { return in_array( $cap, $GLOBALS['uox_caps'], true ); }
 function get_option( $key, $default = false ) { return array_key_exists( $key, $GLOBALS['uox_options'] ) ? $GLOBALS['uox_options'][ $key ] : $default; }
-function update_option( $key, $value, $autoload = null ) { $GLOBALS['uox_options'][ $key ] = $value; return true; }
+// `update_option` segue o core: aplica `pre_update_option_{$key}` e desiste se o valor
+// voltar igual ao antigo, inclusive na primeira gravação, em que o antigo é `false`.
+function update_option( $key, $value, $autoload = null ) {
+	$antigo = get_option( $key );
+	foreach ( $GLOBALS['uox_filters'][ 'pre_update_option_' . $key ] ?? array() as $filtro ) {
+		$value = call_user_func( $filtro[0], $value, $antigo, $key );
+	}
+	if ( $value === $antigo || serialize( $value ) === serialize( $antigo ) ) {
+		return false;
+	}
+	$GLOBALS['uox_options'][ $key ] = $value;
+	return true;
+}
 function add_action( $hook, $callback, $priority = 10, $args = 1 ) { $GLOBALS['uox_actions'][] = array( $hook, $callback, $priority ); return true; }
-// O 50 registra a trava de gravação da licença; aqui ela não entra em jogo.
-function add_filter( $hook, $callback, $priority = 10, $args = 1 ) { return true; }
+$GLOBALS['uox_filters'] = array();
+function add_filter( $hook, $callback, $priority = 10, $args = 1 ) { $GLOBALS['uox_filters'][ $hook ][] = array( $callback, $priority, $args ); return true; }
 function add_menu_page( $page_title, $menu_title, $cap, $slug, $callback = '', $icon = '', $position = null ) {
 	$GLOBALS['uox_menus'][] = compact( 'menu_title', 'cap', 'slug', 'callback', 'icon', 'position' );
 }
@@ -201,7 +213,7 @@ uox_assert( 'ksiodev' === uonix_ksio_owner_login(), 'o dono padrão é ksiodev' 
 // A constante sobrescreve, para o ambiente sem o usuário `ksiodev`. Processo separado,
 // porque constante não se redefine.
 $sub = shell_exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg(
-	'define("ABSPATH", 1); define("UONIX_KSIO_OWNER_LOGIN", "operador-qa"); function add_action() {} '
+	'define("ABSPATH", 1); define("UONIX_KSIO_OWNER_LOGIN", "operador-qa"); function add_action() {} function add_filter() {} '
 	. 'require ' . var_export( $RAIZ . '/mu-plugins/uonix-admin/49-admin-ksio-governanca.php', true ) . '; echo uonix_ksio_owner_login();'
 ) );
 uox_assert( 'operador-qa' === $sub, 'UONIX_KSIO_OWNER_LOGIN sobrescreve o dono; obteve ' . var_export( $sub, true ) );
@@ -381,6 +393,46 @@ unset( $GLOBALS['uox_options']['uonix_intelligence_license'] );
 define( 'KSIODEV_INTELLIGENCE_STATUS', 'suspended' );
 uox_assert( false !== strpos( uox_home_do_dono(), 'está suspenso' ), 'com a licença suspensa o cartão diz que está suspenso' );
 $GLOBALS['uox_user'] = 'root';
+
+// ---------------------------------------------------------------------------
+// 10. Trava da opção (#323): `update_option` de quem não é o dono não cria nem muda
+//     a visibilidade. É o caminho do `/wp-admin/options.php`.
+// ---------------------------------------------------------------------------
+uox_assert(
+	array( array( 'uonix_ksio_visibility_guard_write', PHP_INT_MAX, 2 ) ) === ( $GLOBALS['uox_filters'][ 'pre_update_option_' . $OPCAO ] ?? null ),
+	'A trava fica no pre_update_option da visibilidade, por último e com 2 args'
+);
+
+$GLOBALS['uox_user']    = 'root';
+$GLOBALS['uox_caps']    = $ADMIN;
+$GLOBALS['uox_options'] = array();
+uox_assert( false === update_option( $OPCAO, array( 'clone' => true ) ), 'Outro administrador não cria a opção da visibilidade' );
+uox_assert( ! array_key_exists( $OPCAO, $GLOBALS['uox_options'] ) && false === uonix_ksio_can_access_tool( 'clone' ), 'Sem a opção criada, o Clone continua oculto para ele' );
+
+$GLOBALS['uox_options'] = array( $OPCAO => array( 'limpeza' => false, 'clone' => false, 'analytics' => true ) );
+update_option( $OPCAO, array( 'limpeza' => true, 'clone' => true, 'analytics' => true ) );
+uox_assert( array( 'limpeza' => false, 'clone' => false, 'analytics' => true ) === get_option( $OPCAO ), 'Outro administrador não muda a visibilidade gravada' );
+uox_assert( false === uonix_ksio_can_access_tool( 'clone' ) && true === uonix_ksio_can_access_tool( 'analytics' ), 'Depois da tentativa, ele vê só o que o dono liberou' );
+
+$GLOBALS['uox_user'] = 'ksiodev';
+update_option( $OPCAO, array( 'limpeza' => false, 'clone' => true, 'analytics' => true ) );
+uox_assert( array( 'limpeza' => false, 'clone' => true, 'analytics' => true ) === get_option( $OPCAO ), 'O dono muda a visibilidade pelo update_option' );
+$GLOBALS['uox_user']    = 'root';
+$GLOBALS['uox_options'] = array();
+
+// WP-CLI passa (receita de recuperação), em processo separado: a constante não se
+// redefine. Sem funções de usuário carregadas, ninguém é o dono.
+function uox_sub_49( $prefixo, $expressao ) {
+	$codigo = 'define("ABSPATH", 1); function add_action() {} function add_filter() {} ' . $prefixo
+		. ' require ' . var_export( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/49-admin-ksio-governanca.php', true ) . '; echo json_encode(' . $expressao . ');';
+	return json_decode( (string) shell_exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg( $codigo ) . ' 2>&1' ), true );
+}
+$r = uox_sub_49( '', 'uonix_ksio_visibility_guard_write("novo", "velho")' );
+uox_assert( 'velho' === $r, 'Fora do WP-CLI e sem o dono, a trava mantém o valor antigo; obteve ' . var_export( $r, true ) );
+$r = uox_sub_49( 'define("WP_CLI", true);', 'uonix_ksio_visibility_guard_write("novo", "velho")' );
+uox_assert( 'novo' === $r, 'No WP-CLI a trava deixa gravar; obteve ' . var_export( $r, true ) );
+$r = uox_sub_49( 'define("WP_CLI", false);', 'uonix_ksio_visibility_guard_write("novo", "velho")' );
+uox_assert( 'velho' === $r, 'WP_CLI definida como false não libera; obteve ' . var_export( $r, true ) );
 
 // ---------------------------------------------------------------------------
 
