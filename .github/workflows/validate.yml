@@ -223,6 +223,9 @@ jobs:
       - name: Test footer widgets in Customizer for editor
         run: php scripts/tests/test-admin-customizer-widgets-rodape.php
 
+      - name: Test block widgets without content from Max Mega Menu
+        run: php scripts/tests/test-navigation-mega-menu-widget-bloco.php
+
       - name: Test admin dados globais write guards
         run: php scripts/tests/test-admin-dados-globais-rfq.php
 
