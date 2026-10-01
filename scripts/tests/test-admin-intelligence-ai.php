@@ -144,6 +144,10 @@ uox_ai_assert( 'application/json' === $gc['responseMimeType'] && 0.2 === $gc['te
 uox_ai_assert( array( 'title', 'description', 'differentiators_used' ) === $gc['responseSchema']['required'], 'Esquema exige as três chaves' );
 $texto_pedido = $body['contents'][0]['parts'][0]['text'];
 uox_ai_assert( false !== strpos( $texto_pedido, 'olhal de ancoragem inox' ) && false !== strpos( $texto_pedido, 'Aço Inox 304/316' ) && false !== strpos( $texto_pedido, 'no máximo 60' ) && false !== strpos( $texto_pedido, 'no máximo 155' ), 'O pedido leva a consulta, a lista e os limites' );
+// Fronteira de dados pelo conteúdo, e não por busca de texto: os dados vão como JSON
+// na última linha da instrução, e só as oito chaves permitidas podem estar lá.
+$json_dados = json_decode( substr( $texto_pedido, (int) strrpos( $texto_pedido, "\n" ) + 1 ), true );
+uox_ai_assert( is_array( $json_dados ) && array( 'consulta', 'impressoes_30_dias', 'posicao_media', 'taxa_de_clique', 'pagina', 'titulo_atual', 'descricao_atual', 'diferenciais_permitidos' ) === array_keys( $json_dados ), 'Os dados enviados têm exatamente as oito chaves permitidas; obteve ' . var_export( is_array( $json_dados ) ? array_keys( $json_dados ) : $json_dados, true ) );
 
 // ---------------------------------------------------------------------------
 // 4. Validação (foco de revisão 4: diferencial escrito diferente é recusado).
@@ -235,6 +239,10 @@ $GLOBALS['uox_posts'][10]['meta']['rank_math_title'] = 'Olhal Inox Novo | Uônix
 $GLOBALS['uox_http'] = array( uox_http( 503 ), uox_http( 503 ) );
 $res3 = uonix_intelligence_ai_run( uox_analise( array( uox_linha() ) ), 0 );
 uox_ai_assert( 1 === $res3['called'] && 'unavailable' === get_option( uonix_intelligence_ai_option() )[ $k_ok ]['status'] && ! isset( get_option( uonix_intelligence_ai_option() )[ $k_ok ]['suggestion'] ), 'Título mudou e o Gemini falhou: unavailable, e a sugestão antiga não sobrevive' );
+// No dia seguinte, a mesma entrada que falhou é tentada de novo: falha transitória não trava a sugestão.
+$GLOBALS['uox_http'] = array( uox_gemini( $ok ) );
+$res3b = uonix_intelligence_ai_run( uox_analise( array( uox_linha() ) ), 0 );
+uox_ai_assert( 1 === $res3b['called'] && 'ok' === get_option( uonix_intelligence_ai_option() )[ $k_ok ]['status'], 'Mesma entrada depois de uma falha: chama de novo na execução seguinte' );
 uox_posts_padrao();
 
 $GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
