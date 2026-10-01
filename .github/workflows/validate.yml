@@ -229,6 +229,9 @@ jobs:
       - name: Test dark footer widget areas in widgets editor
         run: php scripts/tests/test-admin-widgets-rodape-fundo-escuro.php
 
+      - name: Test widgets editor batch route alternative
+        run: php scripts/tests/test-admin-widgets-lote-rest.php
+
       - name: Test admin dados globais write guards
         run: php scripts/tests/test-admin-dados-globais-rfq.php
 
@@ -279,6 +282,9 @@ jobs:
 
       - name: Test consent-aware campaign attribution browser flow
         run: node scripts/tests/test-attribution-tracking.mjs
+
+      - name: Test widgets editor batch request redirect
+        run: node --test scripts/tests/test-admin-widgets-lote.mjs
 
       - name: Run ShellCheck
         run: find scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck -x
