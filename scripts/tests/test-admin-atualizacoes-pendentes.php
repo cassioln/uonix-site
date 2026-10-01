@@ -196,12 +196,15 @@ uox_atualizacoes_assert(
 
 $so_nucleo = uox_atualizacoes_render();
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'id="uox-atualizacoes-sistemicas"' ), 'com pendência, o bloco deve ser renderizado' );
-uox_atualizacoes_assert( array( 'todos', 'core' ) === uox_atualizacoes_abas( $so_nucleo ), 'só com o núcleo pendente, as abas devem ser Todos e WordPress (vazias ocultas)' );
+// Uma categoria só: "Todos" repetiria a mesma lista, então fica a aba única.
+uox_atualizacoes_assert( array( 'core' ) === uox_atualizacoes_abas( $so_nucleo ), 'só com o núcleo pendente, a única aba deve ser WordPress (sem Todos, vazias ocultas)' );
+uox_atualizacoes_assert( false === strpos( $so_nucleo, 'data-uox-painel="todos"' ), 'com uma categoria só, não deve haver painel Todos' );
 uox_atualizacoes_assert( false === strpos( $so_nucleo, 'data-uox-painel="plugins"' ), 'categoria vazia não deve ter painel' );
-uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $so_nucleo, 'todos' ), 'is-active' ), 'a aba Todos deve abrir ativa por padrão' );
+uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $so_nucleo, 'core' ), 'is-active' ), 'a aba única deve abrir ativa' );
+uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $so_nucleo, 'core' ), 'tabindex="0"' ), 'a aba única deve estar na ordem do Tab' );
 uox_atualizacoes_assert( 1 === substr_count( $so_nucleo, 'class="uox-atualizacoes-tab is-active"' ), 'exatamente uma aba deve abrir ativa' );
-uox_atualizacoes_assert( false === strpos( uox_atualizacoes_tag_painel( $so_nucleo, 'todos' ), 'hidden' ), 'o painel Todos deve abrir visível' );
-uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_painel( $so_nucleo, 'core' ), 'hidden' ), 'o painel WordPress deve abrir oculto' );
+uox_atualizacoes_assert( false === strpos( uox_atualizacoes_tag_painel( $so_nucleo, 'core' ), 'hidden' ), 'o painel da aba única deve abrir visível' );
+uox_atualizacoes_assert( false === strpos( uox_atualizacoes_painel( $so_nucleo, 'core' ), '&middot;' ), 'na aba única, o item não repete a categoria' );
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'Crítica' ), 'o selo "Crítica" deve aparecer para o núcleo' );
 uox_atualizacoes_assert( false === strpos( $so_nucleo, 'uox-atualizacoes-paginacao' ), 'até 10 itens não há paginação' );
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, '#uox-atualizacoes-sistemicas [hidden]{display:none !important;}' ), 'o bloco deve garantir que [hidden] vença o display:flex inline' );
@@ -218,7 +221,7 @@ uox_atualizacoes_assert(
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'function fixarAltura()' ), 'o JS deve travar a altura da área dos painéis' );
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, "caixa.style.height = maior > 0 ? maior + 'px' : '';" ), 'medida 0 (widget recolhido) não pode travar a altura em 0' );
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'new ResizeObserver(' ), 'a altura deve ser refeita quando a largura do bloco muda, não só no resize da janela' );
-uox_atualizacoes_assert( 2 === uox_atualizacoes_assert_informativo( $so_nucleo, 'só núcleo' ), 'só núcleo: os únicos botões devem ser as 2 abas' );
+uox_atualizacoes_assert( 1 === uox_atualizacoes_assert_informativo( $so_nucleo, 'só núcleo' ), 'só núcleo: o único botão deve ser a aba única' );
 uox_atualizacoes_assert_aviso( $so_nucleo, 'só núcleo' );
 
 // Núcleo, plugins (fora de ordem) e temas pendentes.
@@ -348,6 +351,8 @@ uox_atualizacoes_plugins_patch( 10 );
 $dez = uox_atualizacoes_render();
 uox_atualizacoes_assert( false === strpos( $dez, 'uox-atualizacoes-paginacao' ), '10 itens não devem gerar paginação' );
 uox_atualizacoes_assert( 0 === preg_match( '#<li[^>]*hidden#', $dez ), '10 itens devem aparecer todos na primeira página' );
+uox_atualizacoes_assert( array( 'plugins' ) === uox_atualizacoes_abas( $dez ), 'só plugins pendentes: a única aba deve ser Plugins (sem Todos)' );
+uox_atualizacoes_assert( false !== strpos( uox_atualizacoes_tag_aba( $dez, 'plugins' ), 'is-active' ) && false === strpos( uox_atualizacoes_tag_painel( $dez, 'plugins' ), 'hidden' ), 'só plugins: a aba Plugins abre ativa e visível' );
 
 // Paginação: 12 plugins + núcleo = Todos com 13 (2 páginas) e Plugins com 12 (2 páginas).
 $GLOBALS['uox_test_site_transients']['update_core'] = (object) array(
@@ -367,6 +372,15 @@ foreach ( array( 'todos' => 13, 'plugins' => 12 ) as $aba => $quantidade ) {
 }
 
 uox_atualizacoes_assert( false === strpos( uox_atualizacoes_painel( $paginado, 'core' ), 'uox-atualizacoes-paginacao' ), 'a aba com 1 item não deve ter paginação' );
+uox_atualizacoes_assert(
+	1 === preg_match( '#<div class="uox-atualizacoes-painel" data-uox-painel="todos"[^>]*style="display:flex; flex-direction:column; min-height:100%;#', $paginado )
+		&& 1 === preg_match( '#<div class="uox-atualizacoes-paginacao" style="[^"]*margin-top:auto;#', $paginado ),
+	'a paginação deve ficar colada no fundo da área de altura fixa (painel em coluna flex + margin-top:auto)'
+);
+uox_atualizacoes_assert(
+	1 === preg_match( "#if \\(!tab\\.classList\\.contains\\('is-active'\\)\\) \\{\\s*wrap\\.querySelectorAll\\('\\[data-uox-painel\\]'\\)\\.forEach\\(function \\(painel\\) \\{\\s*irParaPagina\\(painel, 1\\);#", $paginado ),
+	'trocar de aba deve voltar todas as abas para a página 1'
+);
 uox_atualizacoes_assert( 7 === uox_atualizacoes_assert_informativo( $paginado, 'paginado' ), 'paginado: 3 abas + 2 botões de paginação em 2 painéis' );
 uox_atualizacoes_assert_aviso( $paginado, 'paginado' );
 

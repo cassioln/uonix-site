@@ -1451,6 +1451,14 @@ function uox_render_lista_atualizacoes_pendentes()
         return !empty($painel['itens']);
     });
 
+    // Com uma categoria só, "Todos" repetiria a mesma lista: fica a aba única.
+    if (2 === count($paineis)) {
+        unset($paineis['todos']);
+    }
+
+    // Abre na primeira aba que sobrou — "Todos", quando existe.
+    $aba_ativa = array_key_first($paineis);
+
     // Limite por página, para o card não crescer sem fim no dashboard.
     $por_pagina = 10;
     $estilo_botao_pagina = 'font-size:12px; padding:3px 10px; border-radius:6px; border:1px solid #cbd5e1; background:#ffffff; color:#334155; cursor:pointer;';
@@ -1463,7 +1471,7 @@ function uox_render_lista_atualizacoes_pendentes()
     echo '<div class="uox-atualizacoes-tabs" role="tablist" aria-label="Categorias de atualização" style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">';
 
     foreach ($paineis as $chave => $painel) {
-        $ativa = 'todos' === $chave;
+        $ativa = $aba_ativa === $chave;
 
         printf(
             '<button type="button" class="uox-atualizacoes-tab%1$s" id="uox-atualizacoes-tab-%2$s" data-uox-aba="%2$s" role="tab" aria-selected="%3$s" aria-controls="uox-atualizacoes-painel-%2$s" tabindex="%4$s" style="font-size:12px; font-weight:600; padding:5px 12px; border-radius:999px; border:1px solid #cbd5e1; background:%5$s; color:%6$s; cursor:pointer;">%7$s (%8$d)</button>',
@@ -1488,10 +1496,10 @@ function uox_render_lista_atualizacoes_pendentes()
         $paginas = (int) ceil(count($painel['itens']) / $por_pagina);
 
         printf(
-            '<div class="uox-atualizacoes-painel" data-uox-painel="%1$s" id="uox-atualizacoes-painel-%1$s" role="tabpanel" aria-labelledby="uox-atualizacoes-tab-%1$s" tabindex="0" data-uox-pagina-atual="1" data-uox-paginas="%2$d"%3$s>',
+            '<div class="uox-atualizacoes-painel" data-uox-painel="%1$s" id="uox-atualizacoes-painel-%1$s" role="tabpanel" aria-labelledby="uox-atualizacoes-tab-%1$s" tabindex="0" data-uox-pagina-atual="1" data-uox-paginas="%2$d" style="display:flex; flex-direction:column; min-height:100%%; box-sizing:border-box;"%3$s>',
             esc_attr($chave),
             $paginas,
-            'todos' === $chave ? '' : ' hidden'
+            $aba_ativa === $chave ? '' : ' hidden'
         );
 
         echo '<ul style="list-style: none; margin: 0; padding: 0; font-size: 13px; color: #334155;">';
@@ -1521,7 +1529,9 @@ function uox_render_lista_atualizacoes_pendentes()
 
         if ($paginas > 1) {
             printf(
-                '<div class="uox-atualizacoes-paginacao" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:#64748b;">
+                // margin-top:auto cola a paginação no fundo da área de altura
+                // fixa, mesmo numa última página com poucos itens.
+                '<div class="uox-atualizacoes-paginacao" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-top:auto; padding-top:8px; font-size:12px; color:#64748b;">
                     <button type="button" data-uox-pagina-acao="anterior" disabled style="%1$s">&lsaquo; Anterior</button>
                     <span data-uox-pagina-status aria-live="polite">Página 1 de %2$d</span>
                     <button type="button" data-uox-pagina-acao="proxima" style="%1$s">Próxima &rsaquo;</button>
@@ -1681,6 +1691,13 @@ function uox_render_lista_atualizacoes_pendentes()
 
             function ativarAba(tab) {
                 var aba = tab.dataset.uoxAba;
+
+                // Trocar de aba recomeça a paginação de todas na página 1.
+                if (!tab.classList.contains('is-active')) {
+                    wrap.querySelectorAll('[data-uox-painel]').forEach(function (painel) {
+                        irParaPagina(painel, 1);
+                    });
+                }
 
                 wrap.querySelectorAll('[data-uox-aba]').forEach(function (botao) {
                     var ativo = botao === tab;
