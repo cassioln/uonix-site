@@ -10,60 +10,7 @@
 
 declare( strict_types=1 );
 
-define( 'ABSPATH', __DIR__ );
-
-$GLOBALS['uox_test_site_transients'] = array();
-$GLOBALS['uox_test_plugins']         = array();
-$GLOBALS['uox_test_themes']          = array();
-$GLOBALS['wp_version']               = '6.8.1';
-
-function add_action( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
-}
-
-function add_filter( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
-}
-
-function apply_filters( $hook, $value ) {
-	return $value;
-}
-
-function get_site_transient( $key ) {
-	return $GLOBALS['uox_test_site_transients'][ $key ] ?? false;
-}
-
-function get_plugins() {
-	return $GLOBALS['uox_test_plugins'];
-}
-
-class Uox_Test_Theme {
-	private $headers;
-
-	public function __construct( $headers ) {
-		$this->headers = $headers;
-	}
-
-	public function exists() {
-		return null !== $this->headers;
-	}
-
-	public function get( $header ) {
-		return $this->headers[ $header ] ?? false;
-	}
-}
-
-function wp_get_theme( $stylesheet ) {
-	return new Uox_Test_Theme( $GLOBALS['uox_test_themes'][ $stylesheet ] ?? null );
-}
-
-function esc_html( $text ) {
-	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
-}
-
-function esc_attr( $text ) {
-	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
-}
-
-require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/39-admin-editor-dashboard.php';
+require_once __DIR__ . '/fixtures/atualizacoes-sistemicas-stubs.php';
 
 $failures = 0;
 
@@ -208,8 +155,8 @@ uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'Crítica' ), 'o selo "Cr
 uox_atualizacoes_assert( false === strpos( $so_nucleo, 'uox-atualizacoes-paginacao' ), 'até 10 itens não há paginação' );
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, '#uox-atualizacoes-sistemicas [hidden]{display:none !important;}' ), 'o bloco deve garantir que [hidden] vença o display:flex inline' );
 // Altura fixa: todos os painéis dentro de um contêiner único, cuja altura o JS
-// trava. Aqui só se confere a presença; o comportamento foi conferido no
-// navegador (falta teste headless que execute o JS).
+// trava. Aqui só se confere a presença; o comportamento é executado num Chrome
+// headless por test-admin-atualizacoes-sistemicas-navegador.mjs.
 $pos_caixa = strpos( $so_nucleo, '<div class="uox-atualizacoes-paineis"' );
 uox_atualizacoes_assert(
 	false !== $pos_caixa && $pos_caixa < strpos( $so_nucleo, 'data-uox-painel=' ) && $pos_caixa > strpos( $so_nucleo, 'role="tablist"' ),
