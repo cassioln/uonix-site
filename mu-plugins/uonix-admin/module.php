@@ -32,6 +32,7 @@ uonix_mu_require_files(
 		'52-admin-analytics-dashboard.php',
 		'60-admin-customizer-widgets-rodape.php',
 		'61-admin-widgets-rodape-fundo-escuro.php',
+		'62-admin-widgets-lote-rest.php',
 	),
 	'uonix-admin'
 );
