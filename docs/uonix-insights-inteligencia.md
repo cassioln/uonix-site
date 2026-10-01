@@ -478,12 +478,13 @@ Quando uma cadeia passa de `max_hops`, o endereço de partida fica "não verific
 O orçamento **não** existe por causa do `max_execution_time`: no Linux ele não conta o tempo gasto em operação de rede (nota de `set_time_limit()` no manual do PHP). O limite de relógio real vem do servidor web e do PHP-FPM, e não foi medido. O orçamento existe para as conferências HEAD não somarem mais que ~28 s a esse limite desconhecido. **Ele não protege a execução inteira:** as três chamadas ao Google (GA4, série e páginas), cada uma com o próprio pedido de token e timeout de 20 s, somam até 120 s no pior caso, fora dele. Então o botão "Enviar Teste Agora" continua dependendo de um limite que ninguém mediu.
 
 **Desde 2026-10-01 (#348), as conferências HEAD não rodam mais no envio.**
-- **O que foi medido:** em produção, montar o relatório com as conferências dentro do envio levava 27,8 s de relógio, e um clique em "Enviar Teste Agora" não completou o envio. A causa exata daquele corte não está provada.
+- **O que foi medido:** em produção, com as conferências dentro do envio, `uonix_intelligence_executive_collect()` levava 27,8 s de relógio, e o relatório inteiro (`uonix_intelligence_report_context()`) 29,5 s; e um clique em "Enviar Teste Agora" não completou o envio. A causa exata daquele corte não está provada.
 - **O cron diário `uonix_intelligence_page_status_daily`** (`uonix_intelligence_executive_refresh_page_status()`) busca as páginas da mesma janela do envio (`uonix_intelligence_executive_pages_window()`). Ele roda o mesmo `top_pages()`, com teto, orçamento e cadeias, e a conferência real fica por trás de um gravador.
 - **O que ele grava** em `uonix_intelligence_page_status_cache`, por caminho: estado, código, destino e hora.
   - Não grava texto de consulta nem métrica.
-  - `unknown` com código ≥ 400, que é resposta do servidor e fim de cadeia, é gravado. Sem resposta (código 0) não é gravado, e o registro anterior ainda válido daquele caminho fica.
-  - Registros não reconferidos hoje ficam até `status_max_age`, e os vencidos saem.
+  - `unknown` com qualquer código é gravado, porque é resposta do servidor. Com código ≥ 400 ele é fim de cadeia; abaixo de 400 (3xx sem `Location`, 300, 304...), sem fim. Sem resposta (código 0) não é gravado, e o registro anterior ainda válido daquele caminho fica.
+  - O status de hoje sempre substitui o anterior.
+  - Registros não reconferidos hoje ficam até `status_max_age`, e os vencidos ou com hora no futuro saem. O leitor também recusa hora no futuro.
   - Grava sem autoload.
   - A opção está em `protected_options_where()`, porque é estado da origem.
 - **Se a busca de páginas falhar, ou faltar credencial,** o cache anterior fica intacto.

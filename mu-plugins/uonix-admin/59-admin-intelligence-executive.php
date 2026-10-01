@@ -1207,7 +1207,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_status_cached' ) ) {
 		}
 		$e     = $cache[ $chave ];
 		$agora = is_int( $now ) ? $now : time();
-		if ( ! isset( $e['state'], $e['checked_at'] ) || ! is_string( $e['state'] ) || ! is_int( $e['checked_at'] ) || ( $agora - $e['checked_at'] ) > (int) uonix_intelligence_executive_rules()['status_max_age'] ) {
+		if ( ! isset( $e['state'], $e['checked_at'] ) || ! is_string( $e['state'] ) || ! is_int( $e['checked_at'] ) || $e['checked_at'] > $agora || ( $agora - $e['checked_at'] ) > (int) uonix_intelligence_executive_rules()['status_max_age'] ) {
 			return $desconhecido;
 		}
 
@@ -1230,13 +1230,15 @@ if ( ! function_exists( 'uonix_intelligence_executive_refresh_page_status' ) ) {
 	 * às mesmas linhas sem nenhuma requisição.
 	 *
 	 * Grava só caminho, estado, código, destino e hora: nenhum texto de consulta, nenhuma
-	 * métrica. `unknown` com código >= 400 É gravado: é resposta do servidor, e o
-	 * `top_pages()` a trata como fim de cadeia (soma o 301 nela); sem gravá-la, o envio
-	 * partia a cadeia (MÉDIO 1 da revisão do PR #349). Sem resposta (código 0, falha de
-	 * rede) não é estado da página e não é gravado: o registro anterior desse caminho,
-	 * se ainda valer, fica. Registros de caminhos não conferidos hoje ficam até
-	 * `status_max_age`, e os vencidos saem. Falha da busca de páginas, ou falta de
-	 * credencial, mantém o cache anterior inteiro.
+	 * métrica. `unknown` com qualquer código É gravado, porque é resposta do servidor:
+	 * com código >= 400 o `top_pages()` a trata como fim de cadeia (soma o 301 nela), e
+	 * abaixo de 400 (3xx sem `Location`, 300, 304...) como sem fim. Lido do cache, dá o
+	 * mesmo resultado da conferência na hora (MÉDIO 1 e BAIXO 7 da revisão do PR #349).
+	 * Sem resposta (código 0, falha de rede) não é estado da página e não é gravado: o
+	 * registro anterior desse caminho, se ainda valer, fica. O status de hoje sempre
+	 * substitui o anterior. Registros de caminhos não conferidos hoje ficam até
+	 * `status_max_age`, e os vencidos ou com hora no futuro saem. Falha da busca de
+	 * páginas, ou falta de credencial, mantém o cache anterior inteiro.
 	 *
 	 * Tudo é injetável por `$args`, como em `uonix_intelligence_executive_collect()`.
 	 *
@@ -1269,7 +1271,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_refresh_page_status' ) ) {
 			$status = is_array( $status ) ? $status : array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
 			$estado = isset( $status['state'] ) && is_string( $status['state'] ) ? $status['state'] : 'unknown';
 			$codigo = isset( $status['code'] ) ? (int) $status['code'] : 0;
-			if ( 'unknown' !== $estado || $codigo >= 400 ) {
+			if ( 'unknown' !== $estado || $codigo > 0 ) {
 				$gravado[ (string) $caminho ] = array(
 					'state'      => $estado,
 					'code'       => $codigo,
@@ -1295,7 +1297,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_refresh_page_status' ) ) {
 		$anterior = function_exists( 'get_option' ) ? get_option( uonix_intelligence_executive_status_cache_option(), array() ) : array();
 		$idade    = (int) uonix_intelligence_executive_rules()['status_max_age'];
 		foreach ( is_array( $anterior ) ? $anterior : array() as $caminho => $e ) {
-			if ( ! isset( $gravado[ $caminho ] ) && is_array( $e ) && isset( $e['checked_at'] ) && is_int( $e['checked_at'] ) && ( $agora - $e['checked_at'] ) <= $idade ) {
+			if ( ! isset( $gravado[ $caminho ] ) && is_array( $e ) && isset( $e['checked_at'] ) && is_int( $e['checked_at'] ) && $e['checked_at'] <= $agora && ( $agora - $e['checked_at'] ) <= $idade ) {
 				$gravado[ $caminho ] = $e;
 			}
 		}
@@ -1324,8 +1326,9 @@ if ( ! function_exists( 'uonix_intelligence_executive_collect' ) ) {
 	 * Console (via `uonix_intelligence_anomaly_organic_drop()`) e a lista de páginas.
 	 * O status das páginas NÃO é conferido aqui: vem do que o cron diário gravou
 	 * (`uonix_intelligence_executive_refresh_page_status()`, #348). Medido em produção
-	 * em 2026-10-01: com as conferências HEAD dentro do envio, montar o relatório
-	 * levava 27,8 s de relógio, numa requisição web cujo limite ninguém mediu. O relatório sai uma vez por semana,
+	 * em 2026-10-01: com as conferências HEAD dentro do envio, esta função levava
+	 * 27,8 s de relógio (o relatório inteiro, `uonix_intelligence_report_context()`,
+	 * 29,5 s), numa requisição web cujo limite ninguém mediu. O relatório sai uma vez por semana,
 	 * então o custo é irrelevante; o que importa é que falha de rede degrada a caixa ou
 	 * o bloco para "indisponível" e o e-mail sai mesmo assim.
 	 *

@@ -999,6 +999,11 @@ foreach ( array( '/velha/', '/sem-hora/', '/ruim/', '/ausente/' ) as $c ) {
 }
 $GLOBALS['uox_options'] = array( $opcaoStatus => array( '/ontem/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $agora - 30 * HOUR_IN_SECONDS ) ) );
 uox_assert( 'ok' === uonix_intelligence_executive_page_status_cached( '/ontem/', $agora )['state'], 'conferido há 30 h ainda vale: o cron é diário e o envio pode cair até ~1 dia depois (revisão do #349, M2)' );
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/anteontem/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $agora - 47 * HOUR_IN_SECONDS ) ) );
+uox_assert( 'ok' === uonix_intelligence_executive_page_status_cached( '/anteontem/', $agora )['state'], 'conferido há 47 h ainda vale: cobre um dia em que o cron não rodou (revisão do #349, B9)' );
+// B6: hora no futuro (relógio adiantado e depois corrigido) não é status conferido.
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/futuro/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $agora + HOUR_IN_SECONDS ) ) );
+uox_assert( 'unknown' === uonix_intelligence_executive_page_status_cached( '/futuro/', $agora )['state'], 'registro com hora no futuro vira unknown (revisão do #349, B6)' );
 $GLOBALS['uox_options'] = array( $opcaoStatus => 'lixo' );
 uox_assert( 'unknown' === uonix_intelligence_executive_page_status_cached( '/fresca/', $agora )['state'], 'cache inteiro malformado: unknown' );
 uox_assert( $headAntes === count( $GLOBALS['uox_http_args'] ), 'o leitor do cache nunca faz HEAD' );
@@ -1081,6 +1086,7 @@ $direto = $resumo( uonix_intelligence_executive_collect( $argsErro + array( 'sta
 $GLOBALS['uox_options'] = array();
 uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherErro, 'status_fetcher' => $statusComErro, 'now' => time() ) );
 $viaCache = $resumo( uonix_intelligence_executive_collect( $argsErro ) );
+uox_assert( in_array( array( '/fora-do-ar/', 400.0, 'unknown' ), $direto, true ), 'a conferência direta soma o 301 na página que responde 503; obteve ' . var_export( $direto, true ) );
 uox_assert( $direto === $viaCache, 'pelo cache, o envio chega às mesmas linhas da conferência direta, inclusive com 301 para uma página que responde 503; direto=' . var_export( $direto, true ) . ' cache=' . var_export( $viaCache, true ) );
 
 // B2 da revisão do #349: se todas as conferências de hoje falharem por rede, o status
@@ -1091,6 +1097,43 @@ uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'conf
 $depoisDaFalha = get_option( $opcaoStatus );
 uox_assert( isset( $depoisDaFalha['/antiga/'] ) && $ontem === $depoisDaFalha['/antiga/']['checked_at'], 'falha de rede em todas as conferências de hoje não apaga o status válido de ontem' );
 uox_assert( ! isset( $depoisDaFalha['/vencida/'] ), 'o registro que já passou da idade máxima sai do cache' );
+$GLOBALS['uox_options'] = array();
+
+
+// M5 da revisão do #349: o status de hoje vence o registro anterior ainda válido.
+$umaHora = time() - HOUR_IN_SECONDS;
+$GLOBALS['uox_options'] = array( $opcaoStatus => array(
+	'/morta/'  => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $umaHora ),
+	'/antiga/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $umaHora ),
+) );
+$consultasM5 = array();
+$agoraM5     = time();
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherRefresh, 'status_fetcher' => uox_status_mapa( $mapaRefresh, $consultasM5 ), 'now' => $agoraM5 ) );
+$depoisM5 = get_option( $opcaoStatus );
+uox_assert( 'not_found' === ( $depoisM5['/morta/']['state'] ?? '' ) && $agoraM5 === ( $depoisM5['/morta/']['checked_at'] ?? 0 ), 'o 404 de hoje substitui o "ok" de 1 h atrás; obteve ' . var_export( $depoisM5['/morta/'] ?? null, true ) );
+uox_assert( 'redirect' === ( $depoisM5['/antiga/']['state'] ?? '' ) && $agoraM5 === ( $depoisM5['/antiga/']['checked_at'] ?? 0 ), 'o 301 de hoje substitui o "ok" de 1 h atrás' );
+uox_assert( 'not_found' === uonix_intelligence_executive_page_status_cached( '/morta/' )['state'], 'o envio lê o status de hoje, não o de 1 h atrás' );
+
+// B6: registro com hora no futuro não sobrevive à mescla.
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/futuro/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => time() + 30 * DAY_IN_SECONDS ) ) );
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherRefresh, 'status_fetcher' => $tudoDesconhecido, 'now' => time() ) );
+uox_assert( ! isset( get_option( $opcaoStatus )['/futuro/'] ), 'registro com hora no futuro sai do cache na mescla (revisão do #349, B6)' );
+
+// B7: resposta sem fim (302 sem Location) é gravada como unknown com o código, e
+// substitui o "ok" anterior: o envio chega às mesmas linhas da conferência direta.
+$status302 = static function ( $p ) {
+	if ( '/ok/' === $p ) {
+		return array( 'state' => 'unknown', 'code' => 302, 'location' => '' );
+	}
+	return array( 'state' => 'ok', 'code' => 200, 'location' => '' );
+};
+$argsB7  = array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'config' => $CFG, 'ga4_fetcher' => $fetcherGa4, 'gsc_fetcher' => $fetcherGsc( 130 ), 'pages_fetcher' => $fetcherErro, 'labeler' => $rotulo );
+$diretoB7 = $resumo( uonix_intelligence_executive_collect( $argsB7 + array( 'status_fetcher' => $status302 ) ) );
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/ok/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => time() - HOUR_IN_SECONDS ) ) );
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherErro, 'status_fetcher' => $status302, 'now' => time() ) );
+$gravadoB7 = get_option( $opcaoStatus );
+uox_assert( 'unknown' === ( $gravadoB7['/ok/']['state'] ?? '' ) && 302 === ( $gravadoB7['/ok/']['code'] ?? 0 ), 'o 302 sem Location é gravado como unknown com o código; obteve ' . var_export( $gravadoB7['/ok/'] ?? null, true ) );
+uox_assert( in_array( array( '/ok/', 40.0, 'unknown' ), $diretoB7, true ) && $diretoB7 === $resumo( uonix_intelligence_executive_collect( $argsB7 ) ), 'com o 302 sem Location, o envio pelo cache chega às linhas da conferência direta; direto=' . var_export( $diretoB7, true ) );
 $GLOBALS['uox_options'] = array();
 
 // Falha da busca de páginas ou falta de credencial: o cache anterior fica intacto.
