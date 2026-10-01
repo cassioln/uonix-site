@@ -1480,9 +1480,8 @@ function uox_render_lista_atualizacoes_pendentes()
 
     echo '</div>';
 
-    // Altura travada pelo JS na página 1 de "Todos" (a maior possível, já que
-    // Todos contém as demais e nenhuma página passa de $por_pagina itens), para
-    // o card não mudar de tamanho ao trocar de aba ou de página.
+    // Altura travada pelo JS na maior página entre as abas (normalmente a 1 de
+    // "Todos"), para o card não mudar de tamanho ao trocar de aba ou de página.
     echo '<div class="uox-atualizacoes-paineis" style="position: relative; overflow-y: auto;">';
 
     foreach ($paineis as $chave => $painel) {
@@ -1551,48 +1550,65 @@ function uox_render_lista_atualizacoes_pendentes()
             wrap.dataset.uoxTabsBound = '1';
 
             var caixa = wrap.querySelector('.uox-atualizacoes-paineis');
-            var todos = wrap.querySelector('[data-uox-painel="todos"]');
 
-            // Mede um clone invisível de "Todos" na página 1 — sem mexer no que
-            // está à vista — e trava a altura da área dos painéis nesse valor.
+            // Trava a altura da área dos painéis na maior página entre todas as
+            // abas — normalmente a página 1 de "Todos", que contém as demais;
+            // nomes longos quebrando linha podem fazer outra página passar dela.
+            // Mede clones invisíveis, sem mexer no que está à vista.
             function fixarAltura() {
-                if (!caixa || !todos) {
+                if (!caixa) {
                     return;
                 }
 
-                var clone = todos.cloneNode(true);
-                clone.removeAttribute('data-uox-painel');
-                clone.removeAttribute('id');
-                clone.removeAttribute('tabindex');
-                clone.hidden = false;
-                clone.setAttribute('aria-hidden', 'true');
-                clone.style.cssText = 'position:absolute; top:0; left:0; right:0; visibility:hidden; pointer-events:none;';
-                clone.querySelectorAll('[data-uox-pagina]').forEach(function (item) {
-                    item.hidden = '1' !== item.dataset.uoxPagina;
+                var maior = 0;
+
+                caixa.querySelectorAll('[data-uox-painel]').forEach(function (painel) {
+                    var paginas = parseInt(painel.dataset.uoxPaginas, 10) || 1;
+
+                    for (var pagina = 1; pagina <= paginas; pagina++) {
+                        var clone = painel.cloneNode(true);
+                        clone.removeAttribute('data-uox-painel');
+                        clone.removeAttribute('id');
+                        clone.removeAttribute('tabindex');
+                        clone.hidden = false;
+                        clone.setAttribute('aria-hidden', 'true');
+                        clone.style.cssText = 'position:absolute; top:0; left:0; right:0; visibility:hidden; pointer-events:none;';
+                        clone.querySelectorAll('[data-uox-pagina]').forEach(function (item) {
+                            item.hidden = String(pagina) !== item.dataset.uoxPagina;
+                        });
+
+                        caixa.appendChild(clone);
+                        maior = Math.max(maior, clone.offsetHeight);
+                        caixa.removeChild(clone);
+                    }
                 });
 
-                caixa.appendChild(clone);
-                caixa.style.height = clone.offsetHeight + 'px';
-                caixa.removeChild(clone);
+                // Medida 0 = widget recolhido ou oculto em "Opções de tela":
+                // travar em 0 esconderia a lista até o próximo resize.
+                caixa.style.height = maior > 0 ? maior + 'px' : '';
             }
 
             fixarAltura();
             window.addEventListener('load', fixarAltura);
 
-            var aguardandoMedida = false;
+            // A largura muda a quebra de linha dos itens — por resize da janela,
+            // mas também ao abrir o widget recolhido, arrastá-lo de coluna ou
+            // mudar o número de colunas, que não disparam resize. Só a largura
+            // importa: a altura que este código trava não pode realimentá-lo.
+            if ('ResizeObserver' in window) {
+                var larguraMedida = -1;
 
-            // A largura do card muda a quebra de linha dos itens.
-            window.addEventListener('resize', function () {
-                if (aguardandoMedida) {
-                    return;
-                }
+                new ResizeObserver(function () {
+                    if (wrap.clientWidth === larguraMedida) {
+                        return;
+                    }
 
-                aguardandoMedida = true;
-                window.requestAnimationFrame(function () {
-                    aguardandoMedida = false;
+                    larguraMedida = wrap.clientWidth;
                     fixarAltura();
-                });
-            });
+                }).observe(wrap);
+            } else {
+                window.addEventListener('resize', fixarAltura);
+            }
 
             function irParaPagina(painel, pagina) {
                 var total = parseInt(painel.dataset.uoxPaginas, 10) || 1;

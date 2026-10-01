@@ -206,13 +206,18 @@ uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'Crítica' ), 'o selo "Cr
 uox_atualizacoes_assert( false === strpos( $so_nucleo, 'uox-atualizacoes-paginacao' ), 'até 10 itens não há paginação' );
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, '#uox-atualizacoes-sistemicas [hidden]{display:none !important;}' ), 'o bloco deve garantir que [hidden] vença o display:flex inline' );
 // Altura fixa: todos os painéis dentro de um contêiner único, cuja altura o JS
-// trava na página 1 de "Todos" (comportamento conferido no navegador, não aqui).
+// trava. Aqui só se confere a presença; o comportamento foi conferido no
+// navegador (falta teste headless que execute o JS).
 $pos_caixa = strpos( $so_nucleo, '<div class="uox-atualizacoes-paineis"' );
 uox_atualizacoes_assert(
 	false !== $pos_caixa && $pos_caixa < strpos( $so_nucleo, 'data-uox-painel=' ) && $pos_caixa > strpos( $so_nucleo, 'role="tablist"' ),
 	'os painéis devem ficar num contêiner único, abaixo das abas'
 );
+// O JS trava na maior página entre as abas (normalmente a 1 de "Todos"), não
+// trava em 0 com o widget recolhido e remede quando a largura muda.
 uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'function fixarAltura()' ), 'o JS deve travar a altura da área dos painéis' );
+uox_atualizacoes_assert( false !== strpos( $so_nucleo, "caixa.style.height = maior > 0 ? maior + 'px' : '';" ), 'medida 0 (widget recolhido) não pode travar a altura em 0' );
+uox_atualizacoes_assert( false !== strpos( $so_nucleo, 'new ResizeObserver(' ), 'a altura deve ser refeita quando a largura do bloco muda, não só no resize da janela' );
 uox_atualizacoes_assert( 2 === uox_atualizacoes_assert_informativo( $so_nucleo, 'só núcleo' ), 'só núcleo: os únicos botões devem ser as 2 abas' );
 uox_atualizacoes_assert_aviso( $so_nucleo, 'só núcleo' );
 
