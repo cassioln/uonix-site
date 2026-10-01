@@ -142,8 +142,20 @@ if ( ! function_exists( 'uonix_intelligence_ai_input' ) ) {
 }
 
 if ( ! function_exists( 'uonix_intelligence_ai_input_hash' ) ) {
+	/**
+	 * Hash do que define a sugestão: consulta, página, texto atual, lista e modelo.
+	 *
+	 * As métricas vão no pedido, mas ficam fora do hash: a janela de 30 dias do 53
+	 * termina ontem e muda as métricas a cada sincronização diária. Com elas no hash,
+	 * toda sincronização invalidava o cache (revisão do PR #329, A1).
+	 */
 	function uonix_intelligence_ai_input_hash( array $input ) {
-		return hash( 'sha256', (string) wp_json_encode( $input ) );
+		$base = array();
+		foreach ( array( 'query', 'page_url', 'title', 'description', 'differentiators', 'model' ) as $chave ) {
+			$base[ $chave ] = isset( $input[ $chave ] ) ? $input[ $chave ] : null;
+		}
+
+		return hash( 'sha256', (string) wp_json_encode( $base ) );
 	}
 }
 

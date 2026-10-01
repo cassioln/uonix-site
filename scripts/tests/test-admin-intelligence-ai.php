@@ -131,6 +131,7 @@ uox_ai_assert( '' === $in_tpl['description'], 'Descrição vazia é aceita' );
 uox_ai_assert( null === uonix_intelligence_ai_input( uox_linha( 'x', '/olhal-de-ancoragem/' ) ), 'Sem post publicado, não há entrada' );
 uox_ai_assert( null === uonix_intelligence_ai_input( uox_linha( '', '/produtos/olhal-inox/' ) ), 'Sem consulta, não há entrada' );
 uox_ai_assert( uonix_intelligence_ai_input_hash( $in ) !== uonix_intelligence_ai_input_hash( array_merge( $in, array( 'title' => 'Outro' ) ) ), 'O hash muda quando o título atual muda' );
+uox_ai_assert( uonix_intelligence_ai_input_hash( $in ) === uonix_intelligence_ai_input_hash( array_merge( $in, array( 'impressions' => 56, 'position' => 6.3, 'ctr' => 0.01 ) ) ), 'O hash NÃO muda quando só as métricas mudam: a janela de 30 dias anda todo dia (revisão do #329, A1)' );
 uox_ai_assert( uonix_intelligence_ai_entry_key( 'a', '/b/' ) === hash( 'sha256', "a\n/b/" ), 'A chave da entrada é sha256 de consulta e caminho' );
 
 // Fronteira de dados: campos de lead na linha nunca chegam ao corpo do pedido.
@@ -263,6 +264,12 @@ $GLOBALS['uox_http']    = array( uox_gemini( $ok ) );
 uonix_intelligence_ai_run( uox_analise( array( uox_linha() ) ), 0 );
 $s = uonix_intelligence_ai_suggestion_for( uox_linha() );
 uox_ai_assert( 'ok' === $s['status'] && $ok['title'] === $s['title'] && 'Olhal de Ancoragem Inox | Uônix' === $s['current_title'] && 10 === $s['post_id'] && '' !== $s['generated_at'], 'Leitor devolve a sugestão com o texto atual ao lado' );
+// A sincronização do dia seguinte muda só as métricas: a sugestão continua valendo, e o
+// cron não chama o Gemini de novo (revisão do #329, A1).
+$dia_seguinte = array_merge( uox_linha(), array( 'impressions' => 61.0, 'position' => 5.9, 'ctr' => 0.016 ) );
+uox_ai_assert( 'ok' === uonix_intelligence_ai_suggestion_for( $dia_seguinte )['status'], 'Só as métricas mudaram: o leitor continua em ok' );
+$GLOBALS['uox_pedidos'] = array();
+uox_ai_assert( 0 === uonix_intelligence_ai_run( uox_analise( array( $dia_seguinte ) ), 0 )['called'] && 0 === count( $GLOBALS['uox_pedidos'] ), 'Só as métricas mudaram: o cron não chama o Gemini' );
 $GLOBALS['uox_posts'][10]['meta']['rank_math_title'] = 'Editado à mão | Uônix';
 uox_ai_assert( 'pending' === uonix_intelligence_ai_suggestion_for( uox_linha() )['status'], 'Título editado depois da geração: pending, nunca a sugestão antiga' );
 uox_posts_padrao();

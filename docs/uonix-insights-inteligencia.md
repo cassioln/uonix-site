@@ -335,6 +335,7 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 
 **O pedido:**
 - Uma chamada por oportunidade (até 5 por execução), e só quando a entrada mudou desde a última sugestão aceita.
+- **A entrada, para o cache, é:** a consulta, a página, o título e a descrição atuais, a lista de diferenciais e o modelo. As métricas vão no pedido, mas ficam fora do hash: a janela de 30 dias termina ontem e muda a cada sincronização diária. Com elas no hash, cada sincronização invalidaria a sugestão (revisão do PR #329).
 - A chave vai no cabeçalho `x-goog-api-key`, nunca na URL.
 - O corpo é montado chave por chave, com estes campos:
   - a consulta, as impressões, a posição e o CTR;
@@ -361,7 +362,7 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 **Cache e estados:**
 - Cada entrada do cache é chaveada por `sha256` de consulta + caminho, e a consulta não fica em texto puro.
 - Entrada nova faz uma chamada, e o resultado substitui o anterior, inclusive quando falha. Assim, a sugestão de um título que já não existe nunca sobrevive.
-- O leitor recalcula a entrada, e se o título ou a descrição mudaram depois da geração, o estado é `pending`.
+- O leitor recalcula a entrada. Se o título ou a descrição mudaram depois da geração, o estado é `pending`. Mudança só nas métricas não muda nada.
 - Oportunidade que saiu da lista sai do cache.
 - O cache está em `protected_options_where()` e não atravessa ambientes no clone.
 
