@@ -731,7 +731,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_status' ) ) {
 	 *
 	 * A requisição passa pelo Rank Math, e isso tem um custo que o User-Agent NÃO
 	 * resolve. O contador do redirecionamento grava só acessos e data do último, sem
-	 * User-Agent: cada endereço antigo conferido ganha um acesso artificial por semana,
+	 * User-Agent: cada endereço antigo conferido ganha um acesso artificial por dia (o cron de status é diário desde o #348),
 	 * e o contador não tem como separá-lo. O monitor de 404, por outro lado, não
 	 * registra esta requisição: o WordPress encerra HEAD logo depois de
 	 * `template_redirect`, antes do template, e o monitor captura em `get_header` ou
@@ -750,7 +750,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_status' ) ) {
 			array(
 				'redirection' => 0,
 				'timeout'     => (int) uonix_intelligence_executive_rules()['head_timeout'],
-				'user-agent'  => 'Uonix-Relatorio-Executivo/1.0 (conferencia semanal de status de pagina)',
+				'user-agent'  => 'Uonix-Relatorio-Executivo/1.0 (conferencia diaria de status de pagina)',
 			)
 		);
 		if ( is_wp_error( $resposta ) ) {
@@ -1230,9 +1230,13 @@ if ( ! function_exists( 'uonix_intelligence_executive_refresh_page_status' ) ) {
 	 * às mesmas linhas sem nenhuma requisição.
 	 *
 	 * Grava só caminho, estado, código, destino e hora: nenhum texto de consulta, nenhuma
-	 * métrica. `unknown` não é gravado, porque falha de rede de hoje não é estado da
-	 * página. Falha da busca de páginas, ou falta de credencial, mantém o cache anterior:
-	 * ele continua valendo até `status_max_age`.
+	 * métrica. `unknown` com código >= 400 É gravado: é resposta do servidor, e o
+	 * `top_pages()` a trata como fim de cadeia (soma o 301 nela); sem gravá-la, o envio
+	 * partia a cadeia (MÉDIO 1 da revisão do PR #349). Sem resposta (código 0, falha de
+	 * rede) não é estado da página e não é gravado: o registro anterior desse caminho,
+	 * se ainda valer, fica. Registros de caminhos não conferidos hoje ficam até
+	 * `status_max_age`, e os vencidos saem. Falha da busca de páginas, ou falta de
+	 * credencial, mantém o cache anterior inteiro.
 	 *
 	 * Tudo é injetável por `$args`, como em `uonix_intelligence_executive_collect()`.
 	 *
@@ -1264,10 +1268,11 @@ if ( ! function_exists( 'uonix_intelligence_executive_refresh_page_status' ) ) {
 			$status = call_user_func( $real, $caminho );
 			$status = is_array( $status ) ? $status : array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
 			$estado = isset( $status['state'] ) && is_string( $status['state'] ) ? $status['state'] : 'unknown';
-			if ( 'unknown' !== $estado ) {
+			$codigo = isset( $status['code'] ) ? (int) $status['code'] : 0;
+			if ( 'unknown' !== $estado || $codigo >= 400 ) {
 				$gravado[ (string) $caminho ] = array(
 					'state'      => $estado,
-					'code'       => isset( $status['code'] ) ? (int) $status['code'] : 0,
+					'code'       => $codigo,
 					'location'   => isset( $status['location'] ) && is_string( $status['location'] ) ? $status['location'] : '',
 					'checked_at' => $agora,
 				);
@@ -1286,9 +1291,17 @@ if ( ! function_exists( 'uonix_intelligence_executive_refresh_page_status' ) ) {
 			null,
 			isset( $args['clock'] ) ? $args['clock'] : null
 		);
+		$checados = count( $gravado );
+		$anterior = function_exists( 'get_option' ) ? get_option( uonix_intelligence_executive_status_cache_option(), array() ) : array();
+		$idade    = (int) uonix_intelligence_executive_rules()['status_max_age'];
+		foreach ( is_array( $anterior ) ? $anterior : array() as $caminho => $e ) {
+			if ( ! isset( $gravado[ $caminho ] ) && is_array( $e ) && isset( $e['checked_at'] ) && is_int( $e['checked_at'] ) && ( $agora - $e['checked_at'] ) <= $idade ) {
+				$gravado[ $caminho ] = $e;
+			}
+		}
 		update_option( uonix_intelligence_executive_status_cache_option(), $gravado, false );
 
-		return array( 'checked' => count( $gravado ), 'reason' => '' );
+		return array( 'checked' => $checados, 'reason' => '' );
 	}
 }
 

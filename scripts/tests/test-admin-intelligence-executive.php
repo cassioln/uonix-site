@@ -997,6 +997,8 @@ uox_assert( array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://
 foreach ( array( '/velha/', '/sem-hora/', '/ruim/', '/ausente/' ) as $c ) {
 	uox_assert( 'unknown' === ( uonix_intelligence_executive_page_status_cached( $c, $agora )['state'] ?? '' ), "status de {$c} vira unknown (não verificado)" );
 }
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/ontem/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $agora - 30 * HOUR_IN_SECONDS ) ) );
+uox_assert( 'ok' === uonix_intelligence_executive_page_status_cached( '/ontem/', $agora )['state'], 'conferido há 30 h ainda vale: o cron é diário e o envio pode cair até ~1 dia depois (revisão do #349, M2)' );
 $GLOBALS['uox_options'] = array( $opcaoStatus => 'lixo' );
 uox_assert( 'unknown' === uonix_intelligence_executive_page_status_cached( '/fresca/', $agora )['state'], 'cache inteiro malformado: unknown' );
 uox_assert( $headAntes === count( $GLOBALS['uox_http_args'] ), 'o leitor do cache nunca faz HEAD' );
@@ -1016,7 +1018,9 @@ $cacheStatus = get_option( $opcaoStatus );
 uox_assert( '' === ( $refresh['reason'] ?? 'x' ) && 4 === ( $refresh['checked'] ?? 0 ), 'o cron confere e grava as 4 páginas (o destino do 301 uma vez só); obteve ' . var_export( $refresh, true ) );
 uox_assert( is_array( $cacheStatus ) && 'redirect' === ( $cacheStatus['/antiga/']['state'] ?? '' ) && 'https://uonix.com.br/servico/nova/' === ( $cacheStatus['/antiga/']['location'] ?? '' ) && $agora === ( $cacheStatus['/antiga/']['checked_at'] ?? 0 ), 'o redirecionamento é gravado com destino e hora' );
 uox_assert( 'not_found' === ( $cacheStatus['/morta/']['state'] ?? '' ) && 'ok' === ( $cacheStatus['/servico/nova/']['state'] ?? '' ), 'not_found e ok gravados' );
-uox_assert( array( '/antiga/', '/morta/', '/ok/', '/servico/nova/' ) === array_keys( $cacheStatus ) || 4 === count( $cacheStatus ), 'o cache guarda só caminhos' );
+$chavesCache = array_keys( (array) $cacheStatus );
+sort( $chavesCache );
+uox_assert( array( '/antiga/', '/morta/', '/ok/', '/servico/nova/' ) === $chavesCache, 'o cache guarda exatamente os caminhos consultados; obteve ' . var_export( $chavesCache, true ) );
 uox_assert( false === strpos( serialize( $cacheStatus ), 'olhal' ) && false === strpos( serialize( $cacheStatus ), 'impressions' ), 'o cache não guarda texto de consulta nem métrica' );
 uox_assert( false === ( $GLOBALS['uox_autoload'][ $opcaoStatus ] ?? null ), 'o cache de status é gravado sem autoload' );
 uox_assert( $periodoRefresh === $periodoPaginas, 'o cron usa a MESMA janela de páginas do envio; obteve ' . var_export( $periodoRefresh, true ) );
@@ -1047,6 +1051,47 @@ $GLOBALS['uox_options'] = array();
 $tudoDesconhecido = static function ( $p ) { return array( 'state' => 'unknown', 'code' => 0, 'location' => '' ); };
 $refreshUnk = uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherRefresh, 'status_fetcher' => $tudoDesconhecido, 'now' => $agora ) );
 uox_assert( 0 === ( $refreshUnk['checked'] ?? -1 ) && array() === get_option( $opcaoStatus ), 'status unknown não é gravado' );
+
+
+// M1 da revisão do #349: 301 para uma página que RESPONDE com erro (503). A conferência
+// real devolve unknown com código >= 400, e o top_pages() trata isso como fim de cadeia
+// e soma o 301 nela. Pelo cache, o envio tem de chegar às MESMAS linhas.
+$statusComErro = static function ( $p ) {
+	if ( '/antiga/' === $p ) {
+		return array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/fora-do-ar/' );
+	}
+	if ( '/fora-do-ar/' === $p ) {
+		return array( 'state' => 'unknown', 'code' => 503, 'location' => '' );
+	}
+	return array( 'state' => 'ok', 'code' => 200, 'location' => '' );
+};
+$linhasErro = array( 'rows' => uox_linhas( array( '/antiga/' => 300, '/fora-do-ar/' => 100, '/ok/' => 40 ) ), 'truncated' => false );
+$fetcherErro = static function ( $config, $period ) use ( $linhasErro ) {
+	return $linhasErro;
+};
+$resumo = static function ( $exec ) {
+	$saida = array();
+	foreach ( (array) ( $exec['top_pages']['rows'] ?? array() ) as $l ) {
+		$saida[] = array( $l['path'], (float) $l['impressions'], $l['state'] );
+	}
+	return $saida;
+};
+$argsErro = array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'config' => $CFG, 'ga4_fetcher' => $fetcherGa4, 'gsc_fetcher' => $fetcherGsc( 130 ), 'pages_fetcher' => $fetcherErro, 'labeler' => $rotulo );
+$direto = $resumo( uonix_intelligence_executive_collect( $argsErro + array( 'status_fetcher' => $statusComErro ) ) );
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherErro, 'status_fetcher' => $statusComErro, 'now' => time() ) );
+$viaCache = $resumo( uonix_intelligence_executive_collect( $argsErro ) );
+uox_assert( $direto === $viaCache, 'pelo cache, o envio chega às mesmas linhas da conferência direta, inclusive com 301 para uma página que responde 503; direto=' . var_export( $direto, true ) . ' cache=' . var_export( $viaCache, true ) );
+
+// B2 da revisão do #349: se todas as conferências de hoje falharem por rede, o status
+// ainda válido de ontem não é apagado.
+$ontem = time() - 20 * HOUR_IN_SECONDS;
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/antiga/' => array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/servico/nova/', 'checked_at' => $ontem ), '/vencida/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => time() - 5 * DAY_IN_SECONDS ) ) );
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherRefresh, 'status_fetcher' => $tudoDesconhecido, 'now' => time() ) );
+$depoisDaFalha = get_option( $opcaoStatus );
+uox_assert( isset( $depoisDaFalha['/antiga/'] ) && $ontem === $depoisDaFalha['/antiga/']['checked_at'], 'falha de rede em todas as conferências de hoje não apaga o status válido de ontem' );
+uox_assert( ! isset( $depoisDaFalha['/vencida/'] ), 'o registro que já passou da idade máxima sai do cache' );
+$GLOBALS['uox_options'] = array();
 
 // Falha da busca de páginas ou falta de credencial: o cache anterior fica intacto.
 $cacheAnterior = array( '/x/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $agora ) );

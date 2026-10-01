@@ -47,12 +47,12 @@ Desde 2026-10-01 (#348), o WP-Cron de produção **não** roda por visita. Ele r
   - o `flock` impede duas execuções ao mesmo tempo, e o `timeout` corta uma execução travada.
 - **Por que 5 minutos:** a fila do WooCommerce (`action_scheduler_run_queue`) roda a cada 1 minuto, e a do Fluent Forms a cada 5.
 - **Por que pelo CLI:** pela web, todos os eventos vencidos rodam numa mesma requisição, sujeita ao limite de relógio do servidor, que nunca foi medido. O WordPress reagenda cada evento **antes** de rodá-lo, então um evento cortado no meio se perde até o próximo ciclo. Medido em 2026-10-01:
-  - a montagem do relatório semanal levava 29,5 s;
+  - a montagem do relatório semanal levava 29,5 s (`uonix_intelligence_report_context()` inteiro; a parte do `executive_collect` sozinha, 27,8 s);
   - a sincronização de métricas leva cerca de 14 s;
   - uma chamada ao Gemini, 6,9 s.
 - **Como diagnosticar:** `<conta>/.uonix-cron-ultimo.log` traz a última execução, e `wp cron event list` mostra a agenda.
 - **QA e local continuam com o WP-Cron por visita.** O clone não copia o `wp-config.php`, e o `crontab` não está no banco.
-- **Para voltar ao WP-Cron por visita,** remova a linha do `crontab` e o `DISABLE_WP_CRON` juntos. Sem nenhum dos dois, o site fica sem cron.
+- **Para voltar ao WP-Cron por visita,** remova a linha do `crontab` e o `DISABLE_WP_CRON` juntos. Remover só a linha do `crontab` e manter o `DISABLE_WP_CRON` deixa o site sem cron nenhum.
 
 ### Chave do Gemini (`UONIX_GEMINI_API_KEY`)
 

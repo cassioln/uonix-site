@@ -482,16 +482,18 @@ O orçamento **não** existe por causa do `max_execution_time`: no Linux ele nã
 - **O cron diário `uonix_intelligence_page_status_daily`** (`uonix_intelligence_executive_refresh_page_status()`) busca as páginas da mesma janela do envio (`uonix_intelligence_executive_pages_window()`). Ele roda o mesmo `top_pages()`, com teto, orçamento e cadeias, e a conferência real fica por trás de um gravador.
 - **O que ele grava** em `uonix_intelligence_page_status_cache`, por caminho: estado, código, destino e hora.
   - Não grava texto de consulta nem métrica.
-  - `unknown` não é gravado.
+  - `unknown` com código ≥ 400, que é resposta do servidor e fim de cadeia, é gravado. Sem resposta (código 0) não é gravado, e o registro anterior ainda válido daquele caminho fica.
+  - Registros não reconferidos hoje ficam até `status_max_age`, e os vencidos saem.
   - Grava sem autoload.
   - A opção está em `protected_options_where()`, porque é estado da origem.
 - **Se a busca de páginas falhar, ou faltar credencial,** o cache anterior fica intacto.
+- **Com o cache em dia, o envio chega às mesmas linhas** que chegaria conferindo na hora, porque roda o mesmo algoritmo sobre os mesmos status.
 - **O envio** lê esse cache (`uonix_intelligence_executive_page_status_cached()`) e não faz nenhuma requisição HEAD. Registro ausente, malformado ou com mais de `status_max_age` (2 dias) vira "não verificado".
 - **O que continua no envio:** as três chamadas ao Google.
 
 A requisição passa pelo Rank Math, e isso tem um custo que o User-Agent **não** resolve:
 
-- **O contador do redirecionamento ganha um acesso artificial por semana**, por endereço antigo conferido. Ele grava só acessos e a data do último, sem User-Agent, então não há como separar esse acesso dos visitantes pelo contador.
+- **O contador do redirecionamento ganha um acesso artificial por dia**, por endereço antigo conferido, desde que a conferência passou para o cron diário (#348). Ele grava só acessos e a data do último, sem User-Agent, então não há como separar esse acesso dos visitantes pelo contador.
 - **O monitor de 404 não registra a requisição.** O WordPress encerra HEAD logo depois de `template_redirect`, antes do template, e o monitor captura em `get_header` ou `wp_head`.
 
 As duas coisas foram conferidas pela terceira revisão do PR #301 no código do Rank Math e do WordPress. A versão anterior deste contrato afirmava o contrário das duas. O User-Agent `Uonix-Relatorio-Executivo/1.0` fica porque serve ao log de acesso do servidor.
