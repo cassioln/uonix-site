@@ -171,10 +171,11 @@ $GLOBALS['uox_test_plugins'] = array(
 );
 $GLOBALS['uox_test_site_transients']['update_themes'] = (object) array(
 	'response' => array(
-		// A API de temas devolve array; o código também aceita objeto.
-		'pai'    => array( 'new_version' => '2.0.0' ),
+		// A API de temas devolve array; o código também aceita objeto. O tema de
+		// gravidade média vem primeiro de propósito: sem ordenação, ele lideraria.
 		'filho'  => (object) array( 'new_version' => '1.1.0' ),
 		'sumido' => array( 'new_version' => '9.9.9' ),
+		'pai'    => array( 'new_version' => '2.0.0' ),
 	),
 );
 $GLOBALS['uox_test_themes'] = array(
@@ -208,7 +209,10 @@ uox_atualizacoes_assert(
 	isset( $temas['sumido'] ) && '?' === $temas['sumido']['versao_atual'],
 	'tema não instalado deve cair para o stylesheet como nome e "?" como versão'
 );
-uox_atualizacoes_assert( 'Tema Pai' === ( $grupos['temas'][0]['nome'] ?? '' ), 'temas devem sair ordenados pela gravidade (alta primeiro)' );
+uox_atualizacoes_assert(
+	array( 'alta', 'alta', 'media' ) === array_column( $grupos['temas'], 'gravidade' ),
+	'temas devem sair ordenados pela gravidade (alta primeiro)'
+);
 
 $lista = uox_atualizacoes_render();
 uox_atualizacoes_assert( 7 === substr_count( $lista, '<li' ), 'a lista deve renderizar um <li> por pendência (1 + 3 + 3)' );
