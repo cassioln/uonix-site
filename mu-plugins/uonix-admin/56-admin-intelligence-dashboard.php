@@ -267,31 +267,74 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_radar_flag_message' ) ) {
 	/**
-	 * Aviso depois de descartar ou restaurar, a partir do marcador da URL.
+	 * Aviso depois de descartar ou restaurar, a partir dos marcadores da URL: a ação e
+	 * quantas pautas ela alcançou (o lote pode levar várias).
 	 */
-	function uonix_intelligence_radar_flag_message( $flag ) {
-		$mapa = array(
-			'dismiss' => 'Pauta descartada. Ela não volta à lista nem ao e-mail enquanto estiver descartada.',
-			'restore' => 'Pauta restaurada. Se ainda não tem pauta da IA, ela é gerada na próxima execução do Radar.',
-			'invalid' => 'Não foi possível alterar a pauta: ela não está mais na lista do Radar.',
-		);
+	function uonix_intelligence_radar_flag_message( $flag, $quantas = '' ) {
+		$n = is_string( $quantas ) && 1 === preg_match( '/^[1-9][0-9]?$/', $quantas ) ? (int) $quantas : 1;
+		if ( 'dismiss' === $flag ) {
+			return ( 1 === $n ? '1 pauta descartada.' : $n . ' pautas descartadas.' ) . ' Descartadas não voltam à lista nem ao e-mail enquanto estiverem descartadas.';
+		}
+		if ( 'restore' === $flag ) {
+			return ( 1 === $n ? '1 pauta restaurada.' : $n . ' pautas restauradas.' ) . ' A pauta da IA que ainda faltar é gerada na próxima execução do Radar.';
+		}
 
-		return isset( $mapa[ $flag ] ) ? $mapa[ $flag ] : '';
+		return 'invalid' === $flag ? 'Não foi possível alterar: nenhuma das pautas está mais na lista do Radar.' : '';
 	}
 }
 
-if ( ! function_exists( 'uonix_intelligence_render_radar_form' ) ) {
+if ( ! function_exists( 'uonix_intelligence_render_radar_form_open' ) ) {
 	/**
-	 * Botão "Descartar" ou "Restaurar": POST para os handlers do 63, com nonce por chave.
+	 * Abre o formulário de uma tabela do Radar: um POST para o handler do 63, com o nonce da
+	 * ação, e a barra do lote ("Descartar selecionadas" ou "Restaurar selecionadas").
 	 */
-	function uonix_intelligence_render_radar_form( $acao, $chave, $rotulo ) {
+	function uonix_intelligence_render_radar_form_open( $acao, $rotulo_lote ) {
 		?>
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="uonix-radar-form">
 			<input type="hidden" name="action" value="<?php echo esc_attr( 'uonix_intelligence_radar_' . $acao ); ?>">
-			<input type="hidden" name="uonix_radar_key" value="<?php echo esc_attr( $chave ); ?>">
-			<?php wp_nonce_field( 'uonix_intelligence_radar_' . $acao . '_' . $chave ); ?>
-			<button type="submit" class="button button-small"><?php echo esc_html( $rotulo ); ?></button>
-		</form>
+			<?php wp_nonce_field( 'uonix_intelligence_radar_' . $acao ); ?>
+			<div class="tablenav top">
+				<div class="alignleft actions bulkactions">
+					<button type="submit" name="uonix_radar_bulk" value="1" class="button action"><?php echo esc_html( $rotulo_lote ); ?></button>
+				</div>
+				<br class="clear">
+			</div>
+		<?php
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_render_radar_check_all' ) ) {
+	/**
+	 * Caixa "selecionar todas" do cabeçalho. O `common.js` do WordPress marca as caixas da
+	 * tabela a partir de uma `.check-column` do `thead`.
+	 */
+	function uonix_intelligence_render_radar_check_all( $id ) {
+		?>
+		<td class="manage-column column-cb check-column"><label class="screen-reader-text" for="<?php echo esc_attr( $id ); ?>">Selecionar todas</label><input id="<?php echo esc_attr( $id ); ?>" type="checkbox"></td>
+		<?php
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_render_radar_check' ) ) {
+	/**
+	 * Caixa de uma linha, com o nome que o handler do lote lê.
+	 */
+	function uonix_intelligence_render_radar_check( array $c ) {
+		$id = 'uonix-radar-cb-' . $c['key'];
+		?>
+		<th scope="row" class="check-column"><label class="screen-reader-text" for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( 'Selecionar ' . $c['query'] ); ?></label><input id="<?php echo esc_attr( $id ); ?>" type="checkbox" name="uonix_radar_keys[]" value="<?php echo esc_attr( $c['key'] ); ?>"></th>
+		<?php
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_render_radar_row_button' ) ) {
+	/**
+	 * Botão de uma linha. O handler dá preferência a ele: vale só para esta pauta, mesmo com
+	 * outras caixas marcadas.
+	 */
+	function uonix_intelligence_render_radar_row_button( $chave, $rotulo ) {
+		?>
+		<button type="submit" name="uonix_radar_key" value="<?php echo esc_attr( $chave ); ?>" class="button button-small"><?php echo esc_html( $rotulo ); ?></button>
 		<?php
 	}
 }
@@ -363,7 +406,7 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_section' ) ) {
 			$momento = is_string( $iso ) && '' !== $iso ? strtotime( $iso ) : false;
 			return false === $momento ? '' : gmdate( $formato, $momento );
 		};
-		$aviso  = uonix_intelligence_radar_flag_message( uonix_intelligence_query_flag( 'uonix_radar' ) );
+		$aviso  = uonix_intelligence_radar_flag_message( uonix_intelligence_query_flag( 'uonix_radar' ), uonix_intelligence_query_flag( 'uonix_radar_n' ) );
 		$falhou = in_array( $estado['status'], array( 'gsc_failed', 'config_missing' ), true );
 		$regra  = sprintf( 'posição depois da %d.ª e pelo menos %d impressões em %d dias', (int) $regras['min_position'], (int) $regras['min_impressions'], (int) $regras['window_days'] );
 		?>
@@ -391,10 +434,16 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_section' ) ) {
 			<?php if ( array() === $estado['visible'] && ! $falhou ) : ?>
 				<div class="notice notice-info inline"><p><?php echo esc_html( 'Nenhuma consulta nesta janela passa na regra do Radar: ' . $regra . '.' ); ?></p></div>
 			<?php elseif ( array() !== $estado['visible'] ) : ?>
+				<?php if ( $curador ) : ?>
+					<?php uonix_intelligence_render_radar_form_open( 'dismiss', 'Descartar selecionadas' ); ?>
+				<?php endif; ?>
 				<table class="wp-list-table widefat striped">
 					<caption class="screen-reader-text">Pautas sugeridas, ordenadas por impressões</caption>
 					<thead>
 						<tr>
+							<?php if ( $curador ) : ?>
+								<?php uonix_intelligence_render_radar_check_all( 'uonix-radar-select-all' ); ?>
+							<?php endif; ?>
 							<th scope="col">Consulta</th>
 							<th scope="col">Posição</th>
 							<th scope="col">Impressões</th>
@@ -408,32 +457,65 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_section' ) ) {
 					<tbody>
 						<?php foreach ( $estado['visible'] as $c ) : ?>
 							<tr>
+								<?php if ( $curador ) : ?>
+									<?php uonix_intelligence_render_radar_check( $c ); ?>
+								<?php endif; ?>
 								<td><strong><?php echo esc_html( $c['query'] ); ?></strong></td>
 								<td><?php echo esc_html( uonix_intelligence_number( $c['position'], 1 ) ); ?></td>
 								<td><?php echo esc_html( uonix_intelligence_number( $c['impressions'], 0 ) ); ?></td>
 								<td><?php uonix_intelligence_render_radar_page_cell( $c['page'] ); ?></td>
 								<td><?php uonix_intelligence_render_radar_pauta_cell( $c ); ?></td>
 								<?php if ( $curador ) : ?>
-									<td><?php uonix_intelligence_render_radar_form( 'dismiss', $c['key'], 'Descartar' ); ?></td>
+									<td><?php uonix_intelligence_render_radar_row_button( $c['key'], 'Descartar' ); ?></td>
 								<?php endif; ?>
 							</tr>
 						<?php endforeach; ?>
 					</tbody>
 				</table>
+				<?php if ( $curador ) : ?>
+					</form>
+				<?php endif; ?>
 			<?php endif; ?>
 			<?php if ( array() !== $estado['dismissed'] ) : ?>
-				<details class="uonix-radar-dismissed">
+				<details class="uonix-radar-dismissed" style="margin-top:16px;">
 					<summary><?php echo esc_html( 'Descartadas (' . count( $estado['dismissed'] ) . ')' ); ?></summary>
-					<ul>
-						<?php foreach ( $estado['dismissed'] as $c ) : ?>
-							<li>
-								<?php echo esc_html( $c['query'] ); ?>
+					<?php if ( $curador ) : ?>
+						<?php uonix_intelligence_render_radar_form_open( 'restore', 'Restaurar selecionadas' ); ?>
+					<?php endif; ?>
+					<table class="wp-list-table widefat striped uonix-radar-dismissed-table">
+						<caption class="screen-reader-text">Pautas descartadas</caption>
+						<thead>
+							<tr>
 								<?php if ( $curador ) : ?>
-									<?php uonix_intelligence_render_radar_form( 'restore', $c['key'], 'Restaurar' ); ?>
+									<?php uonix_intelligence_render_radar_check_all( 'uonix-radar-select-all-dismissed' ); ?>
 								<?php endif; ?>
-							</li>
-						<?php endforeach; ?>
-					</ul>
+								<th scope="col">Consulta</th>
+								<th scope="col">Posição</th>
+								<th scope="col">Impressões</th>
+								<?php if ( $curador ) : ?>
+									<th scope="col"><span class="screen-reader-text">Ações</span></th>
+								<?php endif; ?>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $estado['dismissed'] as $c ) : ?>
+								<tr>
+									<?php if ( $curador ) : ?>
+										<?php uonix_intelligence_render_radar_check( $c ); ?>
+									<?php endif; ?>
+									<td><?php echo esc_html( $c['query'] ); ?></td>
+									<td><?php echo esc_html( uonix_intelligence_number( $c['position'], 1 ) ); ?></td>
+									<td><?php echo esc_html( uonix_intelligence_number( $c['impressions'], 0 ) ); ?></td>
+									<?php if ( $curador ) : ?>
+										<td><?php uonix_intelligence_render_radar_row_button( $c['key'], 'Restaurar' ); ?></td>
+									<?php endif; ?>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+					<?php if ( $curador ) : ?>
+						</form>
+					<?php endif; ?>
 				</details>
 			<?php endif; ?>
 		<?php endif; ?>

@@ -559,6 +559,7 @@ Arquivo: `mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php`. Decis
   - aceita por `uonix_analytics_metrics_sanitize_query()` (53), que recusa e-mail, telefone, link e mais de 120 caracteres;
   - sem sinal de HTML nem entidade depois do saneamento. O 53 tira as tags antes de decodificar, então `&amp;lt;b&amp;gt;` sairia dele como `<b>` (MÉDIO 1 da revisão do PR #378).
 - **Limite:** até 10 candidatas, por impressões. O limite conta depois de tirar as descartadas. Duas grafias com a mesma chave (consulta normalizada) viram uma candidata.
+- **Sem repetir o Módulo 3:** a consulta que o painel do Módulo 3 já mostra como oportunidade (posição de 4 a 12 nos 30 dias do snapshot, até `panel_limit`, hoje 5) sai do Radar, nem visível nem descartada. As que o Módulo 3 calcula e não mostra continuam no Radar. Medido em 2026-10-02: "ensaio de arrancamento" estava nos dois blocos, na posição 10,1 em 30 dias e 15,1 em 90. Decisão do Cassio: cada consulta fica com uma recomendação só.
 - **Medido em 2026-10-02:** 163 consultas em 90 dias, e de 5 a 10 passam. A forma de pergunta não é fonte: eram 12 consultas, com 1 impressão cada. 4 das 15 maiores acima da posição 15 eram buscas de spammer, sempre entre aspas.
 - **Entre as posições 12 e 15, nenhum módulo lista a consulta.** A faixa do Módulo 3 vai até 12, e a consulta já está perto do topo.
 
@@ -567,6 +568,7 @@ Arquivo: `mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php`. Decis
 - **O que vai ao Gemini:**
   - a consulta, as impressões em 90 dias e a posição média;
   - a página que aparece hoje, com caminho, tipo e título. Ela é resolvida pelo 54: post, termo (#344) ou o destino de um 301 (#343, até 10 HEADs por execução).
+  - Cada endereço é resolvido **uma vez por execução**, e o "não sei" também é lembrado. Medido em 2026-10-02: três endereços apareciam em duas candidatas cada, gastavam o orçamento de HEAD em dobro, e as duas últimas da lista nunca eram conferidas.
 - **O que volta:** um JSON com `caminho` (`nova` ou `reforcar`), `titulo` (até 80 caracteres), `angulo` (até 300) e `intencao` (`informacional`, `comercial`, `transacional` ou `navegacional`).
   - Sem HTML e sem link.
   - Sem página resolvida, só `nova` é aceita.
@@ -606,7 +608,9 @@ São três opções, sem autoload e protegidas no clone:
 - **Painel:** a seção "Radar de Pautas" fica no fim da aba "Oportunidades SEO".
   - A tabela mostra consulta, posição, impressões, a página que aparece hoje (com o 301 e o link "Editar") e a pauta.
   - Há mensagens para cada estado: ainda não rodou, sem candidata, Search Console indisponível, corte de linhas, sem chave e pauta não gerada.
-  - **"Descartar" e "Restaurar"** valem para quem vê a Central, com `edit_posts` e `uonix_ksio_can_access_tool( 'analytics' )`, e usam nonce por chave. O descarte vale na hora, e as descartadas ficam numa área recolhida enquanto ainda passarem na regra.
+  - **"Descartar" e "Restaurar"** valem para quem vê a Central, com `edit_posts` e `uonix_ksio_can_access_tool( 'analytics' )`. O descarte vale na hora, e as descartadas ficam numa tabela recolhida enquanto ainda passarem na regra.
+  - **Em lote** (pedido do Cassio em 2026-10-02): cada tabela é um formulário, com uma caixa por linha, "selecionar todas" e "Descartar selecionadas" ou "Restaurar selecionadas". O botão de uma linha vale só para ela, mesmo com outras caixas marcadas.
+  - **Limites e segurança:** no máximo 20 chaves por pedido. O nonce é por ação, porque um formulário serve várias pautas, e cada chave continua conferida contra as candidatas gravadas. O aviso diz quantas foram.
 
 ### O que o Módulo 8 não entrega
 

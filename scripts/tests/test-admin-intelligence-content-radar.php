@@ -611,9 +611,9 @@ $kB    = uonix_intelligence_radar_query_key( 'teste de arrancamento' );
 $saida = uox_rd_curar( 'dismiss', $kB );
 uox_rd_assert( 0 === strpos( $saida, 'redirect:https://uonix.com.br/wp-admin/admin.php?' ) && false !== strpos( $saida, 'tab=intelligence' ) && false !== strpos( $saida, 'uonix_radar=dismiss' ) && '#uonix-radar' === substr( $saida, -12 ), 'Descartar volta para a seção, com o aviso; obteve ' . $saida );
 uox_rd_assert( isset( uonix_intelligence_radar_dismissed()[ $kB ] ) && false === $GLOBALS['uox_autoload'][ $desc ] && false === strpos( serialize( get_option( $desc ) ), 'arrancamento' ), 'Descarte gravado, sem autoload e sem texto' );
-uox_rd_assert( 'uonix_intelligence_radar_dismiss_' . $kB === $GLOBALS['uox_referer_action'], 'O nonce é por ação e por chave' );
+uox_rd_assert( 'uonix_intelligence_radar_dismiss' === $GLOBALS['uox_referer_action'], 'O nonce é por ação: um formulário serve várias pautas' );
 uox_rd_curar( 'restore', $kB );
-uox_rd_assert( ! isset( uonix_intelligence_radar_dismissed()[ $kB ] ) && 'uonix_intelligence_radar_restore_' . $kB === $GLOBALS['uox_referer_action'], 'Restaurar tira o descarte' );
+uox_rd_assert( ! isset( uonix_intelligence_radar_dismissed()[ $kB ] ) && 'uonix_intelligence_radar_restore' === $GLOBALS['uox_referer_action'], 'Restaurar tira o descarte' );
 $antes = get_option( $desc );
 foreach ( array( 'curta' => 'curta', 'fora das candidatas' => str_repeat( 'd', 64 ), 'vazia' => '', 'array' => array( 'x' ) ) as $caso => $ruim ) {
 	$s = uox_rd_curar( 'dismiss', $ruim );
@@ -633,6 +633,106 @@ foreach ( array( 'admin_post_uonix_intelligence_radar_dismiss' => 'uonix_intelli
 	uox_rd_assert( 1 === count( array_filter( $GLOBALS['uox_actions'], static function ( $a ) use ( $gancho, $cb ) { return $gancho === $a[0] && $cb === $a[1] && 0 === $a[3]; } ) ), "Handler {$gancho} registrado sem argumentos" );
 }
 $_POST                  = array();
+$GLOBALS['uox_options'] = array();
+
+// ---------------------------------------------------------------------------
+// 12. Pós-deploy de 2026-10-02: endereço conferido uma vez por execução, e sem repetir o
+//     que o Módulo 3 já lista.
+// ---------------------------------------------------------------------------
+$k_tarr = uonix_intelligence_radar_query_key( 'teste de arrancamento' );
+$sel_m3 = uonix_intelligence_radar_select( $consultas, $paginas, array( $k_tarr => '2026-10-01T00:00:00+00:00' ), array( uonix_intelligence_radar_query_key( 'ancoragem predial' ) => true, $k_tarr => true ) );
+uox_rd_assert( ! in_array( 'ancoragem predial', array_column( $sel_m3['visible'], 'query' ), true ) && ! in_array( 'teste de arrancamento', array_column( array_merge( $sel_m3['visible'], $sel_m3['dismissed'] ), 'query' ), true ) && 4 === count( $sel_m3['visible'] ), 'Consulta que já é oportunidade do Módulo 3 sai do Radar, mesmo descartada' );
+$GLOBALS['uox_options'] = array();
+$pedidos_ia             = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'module3' => array( 'Ancoragem Predial', 'outra consulta' ) ) ) );
+uox_rd_assert( ! in_array( 'ancoragem predial', array_column( get_option( $opt )['candidates'], 'query' ), true ) && ! in_array( 'ancoragem predial', $pedidos_ia, true ), 'O cron tira do Radar a consulta que o Módulo 3 já lista, comparada pela chave normalizada' );
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( $base );
+uox_rd_assert( 6 === count( get_option( $opt )['candidates'] ), 'Sem oportunidades do Módulo 3 (sem snapshot), nenhuma exclusão' );
+// Revisão do PR #385, MÉDIO: só sai do Radar o que o painel do Módulo 3 MOSTRA (`panel_limit`),
+// e não as 1.000 que ele calcula; a 6.ª e a 7.ª oportunidades continuam no Radar.
+$universo_m3 = array();
+for ( $i = 1; $i <= 7; $i++ ) {
+	$universo_m3[] = array( 'query' => 'oportunidade ' . $i, 'clicks' => 0, 'impressions' => 100 - $i, 'ctr' => 0.0, 'position' => 8.0 );
+}
+$GLOBALS['uox_options'] = array( uonix_analytics_metrics_snapshot_option( 30 ) => array( 'version' => 3, 'period_days' => 30, 'status' => 'updated', 'updated_at' => gmdate( 'c' ), 'ga4' => array(), 'search_console' => array( 'queries' => array(), 'queries_extended' => $universo_m3, 'pages' => array() ) ) );
+$m3 = uonix_intelligence_radar_module3_queries();
+uox_rd_assert( array( 'oportunidade 1', 'oportunidade 2', 'oportunidade 3', 'oportunidade 4', 'oportunidade 5' ) === $m3, 'Só saem do Radar as oportunidades que o painel do Módulo 3 mostra (panel_limit = 5); obteve ' . var_export( $m3, true ) );
+$GLOBALS['uox_options'] = array();
+$caminhos = array();
+$res_cam  = static function ( $consulta, $caminho, &$orcamento ) use ( &$caminhos ) {
+	$caminhos[] = $caminho;
+	return array( 'path' => $caminho, 'kind' => 'página', 'title' => 'T ' . $caminho, 'redirected_to' => '' );
+};
+$pag_rep  = array(
+	uox_rd_pagina( 'ancoragem predial', 'https://uonix.com.br/norma-ancoragem-predial', 70 ),
+	uox_rd_pagina( 'teste de ancoragem', 'https://uonix.com.br/norma-ancoragem-predial', 9 ),
+	uox_rd_pagina( 'teste de arrancamento', 'https://uonix.com.br/teste-de-arrancamento', 11 ),
+	uox_rd_pagina( 'barra roscada inox fabricante', 'https://uonix.com.br/teste-de-arrancamento', 5 ),
+);
+$busc_rep = static function ( $config, $periodo, $dimensao, $limite ) use ( $consultas, $pag_rep ) {
+	return uox_rd_resposta( 'query' === $dimensao ? $consultas : $pag_rep );
+};
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'query' => $busc_rep, 'page_resolver' => $res_cam ) ) );
+$contagem = array_count_values( $caminhos );
+uox_rd_assert( 1 === ( $contagem['/norma-ancoragem-predial'] ?? 0 ) && 1 === ( $contagem['/teste-de-arrancamento'] ?? 0 ), 'Cada endereço é resolvido uma vez por execução, mesmo com duas candidatas; obteve ' . var_export( $contagem, true ) );
+$por_rep = array_column( get_option( $opt )['candidates'], null, 'query' );
+uox_rd_assert( 'T /norma-ancoragem-predial' === $por_rep['teste de ancoragem']['page']['title'] && 'T /teste-de-arrancamento' === $por_rep['barra roscada inox fabricante']['page']['title'], 'A segunda candidata do mesmo endereço recebe a mesma página' );
+$caminhos_ns = array();
+$res_ns      = static function ( $consulta, $caminho, &$orcamento ) use ( &$caminhos_ns ) {
+	$caminhos_ns[] = $caminho;
+	return null;
+};
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'query' => $busc_rep, 'page_resolver' => $res_ns ) ) );
+uox_rd_assert( 1 === ( array_count_values( $caminhos_ns )['/norma-ancoragem-predial'] ?? 0 ), '"Não sei" de um endereço vale para a execução inteira: nenhum HEAD repetido' );
+$GLOBALS['uox_options'] = array();
+
+// ---------------------------------------------------------------------------
+// 13. Descartar e restaurar em lote (pedido do Cassio em 2026-10-02).
+// ---------------------------------------------------------------------------
+function uox_rd_lote( $acao, array $chaves, $linha = null ) {
+	$_POST = array( 'uonix_radar_keys' => $chaves, 'uonix_radar_bulk' => '1' );
+	if ( null !== $linha ) {
+		$_POST['uonix_radar_key'] = $linha;
+	}
+	try {
+		if ( 'dismiss' === $acao ) {
+			uonix_intelligence_radar_handle_dismiss();
+		} else {
+			uonix_intelligence_radar_handle_restore();
+		}
+	} catch ( Uox_Redirect $r ) {
+		return $r->url;
+	} catch ( Uox_Die $d ) {
+		return 'die:' . $d->getMessage();
+	}
+	return 'nada';
+}
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( $base );
+$kL1 = uonix_intelligence_radar_query_key( 'ancoragem predial' );
+$kL2 = uonix_intelligence_radar_query_key( 'teste de arrancamento' );
+$kL3 = uonix_intelligence_radar_query_key( 'pontos de ancoragem predial' );
+$uL  = uox_rd_lote( 'dismiss', array( $kL1, $kL2, str_repeat( 'd', 64 ), 'lixo', $kL1, array( 'x' ) ) );
+$dL  = uonix_intelligence_radar_dismissed();
+uox_rd_assert( isset( $dL[ $kL1 ], $dL[ $kL2 ] ) && 2 === count( $dL ) && false !== strpos( $uL, 'uonix_radar=dismiss' ) && false !== strpos( $uL, 'uonix_radar_n=2' ), 'Lote: as duas válidas são descartadas; repetida e inválidas são ignoradas; o aviso traz o número; obteve ' . $uL );
+uox_rd_assert( 'uonix_intelligence_radar_dismiss' === $GLOBALS['uox_referer_action'], 'Lote usa o nonce da ação' );
+uox_rd_lote( 'dismiss', array( $kL3 ), $kL2 );
+uox_rd_assert( ! isset( uonix_intelligence_radar_dismissed()[ $kL3 ] ), 'O botão de uma linha vale só para ela, mesmo com outras caixas marcadas' );
+$uR = uox_rd_lote( 'restore', array( $kL1, $kL2 ) );
+uox_rd_assert( array() === uonix_intelligence_radar_dismissed() && false !== strpos( $uR, 'uonix_radar=restore' ) && false !== strpos( $uR, 'uonix_radar_n=2' ), 'Restaurar em lote; obteve ' . $uR );
+$antesL = get_option( uonix_intelligence_radar_dismissed_option() );
+uox_rd_assert( false !== strpos( uox_rd_lote( 'dismiss', array( 'lixo', str_repeat( 'e', 64 ) ) ), 'uonix_radar=invalid' ) && $antesL === get_option( uonix_intelligence_radar_dismissed_option() ), 'Lote sem chave válida: nada gravado, aviso invalid' );
+uox_rd_assert( false !== strpos( uox_rd_lote( 'dismiss', array() ), 'uonix_radar=invalid' ), 'Lote vazio: aviso invalid' );
+$vinte = array_map( static function ( $i ) { return 'lixo' . $i; }, range( 1, 20 ) );
+uox_rd_assert( false !== strpos( uox_rd_lote( 'dismiss', array_merge( $vinte, array( $kL1 ) ) ), 'uonix_radar=invalid' ) && ! isset( uonix_intelligence_radar_dismissed()[ $kL1 ] ), 'No máximo 20 chaves por pedido: a 21.ª é ignorada' );
+$GLOBALS['uox_caps']           = array();
+$GLOBALS['uox_referer_action'] = null;
+uox_rd_assert( 0 === strpos( uox_rd_lote( 'dismiss', array( $kL1 ) ), 'die:' ) && null === $GLOBALS['uox_referer_action'] && ! isset( uonix_intelligence_radar_dismissed()[ $kL1 ] ), 'Lote sem permissão: recusado antes do nonce' );
+$GLOBALS['uox_caps'] = array( 'edit_posts' );
+$_POST               = array();
 $GLOBALS['uox_options'] = array();
 
 // FIM DAS SEÇÕES — as seções das tarefas seguintes entram acima desta linha.
