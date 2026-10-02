@@ -1038,9 +1038,8 @@ function uox_render_quick_links()
         <a href="/wp-admin/admin.php?page=fluent_forms_all_entries" class="uox-btn">
             <span class="dashicons dashicons-email-alt"></span> Leads
         </a>
-        <a href="https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags" target="_blank" rel="noopener noreferrer"
-            class="uox-btn">
-            <span class="dashicons dashicons-shield"></span> Adopt
+        <a href="/wp-admin/widgets.php" class="uox-btn">
+            <span class="dashicons dashicons-table-row-after"></span> Rodapé
         </a>
         <a href="/wp-admin/admin.php?page=uox-dados-globais" class="uox-btn uox-btn-primary uox-btn-full">
             <span class="dashicons dashicons-building"></span> Alterar Telefones e Endereço
