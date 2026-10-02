@@ -5,7 +5,8 @@
  * O editor tem edit_theme_options, mas o menu Aparência fica oculto para ele
  * (39-admin-editor-dashboard.php). Este arquivo:
  *
- * 1. põe "Rodapé" no menu lateral, apontando para widgets.php;
+ * 1. destaca o menu "Seções do Site" em widgets.php (o menu e o item
+ *    "Rodapé" ficam em 67-admin-editor-menus.php);
  * 2. troca o título "Widgets" por "Editar Rodapé" (aba do navegador e o h1
  *    do editor em blocos, que vem do JavaScript);
  * 3. filtra as leituras REST de áreas e widgets para só as áreas footer*,
@@ -49,29 +50,8 @@ function uonix_admin_editor_rodape_area_do_rodape( $id ) {
 }
 
 /**
- * Item "Rodapé" no menu lateral.
- *
- * @return void
- */
-function uonix_admin_editor_rodape_menu() {
-	if ( ! uonix_admin_editor_rodape_ativo() ) {
-		return;
-	}
-
-	add_menu_page(
-		'Editar Rodapé',
-		'Rodapé',
-		'edit_theme_options',
-		'widgets.php',
-		'',
-		'dashicons-table-row-after',
-		56
-	);
-}
-add_action( 'admin_menu', 'uonix_admin_editor_rodape_menu', 1000 );
-
-/**
- * Em widgets.php, destaca o item "Rodapé" em vez do Aparência oculto.
+ * Em widgets.php, destaca "Seções do Site" (slug widgets.php) em vez do
+ * Aparência oculto.
  *
  * @param string $parent_file Arquivo pai do menu.
  * @return string

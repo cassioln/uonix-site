@@ -1018,7 +1018,7 @@ function uox_render_quick_links()
         </a>
         <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F10973&canvas=edit" target="_blank" rel="noopener noreferrer"
             class="uox-btn">
-            <span class="dashicons dashicons-buddicons-community"></span> Selo Aniverário
+            <span class="dashicons dashicons-buddicons-community"></span> Selo Aniversário
         </a>
         <a href="/wp-admin/site-editor.php?p=%2Fwp_block%2F7255&canvas=edit" target="_blank" rel="noopener noreferrer"
             class="uox-btn">

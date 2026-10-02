@@ -24,7 +24,6 @@ set_error_handler(
 );
 
 $GLOBALS['uox_test_caps']    = array();
-$GLOBALS['uox_test_menus']   = array();
 $GLOBALS['uox_test_inline']  = array();
 $GLOBALS['uox_test_widgets'] = array();
 $GLOBALS['pagenow']          = 'index.php';
@@ -37,11 +36,6 @@ function add_filter( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
 
 function current_user_can( $cap ) {
 	return in_array( $cap, $GLOBALS['uox_test_caps'], true );
-}
-
-function add_menu_page( $page_title, $menu_title, $capability, $menu_slug, $callback = '', $icon_url = '', $position = null ) {
-	$GLOBALS['uox_test_menus'][] = compact( 'page_title', 'menu_title', 'capability', 'menu_slug', 'position' );
-	return 'toplevel_page_widgets';
 }
 
 function wp_add_inline_script( $handle, $data, $position = 'after' ) {
@@ -156,20 +150,11 @@ foreach ( array( 'sidebar-primary', 'sidebar-secondary', 'mega-menu', 'wp_inacti
 }
 uox_er_assert( ! uonix_admin_editor_rodape_area_do_rodape( null ), 'null não é rodapé' );
 
-// Menu lateral.
-uox_er_como_admin();
-uonix_admin_editor_rodape_menu();
-uox_er_assert( array() === $GLOBALS['uox_test_menus'], 'administrador não ganha o item Rodapé' );
-
-uox_er_como_editor();
-uonix_admin_editor_rodape_menu();
-$menu = $GLOBALS['uox_test_menus'][0] ?? array();
-uox_er_assert( 1 === count( $GLOBALS['uox_test_menus'] ), 'editor ganha um item de menu' );
-uox_er_assert( 'Rodapé' === ( $menu['menu_title'] ?? null ), 'item do menu se chama Rodapé' );
-uox_er_assert( 'widgets.php' === ( $menu['menu_slug'] ?? null ), 'item do menu aponta para widgets.php' );
-uox_er_assert( 'edit_theme_options' === ( $menu['capability'] ?? null ), 'item do menu exige edit_theme_options' );
+// O item Rodapé saiu deste arquivo: fica em "Seções do Site" (67-admin-editor-menus.php).
+uox_er_assert( ! function_exists( 'uonix_admin_editor_rodape_menu' ), 'menu do rodapé deveria estar só em 67-admin-editor-menus.php' );
 
 // parent_file e título PHP.
+uox_er_como_editor();
 $GLOBALS['pagenow'] = 'widgets.php';
 uox_er_assert( 'widgets.php' === uonix_admin_editor_rodape_parent_file( 'themes.php' ), 'editor em widgets.php destaca Rodapé' );
 uox_er_assert( 'Editar Rodapé' === uonix_admin_editor_rodape_gettext( 'Widgets', 'Widgets', 'default' ), 'editor vê Editar Rodapé no título' );
