@@ -438,3 +438,60 @@ if ( ! function_exists( 'uonix_intelligence_radar_validate' ) ) {
 		return $pauta;
 	}
 }
+
+if ( ! function_exists( 'uonix_intelligence_radar_post_kind' ) ) {
+	/**
+	 * Como o pedido e o painel chamam cada tipo de post. Termos vêm prontos do 54
+	 * (`uonix_intelligence_ai_term_kind()`).
+	 */
+	function uonix_intelligence_radar_post_kind( $post_id ) {
+		$tipo = function_exists( 'get_post_type' ) ? (string) get_post_type( (int) $post_id ) : '';
+		$mapa = array(
+			'post'     => 'post do blog',
+			'page'     => 'página',
+			'product'  => 'produto',
+			'servicos' => 'página de serviço',
+		);
+
+		return isset( $mapa[ $tipo ] ) ? $mapa[ $tipo ] : 'página';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_page' ) ) {
+	/**
+	 * O que é a página líder de uma consulta: título e tipo, para o pedido e o painel.
+	 *
+	 * Reaproveita a resolução do 54: post publicado, termo (#344) ou o destino de um 301
+	 * do próprio domínio (#343). **Seguir o 301 faz HTTP**, um HEAD por salto, e cada HEAD
+	 * desconta de `$orcamento`. Por isso só o cron chama esta função.
+	 *
+	 * Não resolvida (removida, 404, HEAD sem resposta, orçamento esgotado), a página volta
+	 * com `title` vazio, e a pauta só pode ser "nova".
+	 *
+	 * @param int|null $orcamento HEADs que ainda podem ser gastos; null é sem limite (só para teste).
+	 * @return array{path: string, kind: string, title: string, redirected_to: string}
+	 */
+	function uonix_intelligence_radar_page( $consulta, $path, &$orcamento = null ) {
+		$path  = is_string( $path ) ? $path : '';
+		$vazia = array( 'path' => $path, 'kind' => '', 'title' => '', 'redirected_to' => '' );
+		if ( '' === $path || ! function_exists( 'uonix_intelligence_ai_input' ) ) {
+			return $vazia;
+		}
+		$linha   = array( 'query' => (string) $consulta, 'target_page' => $path );
+		$entrada = uonix_intelligence_ai_input( $linha );
+		if ( null === $entrada && function_exists( 'uonix_intelligence_ai_follow_redirect' ) ) {
+			$destino = uonix_intelligence_ai_follow_redirect( $path, $orcamento );
+			$entrada = is_string( $destino ) && '' !== $destino ? uonix_intelligence_ai_input( $linha, $destino ) : null;
+		}
+		if ( ! is_array( $entrada ) || ! isset( $entrada['title'] ) || '' === (string) $entrada['title'] ) {
+			return $vazia;
+		}
+
+		return array(
+			'path'          => $path,
+			'kind'          => isset( $entrada['page_kind'] ) && is_string( $entrada['page_kind'] ) ? $entrada['page_kind'] : uonix_intelligence_radar_post_kind( (int) ( $entrada['post_id'] ?? 0 ) ),
+			'title'         => (string) $entrada['title'],
+			'redirected_to' => isset( $entrada['redirected_to'] ) ? (string) $entrada['redirected_to'] : '',
+		);
+	}
+}

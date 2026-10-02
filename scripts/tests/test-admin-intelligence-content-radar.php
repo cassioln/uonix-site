@@ -296,6 +296,38 @@ uox_rd_assert( is_array( uonix_intelligence_radar_validate( json_encode( array_m
 $reforco = array_merge( $boa, array( 'caminho' => 'reforcar' ) );
 uox_rd_assert( is_array( uonix_intelligence_radar_validate( json_encode( $reforco ), true ) ) && null === uonix_intelligence_radar_validate( json_encode( $reforco ), false ), 'Reforço só vale com página resolvida (foco de revisão 3)' );
 
+// ---------------------------------------------------------------------------
+// 7. A página que aparece hoje.
+// ---------------------------------------------------------------------------
+$GLOBALS['uox_posts'] = array(
+	20 => array( 'path' => '/norma-ancoragem-predial', 'type' => 'page', 'status' => 'publish', 'title' => 'Norma de Ancoragem Predial', 'meta' => array( 'rank_math_title' => 'Norma de Ancoragem Predial: NBR 16325 | Uônix' ) ),
+	21 => array( 'path' => '/blog/zona-livre-de-queda/', 'type' => 'post', 'status' => 'publish', 'title' => 'Zona Livre de Queda', 'meta' => array() ),
+	15 => array( 'path' => '/servico/ensaios-de-arrancamento/', 'type' => 'servicos', 'status' => 'publish', 'title' => 'Ensaios de Arrancamento', 'meta' => array() ),
+	22 => array( 'path' => '/produtos/olhal-inox/', 'type' => 'product', 'status' => 'publish', 'title' => 'Olhal Inox', 'meta' => array() ),
+	23 => array( 'path' => '/rascunho/', 'type' => 'post', 'status' => 'draft', 'title' => 'Rascunho', 'meta' => array() ),
+);
+$GLOBALS['uox_heads'] = 0;
+$orc                  = 10;
+uox_rd_assert( array( 'path' => '/norma-ancoragem-predial', 'kind' => 'página', 'title' => 'Norma de Ancoragem Predial: NBR 16325 | Uônix', 'redirected_to' => '' ) === uonix_intelligence_radar_page( 'ancoragem predial', '/norma-ancoragem-predial', $orc ), 'Página: título do Rank Math e tipo "página"' );
+uox_rd_assert( 'post do blog' === uonix_intelligence_radar_page( 'x', '/blog/zona-livre-de-queda/', $orc )['kind'] && 'produto' === uonix_intelligence_radar_page( 'x', '/produtos/olhal-inox/', $orc )['kind'] && 'página de serviço' === uonix_intelligence_radar_page( 'x', '/servico/ensaios-de-arrancamento/', $orc )['kind'], 'Tipo de cada post' );
+uox_rd_assert( 'Zona Livre de Queda' === uonix_intelligence_radar_page( 'x', '/blog/zona-livre-de-queda/', $orc )['title'], 'Sem meta do Rank Math, o título do post' );
+uox_rd_assert( 10 === $orc && 0 === $GLOBALS['uox_heads'], 'Post achado direto não gasta HEAD' );
+$GLOBALS['uox_status'] = array(
+	'/teste-de-arrancamento'            => array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/servico/ensaios-de-arrancamento/' ),
+	'/servico/ensaios-de-arrancamento/' => array( 'state' => 'ok', 'code' => 200, 'location' => '' ),
+	'/sumiu'                            => array( 'state' => 'not_found', 'code' => 404, 'location' => '' ),
+);
+$p301 = uonix_intelligence_radar_page( 'teste de arrancamento', '/teste-de-arrancamento', $orc );
+uox_rd_assert( array( 'path' => '/teste-de-arrancamento', 'kind' => 'página de serviço', 'title' => 'Ensaios de Arrancamento', 'redirected_to' => '/servico/ensaios-de-arrancamento/' ) === $p301 && 8 === $orc, '301 do próprio domínio: a página é o destino, e 2 HEADs saem do orçamento (#343); obteve ' . var_export( array( $p301, $orc ), true ) );
+$vazia = array( 'path' => '/removida', 'kind' => '', 'title' => '', 'redirected_to' => '' );
+uox_rd_assert( $vazia === uonix_intelligence_radar_page( 'x', '/removida', $orc ), 'HEAD sem resposta: página não resolvida (foco de revisão 3)' );
+uox_rd_assert( '' === uonix_intelligence_radar_page( 'x', '/sumiu', $orc )['title'], '404: página não resolvida' );
+uox_rd_assert( '' === uonix_intelligence_radar_page( 'x', '/rascunho/', $orc )['title'], 'Rascunho não é página' );
+$zero        = 0;
+$heads_antes = $GLOBALS['uox_heads'];
+uox_rd_assert( '' === uonix_intelligence_radar_page( 'x', '/teste-de-arrancamento', $zero )['title'] && $heads_antes === $GLOBALS['uox_heads'], 'Orçamento de HEAD esgotado: nenhum HEAD, página não resolvida' );
+uox_rd_assert( array( 'path' => '', 'kind' => '', 'title' => '', 'redirected_to' => '' ) === uonix_intelligence_radar_page( 'x', '', $orc ), 'Sem caminho líder: página vazia' );
+
 // FIM DAS SEÇÕES — as seções das tarefas seguintes entram acima desta linha.
 
 if ( $failures > 0 ) {
