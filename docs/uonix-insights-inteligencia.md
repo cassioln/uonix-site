@@ -579,6 +579,8 @@ Arquivo: `mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php`. Decis
   - descartadas não chamam o Gemini;
   - depois de **150 s do início** da execução, nenhuma página é resolvida (nenhum HEAD) e nenhuma chamada começa; as restantes ficam `deferred`. O `crontab` de produção corta em 290 s, e o corte derrubaria também os outros eventos do mesmo ciclo.
 - **"Não sei" não é "não há página":** HEAD sem resposta, ou orçamento de HEAD esgotado, reaproveita a página de ontem, e a pauta pronta fica. Sem página anterior, a pauta fica `deferred`, sem chamada. Tratar o "não sei" como página ausente refazia uma pauta "reforcar" boa como "nova" (MÉDIO 2 da revisão do PR #378, a mesma lição do #373).
+  - A página de ontem só vale para o **mesmo** caminho líder.
+  - Uma página que ontem já era "não sei" fica marcada (`page_unknown`) e não vale como a de ontem: sem isso, o segundo "não sei" seguido chamava o Gemini sem página.
 - **Transporte:** é o mesmo da sugestão de título, `uonix_intelligence_ai_generate()`, com uma nova tentativa em 429 e 503.
 
 ### O que é gravado

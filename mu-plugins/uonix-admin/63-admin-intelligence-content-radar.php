@@ -588,8 +588,10 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 		$pagina_antes = array();
 		foreach ( isset( $anterior['candidates'] ) && is_array( $anterior['candidates'] ) ? $anterior['candidates'] : array() as $c ) {
 			if ( is_array( $c ) && uonix_intelligence_radar_is_key( $c['key'] ?? null ) ) {
-				$ia_antes[ $c['key'] ]     = isset( $c['ai'] ) && is_array( $c['ai'] ) ? $c['ai'] : array();
-				$pagina_antes[ $c['key'] ] = isset( $c['page'] ) && is_array( $c['page'] ) ? $c['page'] : null;
+				$ia_antes[ $c['key'] ] = isset( $c['ai'] ) && is_array( $c['ai'] ) ? $c['ai'] : array();
+				// Página que ontem já era "não sei" não é a página de ontem: com ela, o segundo
+				// "não sei" seguido chamava o Gemini sem página (segunda passada da revisão do #378).
+				$pagina_antes[ $c['key'] ] = isset( $c['page'] ) && is_array( $c['page'] ) && empty( $ia_antes[ $c['key'] ]['page_unknown'] ) ? $c['page'] : null;
 			}
 		}
 		$resolver  = isset( $args['page_resolver'] ) && is_callable( $args['page_resolver'] ) ? $args['page_resolver'] : 'uonix_intelligence_radar_page';
@@ -614,7 +616,9 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 			if ( null === $pagina ) {
 				// "Não sei": a página de ontem vale, e sem ela a pauta espera. Tratar como "não há
 				// página" refazia uma pauta "reforcar" boa como "nova" (MÉDIO 2 da revisão do PR #378).
-				$pagina = isset( $pagina_antes[ $c['key'] ] ) ? $pagina_antes[ $c['key'] ] : null;
+				// E só para o MESMO caminho líder: com outro, ela é de outra página.
+				$ontem  = isset( $pagina_antes[ $c['key'] ] ) ? $pagina_antes[ $c['key'] ] : null;
+				$pagina = is_array( $ontem ) && isset( $ontem['path'] ) && (string) $ontem['path'] === (string) $c['page_path'] ? $ontem : null;
 				$adiar  = null === $pagina;
 			}
 			$c['page'] = is_array( $pagina ) ? array_merge( $sem_pagina, array_map( 'strval', array_intersect_key( $pagina, $sem_pagina ) ) ) : $sem_pagina;
@@ -650,6 +654,12 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 					}
 				}
 				$c['ai'] = $ai;
+			}
+			// A página ficou sem saber: o próximo cron não pode tomá-la como a de ontem.
+			if ( $adiar ) {
+				$c['ai']['page_unknown'] = true;
+			} else {
+				unset( $c['ai']['page_unknown'] );
 			}
 			$gravadas[] = $c;
 		}

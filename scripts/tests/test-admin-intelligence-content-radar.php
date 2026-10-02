@@ -443,6 +443,25 @@ $g_m2b                  = get_option( $opt )['candidates'][0];
 uox_rd_assert( 0 === $r_m2b['called'] && 'deferred' === $g_m2b['ai']['status'] && '' === $g_m2b['page']['title'], '"Não sei" sem página anterior: deferred, sem chamar o Gemini' );
 uox_rd_assert( 6 === uonix_intelligence_radar_run( $base )['called'], 'No dia seguinte, com a página resolvida, a pauta é gerada' );
 
+// Segunda passada da revisão do PR #378, MÉDIO: dois "não sei" seguidos, sem página anterior,
+// não podem chamar o Gemini sem página.
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'page_resolver' => $nao_sei ) ) );
+$pedidos_ia = array();
+$r_dois     = uonix_intelligence_radar_run( array_merge( $base, array( 'page_resolver' => $nao_sei, 'now' => '2026-10-03T03:00:00+00:00' ) ) );
+$g_dois     = get_option( $opt )['candidates'][0];
+uox_rd_assert( 0 === $r_dois['called'] && array() === $pedidos_ia && 'deferred' === $g_dois['ai']['status'], 'Segundo "não sei" seguido: ainda deferred, nenhuma chamada (a página vazia adiada não vale como a de ontem)' );
+uox_rd_assert( 6 === uonix_intelligence_radar_run( $base )['called'], 'Com a página de volta, a pauta é gerada' );
+// Segunda passada, BAIXO 1: a página de ontem só vale para o MESMO caminho líder.
+$paginas_trocadas = array( uox_rd_pagina( 'ancoragem predial', 'https://uonix.com.br/laudo-ancoragem-predial', 90 ) );
+$buscador_troca   = static function ( $config, $periodo, $dimensao, $limite ) use ( $consultas, $paginas_trocadas ) {
+	return uox_rd_resposta( 'query' === $dimensao ? $consultas : $paginas_trocadas );
+};
+$pedidos_ia = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'query' => $buscador_troca, 'page_resolver' => $nao_sei ) ) );
+$g_troca = array_column( get_option( $opt )['candidates'], null, 'query' )['ancoragem predial'];
+uox_rd_assert( ! in_array( 'ancoragem predial', $pedidos_ia, true ) && 'deferred' === $g_troca['ai']['status'] && '/laudo-ancoragem-predial' === $g_troca['page']['path'] && '' === $g_troca['page']['title'], 'Caminho líder trocado e "não sei": a página de ontem não vale, e a pauta espera' );
+
 // BAIXO 4 da revisão do PR #378, promovido: depois do orçamento, nem HEAD nem Gemini.
 $GLOBALS['uox_options'] = array();
 $resolvidas             = array();
