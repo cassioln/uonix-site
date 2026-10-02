@@ -662,3 +662,245 @@ add_action( 'init', 'uonix_intelligence_radar_schedule', 10, 0 );
 // `accepted_args = 0`, como os irmãos de 53, 54, 57 e 59: um evento agendado à mão não
 // injeta `$args` (buscador, gerador, resolvedor) pelo despacho do hook.
 add_action( uonix_intelligence_radar_hook(), 'uonix_intelligence_radar_run', 10, 0 );
+
+if ( ! function_exists( 'uonix_intelligence_radar_state' ) ) {
+	/**
+	 * O que o painel e o e-mail leem: a última execução do cron, sem rede.
+	 *
+	 * A separação entre visíveis e descartadas usa os descartes AO VIVO: um descarte vale
+	 * na hora, sem esperar o próximo cron. Candidata malformada é ignorada, e campo
+	 * malformado vira vazio do tipo certo (foco de revisão 4).
+	 */
+	function uonix_intelligence_radar_state() {
+		$gravado   = get_option( uonix_intelligence_radar_option(), array() );
+		$gravado   = is_array( $gravado ) ? $gravado : array();
+		$descartes = uonix_intelligence_radar_dismissed();
+		$texto     = static function ( $valor ) {
+			return is_string( $valor ) ? $valor : '';
+		};
+
+		$visiveis    = array();
+		$descartadas = array();
+		foreach ( isset( $gravado['candidates'] ) && is_array( $gravado['candidates'] ) ? $gravado['candidates'] : array() as $c ) {
+			if ( ! is_array( $c ) || ! uonix_intelligence_radar_is_key( $c['key'] ?? null ) || ! isset( $c['query'] ) || ! is_string( $c['query'] ) || '' === $c['query'] ) {
+				continue;
+			}
+			$pagina = isset( $c['page'] ) && is_array( $c['page'] ) ? $c['page'] : array();
+			$normal = array(
+				'key'         => $c['key'],
+				'query'       => $c['query'],
+				'impressions' => is_numeric( $c['impressions'] ?? null ) ? (int) $c['impressions'] : 0,
+				'clicks'      => is_numeric( $c['clicks'] ?? null ) ? (int) $c['clicks'] : 0,
+				'position'    => is_numeric( $c['position'] ?? null ) ? (float) $c['position'] : 0.0,
+				'page'        => array(
+					'path'          => $texto( $pagina['path'] ?? null ),
+					'kind'          => $texto( $pagina['kind'] ?? null ),
+					'title'         => $texto( $pagina['title'] ?? null ),
+					'redirected_to' => $texto( $pagina['redirected_to'] ?? null ),
+				),
+				'ai'          => isset( $c['ai'] ) && is_array( $c['ai'] ) ? $c['ai'] : array(),
+			);
+			if ( isset( $descartes[ $c['key'] ] ) ) {
+				$descartadas[] = $normal;
+			} else {
+				$visiveis[] = $normal;
+			}
+		}
+		$janela = isset( $gravado['window']['start'], $gravado['window']['end'] ) && is_string( $gravado['window']['start'] ) && is_string( $gravado['window']['end'] ) ? $gravado['window'] : array();
+
+		return array(
+			'ran'             => isset( $gravado['updated_at'] ) && is_string( $gravado['updated_at'] ),
+			'status'          => $texto( $gravado['status'] ?? null ),
+			'updated_at'      => $texto( $gravado['updated_at'] ?? null ),
+			'list_updated_at' => $texto( $gravado['list_updated_at'] ?? null ),
+			'window'          => $janela,
+			'truncated'       => ! empty( $gravado['truncated'] ),
+			'visible'         => array_slice( $visiveis, 0, (int) uonix_intelligence_radar_rules()['max_candidates'] ),
+			'dismissed'       => $descartadas,
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_suggestion' ) ) {
+	/**
+	 * A pauta de uma candidata, só quando `ok` e com os quatro campos válidos. Painel e
+	 * e-mail leem por aqui, e não direto da opção.
+	 *
+	 * @return array{caminho: string, titulo: string, angulo: string, intencao: string}|null
+	 */
+	function uonix_intelligence_radar_suggestion( $candidata ) {
+		if ( ! is_array( $candidata ) || ! isset( $candidata['ai']['status'], $candidata['ai']['suggestion'] ) || 'ok' !== $candidata['ai']['status'] || ! is_array( $candidata['ai']['suggestion'] ) ) {
+			return null;
+		}
+		$p = $candidata['ai']['suggestion'];
+		foreach ( array( 'caminho', 'titulo', 'angulo', 'intencao' ) as $campo ) {
+			if ( ! isset( $p[ $campo ] ) || ! is_string( $p[ $campo ] ) || '' === $p[ $campo ] ) {
+				return null;
+			}
+		}
+		if ( ! in_array( $p['caminho'], array( 'nova', 'reforcar' ), true ) || ! in_array( $p['intencao'], array( 'informacional', 'comercial', 'transacional', 'navegacional' ), true ) ) {
+			return null;
+		}
+
+		return array( 'caminho' => $p['caminho'], 'titulo' => $p['titulo'], 'angulo' => $p['angulo'], 'intencao' => $p['intencao'] );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_emailed' ) ) {
+	/**
+	 * Registros de envio que ainda valem: chave válida, data legível, não no futuro e com
+	 * até 180 dias. Uma data no futuro, de relógio adiantado, não conta (foco de revisão 5).
+	 *
+	 * @param int|null $now Para teste; o padrão é `time()`.
+	 * @return array<string, string>
+	 */
+	function uonix_intelligence_radar_emailed( $now = null ) {
+		$agora   = is_int( $now ) ? $now : time();
+		$validade = (int) uonix_intelligence_radar_rules()['emailed_ttl'];
+		$gravado = get_option( uonix_intelligence_radar_emailed_option(), array() );
+		$saida   = array();
+		foreach ( is_array( $gravado ) ? $gravado : array() as $chave => $data ) {
+			$momento = is_string( $data ) ? strtotime( $data ) : false;
+			if ( uonix_intelligence_radar_is_key( $chave ) && false !== $momento && $momento <= $agora && ( $agora - $momento ) <= $validade ) {
+				$saida[ $chave ] = $data;
+			}
+		}
+
+		return $saida;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_email_items' ) ) {
+	/**
+	 * Pautas novas para o próximo e-mail: visíveis, não enviadas nos últimos 180 dias, e
+	 * com pauta `ok`. Sem a chave do Gemini, vão as candidatas sem pauta. Com chave, uma
+	 * pauta que falhou espera, sem gastar a novidade, e continua no painel.
+	 *
+	 * Os 180 dias impedem que uma consulta oscilando em torno do limite gere e-mail toda
+	 * semana (o problema da #297 no Módulo 5).
+	 *
+	 * @param int|null  $now     Para teste; o padrão é `time()`.
+	 * @param bool|null $has_key Para teste; o padrão é a chave do wp-config.php.
+	 * @return array{items: array, panel_count: int}
+	 */
+	function uonix_intelligence_radar_email_items( $now = null, $has_key = null ) {
+		$estado    = uonix_intelligence_radar_state();
+		$enviados  = uonix_intelligence_radar_emailed( $now );
+		$tem_chave = null === $has_key
+			? ( function_exists( 'uonix_intelligence_ai_api_key' ) && '' !== uonix_intelligence_ai_api_key() )
+			: (bool) $has_key;
+		$itens     = array();
+		foreach ( $estado['visible'] as $c ) {
+			if ( isset( $enviados[ $c['key'] ] ) ) {
+				continue;
+			}
+			$status = isset( $c['ai']['status'] ) && is_string( $c['ai']['status'] ) ? $c['ai']['status'] : '';
+			if ( null !== uonix_intelligence_radar_suggestion( $c ) || ( ! $tem_chave && 'not_configured' === $status ) ) {
+				$itens[] = $c;
+			}
+		}
+
+		return array(
+			'items'       => array_slice( $itens, 0, (int) uonix_intelligence_radar_rules()['email_limit'] ),
+			'panel_count' => count( $estado['visible'] ),
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_mark_emailed' ) ) {
+	/**
+	 * Registra que estas pautas foram no e-mail. Só o envio semanal REAL e bem-sucedido
+	 * chama isto (`uonix_intelligence_send_scheduled_report()`, no 57); o envio de teste
+	 * não. Poda os registros vencidos ou com data no futuro.
+	 *
+	 * @return int Registros que ficaram.
+	 */
+	function uonix_intelligence_radar_mark_emailed( $chaves, $now = null ) {
+		$agora = is_int( $now ) ? $now : time();
+		$atual = uonix_intelligence_radar_emailed( $agora );
+		foreach ( is_array( $chaves ) ? $chaves : array() as $chave ) {
+			if ( uonix_intelligence_radar_is_key( $chave ) ) {
+				$atual[ $chave ] = gmdate( 'c', $agora );
+			}
+		}
+		update_option( uonix_intelligence_radar_emailed_option(), $atual, false );
+
+		return count( $atual );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_can_curate' ) ) {
+	/**
+	 * Quem pode descartar e restaurar: quem vê a Central, pela mesma regra da página
+	 * (`uonix_render_analytics_dashboard_page()`, no 52). Descartar só esconde uma linha e
+	 * pode ser desfeito; o envio de teste, que tem efeito externo, continua só do dono.
+	 */
+	function uonix_intelligence_radar_can_curate() {
+		if ( ! function_exists( 'current_user_can' ) || ! current_user_can( 'edit_posts' ) ) {
+			return false;
+		}
+
+		return ! function_exists( 'uonix_ksio_can_access_tool' ) || uonix_ksio_can_access_tool( 'analytics' );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_handle_curation' ) ) {
+	/**
+	 * Descarta ou restaura uma candidata. A permissão vem antes do nonce, que é por ação e
+	 * por chave. A chave tem de ser válida e estar entre as candidatas gravadas; fora disso,
+	 * nada é gravado, e o painel diz por quê.
+	 *
+	 * @param string $acao `dismiss` ou `restore`.
+	 */
+	function uonix_intelligence_radar_handle_curation( $acao ) {
+		if ( ! uonix_intelligence_radar_can_curate() ) {
+			wp_die( esc_html__( 'Sem permissão para alterar o Radar de Pautas.', 'uonix' ), '', array( 'response' => 403 ) );
+		}
+		$chave = isset( $_POST['uonix_radar_key'] ) && is_string( $_POST['uonix_radar_key'] ) ? (string) wp_unslash( $_POST['uonix_radar_key'] ) : '';
+		check_admin_referer( 'uonix_intelligence_radar_' . $acao . '_' . $chave );
+
+		$gravado = get_option( uonix_intelligence_radar_option(), array() );
+		$chaves  = array();
+		foreach ( is_array( $gravado ) && isset( $gravado['candidates'] ) && is_array( $gravado['candidates'] ) ? $gravado['candidates'] : array() as $c ) {
+			if ( is_array( $c ) && isset( $c['key'] ) && is_string( $c['key'] ) ) {
+				$chaves[] = $c['key'];
+			}
+		}
+		$valida = uonix_intelligence_radar_is_key( $chave ) && in_array( $chave, $chaves, true );
+		if ( $valida ) {
+			$descartes = uonix_intelligence_radar_dismissed();
+			if ( 'dismiss' === $acao ) {
+				$descartes[ $chave ] = gmdate( 'c' );
+			} else {
+				unset( $descartes[ $chave ] );
+			}
+			update_option( uonix_intelligence_radar_dismissed_option(), $descartes, false );
+		}
+
+		wp_safe_redirect(
+			add_query_arg(
+				array(
+					'page'        => 'uonix-analytics',
+					'tab'         => 'intelligence',
+					'uonix_radar' => $valida ? $acao : 'invalid',
+				),
+				admin_url( 'admin.php' )
+			) . '#uonix-radar'
+		);
+		exit;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_handle_dismiss' ) ) {
+	function uonix_intelligence_radar_handle_dismiss() {
+		uonix_intelligence_radar_handle_curation( 'dismiss' );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_handle_restore' ) ) {
+	function uonix_intelligence_radar_handle_restore() {
+		uonix_intelligence_radar_handle_curation( 'restore' );
+	}
+}
+add_action( 'admin_post_uonix_intelligence_radar_dismiss', 'uonix_intelligence_radar_handle_dismiss', 10, 0 );
+add_action( 'admin_post_uonix_intelligence_radar_restore', 'uonix_intelligence_radar_handle_restore', 10, 0 );

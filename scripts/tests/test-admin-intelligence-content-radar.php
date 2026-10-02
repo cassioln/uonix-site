@@ -439,6 +439,129 @@ uox_rd_assert( 1 === count( $reg ) && 'uonix_intelligence_radar_run' === $reg[0]
 uox_rd_assert( 1 === count( array_filter( $GLOBALS['uox_actions'], static function ( $a ) { return 'init' === $a[0] && 'uonix_intelligence_radar_schedule' === $a[1] && 0 === $a[3]; } ) ), 'O agendamento roda no init' );
 $GLOBALS['uox_options'] = array();
 
+// ---------------------------------------------------------------------------
+// 9. Leitura do estado.
+// ---------------------------------------------------------------------------
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( $base );
+$st = uonix_intelligence_radar_state();
+uox_rd_assert( true === $st['ran'] && 'ok' === $st['status'] && 6 === count( $st['visible'] ) && array() === $st['dismissed'] && '2026-10-02T03:00:00+00:00' === $st['list_updated_at'], 'Estado lido depois do cron' );
+uox_rd_assert( is_array( uonix_intelligence_radar_suggestion( $st['visible'][0] ) ), 'Pauta ok é lida' );
+$kA = uonix_intelligence_radar_query_key( 'ancoragem predial' );
+update_option( uonix_intelligence_radar_dismissed_option(), array( $kA => '2026-10-02T10:00:00+00:00', 'lixo' => 'x', str_repeat( 'b', 64 ) => 7 ), false );
+$st2 = uonix_intelligence_radar_state();
+uox_rd_assert( 5 === count( $st2['visible'] ) && array( 'ancoragem predial' ) === array_column( $st2['dismissed'], 'query' ), 'O descarte vale na hora, sem esperar o cron' );
+uox_rd_assert( array( $kA => '2026-10-02T10:00:00+00:00' ) === uonix_intelligence_radar_dismissed(), 'Descartes malformados são ignorados' );
+foreach ( array(
+	'string'              => 'lixo',
+	'candidatas string'   => array( 'updated_at' => 'x', 'candidates' => 'lixo' ),
+	'candidata sem chave' => array( 'updated_at' => 'x', 'candidates' => array( array( 'query' => 'a' ), 'lixo', array( 'key' => 'curta', 'query' => 'b' ), array( 'key' => $kA, 'query' => array() ) ) ),
+) as $caso => $valor ) {
+	$GLOBALS['uox_options'] = array( $opt => $valor );
+	$m = uonix_intelligence_radar_state();
+	uox_rd_assert( array() === $m['visible'] && array() === $m['dismissed'], "Estado malformado ({$caso}) não vira candidata (foco de revisão 4)" );
+}
+$GLOBALS['uox_options'] = array( $opt => array( 'updated_at' => 'x', 'candidates' => array( array( 'key' => $kA, 'query' => 'ancoragem predial', 'page' => 'lixo', 'ai' => 'lixo', 'impressions' => '7' ) ) ) );
+$m2 = uonix_intelligence_radar_state();
+uox_rd_assert( array( 'path' => '', 'kind' => '', 'title' => '', 'redirected_to' => '' ) === $m2['visible'][0]['page'] && array() === $m2['visible'][0]['ai'] && 7 === $m2['visible'][0]['impressions'] && 0.0 === $m2['visible'][0]['position'], 'Campos malformados de uma candidata viram vazios do tipo certo' );
+$GLOBALS['uox_options'] = array();
+$m0 = uonix_intelligence_radar_state();
+uox_rd_assert( false === $m0['ran'] && '' === $m0['status'] && array() === $m0['window'] && false === $m0['truncated'], 'Sem opção: ainda não rodou' );
+$cand = array( 'key' => $kA, 'query' => 'ancoragem predial', 'ai' => array( 'status' => 'ok', 'suggestion' => array( 'caminho' => 'nova', 'titulo' => 'T', 'angulo' => 'A', 'intencao' => 'informacional' ) ) );
+uox_rd_assert( $cand['ai']['suggestion'] === uonix_intelligence_radar_suggestion( $cand ), 'Sugestão bem formada é lida' );
+foreach ( array(
+	'status não ok'    => array( 'status' => 'rejected', 'suggestion' => $cand['ai']['suggestion'] ),
+	'caminho fora'     => array( 'status' => 'ok', 'suggestion' => array_merge( $cand['ai']['suggestion'], array( 'caminho' => 'x' ) ) ),
+	'intenção fora'    => array( 'status' => 'ok', 'suggestion' => array_merge( $cand['ai']['suggestion'], array( 'intencao' => 'x' ) ) ),
+	'título não texto' => array( 'status' => 'ok', 'suggestion' => array_merge( $cand['ai']['suggestion'], array( 'titulo' => 1 ) ) ),
+	'título vazio'     => array( 'status' => 'ok', 'suggestion' => array_merge( $cand['ai']['suggestion'], array( 'titulo' => '' ) ) ),
+	'sem sugestão'     => array( 'status' => 'ok' ),
+) as $caso => $ai ) {
+	uox_rd_assert( null === uonix_intelligence_radar_suggestion( array( 'ai' => $ai ) + $cand ), "Sugestão inválida não é lida: {$caso} (foco de revisão 4)" );
+}
+uox_rd_assert( null === uonix_intelligence_radar_suggestion( 'lixo' ) && null === uonix_intelligence_radar_suggestion( array() ), 'Candidata que não é array não tem sugestão' );
+
+// ---------------------------------------------------------------------------
+// 10. Novidade do e-mail.
+// ---------------------------------------------------------------------------
+$emailed = uonix_intelligence_radar_emailed_option();
+$quando  = strtotime( '2026-10-05T12:00:00+00:00' );
+uonix_intelligence_radar_run( $base );
+$e1 = uonix_intelligence_radar_email_items( $quando );
+uox_rd_assert( array( 'ancoragem predial', 'teste de arrancamento', 'pontos de ancoragem predial' ) === array_column( $e1['items'], 'query' ) && 6 === $e1['panel_count'], 'E-mail: as 3 primeiras novas, e o total do painel' );
+uonix_intelligence_radar_mark_emailed( array_column( $e1['items'], 'key' ), $quando );
+uox_rd_assert( false === $GLOBALS['uox_autoload'][ $emailed ] && false === strpos( serialize( get_option( $emailed ) ), 'ancoragem' ), 'Registro de envio sem autoload e sem texto de consulta' );
+uox_rd_assert( array( 'teste de ancoragem', 'ancoragem predial nova', 'barra roscada inox fabricante' ) === array_column( uonix_intelligence_radar_email_items( $quando )['items'], 'query' ), 'Já enviadas não voltam: vêm as próximas' );
+uox_rd_assert( 'teste de ancoragem' === uonix_intelligence_radar_email_items( $quando + 180 * DAY_IN_SECONDS )['items'][0]['query'], 'Com 180 dias, ainda contam como enviadas' );
+uox_rd_assert( 'ancoragem predial' === uonix_intelligence_radar_email_items( $quando + 181 * DAY_IN_SECONDS )['items'][0]['query'], 'Com 181 dias, voltam a contar como novas' );
+uonix_intelligence_radar_mark_emailed( array(), $quando + 181 * DAY_IN_SECONDS );
+uox_rd_assert( array() === get_option( $emailed ), 'Marcar poda os registros vencidos' );
+update_option( $emailed, array( $kA => '2027-01-01T00:00:00+00:00' ), false );
+uox_rd_assert( 'ancoragem predial' === uonix_intelligence_radar_email_items( $quando )['items'][0]['query'], 'Registro de envio com data no futuro não vale (foco de revisão 5)' );
+uonix_intelligence_radar_mark_emailed( array( 'lixo', 42, null, str_repeat( 'c', 64 ) ), $quando );
+uox_rd_assert( array( str_repeat( 'c', 64 ) ) === array_keys( get_option( $emailed ) ), 'Só chave válida é marcada, e o registro do futuro sai' );
+
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $falhou ) ) );
+uox_rd_assert( array() === uonix_intelligence_radar_email_items( $quando )['items'], 'Pauta unavailable espera: não gasta a novidade' );
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'has_key' => false ) ) );
+uox_rd_assert( 3 === count( uonix_intelligence_radar_email_items( $quando, false )['items'] ) && array() === uonix_intelligence_radar_email_items( $quando, true )['items'], 'Sem chave do Gemini, vão as candidatas sem pauta; com chave, elas esperam a pauta' );
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( $base );
+update_option( uonix_intelligence_radar_dismissed_option(), array( $kA => '2026-10-05T10:00:00+00:00' ), false );
+$e4 = uonix_intelligence_radar_email_items( $quando );
+uox_rd_assert( 'teste de arrancamento' === $e4['items'][0]['query'] && 5 === $e4['panel_count'], 'Descartada não vai ao e-mail nem conta no painel' );
+
+// ---------------------------------------------------------------------------
+// 11. Descartar e restaurar.
+// ---------------------------------------------------------------------------
+function uox_rd_curar( $acao, $chave ) {
+	$_POST = array( 'uonix_radar_key' => $chave );
+	try {
+		if ( 'dismiss' === $acao ) {
+			uonix_intelligence_radar_handle_dismiss();
+		} else {
+			uonix_intelligence_radar_handle_restore();
+		}
+	} catch ( Uox_Redirect $r ) {
+		return 'redirect:' . $r->url;
+	} catch ( Uox_Die $d ) {
+		return 'die:' . $d->getMessage();
+	}
+	return 'nada';
+}
+$desc = uonix_intelligence_radar_dismissed_option();
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( $base );
+$kB    = uonix_intelligence_radar_query_key( 'teste de arrancamento' );
+$saida = uox_rd_curar( 'dismiss', $kB );
+uox_rd_assert( 0 === strpos( $saida, 'redirect:https://uonix.com.br/wp-admin/admin.php?' ) && false !== strpos( $saida, 'tab=intelligence' ) && false !== strpos( $saida, 'uonix_radar=dismiss' ) && '#uonix-radar' === substr( $saida, -12 ), 'Descartar volta para a seção, com o aviso; obteve ' . $saida );
+uox_rd_assert( isset( uonix_intelligence_radar_dismissed()[ $kB ] ) && false === $GLOBALS['uox_autoload'][ $desc ] && false === strpos( serialize( get_option( $desc ) ), 'arrancamento' ), 'Descarte gravado, sem autoload e sem texto' );
+uox_rd_assert( 'uonix_intelligence_radar_dismiss_' . $kB === $GLOBALS['uox_referer_action'], 'O nonce é por ação e por chave' );
+uox_rd_curar( 'restore', $kB );
+uox_rd_assert( ! isset( uonix_intelligence_radar_dismissed()[ $kB ] ) && 'uonix_intelligence_radar_restore_' . $kB === $GLOBALS['uox_referer_action'], 'Restaurar tira o descarte' );
+$antes = get_option( $desc );
+foreach ( array( 'curta' => 'curta', 'fora das candidatas' => str_repeat( 'd', 64 ), 'vazia' => '', 'array' => array( 'x' ) ) as $caso => $ruim ) {
+	$s = uox_rd_curar( 'dismiss', $ruim );
+	uox_rd_assert( false !== strpos( $s, 'uonix_radar=invalid' ) && $antes === get_option( $desc ), "Chave {$caso}: nada gravado, aviso invalid; obteve {$s}" );
+}
+$GLOBALS['uox_caps']           = array();
+$GLOBALS['uox_referer_action'] = null;
+uox_rd_assert( 0 === strpos( uox_rd_curar( 'dismiss', $kB ), 'die:' ) && ! isset( uonix_intelligence_radar_dismissed()[ $kB ] ) && null === $GLOBALS['uox_referer_action'], 'Sem edit_posts: recusado, antes do nonce' );
+$GLOBALS['uox_caps']       = array( 'edit_posts' );
+$GLOBALS['uox_ferramenta'] = false;
+uox_rd_assert( 0 === strpos( uox_rd_curar( 'dismiss', $kB ), 'die:' ), 'Sem acesso à ferramenta analytics: recusado' );
+$GLOBALS['uox_ferramenta'] = true;
+$GLOBALS['uox_referer_ok'] = false;
+uox_rd_assert( 'die:nonce' === uox_rd_curar( 'dismiss', $kB ) && ! isset( uonix_intelligence_radar_dismissed()[ $kB ] ), 'Sem nonce válido: recusado' );
+$GLOBALS['uox_referer_ok'] = true;
+foreach ( array( 'admin_post_uonix_intelligence_radar_dismiss' => 'uonix_intelligence_radar_handle_dismiss', 'admin_post_uonix_intelligence_radar_restore' => 'uonix_intelligence_radar_handle_restore' ) as $gancho => $cb ) {
+	uox_rd_assert( 1 === count( array_filter( $GLOBALS['uox_actions'], static function ( $a ) use ( $gancho, $cb ) { return $gancho === $a[0] && $cb === $a[1] && 0 === $a[3]; } ) ), "Handler {$gancho} registrado sem argumentos" );
+}
+$_POST                  = array();
+$GLOBALS['uox_options'] = array();
+
 // FIM DAS SEÇÕES — as seções das tarefas seguintes entram acima desta linha.
 
 if ( $failures > 0 ) {
