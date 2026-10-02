@@ -248,3 +248,54 @@ if ( ! function_exists( 'uonix_intelligence_radar_select' ) ) {
 		return array( 'visible' => $visiveis, 'dismissed' => $descartadas );
 	}
 }
+
+if ( ! function_exists( 'uonix_intelligence_radar_fetch' ) ) {
+	/**
+	 * As duas chamadas ao Search Console: por consulta, que dá as métricas exatas, e por
+	 * consulta e página, que dá a página líder. Mesmo padrão de
+	 * `uonix_intelligence_executive_fetch_gsc_pages()` (59).
+	 *
+	 * O corte é contado nas linhas CRUAS: a resposta com o limite de linhas pode ter
+	 * cortado a cauda, e o corte da API é por cliques, não por impressões.
+	 *
+	 * @param callable|null $query Para teste: `( $config, $periodo, $dimensao, $limite )`.
+	 * @return array{queries: array, pages: array, truncated: bool}|WP_Error
+	 */
+	function uonix_intelligence_radar_fetch( $config, $janela, $query = null ) {
+		if ( ! is_callable( $query ) ) {
+			if ( ! function_exists( 'uonix_analytics_metrics_get_access_token' ) || ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
+				return uonix_analytics_metrics_error( 'analytics_layer_missing' );
+			}
+			$query = static function ( $config, $periodo, $dimensao, $limite ) {
+				$token = uonix_analytics_metrics_get_access_token( $config );
+				if ( is_wp_error( $token ) ) {
+					return $token;
+				}
+				return uonix_analytics_metrics_search_console_rows(
+					$token,
+					isset( $config['search_console_site_url'] ) ? (string) $config['search_console_site_url'] : '',
+					$periodo,
+					$dimensao,
+					$limite
+				);
+			};
+		}
+		$limite = (int) uonix_intelligence_radar_rules()['rows'];
+		$saida  = array( 'queries' => array(), 'pages' => array(), 'truncated' => false );
+		foreach ( array( 'queries' => 'query', 'pages' => array( 'query', 'page' ) ) as $nome => $dimensao ) {
+			$bruto = call_user_func( $query, $config, $janela, $dimensao, $limite );
+			if ( is_wp_error( $bruto ) ) {
+				return $bruto;
+			}
+			$decodificado = uonix_analytics_metrics_decode_search_console_report( $bruto, true );
+			if ( is_wp_error( $decodificado ) ) {
+				return $decodificado;
+			}
+			$linhas             = isset( $decodificado['rows'] ) && is_array( $decodificado['rows'] ) ? $decodificado['rows'] : array();
+			$saida[ $nome ]     = $linhas;
+			$saida['truncated'] = $saida['truncated'] || count( $linhas ) >= $limite;
+		}
+
+		return $saida;
+	}
+}

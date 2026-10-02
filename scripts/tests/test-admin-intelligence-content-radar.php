@@ -211,6 +211,33 @@ $empate = uonix_intelligence_radar_select( array( uox_rd_linha( 'zeta ancoragem'
 uox_rd_assert( array( 'alfa ancoragem', 'zeta ancoragem' ) === array_column( $empate['visible'], 'query' ), 'Empate de impressões: ordem alfabética da consulta normalizada' );
 uox_rd_assert( array( 'visible' => array(), 'dismissed' => array() ) === uonix_intelligence_radar_select( array( 'lixo', array( 'keys' => array() ), array( 'keys' => array( '' ), 'impressions' => 9, 'position' => 40 ) ), array( 'lixo', array( 'keys' => array( 'a' ) ) ) ), 'Linha malformada é ignorada sem aviso' );
 
+// ---------------------------------------------------------------------------
+// 5. Busca no Search Console.
+// ---------------------------------------------------------------------------
+function uox_rd_resposta( array $linhas ) { return json_encode( array( 'responseAggregationType' => 'byProperty', 'rows' => $linhas ) ); }
+$jan          = array( 'start' => '2026-07-02', 'end' => '2026-09-29' );
+$chamadas_gsc = array();
+$buscador     = static function ( $config, $periodo, $dimensao, $limite ) use ( &$chamadas_gsc, $consultas, $paginas ) {
+	$chamadas_gsc[] = array( $periodo, $dimensao, $limite );
+	return uox_rd_resposta( 'query' === $dimensao ? $consultas : $paginas );
+};
+$dados = uonix_intelligence_radar_fetch( array( 'search_console_site_url' => 'sc-domain:uonix.com.br' ), $jan, $buscador );
+uox_rd_assert( is_array( $dados ) && count( $consultas ) === count( $dados['queries'] ) && count( $paginas ) === count( $dados['pages'] ) && false === $dados['truncated'], 'Busca devolve as linhas das duas chamadas' );
+uox_rd_assert( array( array( $jan, 'query', 1000 ), array( $jan, array( 'query', 'page' ), 1000 ) ) === $chamadas_gsc, 'Duas chamadas: por consulta e por consulta+página, na janela, com 1.000 linhas; obteve ' . var_export( $chamadas_gsc, true ) );
+uox_rd_assert( 'ancoragem predial' === $dados['queries'][0]['keys'][0] && 106 === (int) $dados['queries'][0]['impressions'], 'Linhas no formato do decodificador do 53' );
+$mil = array();
+for ( $i = 0; $i < 1000; $i++ ) {
+	$mil[] = uox_rd_linha( 'c' . $i, 1, 1.0 );
+}
+$cheio = uonix_intelligence_radar_fetch( array(), $jan, static function ( $c, $p, $d, $l ) use ( $mil ) { return uox_rd_resposta( 'query' === $d ? $mil : array() ); } );
+uox_rd_assert( true === $cheio['truncated'], 'Resposta com 1.000 linhas marca o corte' );
+$so_uma = 0;
+$erro   = uonix_intelligence_radar_fetch( array(), $jan, static function () use ( &$so_uma ) { ++$so_uma; return new WP_Error( 'google_http_500' ); } );
+uox_rd_assert( is_wp_error( $erro ) && 1 === $so_uma, 'Erro na primeira chamada devolve o erro, sem fazer a segunda' );
+uox_rd_assert( is_wp_error( uonix_intelligence_radar_fetch( array(), $jan, static function () { return 'não é json'; } ) ), 'Resposta que não é JSON vira erro' );
+$vazia = uonix_intelligence_radar_fetch( array(), $jan, static function () { return '{"responseAggregationType":"byProperty"}'; } );
+uox_rd_assert( is_array( $vazia ) && array() === $vazia['queries'] && array() === $vazia['pages'], 'Resposta sem linhas é vazio legítimo' );
+
 // FIM DAS SEÇÕES — as seções das tarefas seguintes entram acima desta linha.
 
 if ( $failures > 0 ) {
