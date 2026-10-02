@@ -80,11 +80,23 @@ $REGRAS_RANK_MATH = array(
 	'([^/]+?)-sitemap([0-9]+)?\.xml$'  => 'index.php?sitemap=$matches[1]&sitemap_n=$matches[2]',
 	'([a-z]+)?-?sitemap\.xsl$'         => 'index.php?xsl=$matches[1]',
 );
-$GRAVADAS_COMPLETAS = $REGRAS_RANK_MATH + array(
+// As que o CORE registra em TODA requisição, com ou sem Rank Math e heartbeat incluso
+// (wp-includes/sitemaps/class-wp-sitemaps.php, WordPress 7.1). Três delas também têm consulta
+// `index.php?sitemap=`, e nenhuma pode servir de sinal (revisão do PR #368, MÉDIO 1).
+$REGRAS_CORE = array(
+	'^wp-sitemap\.xml$'                                => 'index.php?sitemap=index',
+	'^wp-sitemap\.xsl$'                                => 'index.php?sitemap-stylesheet=sitemap',
+	'^wp-sitemap-index\.xsl$'                          => 'index.php?sitemap-stylesheet=index',
+	'^wp-sitemap-([a-z]+?)-([a-z\d_-]+?)-(\d+?)\.xml$' => 'index.php?sitemap=$matches[1]&sitemap-subtype=$matches[2]&paged=$matches[3]',
+	'^wp-sitemap-([a-z]+?)-(\d+?)\.xml$'               => 'index.php?sitemap=$matches[1]&paged=$matches[2]',
+);
+// Numa requisição comum, o Rank Math e o core registram; num heartbeat, só o core.
+$REGISTRADAS = $REGRAS_CORE + $REGRAS_RANK_MATH;
+$GRAVADAS_COMPLETAS = $REGRAS_CORE + $REGRAS_RANK_MATH + array(
 	'olhal-de-ancoragem/?$'  => 'index.php?product_cat=olhal-de-ancoragem',
 	'(.?.+?)(?:/([0-9]+))?/?$' => 'index.php?pagename=$matches[1]&page=$matches[2]',
 );
-$GRAVADAS_SEM_RANK_MATH = array(
+$GRAVADAS_SEM_RANK_MATH = $REGRAS_CORE + array(
 	'(.?.+?)(?:/([0-9]+))?/?$' => 'index.php?pagename=$matches[1]&page=$matches[2]',
 );
 $AGORA      = 1790000000;
@@ -109,7 +121,8 @@ $agendouShutdown = static function () {
 };
 
 // ---------------------------------------------------------------------------
-// 1. Registro: confere em `wp_loaded`, depois do `init` inteiro, sem argumento.
+// 1. Registro: confere em `wp_loaded`, depois do `init` inteiro, sem argumento, e depois da
+//    regravação que o core adia para `wp_loaded` na prioridade 10 (WordPress 6.4+).
 // ---------------------------------------------------------------------------
 $registro = null;
 foreach ( $GLOBALS['uox_actions'] as $a ) {
@@ -119,12 +132,13 @@ foreach ( $GLOBALS['uox_actions'] as $a ) {
 }
 verifica( null !== $registro, 'a guarda é registrada em wp_loaded' );
 verifica( null !== $registro && 0 === $registro[3], 'o callback de wp_loaded não recebe argumento (accepted_args 0)' );
+verifica( null !== $registro && $registro[2] > 10, 'a guarda roda depois da regravação adiada para wp_loaded:10 (revisão do PR #368, BAIXO 2); prioridade ' . var_export( $registro[2] ?? null, true ) );
 
 // ---------------------------------------------------------------------------
 // 2. Caminho normal: tudo gravado. Nada agendado, e nenhuma leitura além da opção
 //    `rewrite_rules`, que é autoload (já está na memória).
 // ---------------------------------------------------------------------------
-$reinicia( $GRAVADAS_COMPLETAS, $REGRAS_RANK_MATH );
+$reinicia( $GRAVADAS_COMPLETAS, $REGISTRADAS );
 $estado = uonix_rewrite_guard_check( $AGORA );
 verifica( 'ok' === $estado, "regras completas: estado ok; obteve {$estado}" );
 verifica( null === $agendouShutdown() && array() === $GLOBALS['uox_flush'], 'regras completas: nenhuma regravação' );
@@ -134,7 +148,7 @@ verifica( array( 'rewrite_rules' ) === $GLOBALS['uox_lidas'], 'caminho normal l�
 // 3. O defeito: a opção foi regravada sem o Rank Math. Requisição comum agenda a
 //    regravação suave no shutdown, grava o registro sem autoload e escreve no log.
 // ---------------------------------------------------------------------------
-$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGRAS_RANK_MATH );
+$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGISTRADAS );
 file_put_contents( $logTeste, '' );
 $estado = uonix_rewrite_guard_check( $AGORA );
 verifica( 'scheduled' === $estado, "regras do Rank Math ausentes: regravação agendada; obteve {$estado}" );
@@ -162,32 +176,48 @@ verifica( 1 === $quantos, "uma regravação por requisição; agendou {$quantos}
 // Basta faltar uma das regras de sitemap.
 $semXsl = $GRAVADAS_COMPLETAS;
 unset( $semXsl['([a-z]+)?-?sitemap\.xsl$'] );
-$reinicia( $semXsl, $REGRAS_RANK_MATH );
+$reinicia( $semXsl, $REGISTRADAS );
 verifica( 'scheduled' === uonix_rewrite_guard_check( $AGORA ), 'falta só a regra do .xsl: também agenda' );
+$semPorTipo = $GRAVADAS_COMPLETAS;
+unset( $semPorTipo['([^/]+?)-sitemap([0-9]+)?\.xml$'] );
+$reinicia( $semPorTipo, $REGISTRADAS );
+verifica( 'scheduled' === uonix_rewrite_guard_check( $AGORA ), 'falta só a regra dos sitemaps por tipo: também agenda (revisão do PR #368, BAIXO 1)' );
+// Uma regra do CORE faltando, com as do Rank Math gravadas, não é o defeito desta guarda.
+$semCore = $GRAVADAS_COMPLETAS;
+unset( $semCore['^wp-sitemap\.xml$'] );
+$reinicia( $semCore, $REGISTRADAS );
+verifica( 'ok' === uonix_rewrite_guard_check( $AGORA ), 'regra do core faltando com as do Rank Math gravadas: ok, a guarda não decide pelo core' );
 
 // ---------------------------------------------------------------------------
 // 4. Heartbeat: NUNCA regrava, mesmo com as regras ausentes e registradas.
 // ---------------------------------------------------------------------------
-$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGRAS_RANK_MATH );
+$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGISTRADAS );
 $_POST  = array( 'action' => 'heartbeat' );
 $estado = uonix_rewrite_guard_check( $AGORA );
 verifica( 'heartbeat' === $estado && null === $agendouShutdown(), "heartbeat não regrava; obteve {$estado}" );
 verifica( ! isset( $GLOBALS['uox_options'][ $opcaoReparo ] ), 'heartbeat não grava registro' );
 
 // ---------------------------------------------------------------------------
-// 5. Sem o Rank Math carregado nesta requisição (heartbeat de outro jeito, módulo de
-//    sitemap desligado): nada registrado, nada a comparar, nada agendado.
+// 5. Sem o Rank Math carregado nesta requisição (`wp --skip-plugins`, módulo de sitemap
+//    desligado, registro do Rank Math inválido): só o core registra. Nada a comparar e nada
+//    agendado, mesmo com as regras do core presentes ou faltando (revisão do PR #368, MÉDIO 1).
 // ---------------------------------------------------------------------------
-$reinicia( $GRAVADAS_SEM_RANK_MATH, array( 'outra-regra/?$' => 'index.php?pagename=outra' ) );
+$soCore = $REGRAS_CORE + array( 'outra-regra/?$' => 'index.php?pagename=outra' );
+$reinicia( $GRAVADAS_SEM_RANK_MATH, $soCore );
 $estado = uonix_rewrite_guard_check( $AGORA );
-verifica( 'not_registered' === $estado && null === $agendouShutdown(), "sem regra de sitemap registrada: nada a fazer; obteve {$estado}" );
+verifica( 'not_registered' === $estado && null === $agendouShutdown(), "só o core registrado: nada a fazer; obteve {$estado}" );
+$coreIncompleto = $GRAVADAS_SEM_RANK_MATH;
+unset( $coreIncompleto['^wp-sitemap-([a-z]+?)-(\d+?)\.xml$'] );
+$reinicia( $coreIncompleto, $soCore );
+$estado = uonix_rewrite_guard_check( $AGORA );
+verifica( 'not_registered' === $estado && null === $agendouShutdown() && array() === $GLOBALS['uox_flush'], "sem o Rank Math e com regra do core faltando: NÃO regrava, porque a regravação sairia sem os módulos; obteve {$estado}" );
 
 // ---------------------------------------------------------------------------
 // 6. Opção vazia ou malformada: o próprio WordPress regenera sob demanda. A guarda não
 //    interfere.
 // ---------------------------------------------------------------------------
 foreach ( array( '', false, 'lixo' ) as $gravadas ) {
-	$reinicia( $gravadas, $REGRAS_RANK_MATH );
+	$reinicia( $gravadas, $REGISTRADAS );
 	$estado = uonix_rewrite_guard_check( $AGORA );
 	verifica( 'empty' === $estado && null === $agendouShutdown(), 'rewrite_rules ' . var_export( $gravadas, true ) . ": nada agendado; obteve {$estado}" );
 }
@@ -195,7 +225,7 @@ foreach ( array( '', false, 'lixo' ) as $gravadas ) {
 // ---------------------------------------------------------------------------
 // 7. Sem links permanentes, as regras não são usadas.
 // ---------------------------------------------------------------------------
-$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGRAS_RANK_MATH );
+$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGISTRADAS );
 $GLOBALS['wp_rewrite']->permalink_structure = '';
 $estado = uonix_rewrite_guard_check( $AGORA );
 verifica( 'no_permalinks' === $estado && null === $agendouShutdown(), "sem links permanentes: nada agendado; obteve {$estado}" );
@@ -205,16 +235,16 @@ verifica( 'no_permalinks' === $estado && null === $agendouShutdown(), "sem links
 // ---------------------------------------------------------------------------
 $intervalo = uonix_rewrite_guard_cooldown();
 verifica( $intervalo >= 5 * MINUTE_IN_SECONDS && $intervalo <= 60 * MINUTE_IN_SECONDS, "intervalo mínimo entre 5 e 60 min; é {$intervalo} s" );
-$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGRAS_RANK_MATH, array( $opcaoReparo => array( 'at' => $AGORA - $intervalo + 1, 'missing' => array() ) ) );
+$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGISTRADAS, array( $opcaoReparo => array( 'at' => $AGORA - $intervalo + 1, 'missing' => array() ) ) );
 $estado = uonix_rewrite_guard_check( $AGORA );
 verifica( 'cooldown' === $estado && null === $agendouShutdown(), "reparo recente: espera o intervalo; obteve {$estado}" );
-$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGRAS_RANK_MATH, array( $opcaoReparo => array( 'at' => $AGORA - $intervalo, 'missing' => array() ) ) );
+$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGISTRADAS, array( $opcaoReparo => array( 'at' => $AGORA - $intervalo, 'missing' => array() ) ) );
 verifica( 'scheduled' === uonix_rewrite_guard_check( $AGORA ), 'passado o intervalo: regrava de novo' );
 // Registro com hora no futuro (relógio adiantado e depois corrigido) não trava a guarda para sempre.
-$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGRAS_RANK_MATH, array( $opcaoReparo => array( 'at' => $AGORA + 30 * 86400, 'missing' => array() ) ) );
+$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGISTRADAS, array( $opcaoReparo => array( 'at' => $AGORA + 30 * 86400, 'missing' => array() ) ) );
 verifica( 'scheduled' === uonix_rewrite_guard_check( $AGORA ), 'registro com hora no futuro não trava a guarda' );
 // Registro malformado não trava nem quebra.
-$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGRAS_RANK_MATH, array( $opcaoReparo => 'lixo' ) );
+$reinicia( $GRAVADAS_SEM_RANK_MATH, $REGISTRADAS, array( $opcaoReparo => 'lixo' ) );
 verifica( 'scheduled' === uonix_rewrite_guard_check( $AGORA ), 'registro malformado não trava a guarda' );
 
 // ---------------------------------------------------------------------------
