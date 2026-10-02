@@ -540,7 +540,9 @@ if ( ! function_exists( 'uonix_intelligence_report_html' ) ) {
 				$html .= '<td style="padding:10px;border-bottom:1px solid #f1f5f9;color:#1e293b;">';
 				$html .= '<strong>' . esc_html( (string) $row['query'] ) . '</strong>';
 				if ( '' !== $alvo ) {
-					$html .= '<div style="color:#64748b;font-size:11px;padding-top:3px;">Página: ' . esc_html( $alvo ) . '</div>';
+					// Endereço antigo que redireciona (#343): a sugestão é da página real, o destino.
+					$destino = isset( $ia['status'], $ia['redirected_to'] ) && 'ok' === $ia['status'] && is_string( $ia['redirected_to'] ) ? $ia['redirected_to'] : '';
+					$html   .= '<div style="color:#64748b;font-size:11px;padding-top:3px;">Página: ' . esc_html( $alvo . ( '' !== $destino ? ' → ' . $destino : '' ) ) . '</div>';
 				}
 				// Sem sugestão, a linha some: o motivo interessa ao operador, que o vê no painel.
 				if ( isset( $ia['status'], $ia['title'] ) && 'ok' === $ia['status'] ) {

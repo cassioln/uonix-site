@@ -36,7 +36,8 @@ if ( ! function_exists( 'uonix_intelligence_ai_limits' ) ) {
 	 * 16 pensando e voltou sem texto.
 	 */
 	function uonix_intelligence_ai_limits() {
-		return array( 'title' => 60, 'description' => 155, 'per_run' => 5, 'timeout' => 15, 'max_output_tokens' => 1024 );
+		// `max_hops`: saltos de redirecionamento seguidos no cron (#343), o mesmo teto do 59.
+		return array( 'title' => 60, 'description' => 155, 'per_run' => 5, 'timeout' => 15, 'max_output_tokens' => 1024, 'max_hops' => 3 );
 	}
 }
 
@@ -111,6 +112,61 @@ if ( ! function_exists( 'uonix_intelligence_ai_page_object' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_ai_follow_redirect' ) ) {
+	/**
+	 * Destino final de um endereço antigo que redireciona, ou '' (#343).
+	 *
+	 * A Search Console ainda credita impressões a endereços que hoje dão 301, como
+	 * `/teste-de-arrancamento` → `/servico/ensaios-de-arrancamento/` (medido em produção em
+	 * 2026-10-01). Sem seguir, a oportunidade ficava em `no_page`.
+	 *
+	 * **Faz HTTP**, um HEAD por salto, por `uonix_intelligence_executive_page_status()` (59).
+	 * Por isso só o cron chama esta função; o leitor usa o destino que o cron gravou.
+	 *
+	 * Só leva a página quando TODAS as condições valem:
+	 *   - cada salto é 301/302/307/308 para o próprio domínio
+	 *     (`uonix_analytics_metrics_normalize_path()`, do 53);
+	 *   - no máximo `max_hops` saltos, sem ciclo;
+	 *   - o destino responde 2xx;
+	 *   - o destino é um post publicado ou um termo (`uonix_intelligence_ai_page_object()`).
+	 * Qualquer outra coisa (fora do domínio, cadeia longa, 404, sem resposta) devolve ''.
+	 */
+	function uonix_intelligence_ai_follow_redirect( $path ) {
+		if ( ! is_string( $path ) || '' === $path || '/' !== $path[0]
+			|| ! function_exists( 'uonix_intelligence_executive_page_status' ) || ! function_exists( 'uonix_analytics_metrics_normalize_path' ) ) {
+			return '';
+		}
+		$maximo = (int) uonix_intelligence_ai_limits()['max_hops'];
+		$atual  = $path;
+		$vistos = array( $path );
+		for ( $saltos = 0; $saltos <= $maximo; $saltos++ ) {
+			$status = uonix_intelligence_executive_page_status( $atual );
+			$estado = is_array( $status ) && isset( $status['state'] ) ? (string) $status['state'] : 'unknown';
+			if ( 'ok' === $estado ) {
+				// Página que responde sem redirecionar não é endereço antigo: nada a seguir.
+				return $saltos > 0 && null !== uonix_intelligence_ai_page_object( $atual ) ? $atual : '';
+			}
+			// O próprio laço limita a `max_hops` saltos: depois do último, ele termina sem destino.
+			if ( 'redirect' !== $estado ) {
+				return '';
+			}
+			$location = isset( $status['location'] ) ? (string) $status['location'] : '';
+			$destino  = uonix_analytics_metrics_normalize_path( $location );
+			// `Location` para a raiz, sem caminho, normaliza para vazio (o mesmo cuidado do 59).
+			if ( '' === $destino && 1 === preg_match( '#^https?://(www\.)?uonix\.com\.br/?$#iD', $location ) ) {
+				$destino = '/';
+			}
+			if ( '' === $destino || in_array( $destino, $vistos, true ) ) {
+				return '';
+			}
+			$vistos[] = $destino;
+			$atual    = $destino;
+		}
+
+		return '';
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_ai_term_kind' ) ) {
 	/**
 	 * Como o pedido e o painel chamam cada taxonomia. O Gemini precisa saber que a página
@@ -153,17 +209,27 @@ if ( ! function_exists( 'uonix_intelligence_ai_meta_text' ) ) {
 if ( ! function_exists( 'uonix_intelligence_ai_input' ) ) {
 	/**
 	 * Entrada do pedido para uma oportunidade, ou null sem consulta ou sem página (post
-	 * publicado ou termo).
+	 * publicado, termo ou o destino de um 301 do próprio domínio).
 	 *
 	 * Fronteira de dados: cada chave é montada uma a uma a partir da linha. Nada mais
 	 * da linha passa, mesmo que um dia ela carregue outros campos.
+	 *
+	 * @param string $redirected_to Destino do 301 que o cron achou (#343). Só vale quando a
+	 *                              página líder não é post nem termo; aí a entrada descreve
+	 *                              o destino, que é a página que se edita.
 	 */
-	function uonix_intelligence_ai_input( $row ) {
+	function uonix_intelligence_ai_input( $row, $redirected_to = '' ) {
 		if ( ! is_array( $row ) || ! isset( $row['query'] ) || ! is_string( $row['query'] ) || '' === $row['query'] ) {
 			return null;
 		}
-		$path   = isset( $row['target_page'] ) && is_string( $row['target_page'] ) ? $row['target_page'] : '';
-		$objeto = uonix_intelligence_ai_page_object( $path );
+		$path    = isset( $row['target_page'] ) && is_string( $row['target_page'] ) ? $row['target_page'] : '';
+		$objeto  = uonix_intelligence_ai_page_object( $path );
+		$destino = '';
+		if ( null === $objeto && is_string( $redirected_to ) && '' !== $redirected_to && '/' === $redirected_to[0] ) {
+			$objeto  = uonix_intelligence_ai_page_object( $redirected_to );
+			$destino = null !== $objeto ? $redirected_to : '';
+			$path    = null !== $objeto ? $redirected_to : $path;
+		}
 		if ( null === $objeto ) {
 			return null;
 		}
@@ -202,6 +268,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_input' ) ) {
 			'model'           => uonix_intelligence_ai_model(),
 			'post_id'         => $post_id,
 			'object'          => $objeto,
+			'redirected_to'   => $destino,
 		);
 	}
 }
@@ -451,6 +518,11 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 			$chave = uonix_intelligence_ai_entry_key( $row['query'], $path );
 			$input = uonix_intelligence_ai_input( $row );
 			if ( null === $input ) {
+				// Endereço antigo: segue o 301 até a página real (#343). Só aqui, no cron.
+				$destino = uonix_intelligence_ai_follow_redirect( $path );
+				$input   = '' !== $destino ? uonix_intelligence_ai_input( $row, $destino ) : null;
+			}
+			if ( null === $input ) {
 				$novo[ $chave ] = array( 'status' => 'no_page', 'attempted_at' => $agora );
 				continue;
 			}
@@ -463,6 +535,9 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 			$resultado = uonix_intelligence_ai_call( $input, $pause );
 			++$chamadas;
 			$entrada = array( 'status' => $resultado['status'], 'input_hash' => $hash, 'attempted_at' => $agora, 'model' => $input['model'] );
+			if ( '' !== $input['redirected_to'] ) {
+				$entrada['redirected_to'] = $input['redirected_to'];
+			}
 			if ( 'ok' === $resultado['status'] ) {
 				$entrada['suggestion']   = $resultado['suggestion'];
 				$entrada['generated_at'] = $agora;
@@ -489,13 +564,15 @@ if ( ! function_exists( 'uonix_intelligence_ai_suggestion_for' ) ) {
 		if ( ! is_array( $row ) || ! isset( $row['query'] ) || ! is_string( $row['query'] ) || ! array_key_exists( 'target_page', $row ) || null === $row['target_page'] ) {
 			return array( 'status' => 'pending' );
 		}
-		$input = uonix_intelligence_ai_input( $row );
-		if ( null === $input ) {
-			return array( 'status' => 'no_page' );
-		}
 		$cache   = get_option( uonix_intelligence_ai_option(), array() );
 		$chave   = uonix_intelligence_ai_entry_key( $row['query'], (string) $row['target_page'] );
 		$entrada = is_array( $cache ) && isset( $cache[ $chave ] ) && is_array( $cache[ $chave ] ) ? $cache[ $chave ] : array();
+		// Endereço antigo (#343): o destino que o cron achou. O leitor não faz HTTP.
+		$destino = isset( $entrada['redirected_to'] ) && is_string( $entrada['redirected_to'] ) ? $entrada['redirected_to'] : '';
+		$input   = uonix_intelligence_ai_input( $row, $destino );
+		if ( null === $input ) {
+			return array( 'status' => 'no_page' );
+		}
 		if ( ( $entrada['input_hash'] ?? '' ) !== uonix_intelligence_ai_input_hash( $input ) ) {
 			return array( 'status' => 'pending' );
 		}
@@ -517,6 +594,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_suggestion_for' ) ) {
 			'generated_at'        => isset( $entrada['generated_at'] ) && is_string( $entrada['generated_at'] ) ? $entrada['generated_at'] : '',
 			'post_id'             => $input['post_id'],
 			'object'              => $input['object'],
+			'redirected_to'       => $input['redirected_to'],
 		);
 	}
 }

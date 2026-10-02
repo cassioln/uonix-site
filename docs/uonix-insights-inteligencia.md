@@ -348,7 +348,13 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
   - os diferenciais permitidos.
 - Nenhum dado de lead vai ao Gemini.
 - O título atual vem de `rank_math_title`, com as variáveis resolvidas pelo Rank Math quando ele expõe o resolvedor. Se sobrar variável sem resolver, vale o título do post.
-- A página líder precisa ter post **publicado** ou ser o arquivo de um termo de taxonomia pública. A home vai para `page_on_front`, e endereço que dá 404 ou 301 vira `no_page` (seguir o 301 é a #343). A exceção é a URL antiga do próprio termo, como `/product-category/olhal-de-ancoragem/`: o WordPress a canonicaliza por 301, e ela resolve para o termo de destino. Feed e embed do termo não valem como página.
+- A página líder precisa ter post **publicado** ou ser o arquivo de um termo de taxonomia pública. A home vai para `page_on_front`, e endereço que dá 404 vira `no_page`. A exceção é a URL antiga do próprio termo, como `/product-category/olhal-de-ancoragem/`: o WordPress a canonicaliza por 301, e ela resolve para o termo de destino. Feed e embed do termo não valem como página.
+- **Endereço antigo que redireciona (#343).** No cron, e só nele, `uonix_intelligence_ai_follow_redirect()` segue a cadeia por HEAD (`uonix_intelligence_executive_page_status()`, do `59`).
+  - **Quando o destino vale:** os saltos são do próprio domínio, no máximo `max_hops` (3) e sem ciclo, e o destino responde 2xx e é post publicado ou termo.
+  - **O que a entrada descreve:** o destino, que é a página que se edita. O cache guarda `redirected_to`, e o leitor do painel e do e-mail o usa **sem HTTP**.
+  - **O destino entra no hash pela URL e pelo título.** Se o redirecionamento mudar, a sugestão é refeita.
+  - **O painel e o e-mail mostram o destino** ao lado do endereço antigo: "/teste-de-arrancamento → /servico/ensaios-de-arrancamento/".
+  - **Limite:** o normalizador do `53` só aceita `uonix.com.br`, então no QA o redirecionamento não é seguido, como já acontece com a conferência de status do `59`.
 - **Categoria e tag (#344).** Sem post, `uonix_intelligence_resolve_term_path()` (`55`) percorre as regras de reescrita como o `url_to_postid()` do core e devolve o termo que a URL abre.
   - **A regra decide, e não o slug.** O slug `olhal-de-ancoragem` existe em três taxonomias (`product_cat` 34, `post_tag` 510 e `product_tag` 465, medido no local em 2026-10-02), e só a regra diz que `/olhal-de-ancoragem/` é a categoria de produto.
   - **Título e descrição:** os de `rank_math_title` e `rank_math_description` do termo. Sem meta, o nome e a descrição do termo.
@@ -397,7 +403,6 @@ No e-mail, todo estado diferente de `ok` só omite a linha.
 **O que não entrega:**
 - destaques por IA no e-mail executivo;
 - o Radar de Pautas (Módulo 8);
-- seguir o 301 até a página real (#343);
 - aplicar a sugestão no Rank Math;
 - botão para regenerar;
 - detecção automática de afirmação inventada fora da lista.

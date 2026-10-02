@@ -404,6 +404,15 @@ $html_ia = uonix_intelligence_report_html( array(
 	'period_label' => '', 'environment' => 'production', 'panel_url' => 'https://uonix.com.br/wp-admin/admin.php?page=uonix-analytics',
 ) );
 uox_assert( false !== strpos( $html_ia, 'Página: /servico/linha-de-vida/' ), 'E-mail mostra a página líder' );
+// #343: endereço antigo que redireciona. O título sugerido é da página real, então o e-mail
+// mostra o destino ao lado do endereço que a Search Console reportou.
+$GLOBALS['uox_ia'] = array( 'teste predial' => array( 'status' => 'ok', 'title' => 'Ensaio de Arrancamento | Uônix', 'description' => 'x', 'current_title' => 'y', 'current_description' => '', 'generated_at' => '', 'post_id' => 15, 'redirected_to' => '/servico/ensaios-de-arrancamento/' ) );
+$html_301 = uonix_intelligence_report_html( array(
+	'analysis' => uox_analysis( array( array( 'query' => 'teste predial', 'position' => 7.4, 'impressions' => 23, 'ctr' => 0, 'clicks' => 0, 'target_page' => '/teste-de-arrancamento' ) ) ),
+	'period_label' => '', 'environment' => 'production', 'panel_url' => '',
+) );
+uox_assert( false !== strpos( $html_301, 'Página: /teste-de-arrancamento → /servico/ensaios-de-arrancamento/' ), '#343: o e-mail mostra o destino do 301 ao lado do endereço antigo' );
+$GLOBALS['uox_ia'] = array( 'linha de vida nbr' => array( 'status' => 'ok', 'title' => 'Linha de Vida <b>NBR</b>', 'description' => 'x', 'current_title' => 'y', 'current_description' => '', 'generated_at' => '', 'post_id' => 1 ) );
 uox_assert( false !== strpos( $html_ia, 'Título sugerido (IA): Linha de Vida &lt;b&gt;NBR&lt;/b&gt;' ), 'E-mail mostra o título sugerido, escapado' );
 $GLOBALS['uox_ia'] = array( 'linha de vida nbr' => array( 'status' => 'unavailable' ) );
 $html_sem = uonix_intelligence_report_html( array(
