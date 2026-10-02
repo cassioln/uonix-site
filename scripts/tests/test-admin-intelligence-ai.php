@@ -503,6 +503,8 @@ $GLOBALS['uox_status'] = array(
 	'/tres-saltos'                          => uox_301( '/s1' ),
 	'/s1'                                   => uox_301( '/s2' ),
 	'/s2'                                   => uox_301( '/servico/ensaios-de-arrancamento/' ),
+	'/velho-raiz'                           => uox_301( 'https://uonix.com.br/' ),
+	'/'                                     => uox_200(),
 );
 uox_ai_assert( '/servico/ensaios-de-arrancamento/' === uonix_intelligence_ai_follow_redirect( '/teste-de-arrancamento' ), '#343: 301 do próprio domínio para um post publicado leva à página real' );
 uox_ai_assert( '/servico/projeto-andaime-fachadeiro/' === uonix_intelligence_ai_follow_redirect( '/projeto-de-andaime-fachadeiro' ), '#343: Location relativo também vale' );
@@ -514,9 +516,17 @@ uox_ai_assert( 2 === $GLOBALS['uox_status_chamadas'], '#343: o ciclo é detectad
 $GLOBALS['uox_status_chamadas'] = 0;
 uonix_intelligence_ai_follow_redirect( '/longa' );
 uox_ai_assert( 4 === $GLOBALS['uox_status_chamadas'], '#343: a cadeia longa para no teto (4 HEADs para 3 saltos); chamadas: ' . $GLOBALS['uox_status_chamadas'] );
-foreach ( array( '/fora' => 'fora do domínio', '/longa' => 'cadeia de 4 saltos', '/ciclo-a' => 'ciclo', '/morto' => 'destino 404', '/para-rascunho' => 'destino sem página publicada', '/sem-status' => 'sem resposta', '/servico/ensaios-de-arrancamento/' => 'página que não redireciona' ) as $origem => $caso ) {
+foreach ( array( '/fora' => 'fora do domínio', '/longa' => 'cadeia de 4 saltos', '/ciclo-a' => 'ciclo', '/morto' => 'destino 404', '/para-rascunho' => 'destino sem página publicada', '/servico/ensaios-de-arrancamento/' => 'página que não redireciona', '/velho-raiz' => '301 para a raiz (o padrão de página removida, MÉDIO 2 da revisão do PR #373)' ) as $origem => $caso ) {
 	uox_ai_assert( '' === uonix_intelligence_ai_follow_redirect( $origem ), "#343: {$caso} não leva a página nenhuma" );
 }
+// Sem resposta não é "não leva a página": é "não sei" (MÉDIO 1 da revisão do PR #373).
+uox_ai_assert( null === uonix_intelligence_ai_follow_redirect( '/sem-status' ), '#343: sem resposta devolve null (não sei), e não vazio' );
+// Orçamento de HEADs (BAIXO 1 da revisão do PR #373): esgotado, a resposta é "não sei".
+$orcamento = 2;
+uox_ai_assert( null === uonix_intelligence_ai_follow_redirect( '/tres-saltos', $orcamento ) && 0 === $orcamento, '#343: a cadeia que precisa de mais HEADs que o orçamento devolve null e zera o orçamento' );
+$orcamento = 10;
+uox_ai_assert( '/servico/ensaios-de-arrancamento/' === uonix_intelligence_ai_follow_redirect( '/teste-de-arrancamento', $orcamento ) && 8 === $orcamento, '#343: cada HEAD gasta uma unidade do orçamento' );
+uox_ai_assert( 10 === uonix_intelligence_ai_limits()['head_max'], '#343: o cron da IA gasta no máximo 10 HEADs por execução' );
 
 // Execução: o endereço antigo gera sugestão para a página real, e a entrada guarda o destino.
 $GLOBALS['uox_options'] = array( 'page_on_front' => 14 );
@@ -543,6 +553,39 @@ $GLOBALS['uox_http'] = array( uox_gemini( $ok ) );
 $res_mudou = uonix_intelligence_ai_run( uox_analise( array( $linha_301 ) ), 0 );
 uox_ai_assert( 1 === $res_mudou['called'] && '/servico/projeto-andaime-fachadeiro/' === ( get_option( uonix_intelligence_ai_option() )[ $k_301 ]['redirected_to'] ?? '' ), '#343: o redirecionamento mudou de destino e a sugestão foi refeita' );
 $GLOBALS['uox_status']['/teste-de-arrancamento'] = uox_301( 'https://uonix.com.br/servico/ensaios-de-arrancamento/' );
+// Sem resposta no HEAD: a sugestão ok gravada fica (MÉDIO 1 da revisão do PR #373).
+$GLOBALS['uox_http'] = array( uox_gemini( $ok ) );
+uonix_intelligence_ai_run( uox_analise( array( $linha_301 ) ), 0 );
+$antes_sem_resposta = get_option( uonix_intelligence_ai_option() )[ $k_301 ] ?? null;
+$GLOBALS['uox_status']['/teste-de-arrancamento'] = array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
+$GLOBALS['uox_pedidos'] = array();
+uonix_intelligence_ai_run( uox_analise( array( $linha_301 ) ), 0 );
+uox_ai_assert( 'ok' === ( $antes_sem_resposta['status'] ?? '' ) && $antes_sem_resposta === ( get_option( uonix_intelligence_ai_option() )[ $k_301 ] ?? null ) && array() === $GLOBALS['uox_pedidos'], '#343: HEAD sem resposta mantém a entrada anterior, sem chamar o Gemini' );
+uox_ai_assert( 'ok' === uonix_intelligence_ai_suggestion_for( $linha_301 )['status'], '#343: e o leitor continua mostrando a sugestão' );
+$GLOBALS['uox_status']['/teste-de-arrancamento'] = uox_301( 'https://uonix.com.br/servico/ensaios-de-arrancamento/' );
+// O orçamento vale para a execução inteira: 5 cadeias de 3 saltos gastam no máximo 10 HEADs.
+$linhas_caras = array();
+foreach ( range( 1, 5 ) as $i ) {
+	$linhas_caras[] = uox_linha( 'cara ' . $i, '/tres-saltos' );
+}
+$GLOBALS['uox_status_chamadas'] = 0;
+$GLOBALS['uox_http']            = array( uox_gemini( $ok ), uox_gemini( $ok ), uox_gemini( $ok ), uox_gemini( $ok ), uox_gemini( $ok ) );
+uonix_intelligence_ai_run( uox_analise( $linhas_caras ), 0 );
+uox_ai_assert( $GLOBALS['uox_status_chamadas'] <= 10, '#343: o cron gasta no máximo head_max HEADs por execução; gastou ' . $GLOBALS['uox_status_chamadas'] );
+// A página própria vence o destino gravado (BAIXO 2 da revisão do PR #373).
+$GLOBALS['uox_http'] = array( uox_gemini( $ok ) );
+uonix_intelligence_ai_run( uox_analise( array( $linha_301 ) ), 0 );
+$GLOBALS['uox_posts'][17] = array( 'path' => '/teste-de-arrancamento', 'type' => 'page', 'status' => 'publish', 'title' => 'Teste (página nova)', 'meta' => array() );
+$sug_propria = uonix_intelligence_ai_suggestion_for( $linha_301 );
+uox_ai_assert( 'pending' === $sug_propria['status'] && '' === ( $sug_propria['redirected_to'] ?? '' ), '#343: o endereço ganhou página própria: o destino gravado não vale mais, e a sugestão espera o cron; obteve ' . var_export( $sug_propria, true ) );
+unset( $GLOBALS['uox_posts'][17] );
+// Fora do estado ok, o leitor também devolve o destino, para o painel mostrá-lo (BAIXO 3).
+$cache_rej = get_option( uonix_intelligence_ai_option() );
+$cache_rej[ $k_301 ]['status'] = 'rejected';
+update_option( uonix_intelligence_ai_option(), $cache_rej, false );
+$sug_rej = uonix_intelligence_ai_suggestion_for( $linha_301 );
+uox_ai_assert( 'rejected' === $sug_rej['status'] && '/servico/ensaios-de-arrancamento/' === ( $sug_rej['redirected_to'] ?? '' ), '#343: sugestão recusada também traz o destino; obteve ' . var_export( $sug_rej, true ) );
+
 // Página que deixou de redirecionar e passou a dar 404: a entrada vira no_page no cron.
 $GLOBALS['uox_status']['/teste-de-arrancamento'] = array( 'state' => 'not_found', 'code' => 404, 'location' => '' );
 uonix_intelligence_ai_run( uox_analise( array( $linha_301 ) ), 0 );

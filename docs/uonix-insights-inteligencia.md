@@ -354,7 +354,9 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
   - **O que a entrada descreve:** o destino, que é a página que se edita. O cache guarda `redirected_to`, e o leitor do painel e do e-mail o usa **sem HTTP**.
   - **O destino entra no hash pela URL e pelo título.** Se o redirecionamento mudar, a sugestão é refeita.
   - **O painel e o e-mail mostram o destino** ao lado do endereço antigo: "/teste-de-arrancamento → /servico/ensaios-de-arrancamento/".
-  - **Limite:** o normalizador do `53` só aceita `uonix.com.br`, então no QA o redirecionamento não é seguido, como já acontece com a conferência de status do `59`.
+  - **Sem resposta não apaga:** HEAD sem resposta, ou o orçamento de `head_max` (10) HEADs por execução esgotado, é "não sei". O cron mantém a entrada anterior, e o leitor revalida o destino a cada leitura.
+  - **301 para a raiz não vale:** é o padrão de página removida mandada para a home, e a sugestão iria para a home.
+  - **Limite:** o normalizador do `53` só aceita `uonix.com.br` num `Location` absoluto. No QA, o `Location` absoluto de `uonix.ksio.dev` não é seguido, como já acontece com a conferência de status do `59`. Um `Location` relativo, sem host, é seguido em qualquer ambiente.
 - **Categoria e tag (#344).** Sem post, `uonix_intelligence_resolve_term_path()` (`55`) percorre as regras de reescrita como o `url_to_postid()` do core e devolve o termo que a URL abre.
   - **A regra decide, e não o slug.** O slug `olhal-de-ancoragem` existe em três taxonomias (`product_cat` 34, `post_tag` 510 e `product_tag` 465, medido no local em 2026-10-02), e só a regra diz que `/olhal-de-ancoragem/` é a categoria de produto.
   - **Título e descrição:** os de `rank_math_title` e `rank_math_description` do termo. Sem meta, o nome e a descrição do termo.
