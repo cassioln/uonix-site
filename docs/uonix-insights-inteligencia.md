@@ -555,8 +555,9 @@ Arquivo: `mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php`. Decis
   - posição média **acima de 15**;
   - **5 impressões ou mais** na janela;
   - sem aspas e sem operador (`site:`, `inurl:`, `intitle:`, `intext:`, `allinurl:`, `allintitle:`);
-  - sem a marca ("uonix" ou "uônix");
-  - aceita por `uonix_analytics_metrics_sanitize_query()` (53), que recusa e-mail, telefone, link e mais de 120 caracteres.
+  - sem a marca ("uonix" ou "uônix"), e sem cara de domínio (`fulano.com.br`), que é busca de navegação;
+  - aceita por `uonix_analytics_metrics_sanitize_query()` (53), que recusa e-mail, telefone, link e mais de 120 caracteres;
+  - sem sinal de HTML nem entidade depois do saneamento. O 53 tira as tags antes de decodificar, então `&amp;lt;b&amp;gt;` sairia dele como `<b>` (MÉDIO 1 da revisão do PR #378).
 - **Limite:** até 10 candidatas, por impressões. O limite conta depois de tirar as descartadas. Duas grafias com a mesma chave (consulta normalizada) viram uma candidata.
 - **Medido em 2026-10-02:** 163 consultas em 90 dias, e de 5 a 10 passam. A forma de pergunta não é fonte: eram 12 consultas, com 1 impressão cada. 4 das 15 maiores acima da posição 15 eram buscas de spammer, sempre entre aspas.
 - **Entre as posições 12 e 15, nenhum módulo lista a consulta.** A faixa do Módulo 3 vai até 12, e a consulta já está perto do topo.
@@ -576,7 +577,8 @@ Arquivo: `mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php`. Decis
   - uma pauta `ok` com o mesmo hash não é refeita;
   - qualquer outro status é tentado de novo no dia seguinte;
   - descartadas não chamam o Gemini;
-  - depois de **150 s do início** da execução, nenhuma chamada começa, e as restantes ficam `deferred`. O `crontab` de produção corta em 290 s.
+  - depois de **150 s do início** da execução, nenhuma página é resolvida (nenhum HEAD) e nenhuma chamada começa; as restantes ficam `deferred`. O `crontab` de produção corta em 290 s, e o corte derrubaria também os outros eventos do mesmo ciclo.
+- **"Não sei" não é "não há página":** HEAD sem resposta, ou orçamento de HEAD esgotado, reaproveita a página de ontem, e a pauta pronta fica. Sem página anterior, a pauta fica `deferred`, sem chamada. Tratar o "não sei" como página ausente refazia uma pauta "reforcar" boa como "nova" (MÉDIO 2 da revisão do PR #378, a mesma lição do #373).
 - **Transporte:** é o mesmo da sugestão de título, `uonix_intelligence_ai_generate()`, com uma nova tentativa em 429 e 503.
 
 ### O que é gravado

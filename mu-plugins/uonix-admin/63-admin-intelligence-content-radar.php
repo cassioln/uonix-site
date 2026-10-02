@@ -27,8 +27,8 @@ if ( ! function_exists( 'uonix_intelligence_radar_rules' ) ) {
 	 *
 	 * `min_position` é exclusivo: a posição média tem de ser MAIOR. A faixa do Módulo 3 vai
 	 * até 12 (55), então de 12 a 15 nenhum dos dois lista: a consulta já está perto do topo.
-	 * `ai_budget` conta do início da execução: depois dele, nenhuma chamada ao Gemini
-	 * começa. O `crontab` de produção corta em 290 s (lição da #335). `head_max` limita os
+	 * `ai_budget` conta do início da execução: depois dele, nenhuma página é resolvida e
+	 * nenhuma chamada ao Gemini começa. O `crontab` de produção corta em 290 s (lição da #335). `head_max` limita os
 	 * HEADs que seguem 301 (#343): 10 × 8 s no pior caso.
 	 */
 	function uonix_intelligence_radar_rules() {
@@ -141,6 +141,8 @@ if ( ! function_exists( 'uonix_intelligence_radar_is_noise' ) ) {
 	 *   maiores acima da posição 15 eram buscas de spammer por blogs com comentário
 	 *   aberto, sempre entre aspas.
 	 * - A marca: quem busca "uônix" procura a empresa, não um assunto.
+	 * - Um domínio, como `fulano.com.br`: é busca de navegação, e pode ser o site de alguém
+	 *   (MÉDIO 1 da revisão do PR #378). Norma e número com ponto ("16325.1", "1.500") não são.
 	 */
 	function uonix_intelligence_radar_is_noise( $consulta ) {
 		$texto = (string) $consulta;
@@ -149,6 +151,9 @@ if ( ! function_exists( 'uonix_intelligence_radar_is_noise' ) ) {
 		}
 		$normal = uonix_intelligence_radar_normalize_query( $texto );
 		if ( 1 === preg_match( '/(^|\s)(site|inurl|intitle|intext|allinurl|allintitle):/', $normal ) ) {
+			return true;
+		}
+		if ( 1 === preg_match( '/\b[a-z0-9-]+\.(com|net|org|br|io|info|biz)\b/', $normal ) ) {
 			return true;
 		}
 
@@ -201,7 +206,10 @@ if ( ! function_exists( 'uonix_intelligence_radar_select' ) ) {
 			}
 			$bruta = $linha['keys'][0];
 			$texto = uonix_analytics_metrics_sanitize_query( $bruta );
-			if ( '' === $texto ) {
+			// O saneamento do 53 tira as tags ANTES de decodificar entidades e `%XX`: um
+			// `&amp;lt;b&amp;gt;` sai dele como `<b>` ou `&lt;b&gt;`. Sobrou sinal de HTML ou
+			// entidade, a consulta sai inteira (MÉDIO 1 da revisão do PR #378).
+			if ( '' === $texto || 1 === preg_match( '/[<>]|&(#[0-9]+|#x[0-9a-f]+|[a-z]+);/i', $texto ) ) {
 				continue;
 			}
 			$impressoes = (float) ( $linha['impressions'] ?? 0 );
@@ -465,11 +473,13 @@ if ( ! function_exists( 'uonix_intelligence_radar_page' ) ) {
 	 * do próprio domínio (#343). **Seguir o 301 faz HTTP**, um HEAD por salto, e cada HEAD
 	 * desconta de `$orcamento`. Por isso só o cron chama esta função.
 	 *
-	 * Não resolvida (removida, 404, HEAD sem resposta, orçamento esgotado), a página volta
-	 * com `title` vazio, e a pauta só pode ser "nova".
+	 * Sem página com certeza (removida, 404, rascunho), ela volta com `title` vazio, e a pauta
+	 * só pode ser "nova". **HEAD sem resposta, ou orçamento esgotado, devolve null:** é "não
+	 * sei", e não "não há página". O cron então mantém a página de ontem, como o 54 faz com a
+	 * sugestão de título (MÉDIO 2 da revisão do PR #378, a lição do MÉDIO 1 do #373).
 	 *
 	 * @param int|null $orcamento HEADs que ainda podem ser gastos; null é sem limite (só para teste).
-	 * @return array{path: string, kind: string, title: string, redirected_to: string}
+	 * @return array{path: string, kind: string, title: string, redirected_to: string}|null
 	 */
 	function uonix_intelligence_radar_page( $consulta, $path, &$orcamento = null ) {
 		$path  = is_string( $path ) ? $path : '';
@@ -481,7 +491,10 @@ if ( ! function_exists( 'uonix_intelligence_radar_page' ) ) {
 		$entrada = uonix_intelligence_ai_input( $linha );
 		if ( null === $entrada && function_exists( 'uonix_intelligence_ai_follow_redirect' ) ) {
 			$destino = uonix_intelligence_ai_follow_redirect( $path, $orcamento );
-			$entrada = is_string( $destino ) && '' !== $destino ? uonix_intelligence_ai_input( $linha, $destino ) : null;
+			if ( null === $destino ) {
+				return null;
+			}
+			$entrada = '' !== $destino ? uonix_intelligence_ai_input( $linha, $destino ) : null;
 		}
 		if ( ! is_array( $entrada ) || ! isset( $entrada['title'] ) || '' === (string) $entrada['title'] ) {
 			return $vazia;
@@ -525,8 +538,10 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 	 * - Pauta `ok` com o mesmo hash é reaproveitada sem chamada. Qualquer outro status é
 	 *   tentado de novo no dia seguinte.
 	 * - Descartadas não resolvem página (nenhum HEAD) nem chamam o Gemini.
-	 * - Depois de `ai_budget` segundos do início, nenhuma chamada ao Gemini começa: as
-	 *   restantes ficam `deferred` (lição da #335).
+	 * - Depois de `ai_budget` segundos do início, nenhuma página é resolvida (HEAD) e nenhuma
+	 *   chamada ao Gemini começa: as restantes ficam `deferred` (lição da #335).
+	 * - Página que o resolvedor não sabe dizer (null) reaproveita a de ontem; sem ela, a pauta
+	 *   fica `deferred`, sem chamada.
 	 *
 	 * Tudo é injetável por `$args`, como em `uonix_intelligence_executive_collect()`:
 	 * `today` (Y-m-d), `now` (ISO 8601), `config`, `query` (buscador do Search Console),
@@ -590,8 +605,19 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 
 		foreach ( $selecao['visible'] as $c ) {
 			$sem_pagina = array( 'path' => $c['page_path'], 'kind' => '', 'title' => '', 'redirected_to' => '' );
-			$pagina     = call_user_func_array( $resolver, array( $c['query'], $c['page_path'], &$heads ) );
-			$c['page']  = is_array( $pagina ) ? array_merge( $sem_pagina, array_map( 'strval', array_intersect_key( $pagina, $sem_pagina ) ) ) : $sem_pagina;
+			// Sem tempo, nenhuma página é resolvida: seguir o 301 faz HEAD, e o HEAD depois do
+			// orçamento empurrava o cron para perto dos 290 s (BAIXO 4 da revisão do PR #378).
+			$pagina = (float) call_user_func( $relogio ) - $inicio > (float) $regras['ai_budget']
+				? null
+				: call_user_func_array( $resolver, array( $c['query'], $c['page_path'], &$heads ) );
+			$adiar  = false;
+			if ( null === $pagina ) {
+				// "Não sei": a página de ontem vale, e sem ela a pauta espera. Tratar como "não há
+				// página" refazia uma pauta "reforcar" boa como "nova" (MÉDIO 2 da revisão do PR #378).
+				$pagina = isset( $pagina_antes[ $c['key'] ] ) ? $pagina_antes[ $c['key'] ] : null;
+				$adiar  = null === $pagina;
+			}
+			$c['page'] = is_array( $pagina ) ? array_merge( $sem_pagina, array_map( 'strval', array_intersect_key( $pagina, $sem_pagina ) ) ) : $sem_pagina;
 			unset( $c['page_path'] );
 			$entrada = array( 'query' => $c['query'], 'impressions' => $c['impressions'], 'position' => $c['position'], 'page' => $c['page'], 'model' => $modelo );
 			$hash    = uonix_intelligence_radar_input_hash( $entrada );
@@ -600,7 +626,7 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 				$c['ai'] = $antes;
 			} elseif ( ! $tem_chave ) {
 				$c['ai'] = array( 'status' => 'not_configured' );
-			} elseif ( (float) call_user_func( $relogio ) - $inicio > (float) $regras['ai_budget'] ) {
+			} elseif ( $adiar || (float) call_user_func( $relogio ) - $inicio > (float) $regras['ai_budget'] ) {
 				$c['ai'] = array( 'status' => 'deferred', 'input_hash' => $hash, 'attempted_at' => $agora );
 			} else {
 				if ( $chamadas > 0 && $pausa > 0 ) {

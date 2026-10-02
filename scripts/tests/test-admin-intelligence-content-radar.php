@@ -211,6 +211,22 @@ $empate = uonix_intelligence_radar_select( array( uox_rd_linha( 'zeta ancoragem'
 uox_rd_assert( array( 'alfa ancoragem', 'zeta ancoragem' ) === array_column( $empate['visible'], 'query' ), 'Empate de impressões: ordem alfabética da consulta normalizada' );
 uox_rd_assert( array( 'visible' => array(), 'dismissed' => array() ) === uonix_intelligence_radar_select( array( 'lixo', array( 'keys' => array() ), array( 'keys' => array( '' ), 'impressions' => 9, 'position' => 40 ) ), array( 'lixo', array( 'keys' => array( 'a' ) ) ) ), 'Linha malformada é ignorada sem aviso' );
 
+// MÉDIO 1 da revisão do PR #378: HTML codificado, entidade e domínio passavam pelo saneamento.
+$cod = uonix_intelligence_radar_select(
+	array(
+		uox_rd_linha( 'ancoragem &amp;lt;b&amp;gt;predial&amp;lt;/b&amp;gt; nova', 9, 40.0 ),
+		uox_rd_linha( 'ancoragem &amp;amp;lt;b&amp;amp;gt; predial', 9, 40.0 ),
+		uox_rd_linha( 'ancoragem %3Cimg src=x%3E predial', 9, 40.0 ),
+		uox_rd_linha( 'ancoragem &#60;b&#62; predial', 9, 40.0 ),
+		uox_rd_linha( 'fulano.com.br', 9, 40.0 ),
+		uox_rd_linha( 'ancoragem empresa.com predial', 9, 40.0 ),
+		uox_rd_linha( 'ancoragem predial', 9, 40.0 ),
+	),
+	array()
+);
+uox_rd_assert( array( 'ancoragem predial' ) === array_column( $cod['visible'], 'query' ), 'HTML codificado, entidade e domínio nunca viram candidata (MÉDIO 1 da revisão do PR #378, foco de revisão 1); obteve ' . var_export( array_column( $cod['visible'], 'query' ), true ) );
+uox_rd_assert( uonix_intelligence_radar_is_noise( 'fulano.com.br' ) && uonix_intelligence_radar_is_noise( 'ancoragem empresa.com predial' ) && ! uonix_intelligence_radar_is_noise( 'nbr 16325.1' ) && ! uonix_intelligence_radar_is_noise( 'carga de 1.500 kgf' ), 'Domínio é ruído; norma e número com ponto não são' );
+
 // ---------------------------------------------------------------------------
 // 5. Busca no Search Console.
 // ---------------------------------------------------------------------------
@@ -316,16 +332,17 @@ $GLOBALS['uox_status'] = array(
 	'/teste-de-arrancamento'            => array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/servico/ensaios-de-arrancamento/' ),
 	'/servico/ensaios-de-arrancamento/' => array( 'state' => 'ok', 'code' => 200, 'location' => '' ),
 	'/sumiu'                            => array( 'state' => 'not_found', 'code' => 404, 'location' => '' ),
+	// A URL de um rascunho dá 404 para quem não está logado: é "não há página", e não "não sei".
+	'/rascunho/'                        => array( 'state' => 'not_found', 'code' => 404, 'location' => '' ),
 );
 $p301 = uonix_intelligence_radar_page( 'teste de arrancamento', '/teste-de-arrancamento', $orc );
 uox_rd_assert( array( 'path' => '/teste-de-arrancamento', 'kind' => 'página de serviço', 'title' => 'Ensaios de Arrancamento', 'redirected_to' => '/servico/ensaios-de-arrancamento/' ) === $p301 && 8 === $orc, '301 do próprio domínio: a página é o destino, e 2 HEADs saem do orçamento (#343); obteve ' . var_export( array( $p301, $orc ), true ) );
-$vazia = array( 'path' => '/removida', 'kind' => '', 'title' => '', 'redirected_to' => '' );
-uox_rd_assert( $vazia === uonix_intelligence_radar_page( 'x', '/removida', $orc ), 'HEAD sem resposta: página não resolvida (foco de revisão 3)' );
+uox_rd_assert( null === uonix_intelligence_radar_page( 'x', '/removida', $orc ), 'HEAD sem resposta é "não sei": null, e não página vazia (MÉDIO 2 da revisão do PR #378)' );
 uox_rd_assert( '' === uonix_intelligence_radar_page( 'x', '/sumiu', $orc )['title'], '404: página não resolvida' );
 uox_rd_assert( '' === uonix_intelligence_radar_page( 'x', '/rascunho/', $orc )['title'], 'Rascunho não é página' );
 $zero        = 0;
 $heads_antes = $GLOBALS['uox_heads'];
-uox_rd_assert( '' === uonix_intelligence_radar_page( 'x', '/teste-de-arrancamento', $zero )['title'] && $heads_antes === $GLOBALS['uox_heads'], 'Orçamento de HEAD esgotado: nenhum HEAD, página não resolvida' );
+uox_rd_assert( null === uonix_intelligence_radar_page( 'x', '/teste-de-arrancamento', $zero ) && $heads_antes === $GLOBALS['uox_heads'], 'Orçamento de HEAD esgotado: nenhum HEAD, e "não sei" (null)' );
 uox_rd_assert( array( 'path' => '', 'kind' => '', 'title' => '', 'redirected_to' => '' ) === uonix_intelligence_radar_page( 'x', '', $orc ), 'Sem caminho líder: página vazia' );
 
 // ---------------------------------------------------------------------------
@@ -402,13 +419,40 @@ $GLOBALS['uox_options'] = array();
 $tempo                  = 0.0;
 $relogio                = static function () use ( &$tempo ) {
 	$agora  = $tempo;
-	$tempo += 40.0;
+	$tempo += 20.0;
 	return $agora;
 };
 $r6  = uonix_intelligence_radar_run( array_merge( $base, array( 'clock' => $relogio ) ) );
 $st6 = array_column( array_column( get_option( $opt )['candidates'], 'ai' ), 'status' );
 uox_rd_assert( 3 === $r6['called'] && array( 'ok', 'ok', 'ok', 'deferred', 'deferred', 'deferred' ) === $st6, 'Depois de 150 s do início, nenhuma chamada começa: as restantes ficam deferred; obteve ' . var_export( $st6, true ) );
 uox_rd_assert( 3 === uonix_intelligence_radar_run( $base )['called'], 'No dia seguinte, as deferred entram' );
+
+// MÉDIO 2 da revisão do PR #378: "não sei" da página não refaz a pauta.
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( $base );
+$antes_m2   = array_column( get_option( $opt )['candidates'], null, 'query' );
+$pedidos_ia = array();
+$nao_sei    = static function ( $q, $c, &$o ) { return null; };
+$r_m2       = uonix_intelligence_radar_run( array_merge( $base, array( 'page_resolver' => $nao_sei, 'now' => '2026-10-03T03:00:00+00:00' ) ) );
+$depois_m2  = array_column( get_option( $opt )['candidates'], null, 'query' );
+uox_rd_assert( 0 === $r_m2['called'] && array() === $pedidos_ia, '"Não sei" da página: nenhuma chamada ao Gemini' );
+uox_rd_assert( $antes_m2['ancoragem predial']['page'] === $depois_m2['ancoragem predial']['page'] && $antes_m2['ancoragem predial']['ai'] === $depois_m2['ancoragem predial']['ai'] && 'reforcar' === $depois_m2['ancoragem predial']['ai']['suggestion']['caminho'], '"Não sei" reaproveita a página e a pauta "reforcar" de ontem' );
+$GLOBALS['uox_options'] = array();
+$r_m2b                  = uonix_intelligence_radar_run( array_merge( $base, array( 'page_resolver' => $nao_sei ) ) );
+$g_m2b                  = get_option( $opt )['candidates'][0];
+uox_rd_assert( 0 === $r_m2b['called'] && 'deferred' === $g_m2b['ai']['status'] && '' === $g_m2b['page']['title'], '"Não sei" sem página anterior: deferred, sem chamar o Gemini' );
+uox_rd_assert( 6 === uonix_intelligence_radar_run( $base )['called'], 'No dia seguinte, com a página resolvida, a pauta é gerada' );
+
+// BAIXO 4 da revisão do PR #378, promovido: depois do orçamento, nem HEAD nem Gemini.
+$GLOBALS['uox_options'] = array();
+$resolvidas             = array();
+$pedidos_ia             = array();
+$saltos                 = array( 0.0, 200.0 );
+$relogio2               = static function () use ( &$saltos ) {
+	return count( $saltos ) > 1 ? array_shift( $saltos ) : $saltos[0];
+};
+$r_b4 = uonix_intelligence_radar_run( array_merge( $base, array( 'clock' => $relogio2 ) ) );
+uox_rd_assert( 0 === $r_b4['called'] && array() === $resolvidas && array( 'deferred' ) === array_values( array_unique( array_column( array_column( get_option( $opt )['candidates'], 'ai' ), 'status' ) ) ), 'Depois de 150 s do início, nenhuma página é resolvida (nenhum HEAD) e nenhuma chamada começa' );
 
 $GLOBALS['uox_options'] = array( uonix_intelligence_radar_dismissed_option() => array( uonix_intelligence_radar_query_key( 'ancoragem predial' ) => '2026-10-01T00:00:00+00:00' ) );
 $pedidos_ia             = array();
