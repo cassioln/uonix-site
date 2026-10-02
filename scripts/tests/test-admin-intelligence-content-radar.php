@@ -462,6 +462,16 @@ uonix_intelligence_radar_run( array_merge( $base, array( 'query' => $buscador_tr
 $g_troca = array_column( get_option( $opt )['candidates'], null, 'query' )['ancoragem predial'];
 uox_rd_assert( ! in_array( 'ancoragem predial', $pedidos_ia, true ) && 'deferred' === $g_troca['ai']['status'] && '/laudo-ancoragem-predial' === $g_troca['page']['path'] && '' === $g_troca['page']['title'], 'Caminho líder trocado e "não sei": a página de ontem não vale, e a pauta espera' );
 
+// Terceira passada da revisão do PR #378, BAIXO: descartada sem página anterior, restaurada,
+// não pode chamar o Gemini sem página no primeiro "não sei".
+$GLOBALS['uox_options'] = array( uonix_intelligence_radar_dismissed_option() => array( uonix_intelligence_radar_query_key( 'ancoragem predial' ) => '2026-10-01T00:00:00+00:00' ) );
+uonix_intelligence_radar_run( $base );
+unset( $GLOBALS['uox_options'][ uonix_intelligence_radar_dismissed_option() ] );
+$pedidos_ia = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'page_resolver' => $nao_sei ) ) );
+$g_rest = array_column( get_option( $opt )['candidates'], null, 'query' )['ancoragem predial'];
+uox_rd_assert( ! in_array( 'ancoragem predial', $pedidos_ia, true ) && 'deferred' === $g_rest['ai']['status'], 'Descartada sem página anterior, restaurada, e "não sei": espera, sem chamar o Gemini sem página' );
+
 // BAIXO 4 da revisão do PR #378, promovido: depois do orçamento, nem HEAD nem Gemini.
 $GLOBALS['uox_options'] = array();
 $resolvidas             = array();

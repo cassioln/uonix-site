@@ -666,6 +666,11 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 		foreach ( $selecao['dismissed'] as $c ) {
 			$c['page'] = isset( $pagina_antes[ $c['key'] ] ) ? $pagina_antes[ $c['key'] ] : array( 'path' => $c['page_path'], 'kind' => '', 'title' => '', 'redirected_to' => '' );
 			$c['ai']   = isset( $ia_antes[ $c['key'] ] ) ? $ia_antes[ $c['key'] ] : array();
+			// Descartada sem página conhecida: restaurada, o primeiro "não sei" não pode tomar a
+			// página vazia como a de ontem (terceira passada da revisão do PR #378).
+			if ( ! isset( $pagina_antes[ $c['key'] ] ) ) {
+				$c['ai']['page_unknown'] = true;
+			}
 			unset( $c['page_path'] );
 			$gravadas[] = $c;
 		}
