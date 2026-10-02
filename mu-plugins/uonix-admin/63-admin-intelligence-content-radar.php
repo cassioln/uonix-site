@@ -495,3 +495,170 @@ if ( ! function_exists( 'uonix_intelligence_radar_page' ) ) {
 		);
 	}
 }
+
+if ( ! function_exists( 'uonix_intelligence_radar_dismissed' ) ) {
+	/**
+	 * Descartes válidos: chave => data. Entrada malformada é ignorada.
+	 *
+	 * @return array<string, string>
+	 */
+	function uonix_intelligence_radar_dismissed() {
+		$gravado = get_option( uonix_intelligence_radar_dismissed_option(), array() );
+		$saida   = array();
+		foreach ( is_array( $gravado ) ? $gravado : array() as $chave => $data ) {
+			if ( uonix_intelligence_radar_is_key( $chave ) && is_string( $data ) ) {
+				$saida[ $chave ] = $data;
+			}
+		}
+
+		return $saida;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
+	/**
+	 * Cron diário do Radar: busca, seleciona, resolve a página, pede a pauta e grava.
+	 *
+	 * - A opção é escrita UMA vez, no fim. Um corte do PHP no meio deixa a lista anterior.
+	 * - Falha do Search Console, ou falta de credencial, grava só `status` e `updated_at`:
+	 *   a lista anterior fica, com a hora dela em `list_updated_at`.
+	 * - Pauta `ok` com o mesmo hash é reaproveitada sem chamada. Qualquer outro status é
+	 *   tentado de novo no dia seguinte.
+	 * - Descartadas não resolvem página (nenhum HEAD) nem chamam o Gemini.
+	 * - Depois de `ai_budget` segundos do início, nenhuma chamada ao Gemini começa: as
+	 *   restantes ficam `deferred` (lição da #335).
+	 *
+	 * Tudo é injetável por `$args`, como em `uonix_intelligence_executive_collect()`:
+	 * `today` (Y-m-d), `now` (ISO 8601), `config`, `query` (buscador do Search Console),
+	 * `page_resolver`, `generate`, `has_key`, `clock` (segundos, float) e `pause`. O hook do
+	 * cron é registrado com `accepted_args = 0`, então só um teste injeta.
+	 *
+	 * @return array{status: string, called: int}
+	 */
+	function uonix_intelligence_radar_run( $args = array() ) {
+		$args    = is_array( $args ) ? $args : array();
+		$regras  = uonix_intelligence_radar_rules();
+		$agora   = isset( $args['now'] ) && is_string( $args['now'] ) && '' !== $args['now'] ? $args['now'] : gmdate( 'c' );
+		$hoje    = isset( $args['today'] ) && is_string( $args['today'] ) && '' !== $args['today']
+			? $args['today']
+			: ( function_exists( 'uonix_intelligence_anomaly_now' ) ? uonix_intelligence_anomaly_now()->format( 'Y-m-d' ) : gmdate( 'Y-m-d' ) );
+		$relogio = isset( $args['clock'] ) && is_callable( $args['clock'] ) ? $args['clock'] : static function () {
+			return microtime( true );
+		};
+		$inicio   = (float) call_user_func( $relogio );
+		$anterior = get_option( uonix_intelligence_radar_option(), array() );
+		$anterior = is_array( $anterior ) ? $anterior : array();
+		$falha    = static function ( $status ) use ( $anterior, $agora ) {
+			$novo               = $anterior;
+			$novo['status']     = $status;
+			$novo['updated_at'] = $agora;
+			update_option( uonix_intelligence_radar_option(), $novo, false );
+			return array( 'status' => $status, 'called' => 0 );
+		};
+
+		$config = array_key_exists( 'config', $args )
+			? $args['config']
+			: ( function_exists( 'uonix_analytics_metrics_get_config' ) ? uonix_analytics_metrics_get_config() : null );
+		$janela = uonix_intelligence_radar_window( $hoje );
+		if ( ! is_array( $config ) || array() === $janela ) {
+			return $falha( 'config_missing' );
+		}
+		$dados = uonix_intelligence_radar_fetch( $config, $janela, isset( $args['query'] ) ? $args['query'] : null );
+		if ( is_wp_error( $dados ) ) {
+			return $falha( 'gsc_failed' );
+		}
+
+		$selecao      = uonix_intelligence_radar_select( $dados['queries'], $dados['pages'], uonix_intelligence_radar_dismissed() );
+		$ia_antes     = array();
+		$pagina_antes = array();
+		foreach ( isset( $anterior['candidates'] ) && is_array( $anterior['candidates'] ) ? $anterior['candidates'] : array() as $c ) {
+			if ( is_array( $c ) && uonix_intelligence_radar_is_key( $c['key'] ?? null ) ) {
+				$ia_antes[ $c['key'] ]     = isset( $c['ai'] ) && is_array( $c['ai'] ) ? $c['ai'] : array();
+				$pagina_antes[ $c['key'] ] = isset( $c['page'] ) && is_array( $c['page'] ) ? $c['page'] : null;
+			}
+		}
+		$resolver  = isset( $args['page_resolver'] ) && is_callable( $args['page_resolver'] ) ? $args['page_resolver'] : 'uonix_intelligence_radar_page';
+		$gerar     = isset( $args['generate'] ) && is_callable( $args['generate'] ) ? $args['generate'] : 'uonix_intelligence_ai_generate';
+		$tem_chave = array_key_exists( 'has_key', $args )
+			? (bool) $args['has_key']
+			: ( function_exists( 'uonix_intelligence_ai_api_key' ) && '' !== uonix_intelligence_ai_api_key() );
+		$modelo    = function_exists( 'uonix_intelligence_ai_model' ) ? uonix_intelligence_ai_model() : '';
+		$pausa     = isset( $args['pause'] ) ? max( 0, (int) $args['pause'] ) : 2;
+		$heads     = (int) $regras['head_max'];
+		$chamadas  = 0;
+		$gravadas  = array();
+
+		foreach ( $selecao['visible'] as $c ) {
+			$sem_pagina = array( 'path' => $c['page_path'], 'kind' => '', 'title' => '', 'redirected_to' => '' );
+			$pagina     = call_user_func_array( $resolver, array( $c['query'], $c['page_path'], &$heads ) );
+			$c['page']  = is_array( $pagina ) ? array_merge( $sem_pagina, array_map( 'strval', array_intersect_key( $pagina, $sem_pagina ) ) ) : $sem_pagina;
+			unset( $c['page_path'] );
+			$entrada = array( 'query' => $c['query'], 'impressions' => $c['impressions'], 'position' => $c['position'], 'page' => $c['page'], 'model' => $modelo );
+			$hash    = uonix_intelligence_radar_input_hash( $entrada );
+			$antes   = isset( $ia_antes[ $c['key'] ] ) ? $ia_antes[ $c['key'] ] : array();
+			if ( 'ok' === ( $antes['status'] ?? '' ) && $hash === ( $antes['input_hash'] ?? '' ) ) {
+				$c['ai'] = $antes;
+			} elseif ( ! $tem_chave ) {
+				$c['ai'] = array( 'status' => 'not_configured' );
+			} elseif ( (float) call_user_func( $relogio ) - $inicio > (float) $regras['ai_budget'] ) {
+				$c['ai'] = array( 'status' => 'deferred', 'input_hash' => $hash, 'attempted_at' => $agora );
+			} else {
+				if ( $chamadas > 0 && $pausa > 0 ) {
+					sleep( $pausa );
+				}
+				$resposta = call_user_func( $gerar, uonix_intelligence_radar_request_body( $entrada ), $modelo, $pausa );
+				++$chamadas;
+				$ai = array(
+					'status'       => is_array( $resposta ) && isset( $resposta['status'] ) && is_string( $resposta['status'] ) ? $resposta['status'] : 'unavailable',
+					'input_hash'   => $hash,
+					'attempted_at' => $agora,
+					'model'        => $modelo,
+				);
+				if ( 'ok' === $ai['status'] ) {
+					$pauta = uonix_intelligence_radar_validate( $resposta['text'] ?? null, '' !== $c['page']['title'] );
+					if ( null === $pauta ) {
+						$ai['status'] = 'rejected';
+					} else {
+						$ai['suggestion']   = $pauta;
+						$ai['generated_at'] = $agora;
+					}
+				}
+				$c['ai'] = $ai;
+			}
+			$gravadas[] = $c;
+		}
+		foreach ( $selecao['dismissed'] as $c ) {
+			$c['page'] = isset( $pagina_antes[ $c['key'] ] ) ? $pagina_antes[ $c['key'] ] : array( 'path' => $c['page_path'], 'kind' => '', 'title' => '', 'redirected_to' => '' );
+			$c['ai']   = isset( $ia_antes[ $c['key'] ] ) ? $ia_antes[ $c['key'] ] : array();
+			unset( $c['page_path'] );
+			$gravadas[] = $c;
+		}
+
+		update_option(
+			uonix_intelligence_radar_option(),
+			array(
+				'updated_at'      => $agora,
+				'list_updated_at' => $agora,
+				'status'          => 'ok',
+				'window'          => $janela,
+				'truncated'       => ! empty( $dados['truncated'] ),
+				'candidates'      => $gravadas,
+			),
+			false
+		);
+
+		return array( 'status' => 'ok', 'called' => $chamadas );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_schedule' ) ) {
+	function uonix_intelligence_radar_schedule() {
+		if ( function_exists( 'wp_next_scheduled' ) && ! wp_next_scheduled( uonix_intelligence_radar_hook() ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', uonix_intelligence_radar_hook() );
+		}
+	}
+}
+add_action( 'init', 'uonix_intelligence_radar_schedule', 10, 0 );
+// `accepted_args = 0`, como os irmãos de 53, 54, 57 e 59: um evento agendado à mão não
+// injeta `$args` (buscador, gerador, resolvedor) pelo despacho do hook.
+add_action( uonix_intelligence_radar_hook(), 'uonix_intelligence_radar_run', 10, 0 );

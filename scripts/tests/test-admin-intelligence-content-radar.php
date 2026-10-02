@@ -328,6 +328,117 @@ $heads_antes = $GLOBALS['uox_heads'];
 uox_rd_assert( '' === uonix_intelligence_radar_page( 'x', '/teste-de-arrancamento', $zero )['title'] && $heads_antes === $GLOBALS['uox_heads'], 'Orçamento de HEAD esgotado: nenhum HEAD, página não resolvida' );
 uox_rd_assert( array( 'path' => '', 'kind' => '', 'title' => '', 'redirected_to' => '' ) === uonix_intelligence_radar_page( 'x', '', $orc ), 'Sem caminho líder: página vazia' );
 
+// ---------------------------------------------------------------------------
+// 8. Cron diário: busca, seleciona, resolve a página, pede a pauta e grava.
+// ---------------------------------------------------------------------------
+$pedidos_ia = array();
+$gerador    = static function ( $corpo, $modelo, $pausa ) use ( &$pedidos_ia ) {
+	$t             = $corpo['contents'][0]['parts'][0]['text'];
+	$d             = json_decode( substr( $t, (int) strrpos( $t, "\n" ) + 1 ), true );
+	$pedidos_ia[] = $d['consulta'];
+	return array( 'status' => 'ok', 'text' => json_encode( array( 'caminho' => null === $d['pagina_atual'] ? 'nova' : 'reforcar', 'titulo' => 'Pauta: ' . $d['consulta'], 'angulo' => 'Ângulo de ' . $d['consulta'] . '.', 'intencao' => 'informacional' ) ) );
+};
+$resolvidas = array();
+$resolvedor = static function ( $consulta, $caminho, &$orcamento ) use ( &$resolvidas ) {
+	$resolvidas[] = $consulta;
+	return '' === $caminho
+		? array( 'path' => '', 'kind' => '', 'title' => '', 'redirected_to' => '' )
+		: array( 'path' => $caminho, 'kind' => 'página', 'title' => 'Título de ' . $caminho, 'redirected_to' => '' );
+};
+$base = array(
+	'today'         => '2026-10-02',
+	'now'           => '2026-10-02T03:00:00+00:00',
+	'config'        => array( 'search_console_site_url' => 'sc-domain:uonix.com.br' ),
+	'query'         => $buscador,
+	'page_resolver' => $resolvedor,
+	'generate'      => $gerador,
+	'has_key'       => true,
+	'pause'         => 0,
+);
+$opt = uonix_intelligence_radar_option();
+$GLOBALS['uox_options'] = array();
+$r1      = uonix_intelligence_radar_run( $base );
+$gravado = get_option( $opt );
+uox_rd_assert( array( 'status' => 'ok', 'called' => 6 ) === $r1, 'Uma chamada ao Gemini por candidata nova; obteve ' . var_export( $r1, true ) );
+uox_rd_assert( 'ok' === $gravado['status'] && '2026-10-02T03:00:00+00:00' === $gravado['updated_at'] && '2026-10-02T03:00:00+00:00' === $gravado['list_updated_at'] && array( 'start' => '2026-07-02', 'end' => '2026-09-29' ) === $gravado['window'] && false === $gravado['truncated'], 'Estado gravado com hora, janela e corte' );
+uox_rd_assert( $textos === array_column( $gravado['candidates'], 'query' ), 'As candidatas da seleção' );
+uox_rd_assert( false === $GLOBALS['uox_autoload'][ $opt ], 'Gravado sem autoload' );
+$c0 = $gravado['candidates'][0];
+uox_rd_assert( array( 'key', 'query', 'impressions', 'clicks', 'position', 'page', 'ai' ) === array_keys( $c0 ), 'Candidata gravada: só os campos do contrato, sem page_path; obteve ' . var_export( array_keys( $c0 ), true ) );
+uox_rd_assert( 'ok' === $c0['ai']['status'] && 'reforcar' === $c0['ai']['suggestion']['caminho'] && 'Pauta: ancoragem predial' === $c0['ai']['suggestion']['titulo'] && 64 === strlen( $c0['ai']['input_hash'] ) && 'gemini-3.8-flash' === $c0['ai']['model'] && '2026-10-02T03:00:00+00:00' === $c0['ai']['generated_at'], 'Pauta ok gravada com hash, modelo e data' );
+$serial = serialize( $GLOBALS['uox_options'] );
+foreach ( array( 'ensaio de arrancamento', 'andaime fachadeiro medidas', 'deixe um comentário', 'olhal de ancoragem', 'joao@example.com', '99999', 'uônix ancoragem' ) as $fora ) {
+	uox_rd_assert( false === strpos( $serial, $fora ), "Nada gravado tem o texto de fora da regra: {$fora} (#253)" );
+}
+
+$pedidos_ia = array();
+$r2         = uonix_intelligence_radar_run( array_merge( $base, array( 'today' => '2026-10-03', 'now' => '2026-10-03T03:00:00+00:00' ) ) );
+uox_rd_assert( 0 === $r2['called'] && array() === $pedidos_ia, 'Mesma página e título: pauta ok reaproveitada, sem chamada' );
+uox_rd_assert( '2026-10-02T03:00:00+00:00' === get_option( $opt )['candidates'][0]['ai']['generated_at'], 'A pauta reaproveitada mantém a data de geração' );
+$r3 = uonix_intelligence_radar_run( array_merge( $base, array( 'page_resolver' => static function ( $q, $c, &$o ) { return array( 'path' => $c, 'kind' => 'página', 'title' => 'Título NOVO', 'redirected_to' => '' ); } ) ) );
+uox_rd_assert( 6 === $r3['called'], 'O título da página mudou: a pauta é refeita' );
+
+$GLOBALS['uox_options'] = array();
+$falhou                 = static function () { return array( 'status' => 'unavailable' ); };
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $falhou ) ) );
+$g = get_option( $opt );
+uox_rd_assert( 'unavailable' === $g['candidates'][0]['ai']['status'] && ! isset( $g['candidates'][0]['ai']['suggestion'] ), 'Gemini fora: status unavailable, sem pauta' );
+uox_rd_assert( 6 === uonix_intelligence_radar_run( $base )['called'], 'No dia seguinte, quem falhou é tentado de novo' );
+
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => static function () { return array( 'status' => 'ok', 'text' => '{"caminho":"x"}' ); } ) ) );
+uox_rd_assert( 'rejected' === get_option( $opt )['candidates'][0]['ai']['status'], 'Resposta fora do formato vira rejected' );
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => static function () { return array( 'status' => 'ok', 'text' => json_encode( array( 'caminho' => 'reforcar', 'titulo' => 'T', 'angulo' => 'A', 'intencao' => 'comercial' ) ) ); } ) ) );
+$porq = array_column( get_option( $opt )['candidates'], null, 'query' );
+uox_rd_assert( 'rejected' === $porq['pontos de ancoragem predial']['ai']['status'] && 'ok' === $porq['ancoragem predial']['ai']['status'], 'Reforço sem página resolvida vira rejected; com página, vale (foco de revisão 3)' );
+
+$GLOBALS['uox_options'] = array();
+$pedidos_ia             = array();
+$r5                     = uonix_intelligence_radar_run( array_merge( $base, array( 'has_key' => false ) ) );
+uox_rd_assert( 0 === $r5['called'] && array() === $pedidos_ia && array( 'status' => 'not_configured' ) === get_option( $opt )['candidates'][0]['ai'], 'Sem chave: candidatas sem pauta, nenhuma chamada' );
+
+$GLOBALS['uox_options'] = array();
+$tempo                  = 0.0;
+$relogio                = static function () use ( &$tempo ) {
+	$agora  = $tempo;
+	$tempo += 40.0;
+	return $agora;
+};
+$r6  = uonix_intelligence_radar_run( array_merge( $base, array( 'clock' => $relogio ) ) );
+$st6 = array_column( array_column( get_option( $opt )['candidates'], 'ai' ), 'status' );
+uox_rd_assert( 3 === $r6['called'] && array( 'ok', 'ok', 'ok', 'deferred', 'deferred', 'deferred' ) === $st6, 'Depois de 150 s do início, nenhuma chamada começa: as restantes ficam deferred; obteve ' . var_export( $st6, true ) );
+uox_rd_assert( 3 === uonix_intelligence_radar_run( $base )['called'], 'No dia seguinte, as deferred entram' );
+
+$GLOBALS['uox_options'] = array( uonix_intelligence_radar_dismissed_option() => array( uonix_intelligence_radar_query_key( 'ancoragem predial' ) => '2026-10-01T00:00:00+00:00' ) );
+$pedidos_ia             = array();
+$resolvidas             = array();
+$r8                     = uonix_intelligence_radar_run( $base );
+uox_rd_assert( 5 === $r8['called'] && ! in_array( 'ancoragem predial', $pedidos_ia, true ) && ! in_array( 'ancoragem predial', $resolvidas, true ), 'Descartada não chama o Gemini nem resolve página (nenhum HEAD)' );
+uox_rd_assert( in_array( 'ancoragem predial', array_column( get_option( $opt )['candidates'], 'query' ), true ), 'A descartada continua gravada, para a área "Descartadas"' );
+
+$lista_antes = get_option( $opt )['candidates'];
+$r9          = uonix_intelligence_radar_run( array_merge( $base, array( 'now' => '2026-10-04T03:00:00+00:00', 'query' => static function () { return new WP_Error( 'google_http_500' ); } ) ) );
+$g9          = get_option( $opt );
+uox_rd_assert( array( 'status' => 'gsc_failed', 'called' => 0 ) === $r9 && 'gsc_failed' === $g9['status'] && '2026-10-04T03:00:00+00:00' === $g9['updated_at'] && '2026-10-02T03:00:00+00:00' === $g9['list_updated_at'] && $lista_antes === $g9['candidates'], 'Search Console fora: grava status e hora, e a lista anterior fica' );
+uox_rd_assert( 'config_missing' === uonix_intelligence_radar_run( array_merge( $base, array( 'config' => null ) ) )['status'] && $lista_antes === get_option( $opt )['candidates'], 'Sem credencial: config_missing, e a lista fica' );
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'config' => null ) ) );
+uox_rd_assert( array( 'status' => 'config_missing', 'updated_at' => '2026-10-02T03:00:00+00:00' ) === get_option( $opt ), 'Sem lista anterior, a falha grava só status e hora' );
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'query' => static function ( $c, $p, $d, $l ) use ( $mil ) { return uox_rd_resposta( 'query' === $d ? $mil : array() ); } ) ) );
+uox_rd_assert( true === get_option( $opt )['truncated'], 'O corte de linhas fica registrado' );
+
+$GLOBALS['uox_cron'] = array();
+uonix_intelligence_radar_schedule();
+$t0 = $GLOBALS['uox_cron'][ uonix_intelligence_radar_hook() ] ?? null;
+uonix_intelligence_radar_schedule();
+uox_rd_assert( 'daily' === ( $GLOBALS['uox_cron_rec'][ uonix_intelligence_radar_hook() ] ?? '' ) && $t0 === $GLOBALS['uox_cron'][ uonix_intelligence_radar_hook() ], 'Cron diário, agendado uma vez só' );
+$reg = array_values( array_filter( $GLOBALS['uox_actions'], static function ( $a ) { return uonix_intelligence_radar_hook() === $a[0]; } ) );
+uox_rd_assert( 1 === count( $reg ) && 'uonix_intelligence_radar_run' === $reg[0][1] && 0 === $reg[0][3], 'O hook roda o cron sem argumentos: um evento agendado à mão não injeta buscador nem gerador' );
+uox_rd_assert( 1 === count( array_filter( $GLOBALS['uox_actions'], static function ( $a ) { return 'init' === $a[0] && 'uonix_intelligence_radar_schedule' === $a[1] && 0 === $a[3]; } ) ), 'O agendamento roda no init' );
+$GLOBALS['uox_options'] = array();
+
 // FIM DAS SEÇÕES — as seções das tarefas seguintes entram acima desta linha.
 
 if ( $failures > 0 ) {

@@ -87,9 +87,15 @@ fi
 # `uonix_intelligence_page_status_cache` guarda o status HTTP das páginas conferido
 # pelo cron diário (#348). Herdado, o relatório do destino listaria como verificados
 # os status das páginas da ORIGEM.
+# As três do Radar de Pautas (Módulo 8) guardam as candidatas, os descartes e o que já
+# foi ao e-mail. Herdadas, o destino mostraria as pautas da ORIGEM e acharia que já
+# mandou por e-mail o que nunca mandou.
 state_options=(
   'uonix_intelligence_anomaly_state'
   'uonix_intelligence_page_status_cache'
+  'uonix_intelligence_content_radar'
+  'uonix_intelligence_content_radar_dismissed'
+  'uonix_intelligence_content_radar_emailed'
 )
 
 for option in "${state_options[@]}"; do

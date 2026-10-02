@@ -317,7 +317,7 @@ local_db_dump_options() {
 
 protected_options_where() {
   cat <<'SQL'
-option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron','uonix_executive_report_recipients','uonix_intelligence_anomaly_state','uonix_intelligence_license','uonix_intelligence_ai_suggestions','uonix_intelligence_page_status_cache')
+option_name IN ('admin_email','active_plugins','active_sitewide_plugins','auto_update_plugins','cron','uonix_executive_report_recipients','uonix_intelligence_anomaly_state','uonix_intelligence_license','uonix_intelligence_ai_suggestions','uonix_intelligence_page_status_cache','uonix_intelligence_content_radar','uonix_intelligence_content_radar_dismissed','uonix_intelligence_content_radar_emailed')
 OR option_name = 'downloaded_font_files'
 OR option_name LIKE 'uonix\_analytics\_metrics\_snapshot%'
 OR option_name LIKE 'googlesitekit%'

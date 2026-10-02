@@ -163,7 +163,7 @@ restauradas depois da importação:
 | E-mail e integrações | `%fluentmail%`, `%mailchimp%`, `%smtp%`, `mailserver_%` |
 | Desafios antirrobô | `%turnstile%`, `%captcha%`, `%recaptcha%`, `%hcaptcha%`, `%wp_captcha%` |
 | Logs e backup | `%wp_mail_logging%`, `%mail_logging%`, `%wpvivid%` |
-| Uônix Insights | `uonix_executive_report_recipients`, `uonix_intelligence_anomaly_state`, `uonix_intelligence_license`, `uonix_intelligence_ai_suggestions`, `uonix_intelligence_page_status_cache` |
+| Uônix Insights | `uonix_executive_report_recipients`, `uonix_intelligence_anomaly_state`, `uonix_intelligence_license`, `uonix_intelligence_ai_suggestions`, `uonix_intelligence_page_status_cache`, `uonix_intelligence_content_radar`, `uonix_intelligence_content_radar_dismissed`, `uonix_intelligence_content_radar_emailed` |
 
 Os sublinhados escapados no predicado SQL representam caracteres literais. Essa
 proteção é deliberadamente específica: opções que não estejam nessa lista vêm da
