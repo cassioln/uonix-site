@@ -241,6 +241,9 @@ jobs:
       - name: Test admin dados globais write guards
         run: php scripts/tests/test-admin-dados-globais-rfq.php
 
+      - name: Test editor footer-only widgets screen
+        run: php scripts/tests/test-admin-editor-rodape.php
+
   shell-and-config:
     name: Shell, workflows, Node and Compose
     runs-on: ubuntu-latest
