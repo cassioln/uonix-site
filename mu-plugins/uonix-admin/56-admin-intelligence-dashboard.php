@@ -148,10 +148,11 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 	 */
 	function uonix_intelligence_render_panel( $active_tab ) {
 		$is_active = 'intelligence' === $active_tab;
+		$rules     = function_exists( 'uonix_intelligence_seo_rules' ) ? uonix_intelligence_seo_rules() : array( 'min_position' => 4, 'max_position' => 12, 'min_impressions' => 5, 'max_ctr' => 0.03 );
+		// O mesmo limite que o e-mail usa para dizer "mais N no painel" (#291).
 		$analysis  = function_exists( 'uonix_intelligence_seo_opportunities' )
-			? uonix_intelligence_seo_opportunities( null, 5 )
+			? uonix_intelligence_seo_opportunities( null, isset( $rules['panel_limit'] ) ? (int) $rules['panel_limit'] : 5 )
 			: array( 'available' => false, 'reason' => 'snapshot_missing', 'source' => 'search_console', 'synced_at' => '', 'stale' => true, 'universe' => 0, 'rows' => array() );
-		$rules = function_exists( 'uonix_intelligence_seo_rules' ) ? uonix_intelligence_seo_rules() : array( 'min_position' => 4, 'max_position' => 12, 'min_impressions' => 5, 'max_ctr' => 0.03 );
 		$rows  = isset( $analysis['rows'] ) && is_array( $analysis['rows'] ) ? $analysis['rows'] : array();
 		?>
 		<section id="uonix-panel-intelligence" role="tabpanel" aria-labelledby="uonix-tab-intelligence"<?php echo $is_active ? '' : ' hidden'; ?>>
@@ -329,7 +330,11 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 
 			<?php if ( false === $momento ) : ?>
 				<div class="notice notice-info inline">
-					<p>A primeira verificação ainda não rodou. Ela é disparada pelo agendador do WordPress, que depende de tráfego no site — então acontece na primeira visita depois do horário agendado, e não em horário fixo.</p>
+					<?php if ( ! function_exists( 'uonix_intelligence_cron_by_visit' ) || uonix_intelligence_cron_by_visit() ) : ?>
+						<p>A primeira verificação ainda não rodou. Ela é disparada pelo agendador do WordPress, que depende de tráfego no site — então acontece na primeira visita depois do horário agendado, e não em horário fixo.</p>
+					<?php else : ?>
+						<p>A primeira verificação ainda não rodou. Neste ambiente o WP-Cron por visita está desligado (<code>DISABLE_WP_CRON</code>): ela depende do agendador do servidor, e não de visitas ao site.</p>
+					<?php endif; ?>
 				</div>
 			<?php endif; ?>
 
@@ -569,7 +574,11 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 				</tr>
 			</table>
 			<p class="description">
-				O envio é disparado pelo agendador do WordPress, que depende de tráfego no site e não de relógio.
+				<?php if ( ! function_exists( 'uonix_intelligence_cron_by_visit' ) || uonix_intelligence_cron_by_visit() ) : ?>
+					O envio é disparado pelo agendador do WordPress, que depende de tráfego no site e não de relógio.
+				<?php else : ?>
+					Neste ambiente o WP-Cron por visita está desligado (<code>DISABLE_WP_CRON</code>): o envio depende do agendador do servidor, e não de tráfego no site. Sem esse agendador, nenhum envio acontece.
+				<?php endif; ?>
 				Por isso esta tela informa a frequência e o próximo disparo realmente agendado, e não promete um horário fixo.
 			</p>
 

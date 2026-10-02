@@ -45,7 +45,27 @@ if ( ! function_exists( 'uonix_intelligence_seo_rules' ) ) {
 			'min_impressions' => 5,
 			'max_ctr'         => 0.03,
 			'period_days'     => 30,
+			// Quantas oportunidades cada saída lista. O e-mail é um resumo de propósito, e
+			// diz quantas ficaram no painel (#291).
+			'panel_limit'     => 5,
+			'email_limit'     => 3,
 		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_cron_by_visit' ) ) {
+	/**
+	 * O WP-Cron deste ambiente roda por visita? Mesmo critério do WordPress
+	 * (`spawn_cron()`, `wp-cron.php`): `DISABLE_WP_CRON` definida e verdadeira o desliga.
+	 *
+	 * Serve só para os textos do painel e do e-mail dizerem a verdade sobre o horário
+	 * (#351). Em produção, desde 2026-10-01, o WP-Cron roda pelo `crontab` do sistema, com a
+	 * constante ligada (`docs/ambientes.md`). QA e local seguem por visita. O PHP não enxerga
+	 * o `crontab`: com a constante ligada, o que se pode afirmar é que o envio NÃO depende de
+	 * visita, e não que existe um agendador do servidor rodando.
+	 */
+	function uonix_intelligence_cron_by_visit() {
+		return ! ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON );
 	}
 }
 
@@ -95,6 +115,7 @@ if ( ! function_exists( 'uonix_intelligence_unavailable' ) ) {
 				'stale'       => true,
 				'period_days' => uonix_intelligence_seo_rules()['period_days'],
 				'universe'    => 0,
+				'matched'     => 0,
 				'rows'        => array(),
 			),
 			is_array( $extra ) ? $extra : array()
@@ -211,6 +232,9 @@ if ( ! function_exists( 'uonix_intelligence_seo_opportunities' ) ) {
 			'stale'       => $stale,
 			'period_days' => $rules['period_days'],
 			'universe'    => count( $universe ),
+			// Oportunidades antes do corte. Não é o `universe`, que conta todas as consultas
+			// peneiradas, oportunidade ou não (#291).
+			'matched'     => count( $matches ),
 			'rows'        => array_slice( $matches, 0, $limit ),
 		);
 	}

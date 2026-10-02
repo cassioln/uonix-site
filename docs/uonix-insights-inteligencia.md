@@ -108,7 +108,11 @@ Lista em `wp_options`. E-mail de destinatário não é segredo; token de API é 
 
 WP-Cron `weekly`. O painel exibe o **próximo disparo real** lido do agendador (`wp_next_scheduled`) e o horário do último envio. O texto ao usuário declara apenas a **frequência** — "semanal" — sem horário e **sem período do dia**.
 
-É proibido prometer horário ou período do dia na interface e no e-mail, incluindo formulações brandas como "às segundas pela manhã". WP-Cron dispara por tráfego, não por relógio, e o site não tem cronjob de servidor: a deriva pode atravessar o dia inteiro, o que torna "pela manhã" tão insustentável quanto "08:00". A única afirmação que o sistema consegue provar é a frequência somada ao próximo disparo agendado.
+É proibido prometer horário ou período do dia na interface e no e-mail, incluindo formulações brandas como "às segundas pela manhã". A única afirmação que o sistema consegue provar é a frequência somada ao próximo disparo agendado.
+
+- **Em QA e no local,** o WP-Cron dispara por tráfego, não por relógio: a deriva pode atravessar o dia inteiro, o que torna "pela manhã" tão insustentável quanto "08:00".
+- **Em produção, desde 2026-10-01 (#348),** o WP-Cron roda pelo `crontab` do sistema a cada 5 minutos, com `DISABLE_WP_CRON` (`docs/ambientes.md`). O PHP não enxerga o `crontab`: se a linha sumir, nada roda, e o código não tem como saber.
+- **Os textos seguem o que o código consegue ver (#351).** `uonix_intelligence_cron_by_visit()` (`55`) usa o mesmo critério do WordPress. Com o WP-Cron por visita, o painel e o e-mail dizem que o envio depende de tráfego. Sem ele, o e-mail diz só que o agendamento não depende de visitas, e o painel, que ele depende do agendador do servidor. Nenhum dos dois afirma que esse agendador está rodando.
 
 #### Quem cria o evento: o invariante dos destinatários
 
@@ -411,6 +415,19 @@ As janelas terminam **ontem** porque o relatório sai segunda às 08:00, e "hoje
 Para o GA4, o que foi **medido** em 2026-09-28 é que o dado intradiário chega em horas — às 13:00 já havia dado parcial do próprio dia. **Não foi medido que o dia anterior esteja fechado às 08:00**, e a revisão do PR #301 apontou a diferença: o processamento diário pode seguir refinando o domingo depois disso. O tamanho do erro possível foi medido no mesmo dia: o domingo 27/09 teve 2 das 65 visitas da semana (~3%). O viés possível na variação semanal de visitas é dessa ordem, para baixo, e fica declarado.
 
 A Search Console segue com ~3 dias de atraso (medido de novo no mesmo dia), e por isso a caixa de impressões reusa as janelas assentadas do Módulo 5 em vez de somar a série de novo. Reimplementar ali seria reabrir os pontos cegos que duas revisões fecharam.
+
+### O selo e o assunto são a semana do relatório (#308)
+
+- **Selo do cabeçalho e assunto:** "Semana de 24/09 a 30/09/2026", a janela `week` de `uonix_intelligence_executive_windows()`, com os 7 dias até ontem. É a mesma de Orçamentos e Visitas, e vem de `uonix_intelligence_report_badge_label()`.
+- **O período do snapshot de SEO,** de 30 dias, vai para a procedência do bloco de oportunidades: "Fonte: Search Console · 01/09 a 30/09 (30 dias) · sincronizado em …". Antes ele estava no selo, e quem lia o topo entendia que o relatório inteiro cobria 30 dias.
+- **Sem o `59`,** o selo continua sendo o período do SEO. Aí o e-mail só tem esse bloco, e o selo está certo.
+
+### O e-mail diz quantas oportunidades ficaram no painel (#291)
+
+- **Os limites:** o e-mail lista `email_limit` (3) oportunidades, e o painel `panel_limit` (5). As duas são regras de `uonix_intelligence_seo_rules()`, no `55`. O e-mail é um resumo de propósito.
+- **A frase:** abaixo da tabela sai "Mais N oportunidades no painel.", com o link para o painel, e só quando N > 0.
+- **O número:** N = min(`matched`, `panel_limit`) − linhas no e-mail. Ele não passa do que o painel mostra a mais.
+- **`matched` não é `universe`:** `matched` é o total de oportunidades antes do corte, e `universe` conta todas as consultas peneiradas, oportunidade ou não. Em 23/09 eram 5 contra 113.
 
 ### "Mudança detectável" é um teste, não um limiar
 

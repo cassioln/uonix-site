@@ -43,35 +43,98 @@ if ( ! function_exists( 'uonix_intelligence_report_period_label' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_report_seo_window_label' ) ) {
+	/**
+	 * "23/08 a 21/09 (30 dias)": a janela do snapshot de SEO, para a procedência do bloco de
+	 * oportunidades. Vazio quando o snapshot não declara o intervalo.
+	 *
+	 * Antes do Módulo 4 essa janela ia no selo do cabeçalho. Com o selo passando a mostrar a
+	 * semana do relatório (#308), é a procedência do bloco que a declara.
+	 */
+	function uonix_intelligence_report_seo_window_label( $snapshot ) {
+		if ( ! is_array( $snapshot ) || ! isset( $snapshot['periods']['current']['start'], $snapshot['periods']['current']['end'] ) ) {
+			return '';
+		}
+		$inicio = strtotime( (string) $snapshot['periods']['current']['start'] );
+		$fim    = strtotime( (string) $snapshot['periods']['current']['end'] );
+		if ( false === $inicio || false === $fim || $fim < $inicio ) {
+			return '';
+		}
+		$dias = (int) round( ( $fim - $inicio ) / DAY_IN_SECONDS ) + 1;
+
+		return gmdate( 'd/m', $inicio ) . ' a ' . gmdate( 'd/m', $fim ) . ' (' . $dias . ' dias)';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_report_badge_label' ) ) {
+	/**
+	 * Selo do cabeçalho e período do assunto (#308).
+	 *
+	 * Com o contexto executivo, é a semana do relatório, a mesma das caixas de orçamentos e
+	 * visitas: os 7 dias terminando ontem (`uonix_intelligence_executive_windows()['week']`).
+	 * O selo antigo, o período do snapshot de SEO, só estava certo quando o e-mail tinha
+	 * apenas o bloco de SEO; é o que continua valendo sem o 59 (`$fallback`).
+	 *
+	 * @param array|null $executive Retorno de `uonix_intelligence_executive_collect()`.
+	 * @param string     $fallback  Rótulo do snapshot de SEO.
+	 */
+	function uonix_intelligence_report_badge_label( $executive, $fallback ) {
+		$semana = is_array( $executive ) && isset( $executive['scorecard']['windows']['week'] ) ? $executive['scorecard']['windows']['week'] : null;
+		$rotulo = uonix_intelligence_report_window_label( $semana );
+		$fim    = is_array( $semana ) && isset( $semana['end'] ) ? DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $semana['end'], new DateTimeZone( 'UTC' ) ) : false;
+		if ( '' === $rotulo || false === $fim ) {
+			return (string) $fallback;
+		}
+
+		return 'Semana de ' . $rotulo . '/' . $fim->format( 'Y' );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_report_context' ) ) {
 	/**
 	 * Reúne tudo que o template precisa, para o template não buscar nada.
+	 *
+	 * @param array $args Para teste: `snapshot` e `executive` (inclusive `null`) substituem
+	 *                    a leitura real, como em `uonix_intelligence_executive_collect()`.
 	 */
-	function uonix_intelligence_report_context() {
+	function uonix_intelligence_report_context( $args = array() ) {
+		$args     = is_array( $args ) ? $args : array();
 		$rules    = function_exists( 'uonix_intelligence_seo_rules' ) ? uonix_intelligence_seo_rules() : array( 'period_days' => 30 );
-		$snapshot = function_exists( 'uonix_analytics_metrics_get_snapshot' ) ? uonix_analytics_metrics_get_snapshot( $rules['period_days'] ) : false;
-		$analysis = function_exists( 'uonix_intelligence_seo_opportunities' ) ? uonix_intelligence_seo_opportunities( $snapshot, 3 ) : array(
+		$snapshot = array_key_exists( 'snapshot', $args )
+			? $args['snapshot']
+			: ( function_exists( 'uonix_analytics_metrics_get_snapshot' ) ? uonix_analytics_metrics_get_snapshot( $rules['period_days'] ) : false );
+		// O e-mail é um resumo: lista menos que o painel e diz quantas ficaram lá (#291).
+		$limite   = isset( $rules['email_limit'] ) ? (int) $rules['email_limit'] : 3;
+		$analysis = function_exists( 'uonix_intelligence_seo_opportunities' ) ? uonix_intelligence_seo_opportunities( $snapshot, $limite ) : array(
 			'available' => false,
 			'reason'    => 'snapshot_missing',
 			'source'    => 'search_console',
 			'synced_at' => '',
 			'stale'     => true,
 			'universe'  => 0,
+			'matched'   => 0,
 			'rows'      => array(),
 		);
 
 		// Módulo 4. Opcional: sem o 59 carregado, o e-mail sai como antes, só com as
 		// oportunidades de SEO. Ver 59-admin-intelligence-executive.php.
-		$executive = function_exists( 'uonix_intelligence_executive_collect' )
-			? uonix_intelligence_executive_collect( array( 'seo' => $analysis ) )
-			: null;
+		if ( array_key_exists( 'executive', $args ) ) {
+			$executive = $args['executive'];
+		} else {
+			$executive = function_exists( 'uonix_intelligence_executive_collect' )
+				? uonix_intelligence_executive_collect( array( 'seo' => $analysis ) )
+				: null;
+		}
 
 		return array(
-			'analysis'     => $analysis,
-			'executive'    => $executive,
-			'period_label' => uonix_intelligence_report_period_label( $snapshot ),
-			'environment'  => defined( 'UONIX_ENV' ) ? (string) UONIX_ENV : '',
-			'panel_url'    => function_exists( 'admin_url' ) ? admin_url( 'admin.php?page=uonix-analytics&tab=intelligence' ) : '',
+			'analysis'         => $analysis,
+			'executive'        => $executive,
+			'period_label'     => uonix_intelligence_report_badge_label( $executive, uonix_intelligence_report_period_label( $snapshot ) ),
+			'seo_period_label' => uonix_intelligence_report_seo_window_label( $snapshot ),
+			'panel_limit'      => isset( $rules['panel_limit'] ) ? (int) $rules['panel_limit'] : 0,
+			'cron_by_visit'    => function_exists( 'uonix_intelligence_cron_by_visit' ) ? uonix_intelligence_cron_by_visit() : true,
+			'environment'      => defined( 'UONIX_ENV' ) ? (string) UONIX_ENV : '',
+			'panel_url'        => function_exists( 'admin_url' ) ? admin_url( 'admin.php?page=uonix-analytics&tab=intelligence' ) : '',
 		);
 	}
 }
@@ -413,7 +476,9 @@ if ( ! function_exists( 'uonix_intelligence_report_html' ) ) {
 		$stale     = ! empty( $analysis['stale'] );
 		$synced_at = isset( $analysis['synced_at'] ) ? (string) $analysis['synced_at'] : '';
 		$timestamp = '' !== $synced_at ? strtotime( $synced_at ) : false;
+		$janela_seo  = isset( $context['seo_period_label'] ) ? (string) $context['seo_period_label'] : '';
 		$procedencia = 'Fonte: Search Console';
+		$procedencia .= '' !== $janela_seo ? ' · ' . $janela_seo : '';
 		$procedencia .= false !== $timestamp ? ' · sincronizado em ' . gmdate( 'd/m/Y H:i', $timestamp ) . ' (UTC)' : ' · sem horário de sincronização';
 		$procedencia .= $stale ? ' · dado desatualizado' : '';
 
@@ -481,6 +546,18 @@ if ( ! function_exists( 'uonix_intelligence_report_html' ) ) {
 				$html .= '</tr>';
 			}
 			$html .= '</table>';
+
+			// O e-mail lista menos que o painel. Dizer quantas ficaram lá, e só quando há resto:
+			// o painel mostra até `panel_limit`, então o número é o que ele mostra a mais, nunca
+			// o resto bruto nem o `universe`, que conta todas as consultas peneiradas (#291).
+			$no_painel = isset( $analysis['matched'], $context['panel_limit'] ) ? min( (int) $analysis['matched'], (int) $context['panel_limit'] ) : 0;
+			$a_mais    = $no_painel - count( $rows );
+			if ( $a_mais > 0 ) {
+				$frase = 'Mais ' . $a_mais . ( 1 === $a_mais ? ' oportunidade' : ' oportunidades' ) . ' no painel.';
+				$html .= '<div style="padding-top:10px;font-size:12px;color:#334155;">';
+				$html .= '' !== $painel ? '<a href="' . esc_url( $painel ) . '" style="color:#0e3780;">' . esc_html( $frase ) . '</a>' : esc_html( $frase );
+				$html .= '</div>';
+			}
 		}
 		$html .= '</td></tr>';
 
@@ -493,7 +570,12 @@ if ( ! function_exists( 'uonix_intelligence_report_html' ) ) {
 		if ( '' !== $painel ) {
 			$html .= '<div><a href="' . esc_url( $painel ) . '" style="color:#0e3780;">Abrir a Central de Inteligência no painel</a></div>';
 		}
-		$html .= '<div style="padding-top:6px;">Envio semanal. O agendador do WordPress depende de tráfego no site, então o horário exato varia.</div>';
+		// O PHP não enxerga o `crontab`: sem o WP-Cron por visita, o que se pode afirmar é que o
+		// envio não depende de visitas, e não que um agendador do servidor está rodando (#351).
+		$por_visita = ! array_key_exists( 'cron_by_visit', $context ) || false !== $context['cron_by_visit'];
+		$html      .= '<div style="padding-top:6px;">' . ( $por_visita
+			? 'Envio semanal. O agendador do WordPress depende de tráfego no site, então o horário exato varia.'
+			: 'Envio semanal. O agendamento não depende de visitas ao site.' ) . '</div>';
 		if ( '' !== $ambiente && 'production' !== $ambiente ) {
 			$html .= '<div style="padding-top:6px;color:#b45309;"><strong>Ambiente: ' . esc_html( strtoupper( $ambiente ) ) . '</strong> — mensagem não produtiva.</div>';
 		}
