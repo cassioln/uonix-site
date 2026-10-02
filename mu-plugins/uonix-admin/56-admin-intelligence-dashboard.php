@@ -211,7 +211,13 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 									<td><?php echo esc_html( uonix_intelligence_format_ctr( $row['ctr'] ) ); ?></td>
 									<?php
 									$alvo     = array_key_exists( 'target_page', $row ) ? $row['target_page'] : null;
-									$post_id  = is_string( $alvo ) && '' !== $alvo && function_exists( 'uonix_intelligence_ai_page_post_id' ) ? uonix_intelligence_ai_page_post_id( $alvo ) : 0;
+									// Post ou termo (#344): o link leva ao editor de cada um.
+									if ( is_string( $alvo ) && '' !== $alvo && function_exists( 'uonix_intelligence_ai_page_object' ) ) {
+										$objeto = uonix_intelligence_ai_page_object( $alvo );
+									} else {
+										$post_id = is_string( $alvo ) && '' !== $alvo && function_exists( 'uonix_intelligence_ai_page_post_id' ) ? uonix_intelligence_ai_page_post_id( $alvo ) : 0;
+										$objeto  = $post_id > 0 ? array( 'type' => 'post', 'id' => $post_id ) : null;
+									}
 									$ia       = function_exists( 'uonix_intelligence_ai_suggestion_for' ) ? uonix_intelligence_ai_suggestion_for( $row ) : array( 'status' => 'not_configured' );
 									$ia_texto = function_exists( 'uonix_intelligence_ai_state_message' ) ? uonix_intelligence_ai_state_message( isset( $ia['status'] ) ? (string) $ia['status'] : '' ) : 'IA não configurada.';
 									?>
@@ -222,8 +228,10 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 											<em>Não identificada.</em>
 										<?php else : ?>
 											<a href="<?php echo esc_url( home_url( $alvo ) ); ?>"><?php echo esc_html( $alvo ); ?></a>
-											<?php if ( $post_id > 0 && current_user_can( 'edit_post', $post_id ) ) : ?>
-												<br><a href="<?php echo esc_url( (string) get_edit_post_link( $post_id ) ); ?>">Editar página</a>
+											<?php if ( is_array( $objeto ) && 'post' === $objeto['type'] && current_user_can( 'edit_post', $objeto['id'] ) ) : ?>
+												<br><a href="<?php echo esc_url( (string) get_edit_post_link( $objeto['id'] ) ); ?>">Editar página</a>
+											<?php elseif ( is_array( $objeto ) && 'term' === $objeto['type'] && function_exists( 'get_edit_term_link' ) && current_user_can( 'edit_term', $objeto['id'] ) ) : ?>
+												<br><a href="<?php echo esc_url( (string) get_edit_term_link( $objeto['id'], $objeto['taxonomy'] ) ); ?>"><?php echo esc_html( 'Editar ' . ( function_exists( 'uonix_intelligence_ai_term_kind' ) ? uonix_intelligence_ai_term_kind( $objeto['taxonomy'] ) : 'termo' ) ); ?></a>
 											<?php endif; ?>
 										<?php endif; ?>
 									</td>

@@ -107,6 +107,15 @@ function wp_remote_retrieve_response_code( $r ) { return is_array( $r ) && isset
 function wp_remote_retrieve_body( $r ) { return ''; }
 function wp_remote_retrieve_header( $r, $name ) { return is_array( $r ) && isset( $r['headers'][ strtolower( $name ) ] ) ? $r['headers'][ strtolower( $name ) ] : ''; }
 function home_url( $path = '' ) { return 'https://uonix.com.br' . $path; }
+// #307: termos para o rótulo das páginas de categoria. O resolvedor (55) tem teste próprio
+// na suíte da IA; aqui importa que o rótulo o use.
+function get_taxonomies( $args = array(), $output = 'names' ) {
+	return array( 'product_cat' => (object) array( 'name' => 'product_cat', 'query_var' => 'product_cat' ) );
+}
+function get_term_by( $campo, $valor, $taxonomia ) {
+	$termos = array( 'olhal-de-ancoragem' => array( 34, 'Olhal de Ancoragem' ), 'acessorios' => array( 160, 'Acessórios &amp; Peças' ) );
+	return 'product_cat' === $taxonomia && isset( $termos[ $valor ] ) ? (object) array( 'term_id' => $termos[ $valor ][0], 'name' => $termos[ $valor ][1], 'description' => '' ) : false;
+}
 // Respostas HTTP por URL, e registro dos argumentos de cada HEAD.
 $GLOBALS['uox_http']      = array();
 $GLOBALS['uox_http_args'] = array();
@@ -693,6 +702,18 @@ $alem   = uonix_intelligence_executive_top_pages( uox_linhas( array( '/t1' => 10
 uox_assert( '/t5' === ( $alem['rows'][0]['path'] ?? '' ) && 110.0 === $alem['rows'][0]['impressions'], 'a sexta página, que redireciona, é conferida e soma no topo: /t5 com 60 + 50 = 110; obteve ' . json_encode( array_column( $alem['rows'], 'impressions', 'path' ) ) );
 
 uox_assert( 'Página inicial' === uonix_intelligence_executive_page_label( '/' ), 'a raiz deve ser rotulada como Página inicial' );
+// #307: `/olhal-de-ancoragem/` é o arquivo da product_cat #34, servido por uma regra do Rank
+// Math. url_to_postid() não o resolve; o rótulo vem do termo que a regra abre.
+$GLOBALS['uox_options']['rewrite_rules'] = array(
+	'olhal-de-ancoragem/?$'    => 'index.php?product_cat=olhal-de-ancoragem',
+	'acessorios/?$'            => 'index.php?product_cat=acessorios',
+	'(.?.+?)(?:/([0-9]+))?/?$' => 'index.php?pagename=$matches[1]&page=$matches[2]',
+);
+uox_assert( 'Olhal de Ancoragem' === uonix_intelligence_executive_page_label( '/olhal-de-ancoragem/' ), '#307: a página de categoria é rotulada pelo nome do termo; obteve ' . var_export( uonix_intelligence_executive_page_label( '/olhal-de-ancoragem/' ), true ) );
+uox_assert( 'Acessórios & Peças' === uonix_intelligence_executive_page_label( '/acessorios/' ), '#307: o nome do termo sai sem entidade HTML' );
+uox_assert( '/sem-termo/' === uonix_intelligence_executive_page_label( '/sem-termo/' ), '#307: sem post e sem termo, o caminho continua sendo o rótulo' );
+unset( $GLOBALS['uox_options']['rewrite_rules'] );
+uox_assert( '/olhal-de-ancoragem/' === uonix_intelligence_executive_page_label( '/olhal-de-ancoragem/' ), '#307: sem as regras gravadas, o caminho' );
 uox_assert( 'pages_fetch_failed' === ( uonix_intelligence_executive_top_pages( new WP_Error( 'x' ), $janelaPag )['reason'] ?? '' ), 'falha de busca deixa o bloco indisponível com motivo' );
 
 // A conferência HTTP de VERDADE, com as respostas que a produção deu em 2026-09-28.

@@ -87,17 +87,62 @@ if ( ! function_exists( 'uonix_intelligence_ai_page_post_id' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_ai_page_object' ) ) {
+	/**
+	 * O que a página líder é: um post publicado, um termo de taxonomia pública, ou nada.
+	 *
+	 * Post primeiro, pelo caminho de sempre. Sem post, o termo que a regra de reescrita abre
+	 * (`uonix_intelligence_resolve_term_path()`, no 55): categoria de produto, categoria e tag
+	 * do blog (#344). A URL antiga do termo que o WordPress canonicaliza por 301 resolve para
+	 * o próprio termo; os demais endereços que redirecionam continuam sem página (#343).
+	 *
+	 * @return array{type: string, id: int, taxonomy?: string}|null
+	 */
+	function uonix_intelligence_ai_page_object( $path ) {
+		$post_id = uonix_intelligence_ai_page_post_id( $path );
+		if ( $post_id > 0 ) {
+			return array( 'type' => 'post', 'id' => $post_id );
+		}
+		$termo = is_string( $path ) && '' !== $path && '/' === $path[0] && function_exists( 'uonix_intelligence_resolve_term_path' )
+			? uonix_intelligence_resolve_term_path( $path )
+			: null;
+
+		return is_array( $termo ) ? array( 'type' => 'term', 'taxonomy' => $termo['taxonomy'], 'id' => $termo['id'] ) : null;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_ai_term_kind' ) ) {
+	/**
+	 * Como o pedido e o painel chamam cada taxonomia. O Gemini precisa saber que a página
+	 * lista produtos, e não é um artigo nem um produto só.
+	 */
+	function uonix_intelligence_ai_term_kind( $taxonomy ) {
+		$mapa = array(
+			'product_cat' => 'categoria de produtos',
+			'product_tag' => 'tag de produtos',
+			'category'    => 'categoria do blog',
+			'post_tag'    => 'tag do blog',
+		);
+
+		return isset( $mapa[ $taxonomy ] ) ? $mapa[ $taxonomy ] : 'arquivo de taxonomia';
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_ai_meta_text' ) ) {
 	/**
 	 * Texto de uma meta do Rank Math pronto para o pedido. Variáveis (`%title%`,
 	 * `%sep%`…) são resolvidas pelo Rank Math quando ele expõe o resolvedor. O que
-	 * sobrar sem resolver vira '', e quem chama cai no título do post: o template
-	 * cru nunca vai ao Gemini.
+	 * sobrar sem resolver vira '', e quem chama cai no título do post ou no nome do
+	 * termo: o template cru nunca vai ao Gemini.
+	 *
+	 * @param mixed      $raw   Valor da meta.
+	 * @param int|object $alvo  Id do post, ou o objeto (post ou termo) que o Rank Math recebe.
 	 */
-	function uonix_intelligence_ai_meta_text( $raw, $post_id ) {
+	function uonix_intelligence_ai_meta_text( $raw, $alvo ) {
 		$texto = is_string( $raw ) ? trim( $raw ) : '';
-		if ( '' !== $texto && false !== strpos( $texto, '%' ) && is_callable( array( 'RankMath\\Helper', 'replace_vars' ) ) && function_exists( 'get_post' ) ) {
-			$texto = (string) call_user_func( array( 'RankMath\\Helper', 'replace_vars' ), $texto, get_post( $post_id ) );
+		if ( '' !== $texto && false !== strpos( $texto, '%' ) && is_callable( array( 'RankMath\\Helper', 'replace_vars' ) ) ) {
+			$objeto = is_object( $alvo ) ? $alvo : ( function_exists( 'get_post' ) ? get_post( (int) $alvo ) : null );
+			$texto  = (string) call_user_func( array( 'RankMath\\Helper', 'replace_vars' ), $texto, $objeto );
 		}
 		$texto = trim( html_entity_decode( wp_strip_all_tags( $texto ), ENT_QUOTES, 'UTF-8' ) );
 
@@ -107,7 +152,8 @@ if ( ! function_exists( 'uonix_intelligence_ai_meta_text' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_ai_input' ) ) {
 	/**
-	 * Entrada do pedido para uma oportunidade, ou null sem consulta ou sem post publicado.
+	 * Entrada do pedido para uma oportunidade, ou null sem consulta ou sem página (post
+	 * publicado ou termo).
 	 *
 	 * Fronteira de dados: cada chave é montada uma a uma a partir da linha. Nada mais
 	 * da linha passa, mesmo que um dia ela carregue outros campos.
@@ -116,27 +162,46 @@ if ( ! function_exists( 'uonix_intelligence_ai_input' ) ) {
 		if ( ! is_array( $row ) || ! isset( $row['query'] ) || ! is_string( $row['query'] ) || '' === $row['query'] ) {
 			return null;
 		}
-		$path    = isset( $row['target_page'] ) && is_string( $row['target_page'] ) ? $row['target_page'] : '';
-		$post_id = uonix_intelligence_ai_page_post_id( $path );
-		if ( 0 === $post_id ) {
+		$path   = isset( $row['target_page'] ) && is_string( $row['target_page'] ) ? $row['target_page'] : '';
+		$objeto = uonix_intelligence_ai_page_object( $path );
+		if ( null === $objeto ) {
 			return null;
 		}
-		$titulo = uonix_intelligence_ai_meta_text( get_post_meta( $post_id, 'rank_math_title', true ), $post_id );
-		if ( '' === $titulo ) {
-			$titulo = trim( html_entity_decode( wp_strip_all_tags( (string) get_the_title( $post_id ) ), ENT_QUOTES, 'UTF-8' ) );
+		$limpo = static function ( $texto ) {
+			return trim( html_entity_decode( wp_strip_all_tags( (string) $texto ), ENT_QUOTES, 'UTF-8' ) );
+		};
+		$extra = array();
+		if ( 'term' === $objeto['type'] ) {
+			// Termo (#344): a meta do Rank Math do termo; sem ela, o nome e a descrição dele.
+			$termo     = uonix_intelligence_resolve_term_path( $path );
+			// O Rank Math resolve as variáveis da meta sobre o termo real.
+			$alvo_meta = function_exists( 'get_term' ) ? get_term( $objeto['id'], $objeto['taxonomy'] ) : null;
+			$alvo_meta = is_object( $alvo_meta ) && ! ( function_exists( 'is_wp_error' ) && is_wp_error( $alvo_meta ) ) ? $alvo_meta : null;
+			$titulo    = uonix_intelligence_ai_meta_text( get_term_meta( $objeto['id'], 'rank_math_title', true ), $alvo_meta );
+			$titulo    = '' !== $titulo ? $titulo : $limpo( is_array( $termo ) ? $termo['name'] : '' );
+			$descricao = uonix_intelligence_ai_meta_text( get_term_meta( $objeto['id'], 'rank_math_description', true ), $alvo_meta );
+			$descricao = '' !== $descricao ? $descricao : $limpo( is_array( $termo ) ? $termo['description'] : '' );
+			$post_id   = 0;
+			$extra     = array( 'page_kind' => uonix_intelligence_ai_term_kind( $objeto['taxonomy'] ) );
+		} else {
+			$post_id   = $objeto['id'];
+			$titulo    = uonix_intelligence_ai_meta_text( get_post_meta( $post_id, 'rank_math_title', true ), $post_id );
+			$titulo    = '' !== $titulo ? $titulo : $limpo( get_the_title( $post_id ) );
+			$descricao = uonix_intelligence_ai_meta_text( get_post_meta( $post_id, 'rank_math_description', true ), $post_id );
 		}
 
-		return array(
+		return $extra + array(
 			'query'           => $row['query'],
 			'impressions'     => (int) round( (float) ( $row['impressions'] ?? 0 ) ),
 			'position'        => round( (float) ( $row['position'] ?? 0 ), 1 ),
 			'ctr'             => round( (float) ( $row['ctr'] ?? 0 ), 4 ),
 			'page_url'        => home_url( $path ),
 			'title'           => $titulo,
-			'description'     => uonix_intelligence_ai_meta_text( get_post_meta( $post_id, 'rank_math_description', true ), $post_id ),
+			'description'     => $descricao,
 			'differentiators' => uonix_intelligence_seo_differentiators(),
 			'model'           => uonix_intelligence_ai_model(),
 			'post_id'         => $post_id,
+			'object'          => $objeto,
 		);
 	}
 }
@@ -153,6 +218,11 @@ if ( ! function_exists( 'uonix_intelligence_ai_input_hash' ) ) {
 		$base = array();
 		foreach ( array( 'query', 'page_url', 'title', 'description', 'differentiators', 'model' ) as $chave ) {
 			$base[ $chave ] = isset( $input[ $chave ] ) ? $input[ $chave ] : null;
+		}
+		// O tipo de página vai ao Gemini, então entra no hash. Só quando existe (termos, #344):
+		// o hash dos posts fica o de antes, e a sugestão pronta não é refeita à toa.
+		if ( isset( $input['page_kind'] ) && '' !== $input['page_kind'] ) {
+			$base['page_kind'] = $input['page_kind'];
 		}
 
 		return hash( 'sha256', (string) wp_json_encode( $base ) );
@@ -171,8 +241,8 @@ if ( ! function_exists( 'uonix_intelligence_ai_entry_key' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_ai_request_body' ) ) {
 	/**
-	 * Corpo do `generateContent`. Só os campos abaixo vão ao Gemini: `post_id` e `model`
-	 * da entrada ficam de fora.
+	 * Corpo do `generateContent`. Só os campos abaixo vão ao Gemini: `post_id`, `object` e
+	 * `model` da entrada ficam de fora.
 	 */
 	function uonix_intelligence_ai_request_body( array $input ) {
 		$limites = uonix_intelligence_ai_limits();
@@ -186,6 +256,9 @@ if ( ! function_exists( 'uonix_intelligence_ai_request_body' ) ) {
 			'descricao_atual'         => $input['description'],
 			'diferenciais_permitidos' => array_values( $input['differentiators'] ),
 		);
+		if ( isset( $input['page_kind'] ) && '' !== $input['page_kind'] ) {
+			$dados['tipo_de_pagina'] = $input['page_kind'];
+		}
 		$instrucao = implode(
 			"\n",
 			array(
@@ -443,6 +516,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_suggestion_for' ) ) {
 			'current_description' => $input['description'],
 			'generated_at'        => isset( $entrada['generated_at'] ) && is_string( $entrada['generated_at'] ) ? $entrada['generated_at'] : '',
 			'post_id'             => $input['post_id'],
+			'object'              => $input['object'],
 		);
 	}
 }
@@ -458,7 +532,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_state_message' ) ) {
 			'pending'        => 'Aguardando a próxima geração diária.',
 			'unavailable'    => 'O Gemini não respondeu. Nova tentativa na próxima geração diária.',
 			'rejected'       => 'Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista.',
-			'no_page'        => 'Sem página publicada para esta consulta: removida, redirecionada, categoria ou tag.',
+			'no_page'        => 'Sem página publicada para esta consulta: removida ou redirecionada.',
 			'model_missing'  => 'Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php.',
 		);
 

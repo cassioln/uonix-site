@@ -677,7 +677,13 @@ if ( ! function_exists( 'uonix_intelligence_executive_insights' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_executive_page_label' ) ) {
 	/**
-	 * Rótulo legível de uma página: o título do post, ou o próprio caminho.
+	 * Rótulo legível de uma página: o título do post, o nome do termo, ou o próprio caminho.
+	 *
+	 * `url_to_postid()` só resolve post. Página de categoria ou de tag, como
+	 * `/olhal-de-ancoragem/` (product_cat #34, a terceira página mais encontrada na busca),
+	 * saía pelo caminho cru (#307). O termo vem da regra de reescrita que a URL abre
+	 * (`uonix_intelligence_resolve_term_path()`, no 55), e não de procurar o slug: o mesmo
+	 * slug existe em três taxonomias.
 	 *
 	 * Devolve texto puro. Quem imprime escapa.
 	 */
@@ -693,6 +699,13 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_label' ) ) {
 				if ( '' !== $titulo ) {
 					return $titulo;
 				}
+			}
+		}
+		$termo = function_exists( 'uonix_intelligence_resolve_term_path' ) ? uonix_intelligence_resolve_term_path( $path ) : null;
+		if ( is_array( $termo ) ) {
+			$nome = trim( html_entity_decode( wp_strip_all_tags( $termo['name'] ), ENT_QUOTES, 'UTF-8' ) );
+			if ( '' !== $nome ) {
+				return $nome;
 			}
 		}
 
