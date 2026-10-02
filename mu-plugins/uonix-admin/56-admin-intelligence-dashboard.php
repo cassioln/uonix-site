@@ -4,7 +4,8 @@
  *
  * Renderiza os painéis das abas `intelligence`, `anomalies` e `settings` do menu
  * Uônix Insights. Consome apenas o que 55-admin-intelligence-metrics.php,
- * 58-admin-intelligence-anomalies.php e 50-admin-intelligence-license.php devolvem;
+ * 58-admin-intelligence-anomalies.php, 63-admin-intelligence-content-radar.php e
+ * 50-admin-intelligence-license.php devolvem;
  * não consulta API, não grava nada e não agenda nada. Os formulários da aba
  * Configurações postam para os handlers de 55, 57 e 50, que fazem a própria guarda.
  *
@@ -258,7 +259,184 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 					</table>
 				<?php endif; ?>
 			<?php endif; ?>
+			<?php uonix_intelligence_render_radar_section(); ?>
 		</section>
+		<?php
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_flag_message' ) ) {
+	/**
+	 * Aviso depois de descartar ou restaurar, a partir do marcador da URL.
+	 */
+	function uonix_intelligence_radar_flag_message( $flag ) {
+		$mapa = array(
+			'dismiss' => 'Pauta descartada. Ela não volta à lista nem ao e-mail enquanto estiver descartada.',
+			'restore' => 'Pauta restaurada. Se ainda não tem pauta da IA, ela é gerada na próxima execução do Radar.',
+			'invalid' => 'Não foi possível alterar a pauta: ela não está mais na lista do Radar.',
+		);
+
+		return isset( $mapa[ $flag ] ) ? $mapa[ $flag ] : '';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_render_radar_form' ) ) {
+	/**
+	 * Botão "Descartar" ou "Restaurar": POST para os handlers do 63, com nonce por chave.
+	 */
+	function uonix_intelligence_render_radar_form( $acao, $chave, $rotulo ) {
+		?>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="uonix-radar-form">
+			<input type="hidden" name="action" value="<?php echo esc_attr( 'uonix_intelligence_radar_' . $acao ); ?>">
+			<input type="hidden" name="uonix_radar_key" value="<?php echo esc_attr( $chave ); ?>">
+			<?php wp_nonce_field( 'uonix_intelligence_radar_' . $acao . '_' . $chave ); ?>
+			<button type="submit" class="button button-small"><?php echo esc_html( $rotulo ); ?></button>
+		</form>
+		<?php
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_render_radar_page_cell' ) ) {
+	/**
+	 * A página que aparece hoje: título com link, tipo, o 301 quando há, e o editor dela
+	 * para quem pode editar, como no Módulo 3.
+	 */
+	function uonix_intelligence_render_radar_page_cell( array $pagina ) {
+		$caminho = (string) $pagina['path'];
+		$destino = (string) $pagina['redirected_to'];
+		if ( '' === $caminho ) {
+			echo '<em>Sem página do site para esta consulta.</em>';
+			return;
+		}
+		$alvo   = '' !== $destino ? $destino : $caminho;
+		$titulo = '' !== (string) $pagina['title'] ? (string) $pagina['title'] : $alvo;
+		echo '<a href="' . esc_url( home_url( $alvo ) ) . '">' . esc_html( $titulo ) . '</a>';
+		if ( '' !== (string) $pagina['kind'] ) {
+			echo '<br><span class="description">' . esc_html( (string) $pagina['kind'] ) . '</span>';
+		}
+		if ( '' !== $destino ) {
+			echo '<br><span class="description">' . esc_html( 'Endereço antigo ' . $caminho . ' redireciona para cá.' ) . '</span>';
+		}
+		$objeto = function_exists( 'uonix_intelligence_ai_page_object' ) ? uonix_intelligence_ai_page_object( $alvo ) : null;
+		if ( is_array( $objeto ) && 'post' === $objeto['type'] && current_user_can( 'edit_post', $objeto['id'] ) ) {
+			echo '<br><a href="' . esc_url( (string) get_edit_post_link( $objeto['id'] ) ) . '">Editar página</a>';
+		} elseif ( is_array( $objeto ) && 'term' === $objeto['type'] && function_exists( 'get_edit_term_link' ) && current_user_can( 'edit_term', $objeto['id'] ) ) {
+			echo '<br><a href="' . esc_url( (string) get_edit_term_link( $objeto['id'], $objeto['taxonomy'] ) ) . '">' . esc_html( 'Editar ' . ( function_exists( 'uonix_intelligence_ai_term_kind' ) ? uonix_intelligence_ai_term_kind( $objeto['taxonomy'] ) : 'termo' ) ) . '</a>';
+		}
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_render_radar_pauta_cell' ) ) {
+	/**
+	 * A pauta da IA, ou o motivo de não haver uma.
+	 */
+	function uonix_intelligence_render_radar_pauta_cell( array $c ) {
+		$pauta = uonix_intelligence_radar_suggestion( $c );
+		if ( null === $pauta ) {
+			$status = isset( $c['ai']['status'] ) && is_string( $c['ai']['status'] ) ? $c['ai']['status'] : '';
+			echo '<em>' . esc_html( 'not_configured' === $status ? 'Sem a chave do Gemini: a candidata aparece sem pauta.' : 'Pauta não gerada. O Radar tenta de novo amanhã.' ) . '</em>';
+			return;
+		}
+		$gerada = isset( $c['ai']['generated_at'] ) && is_string( $c['ai']['generated_at'] ) ? strtotime( $c['ai']['generated_at'] ) : false;
+		echo '<p>' . esc_html( 'reforcar' === $pauta['caminho'] ? 'Reforçar esta página' : 'Post novo' ) . '<br><strong>' . esc_html( $pauta['titulo'] ) . '</strong></p>';
+		echo '<p>' . esc_html( $pauta['angulo'] ) . '</p>';
+		echo '<p class="description">' . esc_html( 'Intenção: ' . $pauta['intencao'] . '. Gerada por IA' . ( false !== $gerada ? ' em ' . gmdate( 'd/m', $gerada ) : '' ) . ' — revise antes de usar.' ) . '</p>';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_render_radar_section' ) ) {
+	/**
+	 * Seção "Radar de Pautas" (Módulo 8), no fim da aba de oportunidades.
+	 *
+	 * Só lê o que o cron do 63 gravou (`uonix_intelligence_radar_state()`): nenhuma chamada
+	 * ao Search Console nem ao Gemini. Os botões postam para os handlers do 63, que fazem a
+	 * própria guarda; aqui eles só aparecem para quem pode usá-los.
+	 */
+	function uonix_intelligence_render_radar_section() {
+		if ( ! function_exists( 'uonix_intelligence_radar_state' ) ) {
+			return;
+		}
+		$estado  = uonix_intelligence_radar_state();
+		$regras  = uonix_intelligence_radar_rules();
+		$curador = function_exists( 'uonix_intelligence_radar_can_curate' ) && uonix_intelligence_radar_can_curate();
+		$quando  = static function ( $iso, $formato ) {
+			$momento = is_string( $iso ) && '' !== $iso ? strtotime( $iso ) : false;
+			return false === $momento ? '' : gmdate( $formato, $momento );
+		};
+		$aviso  = uonix_intelligence_radar_flag_message( uonix_intelligence_query_flag( 'uonix_radar' ) );
+		$falhou = in_array( $estado['status'], array( 'gsc_failed', 'config_missing' ), true );
+		$regra  = sprintf( 'posição depois da %d.ª e pelo menos %d impressões em %d dias', (int) $regras['min_position'], (int) $regras['min_impressions'], (int) $regras['window_days'] );
+		?>
+		<div class="uonix-panel-header" id="uonix-radar">
+			<div class="uonix-metrics-copy">
+				<h2 id="uonix-radar-title">Radar de Pautas</h2>
+				<p><?php echo esc_html( 'Consultas que se repetem na busca, mas em que o site aparece mal: ' . $regra . '. Buscas com aspas, com operadores ou pela marca ficam de fora. Para cada uma, a IA sugere um post novo ou o reforço da página que já aparece.' ); ?></p>
+				<?php if ( '' !== $estado['list_updated_at'] ) : ?>
+					<p class="description"><?php echo esc_html( 'Fonte: Search Console · ' . (int) $regras['window_days'] . ' dias, de ' . uonix_intelligence_radar_window_label( $estado['window'] ) . ' · atualizado em ' . $quando( $estado['list_updated_at'], 'd/m/Y H:i' ) . ' (UTC)' ); ?></p>
+				<?php endif; ?>
+			</div>
+		</div>
+		<?php if ( '' !== $aviso ) : ?>
+			<div class="notice notice-info inline"><p><?php echo esc_html( $aviso ); ?></p></div>
+		<?php endif; ?>
+		<?php if ( ! $estado['ran'] ) : ?>
+			<div class="notice notice-info inline"><p>O Radar ainda não rodou. Ele roda uma vez por dia.</p></div>
+		<?php else : ?>
+			<?php if ( $falhou ) : ?>
+				<div class="notice notice-warning inline"><p><?php echo esc_html( '' !== $estado['list_updated_at'] ? 'Search Console indisponível na última execução. Mostrando a lista de ' . $quando( $estado['list_updated_at'], 'd/m' ) . '.' : 'Search Console indisponível. O Radar tenta de novo amanhã.' ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( $estado['truncated'] ) : ?>
+				<div class="notice notice-warning inline"><p>A resposta do Search Console veio no limite de linhas. Pode faltar consulta.</p></div>
+			<?php endif; ?>
+			<?php if ( array() === $estado['visible'] && ! $falhou ) : ?>
+				<div class="notice notice-info inline"><p><?php echo esc_html( 'Nenhuma consulta nesta janela passa na regra do Radar: ' . $regra . '.' ); ?></p></div>
+			<?php elseif ( array() !== $estado['visible'] ) : ?>
+				<table class="wp-list-table widefat striped">
+					<caption class="screen-reader-text">Pautas sugeridas, ordenadas por impressões</caption>
+					<thead>
+						<tr>
+							<th scope="col">Consulta</th>
+							<th scope="col">Posição</th>
+							<th scope="col">Impressões</th>
+							<th scope="col">Página que aparece hoje</th>
+							<th scope="col">Pauta (IA)</th>
+							<?php if ( $curador ) : ?>
+								<th scope="col"><span class="screen-reader-text">Ações</span></th>
+							<?php endif; ?>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( $estado['visible'] as $c ) : ?>
+							<tr>
+								<td><strong><?php echo esc_html( $c['query'] ); ?></strong></td>
+								<td><?php echo esc_html( uonix_intelligence_number( $c['position'], 1 ) ); ?></td>
+								<td><?php echo esc_html( uonix_intelligence_number( $c['impressions'], 0 ) ); ?></td>
+								<td><?php uonix_intelligence_render_radar_page_cell( $c['page'] ); ?></td>
+								<td><?php uonix_intelligence_render_radar_pauta_cell( $c ); ?></td>
+								<?php if ( $curador ) : ?>
+									<td><?php uonix_intelligence_render_radar_form( 'dismiss', $c['key'], 'Descartar' ); ?></td>
+								<?php endif; ?>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			<?php endif; ?>
+			<?php if ( array() !== $estado['dismissed'] ) : ?>
+				<details class="uonix-radar-dismissed">
+					<summary><?php echo esc_html( 'Descartadas (' . count( $estado['dismissed'] ) . ')' ); ?></summary>
+					<ul>
+						<?php foreach ( $estado['dismissed'] as $c ) : ?>
+							<li>
+								<?php echo esc_html( $c['query'] ); ?>
+								<?php if ( $curador ) : ?>
+									<?php uonix_intelligence_render_radar_form( 'restore', $c['key'], 'Restaurar' ); ?>
+								<?php endif; ?>
+							</li>
+						<?php endforeach; ?>
+					</ul>
+				</details>
+			<?php endif; ?>
+		<?php endif; ?>
 		<?php
 	}
 }
