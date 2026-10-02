@@ -85,9 +85,10 @@ test_assert(
     strpos($admin_content, 'wp_cache_flush') !== false,
     '39-admin-editor-dashboard.php: Deve manter wp_cache_flush para limpeza de cache de objeto'
 );
+// Pedido de 2026-10-02: o botão AdOpt do Acesso Rápido virou Rodapé (Editar Rodapé).
 test_assert(
-    strpos($admin_content, 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags') !== false,
-    '39-admin-editor-dashboard.php: Deve conter atalho para o painel AdOpt com link de tags'
+    strpos($admin_content, 'href="/wp-admin/widgets.php"') !== false && strpos($admin_content, '</span> Rodapé') !== false,
+    '39-admin-editor-dashboard.php: Deve conter atalho Rodapé para widgets.php no Acesso Rápido'
 );
 test_assert(
     strpos($admin_content, 'min-height: 200px') === false,

@@ -83,15 +83,23 @@ class WP_REST_Response {
 	}
 }
 
+/**
+ * Imita a ordem do WP_REST_Request: JSON, POST e GET vêm antes do parâmetro
+ * da URL, então um "id" no corpo ou na query passa por cima do id da rota.
+ */
 class Uox_Test_Request {
 	private $route;
 	private $method;
 	private $params;
+	private $url_params = array();
 
 	public function __construct( $method, $route, array $params = array() ) {
 		$this->method = $method;
 		$this->route  = $route;
 		$this->params = $params;
+		if ( 1 === preg_match( '#/(?:sidebars|widgets)/([\w-]+)/?$#i', $route, $m ) ) {
+			$this->url_params['id'] = $m[1];
+		}
 	}
 
 	public function get_route() {
@@ -103,7 +111,7 @@ class Uox_Test_Request {
 	}
 
 	public function get_param( $key ) {
-		return $this->params[ $key ] ?? null;
+		return $this->params[ $key ] ?? $this->url_params[ $key ] ?? null;
 	}
 }
 
@@ -276,6 +284,15 @@ uox_er_assert( uox_er_recusou( uox_er_guarda( 'DELETE', '/WP/V2/widgets/block-85
 uox_er_assert( uox_er_recusou( uox_er_guarda( 'PUT', '/wp/v2/Widgets/block-10', array( 'sidebar' => 'wp_inactive_widgets' ) ) ), 'PUT em /wp/v2/Widgets mandando para inativos é recusado' );
 uox_er_assert( uox_er_recusou( uox_er_guarda( 'POST', '/wp/v2/WIDGETS', array( 'sidebar' => 'mega-menu' ) ) ), 'POST em /wp/v2/WIDGETS no megamenu é recusado' );
 uox_er_assert( uox_er_recusou( uox_er_guarda( 'POST', '/wp/v2/WIDGETS', array( 'sidebar' => 'footer1', 'id' => 'block-85' ) ) ), 'POST em /wp/v2/WIDGETS com id do megamenu é recusado' );
+// "id" no corpo ou na query passa por cima do id da URL no núcleo: o pedido
+// ambíguo é recusado, mesmo com a URL apontando para o rodapé.
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'PUT', '/wp/v2/sidebars/footer1', array( 'id' => 'mega-menu', 'widgets' => array() ) ) ), 'PUT em footer1 com id mega-menu no corpo é recusado' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'DELETE', '/wp/v2/widgets/block-10', array( 'id' => 'block-85', 'force' => true ) ) ), 'DELETE em block-10 com id block-85 no corpo é recusado' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'PUT', '/wp/v2/widgets/block-10', array( 'id' => 'block-85', 'sidebar' => 'footer1', 'instance' => array() ) ) ), 'PUT em block-10 com id block-85 no corpo é recusado' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'PUT', '/wp/v2/widgets/block-10', array( 'id' => 'block-11' ) ) ), 'id do corpo diferente da URL é recusado mesmo dentro do rodapé' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'PUT', '/wp/v2/sidebars/footer1', array( 'id' => 42 ) ) ), 'id que não é texto é recusado' );
+uox_er_assert( null === uox_er_guarda( 'PUT', '/wp/v2/widgets/block-10', array( 'id' => 'block-10', 'sidebar' => 'footer2' ) ), 'id do corpo igual ao da URL passa' );
+
 uox_er_assert( null === uox_er_guarda( 'PUT', '/wp/v2/posts/1' ), 'outras rotas passam' );
 
 // Resposta já definida por outro filtro segue intacta.

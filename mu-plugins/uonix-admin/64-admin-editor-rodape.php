@@ -159,6 +159,24 @@ function uonix_admin_editor_rodape_widget_liberado( $widget_id ) {
 }
 
 /**
+ * O id que o controlador vai usar é o mesmo da rota?
+ *
+ * No WP_REST_Request, JSON, POST e GET vêm antes do parâmetro da URL, e os
+ * controladores de áreas e widgets usam $request['id']. Um "id" no corpo ou
+ * na query mandaria o controlador agir em outra área ou widget que a guarda
+ * não conferiu. O editor em blocos nunca manda id diferente do da URL.
+ *
+ * @param WP_REST_Request $request  Requisição.
+ * @param string          $da_rota  Id capturado da rota.
+ * @return bool
+ */
+function uonix_admin_editor_rodape_id_da_rota( $request, $da_rota ) {
+	$id = $request->get_param( 'id' );
+
+	return is_string( $id ) && $id === $da_rota;
+}
+
+/**
  * Erro padrão de recusa.
  *
  * @return WP_Error
@@ -190,7 +208,7 @@ function uonix_admin_editor_rodape_guarda( $resposta, $handler, $request ) {
 	$metodo = strtoupper( (string) $request->get_method() );
 
 	if ( 1 === preg_match( '#^/wp/v2/sidebars/([\w-]+)$#i', $rota, $m ) ) {
-		if ( ! uonix_admin_editor_rodape_area_do_rodape( $m[1] ) ) {
+		if ( ! uonix_admin_editor_rodape_id_da_rota( $request, $m[1] ) || ! uonix_admin_editor_rodape_area_do_rodape( $m[1] ) ) {
 			return uonix_admin_editor_rodape_recusa();
 		}
 
@@ -207,6 +225,10 @@ function uonix_admin_editor_rodape_guarda( $resposta, $handler, $request ) {
 	}
 
 	if ( 1 === preg_match( '#^/wp/v2/widgets/([\w-]+)$#i', $rota, $m ) ) {
+		if ( ! uonix_admin_editor_rodape_id_da_rota( $request, $m[1] ) ) {
+			return uonix_admin_editor_rodape_recusa();
+		}
+
 		$area = uonix_admin_editor_rodape_area_do_widget( $m[1] );
 
 		if ( null !== $area && ! uonix_admin_editor_rodape_area_do_rodape( $area ) ) {
