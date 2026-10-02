@@ -65,6 +65,9 @@ jobs:
       - name: Test comments nosnippet and replytocom SEO
         run: php scripts/tests/test-comments-nosnippet-seo.php
 
+      - name: Test Rank Math rewrite rules guard (heartbeat flush)
+        run: php scripts/tests/test-seo-regras-reescrita-rank-math.php
+
       - name: Test consent-aware campaign attribution
         run: php scripts/tests/test-attribution-tracking.php
 
