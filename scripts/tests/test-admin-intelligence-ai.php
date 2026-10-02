@@ -66,6 +66,66 @@ function get_the_title( $id ) { return $GLOBALS['uox_posts'][ $id ]['title'] ?? 
 function get_post_meta( $id, $k, $single = false ) { return $GLOBALS['uox_posts'][ $id ]['meta'][ $k ] ?? ''; }
 function get_post( $id ) { return (object) array( 'ID' => $id ); }
 
+// Taxonomias e termos simulados (#344). O slug `olhal-de-ancoragem` existe em TRÊS
+// taxonomias, como em produção (product_cat #34, post_tag e product_tag): só a regra de
+// reescrita diz qual delas a URL abre.
+$GLOBALS['uox_taxonomias'] = array(
+	'category'    => array( 'query_var' => 'category_name', 'public' => true ),
+	'post_tag'    => array( 'query_var' => 'tag', 'public' => true ),
+	'product_cat' => array( 'query_var' => 'product_cat', 'public' => true ),
+	'product_tag' => array( 'query_var' => 'product_tag', 'public' => true ),
+	'privada'     => array( 'query_var' => 'privada', 'public' => false ),
+);
+$GLOBALS['uox_termos'] = array(
+	'product_cat' => array(
+		'olhal-de-ancoragem' => array( 'id' => 34, 'name' => 'Olhal de Ancoragem', 'description' => '<p>Olhais em aço inox.</p>', 'meta' => array( 'rank_math_title' => 'Olhal de Ancoragem em Inox | Uônix', 'rank_math_description' => 'Olhais de ancoragem conforme a NBR 16325.' ) ),
+		'acessorios'         => array( 'id' => 160, 'name' => 'Acessórios &amp; Peças', 'description' => '', 'meta' => array() ),
+	),
+	'post_tag'    => array( 'olhal-de-ancoragem' => array( 'id' => 501, 'name' => 'olhal de ancoragem', 'description' => '', 'meta' => array() ) ),
+	'product_tag' => array( 'olhal-de-ancoragem' => array( 'id' => 702, 'name' => 'Olhal', 'description' => '', 'meta' => array() ) ),
+	'category'    => array( 'normas' => array( 'id' => 9, 'name' => 'Normas', 'description' => '<p>Normas técnicas de ancoragem.</p>', 'meta' => array() ) ),
+	'privada'     => array( 'x' => array( 'id' => 99, 'name' => 'Privada', 'description' => '', 'meta' => array() ) ),
+);
+function get_taxonomies( $args = array(), $output = 'names' ) {
+	$saida = array();
+	foreach ( $GLOBALS['uox_taxonomias'] as $nome => $t ) {
+		if ( isset( $args['public'] ) && $args['public'] !== $t['public'] ) {
+			continue;
+		}
+		$saida[ $nome ] = 'objects' === $output ? (object) array( 'name' => $nome, 'query_var' => $t['query_var'] ) : $nome;
+	}
+	return $saida;
+}
+function get_term_by( $campo, $valor, $taxonomia ) {
+	$t = 'slug' === $campo ? ( $GLOBALS['uox_termos'][ $taxonomia ][ $valor ] ?? null ) : null;
+	return null === $t ? false : (object) array( 'term_id' => $t['id'], 'name' => $t['name'], 'description' => $t['description'], 'taxonomy' => $taxonomia, 'slug' => $valor );
+}
+function get_term_meta( $id, $chave, $single = false ) {
+	foreach ( $GLOBALS['uox_termos'] as $termos ) {
+		foreach ( $termos as $t ) {
+			if ( $id === $t['id'] ) {
+				return $t['meta'][ $chave ] ?? '';
+			}
+		}
+	}
+	return '';
+}
+$GLOBALS['wp_rewrite'] = (object) array( 'use_verbose_page_rules' => true );
+// Regras na ordem em que o WordPress as grava: as do Rank Math (categorias sem base)
+// antes, a regra de página por último.
+function uox_regras() {
+	return array(
+		'olhal-de-ancoragem/?$'            => 'index.php?product_cat=olhal-de-ancoragem',
+		'acessorios/?$'                    => 'index.php?product_cat=acessorios',
+		'categoria/(.+?)/?$'               => 'index.php?category_name=$matches[1]',
+		'tag/([^/]+)/?$'                   => 'index.php?tag=$matches[1]',
+		'produto-tag/([^/]+)/?$'           => 'index.php?product_tag=$matches[1]',
+		'privada/([^/]+)/?$'               => 'index.php?privada=$matches[1]',
+		'servico/([^/]+)(?:/([0-9]+))?/?$' => 'index.php?post_type=servicos&name=$matches[1]&page=$matches[2]',
+		'(.?.+?)(?:/([0-9]+))?/?$'         => 'index.php?pagename=$matches[1]&page=$matches[2]',
+	);
+}
+
 // HTTP simulado.
 $GLOBALS['uox_http']    = array();
 $GLOBALS['uox_pedidos'] = array();
@@ -305,6 +365,82 @@ uonix_intelligence_ai_schedule();
 uox_ai_assert( 'daily' === ( $GLOBALS['uox_cron'][ uonix_intelligence_ai_hook() ][1] ?? '' ), 'O cron da IA é diário' );
 $registrado = array_filter( $GLOBALS['uox_actions'], static function ( $a ) { return uonix_intelligence_ai_hook() === $a[0] && 'uonix_intelligence_ai_run' === $a[1] && 0 === $a[3]; } );
 uox_ai_assert( 1 === count( $registrado ), 'O hook roda uonix_intelligence_ai_run sem argumentos' );
+
+// ---------------------------------------------------------------------------
+// N. Página de categoria e tag (#344). O termo vem da regra de reescrita que a URL casa,
+//    como o WordPress faz em `url_to_postid()`, e não de procurar o slug em cada taxonomia.
+// ---------------------------------------------------------------------------
+$termo = static function ( $caminho, $regras = null ) {
+	$t = uonix_intelligence_resolve_term_path( $caminho, $regras );
+	return is_array( $t ) ? $t['taxonomy'] . ':' . $t['id'] : 'nenhum';
+};
+$R = uox_regras();
+uox_ai_assert( 'product_cat:34' === $termo( '/olhal-de-ancoragem/', $R ), '#344: o slug existe em três taxonomias e a regra diz product_cat; obteve ' . $termo( '/olhal-de-ancoragem/', $R ) );
+uox_ai_assert( 'product_cat:34' === $termo( '/olhal-de-ancoragem/?utm_source=x', $R ) && 'product_cat:34' === $termo( 'https://uonix.com.br/olhal-de-ancoragem/', $R ), '#344: a consulta da URL e o domínio não atrapalham' );
+uox_ai_assert( 'post_tag:501' === $termo( '/tag/olhal-de-ancoragem/', $R ) && 'product_tag:702' === $termo( '/produto-tag/olhal-de-ancoragem/', $R ), '#344: tag do blog e tag de produto com o mesmo slug, cada uma pela própria regra' );
+uox_ai_assert( 'category:9' === $termo( '/categoria/blog/normas/', $R ), '#344: categoria aninhada usa o último segmento' );
+uox_ai_assert( 'nenhum' === $termo( '/tag/inexistente/', $R ), '#344: termo que não existe: nenhum' );
+uox_ai_assert( 'nenhum' === $termo( '/tag/acessorios/', array( 'tag/([^/]+)/?$' => 'index.php?tag=$matches[1]', 'tag/(.+?)/?$' => 'index.php?product_cat=$matches[1]' ) ), '#344: a regra que casa decide mesmo sem o termo (é 404 no core), sem tentar a regra seguinte' );
+uox_ai_assert( 'nenhum' === $termo( '/privada/x/', $R ), '#344: taxonomia não pública: nenhum' );
+uox_ai_assert( 'nenhum' === $termo( '/servico/teste/', $R ) && 'nenhum' === $termo( '/home-real/', $R ), '#344: a primeira regra que casa é de post ou de página: nenhum termo' );
+uox_ai_assert( 'nenhum' === $termo( '/sem-pagina/', $R ), '#344: a regra de página sem página existente é pulada, como no core, e nada mais casa' );
+uox_ai_assert( 'nenhum' === $termo( '/', $R ) && 'nenhum' === $termo( '', $R ) && 'nenhum' === $termo( null, $R ), '#344: raiz e caminho vazio: nenhum' );
+// A primeira regra que casa decide, mesmo havendo depois uma de taxonomia que também casaria.
+uox_ai_assert( 'nenhum' === $termo( '/olhal-de-ancoragem/', array( '(.+)/?$' => 'index.php?post_type=servicos&name=$matches[1]', 'olhal-de-ancoragem/?$' => 'index.php?product_cat=olhal-de-ancoragem' ) ), '#344: uma regra de post antes da de categoria decide, como no core' );
+// A regra de página só decide quando a página existe; senão é pulada e a seguinte decide.
+$pagina_antes = array( '(.?.+?)(?:/([0-9]+))?/?$' => 'index.php?pagename=$matches[1]&page=$matches[2]', 'olhal-de-ancoragem/?$' => 'index.php?product_cat=olhal-de-ancoragem', 'home-real/?$' => 'index.php?product_cat=acessorios' );
+uox_ai_assert( 'product_cat:34' === $termo( '/olhal-de-ancoragem/', $pagina_antes ), '#344: regra de página sem página é pulada e a de categoria decide' );
+uox_ai_assert( 'nenhum' === $termo( '/home-real/', $pagina_antes ), '#344: regra de página com a página existente decide: nenhum termo' );
+// Caminho codificado que só casa decodificado, como o `WP::parse_request()` tenta.
+uox_ai_assert( 'product_cat:34' === $termo( '/olhal%2Dde%2Dancoragem/', $R ), '#344: caminho codificado casa a regra pela forma decodificada' );
+uox_ai_assert( 'nenhum' === $termo( '/olhal-de-ancoragem/', 'lixo' ) && 'nenhum' === $termo( '/olhal-de-ancoragem/', array() ), '#344: regras malformadas ou vazias: nenhum' );
+$GLOBALS['uox_options'] = array( 'page_on_front' => 14 );
+uox_ai_assert( 'nenhum' === $termo( '/olhal-de-ancoragem/' ), '#344: sem a opção rewrite_rules: nenhum' );
+$GLOBALS['uox_options']['rewrite_rules'] = uox_regras();
+uox_ai_assert( 'product_cat:34' === $termo( '/olhal-de-ancoragem/' ), '#344: sem regras passadas, lê a opção rewrite_rules' );
+uox_ai_assert( 0 === uonix_intelligence_ai_page_post_id( '/olhal-de-ancoragem/' ), '#344: a categoria continua sem post' );
+$obj = uonix_intelligence_ai_page_object( '/olhal-de-ancoragem/' );
+uox_ai_assert( array( 'type' => 'term', 'taxonomy' => 'product_cat', 'id' => 34 ) === $obj, '#344: o objeto da página é o termo; obteve ' . var_export( $obj, true ) );
+uox_ai_assert( array( 'type' => 'post', 'id' => 10 ) === uonix_intelligence_ai_page_object( '/produtos/olhal-inox/' ) && null === uonix_intelligence_ai_page_object( '/rascunho/' ), '#344: post publicado continua post, e rascunho continua sem página' );
+
+// Entrada com termo: título e descrição da meta do Rank Math do termo.
+$in_t = uonix_intelligence_ai_input( uox_linha( 'olhal de ancoragem', '/olhal-de-ancoragem/' ) );
+uox_ai_assert( is_array( $in_t ) && 'Olhal de Ancoragem em Inox | Uônix' === $in_t['title'] && 'Olhais de ancoragem conforme a NBR 16325.' === $in_t['description'], '#344: título e descrição atuais vêm da meta do Rank Math do termo; obteve ' . var_export( $in_t, true ) );
+uox_ai_assert( is_array( $in_t ) && 'categoria de produtos' === ( $in_t['page_kind'] ?? '' ) && array( 'type' => 'term', 'taxonomy' => 'product_cat', 'id' => 34 ) === ( $in_t['object'] ?? null ) && 0 === $in_t['post_id'] && 'https://uonix.com.br/olhal-de-ancoragem/' === $in_t['page_url'], '#344: a entrada diz o tipo de página e o objeto, e post_id 0' );
+// Sem meta: o nome do termo e a descrição dele, sem HTML e sem entidade.
+$in_sem = uonix_intelligence_ai_input( uox_linha( 'acessorios', '/acessorios/' ) );
+uox_ai_assert( is_array( $in_sem ) && 'Acessórios & Peças' === $in_sem['title'] && '' === $in_sem['description'], '#344: sem meta, o nome do termo; obteve ' . var_export( $in_sem['title'] ?? null, true ) );
+$in_cat = uonix_intelligence_ai_input( uox_linha( 'normas', '/categoria/blog/normas/' ) );
+uox_ai_assert( is_array( $in_cat ) && 'Normas' === $in_cat['title'] && 'Normas técnicas de ancoragem.' === $in_cat['description'] && 'categoria do blog' === $in_cat['page_kind'], '#344: sem meta, a descrição do termo, sem HTML' );
+uox_ai_assert( null === uonix_intelligence_ai_input( uox_linha( 'x', '/tag/inexistente/' ) ), '#344: termo inexistente: sem entrada' );
+
+// O pedido diz ao Gemini que é uma categoria; o de post não ganha a chave.
+$corpo_t = uonix_intelligence_ai_request_body( $in_t )['contents'][0]['parts'][0]['text'];
+$corpo_p = uonix_intelligence_ai_request_body( uonix_intelligence_ai_input( uox_linha() ) )['contents'][0]['parts'][0]['text'];
+uox_ai_assert( false !== strpos( $corpo_t, '"tipo_de_pagina":"categoria de produtos"' ) && false === strpos( $corpo_p, 'tipo_de_pagina' ), '#344: o pedido leva tipo_de_pagina só para termo' );
+uox_ai_assert( false === strpos( $corpo_t, '"object"' ) && false === strpos( $corpo_t, '"id":34' ), '#344: o objeto (tipo e id) não vai ao Gemini' );
+
+// Hash: o de post não muda (a sugestão pronta não é refeita); o de termo leva o tipo.
+$in_p    = uonix_intelligence_ai_input( uox_linha() );
+$base_p  = array();
+foreach ( array( 'query', 'page_url', 'title', 'description', 'differentiators', 'model' ) as $k ) {
+	$base_p[ $k ] = $in_p[ $k ];
+}
+uox_ai_assert( hash( 'sha256', (string) wp_json_encode( $base_p ) ) === uonix_intelligence_ai_input_hash( $in_p ), '#344: o hash de post é o mesmo de antes, e a sugestão pronta não é refeita' );
+uox_ai_assert( uonix_intelligence_ai_input_hash( $in_t ) !== uonix_intelligence_ai_input_hash( array_merge( $in_t, array( 'page_kind' => 'tag do blog' ) ) ), '#344: o hash do termo muda com o tipo de página' );
+$h_antes = uonix_intelligence_ai_input_hash( $in_t );
+$GLOBALS['uox_termos']['product_cat']['olhal-de-ancoragem']['meta']['rank_math_title'] = 'Olhal de Ancoragem | Uônix';
+uox_ai_assert( $h_antes !== uonix_intelligence_ai_input_hash( uonix_intelligence_ai_input( uox_linha( 'olhal de ancoragem', '/olhal-de-ancoragem/' ) ) ), '#344: o hash muda quando a meta do termo muda' );
+$GLOBALS['uox_termos']['product_cat']['olhal-de-ancoragem']['meta']['rank_math_title'] = 'Olhal de Ancoragem em Inox | Uônix';
+
+// Execução: a categoria gera sugestão, e o leitor a devolve com o objeto.
+$GLOBALS['uox_http']    = array( uox_gemini( $ok ) );
+$GLOBALS['uox_pedidos'] = array();
+$res_t = uonix_intelligence_ai_run( uox_analise( array( uox_linha( 'olhal de ancoragem', '/olhal-de-ancoragem/' ) ) ), 0 );
+$sug_t = uonix_intelligence_ai_suggestion_for( uox_linha( 'olhal de ancoragem', '/olhal-de-ancoragem/' ) );
+uox_ai_assert( 1 === $res_t['called'] && 'ok' === $sug_t['status'] && array( 'type' => 'term', 'taxonomy' => 'product_cat', 'id' => 34 ) === ( $sug_t['object'] ?? null ) && 'Olhal de Ancoragem em Inox | Uônix' === $sug_t['current_title'], '#344: a categoria gera sugestão, e o leitor devolve o objeto; obteve ' . var_export( array( $res_t, $sug_t['status'] ?? null ), true ) );
+uox_ai_assert( false === strpos( uonix_intelligence_ai_state_message( 'no_page' ), 'categoria' ), '#344: o texto de no_page não cita mais categoria nem tag' );
+unset( $GLOBALS['uox_options']['rewrite_rules'] );
 
 $codigo = 'define("ABSPATH", 1); function add_action() {} function add_filter() {} function get_option($k, $d = false) { return $d; } function wp_remote_post() { echo "CHAMOU"; return null; } '
 	. 'require ' . var_export( $RAIZ . '/mu-plugins/uonix-admin/54-admin-intelligence-ai.php', true ) . '; '

@@ -391,3 +391,94 @@ if ( ! function_exists( 'uonix_intelligence_recipients_guard_write' ) ) {
 	}
 }
 add_filter( 'pre_update_option_' . uonix_intelligence_recipients_option(), 'uonix_intelligence_recipients_guard_write', PHP_INT_MAX, 2 );
+
+if ( ! function_exists( 'uonix_intelligence_resolve_term_path' ) ) {
+	/**
+	 * Termo de taxonomia pública que um caminho do site abre, ou null (#307, #344).
+	 *
+	 * `url_to_postid()` só resolve post: categoria de produto, categoria e tag do blog ficam
+	 * de fora. `/olhal-de-ancoragem/`, a terceira página mais encontrada na busca, é o arquivo
+	 * da `product_cat` #34, servido por uma regra do Rank Math que tira a base da categoria.
+	 *
+	 * **A regra de reescrita decide, e não o slug.** O slug `olhal-de-ancoragem` existe em três
+	 * taxonomias (product_cat, post_tag e product_tag, medido em produção em 2026-10-01).
+	 * Procurá-lo em cada taxonomia escolheria pela ordem da busca. Aqui as regras são
+	 * percorridas na ordem gravada, como em `url_to_postid()` do core:
+	 *   - a primeira regra que casa decide;
+	 *   - a regra de página é pulada quando a página não existe (`use_verbose_page_rules`);
+	 *   - se a regra que decide não for de taxonomia pública, não há termo.
+	 *
+	 * Só lê: a opção `rewrite_rules`, que é autoload, e o termo pelo slug.
+	 *
+	 * @param string     $path  Caminho ou URL do próprio site.
+	 * @param array|null $rules Para teste; o padrão é a opção `rewrite_rules`.
+	 * @return array{taxonomy: string, id: int, name: string, description: string}|null
+	 */
+	function uonix_intelligence_resolve_term_path( $path, $rules = null ) {
+		$caminho = is_string( $path ) ? (string) wp_parse_url( $path, PHP_URL_PATH ) : '';
+		$pedido  = trim( $caminho, '/' );
+		if ( '' === $pedido || ! function_exists( 'get_taxonomies' ) || ! function_exists( 'get_term_by' ) ) {
+			return null;
+		}
+		$regras = null === $rules ? ( function_exists( 'get_option' ) ? get_option( 'rewrite_rules' ) : array() ) : $rules;
+		if ( ! is_array( $regras ) || array() === $regras ) {
+			return null;
+		}
+
+		$por_variavel = array();
+		foreach ( (array) get_taxonomies( array( 'public' => true ), 'objects' ) as $nome => $taxonomia ) {
+			if ( is_object( $taxonomia ) && ! empty( $taxonomia->query_var ) && is_string( $taxonomia->query_var ) ) {
+				$por_variavel[ $taxonomia->query_var ] = (string) $nome;
+			}
+		}
+		global $wp_rewrite;
+		$verboso = is_object( $wp_rewrite ) && ! empty( $wp_rewrite->use_verbose_page_rules );
+
+		foreach ( $regras as $expressao => $consulta ) {
+			if ( ! is_string( $consulta ) ) {
+				continue;
+			}
+			// O core casa o pedido cru; o `WP::parse_request()` também tenta decodificado.
+			if ( 1 !== preg_match( '#^' . $expressao . '#', $pedido, $m ) && 1 !== preg_match( '#^' . $expressao . '#', urldecode( $pedido ), $m ) ) {
+				continue;
+			}
+			if ( $verboso && 1 === preg_match( '/pagename=\$matches\[([0-9]+)\]/', $consulta, $vm ) ) {
+				$pagina = isset( $m[ $vm[1] ] ) && function_exists( 'get_page_by_path' ) ? get_page_by_path( $m[ $vm[1] ] ) : null;
+				if ( ! $pagina ) {
+					continue;
+				}
+			}
+			$query = preg_replace( '!^.+\?!', '', $consulta );
+			$query = preg_replace_callback(
+				'/\$matches\[([0-9]+)\]/',
+				static function ( $x ) use ( $m ) {
+					return isset( $m[ (int) $x[1] ] ) ? urlencode( $m[ (int) $x[1] ] ) : '';
+				},
+				$query
+			);
+			parse_str( $query, $vars );
+			foreach ( $vars as $variavel => $valor ) {
+				if ( ! isset( $por_variavel[ $variavel ] ) || ! is_string( $valor ) || '' === trim( $valor, '/' ) ) {
+					continue;
+				}
+				// Categoria aninhada chega como `pai/filha`: o termo é o último segmento.
+				$partes = explode( '/', trim( $valor, '/' ) );
+				$termo  = get_term_by( 'slug', (string) end( $partes ), $por_variavel[ $variavel ] );
+				if ( ! is_object( $termo ) || ! isset( $termo->term_id ) ) {
+					return null;
+				}
+
+				return array(
+					'taxonomy'    => $por_variavel[ $variavel ],
+					'id'          => (int) $termo->term_id,
+					'name'        => isset( $termo->name ) ? (string) $termo->name : '',
+					'description' => isset( $termo->description ) ? (string) $termo->description : '',
+				);
+			}
+
+			return null;
+		}
+
+		return null;
+	}
+}

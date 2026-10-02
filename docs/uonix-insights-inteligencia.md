@@ -340,10 +340,17 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 - O corpo é montado chave por chave, com estes campos:
   - a consulta, as impressões, a posição e o CTR;
   - a URL da página, com o título e a descrição atuais;
+  - o tipo de página (`tipo_de_pagina`), só quando ela é um termo, por exemplo "categoria de produtos";
   - os diferenciais permitidos.
 - Nenhum dado de lead vai ao Gemini.
 - O título atual vem de `rank_math_title`, com as variáveis resolvidas pelo Rank Math quando ele expõe o resolvedor. Se sobrar variável sem resolver, vale o título do post.
-- A página líder precisa ter post **publicado**. A home vai para `page_on_front`, e endereço que dá 404 ou 301 vira `no_page`.
+- A página líder precisa ter post **publicado** ou ser o arquivo de um termo de taxonomia pública. A home vai para `page_on_front`, e endereço que dá 404 ou 301 vira `no_page` (seguir o 301 é a #343).
+- **Categoria e tag (#344).** Sem post, `uonix_intelligence_resolve_term_path()` (`55`) percorre as regras de reescrita como o `url_to_postid()` do core e devolve o termo que a URL abre.
+  - **A regra decide, e não o slug.** O slug `olhal-de-ancoragem` existe em três taxonomias (`product_cat` 34, `post_tag` 510 e `product_tag` 465, medido no local em 2026-10-02), e só a regra diz que `/olhal-de-ancoragem/` é a categoria de produto.
+  - **Título e descrição:** os de `rank_math_title` e `rank_math_description` do termo. Sem meta, o nome e a descrição do termo.
+  - **O tipo de página vai ao Gemini e entra no hash** só para termos. O hash dos posts é o mesmo de antes.
+  - **No painel,** o link leva ao editor do termo: "Editar categoria de produtos".
+  - **O rótulo do Módulo 4 usa o mesmo resolvedor (#307):** `/olhal-de-ancoragem/` sai como "Olhal de Ancoragem", e não pelo caminho.
 
 **Texto da consulta ao Gemini.** Decisão do Cassio em 2026-09-30: o texto vai, **mesmo no plano gratuito** da API, o que aceita que o Google use o conteúdo para melhorar os produtos dele.
 - O que pesou: a consulta já vem do Google, pela Search Console, e já aparece no painel e no e-mail.
@@ -373,7 +380,7 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 | `pending` | Aguardando a próxima geração diária. |
 | `unavailable` | O Gemini não respondeu. Nova tentativa na próxima geração diária. |
 | `rejected` | Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista. |
-| `no_page` | Sem página publicada para esta consulta: removida, redirecionada, categoria ou tag. |
+| `no_page` | Sem página publicada para esta consulta: removida ou redirecionada. |
 | `model_missing` | Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php. |
 
 No e-mail, todo estado diferente de `ok` só omite a linha.
@@ -386,7 +393,7 @@ No e-mail, todo estado diferente de `ok` só omite a linha.
 **O que não entrega:**
 - destaques por IA no e-mail executivo;
 - o Radar de Pautas (Módulo 8);
-- categoria ou tag como página líder;
+- seguir o 301 até a página real (#343);
 - aplicar a sugestão no Rank Math;
 - botão para regenerar;
 - detecção automática de afirmação inventada fora da lista.
