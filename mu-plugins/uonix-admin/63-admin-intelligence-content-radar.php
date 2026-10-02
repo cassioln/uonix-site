@@ -536,9 +536,15 @@ if ( ! function_exists( 'uonix_intelligence_radar_dismissed' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_radar_module3_queries' ) ) {
 	/**
-	 * Consultas que o Módulo 3 já lista como oportunidade (55): posição de 4 a 12 nos 30 dias
-	 * do snapshot. Medido em 2026-10-02: "ensaio de arrancamento" estava nos dois blocos, na
-	 * posição 10,1 em 30 dias e 15,1 em 90. Sem snapshot, nada é excluído.
+	 * Consultas que o painel do Módulo 3 MOSTRA como oportunidade (55): posição de 4 a 12 nos
+	 * 30 dias do snapshot, até `panel_limit`. Medido em 2026-10-02: "ensaio de arrancamento"
+	 * estava nos dois blocos, na posição 10,1 em 30 dias e 15,1 em 90. Sem snapshot, nada é
+	 * excluído.
+	 *
+	 * Só o que o painel mostra: excluir as que o Módulo 3 calcula e não mostra fazia uma
+	 * consulta em 6.º lugar sumir dos dois blocos (MÉDIO da revisão do PR #385). O Radar decide
+	 * no horário do cron, e o painel lê o snapshot na hora: uma sincronização no meio pode
+	 * deixar a consulta fora dos dois por até um dia, até o próximo cron.
 	 *
 	 * @return string[]
 	 */
@@ -546,7 +552,9 @@ if ( ! function_exists( 'uonix_intelligence_radar_module3_queries' ) ) {
 		if ( ! function_exists( 'uonix_intelligence_seo_opportunities' ) ) {
 			return array();
 		}
-		$analise = uonix_intelligence_seo_opportunities( null, 1000 );
+		$regras  = function_exists( 'uonix_intelligence_seo_rules' ) ? uonix_intelligence_seo_rules() : array();
+		$limite  = isset( $regras['panel_limit'] ) && (int) $regras['panel_limit'] > 0 ? (int) $regras['panel_limit'] : 5;
+		$analise = uonix_intelligence_seo_opportunities( null, $limite );
 		if ( ! is_array( $analise ) || empty( $analise['available'] ) || ! isset( $analise['rows'] ) || ! is_array( $analise['rows'] ) ) {
 			return array();
 		}

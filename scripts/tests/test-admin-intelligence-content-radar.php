@@ -649,6 +649,16 @@ uox_rd_assert( ! in_array( 'ancoragem predial', array_column( get_option( $opt )
 $GLOBALS['uox_options'] = array();
 uonix_intelligence_radar_run( $base );
 uox_rd_assert( 6 === count( get_option( $opt )['candidates'] ), 'Sem oportunidades do Módulo 3 (sem snapshot), nenhuma exclusão' );
+// Revisão do PR #385, MÉDIO: só sai do Radar o que o painel do Módulo 3 MOSTRA (`panel_limit`),
+// e não as 1.000 que ele calcula; a 6.ª e a 7.ª oportunidades continuam no Radar.
+$universo_m3 = array();
+for ( $i = 1; $i <= 7; $i++ ) {
+	$universo_m3[] = array( 'query' => 'oportunidade ' . $i, 'clicks' => 0, 'impressions' => 100 - $i, 'ctr' => 0.0, 'position' => 8.0 );
+}
+$GLOBALS['uox_options'] = array( uonix_analytics_metrics_snapshot_option( 30 ) => array( 'version' => 3, 'period_days' => 30, 'status' => 'updated', 'updated_at' => gmdate( 'c' ), 'ga4' => array(), 'search_console' => array( 'queries' => array(), 'queries_extended' => $universo_m3, 'pages' => array() ) ) );
+$m3 = uonix_intelligence_radar_module3_queries();
+uox_rd_assert( array( 'oportunidade 1', 'oportunidade 2', 'oportunidade 3', 'oportunidade 4', 'oportunidade 5' ) === $m3, 'Só saem do Radar as oportunidades que o painel do Módulo 3 mostra (panel_limit = 5); obteve ' . var_export( $m3, true ) );
+$GLOBALS['uox_options'] = array();
 $caminhos = array();
 $res_cam  = static function ( $consulta, $caminho, &$orcamento ) use ( &$caminhos ) {
 	$caminhos[] = $caminho;
