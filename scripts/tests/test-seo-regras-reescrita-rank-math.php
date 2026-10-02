@@ -122,7 +122,7 @@ $agendouShutdown = static function () {
 
 // ---------------------------------------------------------------------------
 // 1. Registro: confere em `wp_loaded`, depois do `init` inteiro, sem argumento, e depois da
-//    regravação que o core adia para `wp_loaded` na prioridade 10 (WordPress 6.4+).
+//    regravação que o core adia para `wp_loaded` na prioridade 10 (`WP_Rewrite::flush_rules()`).
 // ---------------------------------------------------------------------------
 $registro = null;
 foreach ( $GLOBALS['uox_actions'] as $a ) {

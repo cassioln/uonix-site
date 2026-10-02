@@ -15,9 +15,9 @@
  *     `rewrite_rules_array`.
  *   - O WooCommerce pede a regravação no `init:5` de qualquer requisição, heartbeat incluso,
  *     depois de se atualizar (`WC_Install::check_version()`) ou com a fila
- *     `woocommerce_queue_flush_rewrite_rules` ligada. Desde o WordPress 6.4, a regravação pedida
- *     antes de `wp_loaded` roda em `wp_loaded`, na prioridade 10, da MESMA requisição
- *     (`WP_Rewrite::flush_rules()`): num heartbeat, continua sem os módulos.
+ *     `woocommerce_queue_flush_rewrite_rules` ligada. A regravação pedida antes de `wp_loaded`
+ *     roda em `wp_loaded`, na prioridade 10, da MESMA requisição (`WP_Rewrite::flush_rules()`
+ *     testa `did_action( 'wp_loaded' )` e se adia): num heartbeat, continua sem os módulos.
  *   - O Rank Math não se corrige sozinho: só regrava ao ser ativado, ao ligar ou desligar
  *     módulo e ao criar, editar ou apagar uma `product_cat`.
  *
