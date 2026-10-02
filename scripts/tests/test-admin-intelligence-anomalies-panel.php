@@ -374,6 +374,17 @@ uox_assert( false !== strpos( uox_render( 'metrics' ), 'hidden' ), 'em outra aba
 uox_assert( false === strpos( uox_render( 'anomalies' ), ' hidden>' ), 'na aba DELE o painel não pode sair escondido, senão a aba abre em branco' );
 
 // ---------------------------------------------------------------------------
+// #351: o aviso de "primeira verificação" só fala em tráfego com WP-Cron por visita.
+// Fica no fim porque constante não se desfaz.
+// ---------------------------------------------------------------------------
+unset( $GLOBALS['uox_options']['uonix_intelligence_anomaly_state'] );
+$sem_verificacao = uox_render( 'anomalies' );
+uox_assert( false !== strpos( $sem_verificacao, 'A primeira verificação ainda não rodou.' ) && false !== strpos( $sem_verificacao, 'depende de tráfego no site' ), '#351: sem DISABLE_WP_CRON, o aviso da primeira verificação fala do tráfego' );
+define( 'DISABLE_WP_CRON', true );
+$sem_verificacao = uox_render( 'anomalies' );
+uox_assert( false !== strpos( $sem_verificacao, 'A primeira verificação ainda não rodou.' ) && false === strpos( $sem_verificacao, 'depende de tráfego' ) && false !== strpos( $sem_verificacao, 'agendador do servidor' ), '#351: com DISABLE_WP_CRON, o aviso diz que a verificação depende do agendador do servidor' );
+
+// ---------------------------------------------------------------------------
 // 10. Aviso de licença: só com o envio pausado. Fica no fim porque constante não se desfaz.
 // ---------------------------------------------------------------------------
 

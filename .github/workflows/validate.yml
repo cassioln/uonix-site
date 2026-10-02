@@ -65,6 +65,9 @@ jobs:
       - name: Test comments nosnippet and replytocom SEO
         run: php scripts/tests/test-comments-nosnippet-seo.php
 
+      - name: Test Rank Math rewrite rules guard (heartbeat flush)
+        run: php scripts/tests/test-seo-regras-reescrita-rank-math.php
+
       - name: Test consent-aware campaign attribution
         run: php scripts/tests/test-attribution-tracking.php
 
@@ -76,6 +79,9 @@ jobs:
 
       - name: Test Uônix Insights intelligence metrics
         run: php scripts/tests/test-admin-intelligence-metrics.php
+
+      - name: Test Uônix Insights AI suggestion
+        run: php scripts/tests/test-admin-intelligence-ai.php
 
       - name: Test Uônix Insights intelligence dashboard
         run: php scripts/tests/test-admin-intelligence-dashboard.php
@@ -214,6 +220,21 @@ jobs:
       - name: Test admin cache security
         run: php scripts/tests/test-admin-cache-security.php
 
+      - name: Test admin pending updates list
+        run: php scripts/tests/test-admin-atualizacoes-pendentes.php
+
+      - name: Test footer widgets in Customizer for editor
+        run: php scripts/tests/test-admin-customizer-widgets-rodape.php
+
+      - name: Test block widgets without content from Max Mega Menu
+        run: php scripts/tests/test-navigation-mega-menu-widget-bloco.php
+
+      - name: Test dark footer widget areas in widgets editor
+        run: php scripts/tests/test-admin-widgets-rodape-fundo-escuro.php
+
+      - name: Test widgets editor batch route alternative
+        run: php scripts/tests/test-admin-widgets-lote-rest.php
+
       - name: Test admin dados globais write guards
         run: php scripts/tests/test-admin-dados-globais-rfq.php
 
@@ -264,6 +285,9 @@ jobs:
 
       - name: Test consent-aware campaign attribution browser flow
         run: node scripts/tests/test-attribution-tracking.mjs
+
+      - name: Test widgets editor batch request redirect
+        run: node --test scripts/tests/test-admin-widgets-lote.mjs
 
       - name: Run ShellCheck
         run: find scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck -x
@@ -447,3 +471,28 @@ jobs:
 
       - name: Parse local Compose configuration
         run: podman-compose -p uonix-local -f local/compose.yml config
+
+  browser:
+    name: Browser (Chrome headless)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test Atualizações Sistêmicas in a real browser
+        # O Chrome já vem na imagem ubuntu-latest; sem ele o teste falha, não pula.
+        # O PHP gera o HTML real dos cenários; o Node 22 fala o protocolo DevTools
+        # pelo WebSocket nativo, sem dependências de npm.
+        run: node scripts/tests/test-admin-atualizacoes-sistemicas-navegador.mjs

@@ -66,6 +66,9 @@ if ( ! function_exists( 'uonix_intelligence_executive_rules' ) ) {
 			'head_max'        => 20,
 			'head_budget'     => 20.0,
 			'max_hops'        => 3,
+			// Status de página gravado pelo cron diário vale 2 dias (#348): cobre um dia
+			// em que o cron não rodou, sem levar ao e-mail um status de semanas atrás.
+			'status_max_age'  => 172800,
 		);
 	}
 }
@@ -661,8 +664,9 @@ if ( ! function_exists( 'uonix_intelligence_executive_insights' ) ) {
 				uonix_intelligence_executive_num( $r['position'], 1 ),
 				$cliques > 0 ? 'taxa de clique de ' . uonix_intelligence_executive_num( (float) ( $r['ctr'] ?? 0 ) * 100, 1 ) . '%' : 'nenhum clique'
 			);
-			if ( isset( $r['suggestion'] ) && is_array( $r['suggestion'] ) && array() !== $r['suggestion'] ) {
-				$texto .= ' Acrescentar ao título: ' . implode( ' · ', array_map( 'strval', $r['suggestion'] ) ) . '.';
+			$ia = function_exists( 'uonix_intelligence_ai_suggestion_for' ) ? uonix_intelligence_ai_suggestion_for( $r ) : array();
+			if ( isset( $ia['status'], $ia['title'] ) && 'ok' === $ia['status'] ) {
+				$texto .= ' Título sugerido (IA): “' . (string) $ia['title'] . '”.';
 			}
 			$saida[] = array( 'kind' => 'seo', 'text' => $texto );
 		}
@@ -673,7 +677,13 @@ if ( ! function_exists( 'uonix_intelligence_executive_insights' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_executive_page_label' ) ) {
 	/**
-	 * Rótulo legível de uma página: o título do post, ou o próprio caminho.
+	 * Rótulo legível de uma página: o título do post, o nome do termo, ou o próprio caminho.
+	 *
+	 * `url_to_postid()` só resolve post. Página de categoria ou de tag, como
+	 * `/olhal-de-ancoragem/` (product_cat #34, a terceira página mais encontrada na busca),
+	 * saía pelo caminho cru (#307). O termo vem da regra de reescrita que a URL abre
+	 * (`uonix_intelligence_resolve_term_path()`, no 55), e não de procurar o slug: o mesmo
+	 * slug existe em três taxonomias.
 	 *
 	 * Devolve texto puro. Quem imprime escapa.
 	 */
@@ -689,6 +699,13 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_label' ) ) {
 				if ( '' !== $titulo ) {
 					return $titulo;
 				}
+			}
+		}
+		$termo = function_exists( 'uonix_intelligence_resolve_term_path' ) ? uonix_intelligence_resolve_term_path( $path ) : null;
+		if ( is_array( $termo ) ) {
+			$nome = trim( html_entity_decode( wp_strip_all_tags( $termo['name'] ), ENT_QUOTES, 'UTF-8' ) );
+			if ( '' !== $nome ) {
+				return $nome;
 			}
 		}
 
@@ -727,7 +744,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_status' ) ) {
 	 *
 	 * A requisição passa pelo Rank Math, e isso tem um custo que o User-Agent NÃO
 	 * resolve. O contador do redirecionamento grava só acessos e data do último, sem
-	 * User-Agent: cada endereço antigo conferido ganha um acesso artificial por semana,
+	 * User-Agent: cada endereço antigo conferido ganha um acesso artificial por dia (o cron de status é diário desde o #348),
 	 * e o contador não tem como separá-lo. O monitor de 404, por outro lado, não
 	 * registra esta requisição: o WordPress encerra HEAD logo depois de
 	 * `template_redirect`, antes do template, e o monitor captura em `get_header` ou
@@ -746,7 +763,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_status' ) ) {
 			array(
 				'redirection' => 0,
 				'timeout'     => (int) uonix_intelligence_executive_rules()['head_timeout'],
-				'user-agent'  => 'Uonix-Relatorio-Executivo/1.0 (conferencia semanal de status de pagina)',
+				'user-agent'  => 'Uonix-Relatorio-Executivo/1.0 (conferencia diaria de status de pagina)',
 			)
 		);
 		if ( is_wp_error( $resposta ) ) {
@@ -1148,14 +1165,183 @@ if ( ! function_exists( 'uonix_intelligence_executive_fetch_ga4_daily' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_executive_pages_window' ) ) {
+	/**
+	 * Janela ASSENTADA de 28 dias das páginas, terminando no mesmo dia que a semana das
+	 * impressões. A Search Console publica com ~3 dias de atraso, e o bloco é ranking —
+	 * mas somar dias ainda não publicados como zero mudaria a ordem entre páginas de
+	 * volume próximo, então a janela nem os inclui. O envio e o cron de status usam esta
+	 * mesma conta, para o cron conferir as páginas que o envio vai listar.
+	 *
+	 * @return array{start?: string, end?: string} Vazio se `$hoje` não for AAAA-MM-DD.
+	 */
+	function uonix_intelligence_executive_pages_window( $hoje ) {
+		$regras  = uonix_intelligence_executive_rules();
+		$atraso  = function_exists( 'uonix_intelligence_anomaly_rules' ) ? (int) uonix_intelligence_anomaly_rules()['organic_settle_lag_days'] : 4;
+		$fim_pag = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $hoje, new DateTimeZone( 'UTC' ) );
+
+		return false === $fim_pag ? array() : array(
+			'start' => $fim_pag->modify( '-' . ( $atraso + (int) $regras['pages_days'] - 1 ) . ' days' )->format( 'Y-m-d' ),
+			'end'   => $fim_pag->modify( '-' . $atraso . ' days' )->format( 'Y-m-d' ),
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_executive_status_cache_option' ) ) {
+	function uonix_intelligence_executive_status_cache_option() {
+		return 'uonix_intelligence_page_status_cache';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_executive_status_hook' ) ) {
+	function uonix_intelligence_executive_status_hook() {
+		return 'uonix_intelligence_page_status_daily';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_executive_page_status_cached' ) ) {
+	/**
+	 * Status de uma página lido do que o cron diário conferiu. Não faz HTTP (#348).
+	 *
+	 * Caminho sem registro, registro malformado ou conferido há mais de `status_max_age`
+	 * devolve `unknown`, que o bloco exibe como "status não verificado": não saber o
+	 * status não é saber que a página existe, a mesma regra de
+	 * `uonix_intelligence_executive_page_status()`.
+	 *
+	 * @param int|null $now Para teste; o padrão é `time()`.
+	 * @return array{state: string, code: int, location: string}
+	 */
+	function uonix_intelligence_executive_page_status_cached( $path, $now = null ) {
+		$desconhecido = array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
+		$cache        = function_exists( 'get_option' ) ? get_option( uonix_intelligence_executive_status_cache_option(), array() ) : array();
+		$chave        = (string) $path;
+		if ( ! is_array( $cache ) || ! isset( $cache[ $chave ] ) || ! is_array( $cache[ $chave ] ) ) {
+			return $desconhecido;
+		}
+		$e     = $cache[ $chave ];
+		$agora = is_int( $now ) ? $now : time();
+		if ( ! isset( $e['state'], $e['checked_at'] ) || ! is_string( $e['state'] ) || ! is_int( $e['checked_at'] ) || $e['checked_at'] > $agora || ( $agora - $e['checked_at'] ) > (int) uonix_intelligence_executive_rules()['status_max_age'] ) {
+			return $desconhecido;
+		}
+
+		return array(
+			'state'    => $e['state'],
+			'code'     => isset( $e['code'] ) ? (int) $e['code'] : 0,
+			'location' => isset( $e['location'] ) && is_string( $e['location'] ) ? $e['location'] : '',
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_executive_refresh_page_status' ) ) {
+	/**
+	 * Cron diário (#348): confere, com HEAD de verdade, o status das páginas que o
+	 * próximo relatório vai listar, e grava por caminho.
+	 *
+	 * Roda o próprio `uonix_intelligence_executive_top_pages()` (candidatas, cadeias de
+	 * redirecionamento, teto e orçamento), com a conferência real envolvida por um
+	 * gravador. O envio depois roda o mesmo algoritmo lendo o que foi gravado, e chega
+	 * às mesmas linhas sem nenhuma requisição.
+	 *
+	 * Grava só caminho, estado, código, destino e hora: nenhum texto de consulta, nenhuma
+	 * métrica. `unknown` com qualquer código É gravado, porque é resposta do servidor:
+	 * com código >= 400 o `top_pages()` a trata como fim de cadeia (soma o 301 nela), e
+	 * abaixo de 400 (3xx sem `Location`, 300, 304...) como sem fim. Lido do cache, dá o
+	 * mesmo resultado da conferência na hora (MÉDIO 1 e BAIXO 7 da revisão do PR #349).
+	 * Sem resposta (código 0, falha de rede) não é estado da página e não é gravado: o
+	 * registro anterior desse caminho, se ainda valer, fica. O status de hoje sempre
+	 * substitui o anterior. Registros de caminhos não conferidos hoje ficam até
+	 * `status_max_age`, e os vencidos ou com hora no futuro saem. Falha da busca de
+	 * páginas, ou falta de credencial, mantém o cache anterior inteiro.
+	 *
+	 * Tudo é injetável por `$args`, como em `uonix_intelligence_executive_collect()`.
+	 *
+	 * @return array{checked: int, reason: string}
+	 */
+	function uonix_intelligence_executive_refresh_page_status( $args = array() ) {
+		$args = is_array( $args ) ? $args : array();
+		$hoje = isset( $args['today'] ) && is_string( $args['today'] ) && '' !== $args['today']
+			? $args['today']
+			: ( function_exists( 'uonix_intelligence_anomaly_now' ) ? uonix_intelligence_anomaly_now()->format( 'Y-m-d' ) : gmdate( 'Y-m-d' ) );
+		$config = array_key_exists( 'config', $args )
+			? $args['config']
+			: ( function_exists( 'uonix_analytics_metrics_get_config' ) ? uonix_analytics_metrics_get_config() : null );
+		$janela = uonix_intelligence_executive_pages_window( $hoje );
+		if ( ! is_array( $config ) || array() === $janela ) {
+			return array( 'checked' => 0, 'reason' => 'config_missing' );
+		}
+
+		$fetcher_pag = isset( $args['pages_fetcher'] ) && is_callable( $args['pages_fetcher'] ) ? $args['pages_fetcher'] : 'uonix_intelligence_executive_fetch_gsc_pages';
+		$paginas     = call_user_func( $fetcher_pag, $config, $janela );
+		if ( is_wp_error( $paginas ) ) {
+			return array( 'checked' => 0, 'reason' => 'pages_fetch_failed' );
+		}
+
+		$real     = isset( $args['status_fetcher'] ) && is_callable( $args['status_fetcher'] ) ? $args['status_fetcher'] : 'uonix_intelligence_executive_page_status';
+		$agora    = isset( $args['now'] ) && is_int( $args['now'] ) ? $args['now'] : time();
+		$gravado  = array();
+		$gravador = static function ( $caminho ) use ( $real, &$gravado, $agora ) {
+			$status = call_user_func( $real, $caminho );
+			$status = is_array( $status ) ? $status : array( 'state' => 'unknown', 'code' => 0, 'location' => '' );
+			$estado = isset( $status['state'] ) && is_string( $status['state'] ) ? $status['state'] : 'unknown';
+			$codigo = isset( $status['code'] ) ? (int) $status['code'] : 0;
+			if ( 'unknown' !== $estado || $codigo > 0 ) {
+				$gravado[ (string) $caminho ] = array(
+					'state'      => $estado,
+					'code'       => $codigo,
+					'location'   => isset( $status['location'] ) && is_string( $status['location'] ) ? $status['location'] : '',
+					'checked_at' => $agora,
+				);
+			}
+			return $status;
+		};
+		// O rótulo não interessa aqui; um rótulo vazio evita consultas ao banco à toa.
+		uonix_intelligence_executive_top_pages(
+			$paginas,
+			$janela,
+			$gravador,
+			static function () {
+				return '';
+			},
+			null,
+			null,
+			isset( $args['clock'] ) ? $args['clock'] : null
+		);
+		$checados = count( $gravado );
+		$anterior = function_exists( 'get_option' ) ? get_option( uonix_intelligence_executive_status_cache_option(), array() ) : array();
+		$idade    = (int) uonix_intelligence_executive_rules()['status_max_age'];
+		foreach ( is_array( $anterior ) ? $anterior : array() as $caminho => $e ) {
+			if ( ! isset( $gravado[ $caminho ] ) && is_array( $e ) && isset( $e['checked_at'] ) && is_int( $e['checked_at'] ) && $e['checked_at'] <= $agora && ( $agora - $e['checked_at'] ) <= $idade ) {
+				$gravado[ $caminho ] = $e;
+			}
+		}
+		update_option( uonix_intelligence_executive_status_cache_option(), $gravado, false );
+
+		return array( 'checked' => $checados, 'reason' => '' );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_executive_schedule_status' ) ) {
+	function uonix_intelligence_executive_schedule_status() {
+		if ( function_exists( 'wp_next_scheduled' ) && ! wp_next_scheduled( uonix_intelligence_executive_status_hook() ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', uonix_intelligence_executive_status_hook() );
+		}
+	}
+}
+add_action( 'init', 'uonix_intelligence_executive_schedule_status', 10, 0 );
+// `accepted_args = 0`, como os irmãos de 53 e 57: o callback não usa argumento.
+add_action( uonix_intelligence_executive_status_hook(), 'uonix_intelligence_executive_refresh_page_status', 10, 0 );
+
 if ( ! function_exists( 'uonix_intelligence_executive_collect' ) ) {
 	/**
 	 * Reúne as entradas reais e devolve o que o e-mail renderiza.
 	 *
 	 * Três chamadas às APIs do Google — série diária do GA4, série diária da Search
-	 * Console (via `uonix_intelligence_anomaly_organic_drop()`) e a lista de páginas —
-	 * mais até `head_max` requisições HEAD ao próprio site para conferir o status das
-	 * páginas, dentro do orçamento `head_budget`. O relatório sai uma vez por semana,
+	 * Console (via `uonix_intelligence_anomaly_organic_drop()`) e a lista de páginas.
+	 * O status das páginas NÃO é conferido aqui: vem do que o cron diário gravou
+	 * (`uonix_intelligence_executive_refresh_page_status()`, #348). Medido em produção
+	 * em 2026-10-01: com as conferências HEAD dentro do envio, esta função levava
+	 * 27,8 s de relógio (o relatório inteiro, `uonix_intelligence_report_context()`,
+	 * 29,5 s), numa requisição web cujo limite ninguém mediu. O relatório sai uma vez por semana,
 	 * então o custo é irrelevante; o que importa é que falha de rede degrada a caixa ou
 	 * o bloco para "indisponível" e o e-mail sai mesmo assim.
 	 *
@@ -1214,12 +1400,7 @@ if ( ! function_exists( 'uonix_intelligence_executive_collect' ) ) {
 		// impressões. A Search Console publica com ~3 dias de atraso, e o bloco é ranking
 		// — mas somar dias ainda não publicados como zero mudaria a ordem entre páginas de
 		// volume próximo, então a janela nem os inclui.
-		$atraso  = function_exists( 'uonix_intelligence_anomaly_rules' ) ? (int) uonix_intelligence_anomaly_rules()['organic_settle_lag_days'] : 4;
-		$fim_pag = DateTimeImmutable::createFromFormat( '!Y-m-d', $hoje, new DateTimeZone( 'UTC' ) );
-		$janela_paginas = false === $fim_pag ? array() : array(
-			'start' => $fim_pag->modify( '-' . ( $atraso + (int) $regras['pages_days'] - 1 ) . ' days' )->format( 'Y-m-d' ),
-			'end'   => $fim_pag->modify( '-' . $atraso . ' days' )->format( 'Y-m-d' ),
-		);
+		$janela_paginas = uonix_intelligence_executive_pages_window( $hoje );
 		if ( null === $config || array() === $janela_paginas ) {
 			$paginas = uonix_analytics_metrics_error( 'config_missing' );
 		} else {
@@ -1233,7 +1414,8 @@ if ( ! function_exists( 'uonix_intelligence_executive_collect' ) ) {
 			'top_pages'    => uonix_intelligence_executive_top_pages(
 				$paginas,
 				$janela_paginas,
-				isset( $args['status_fetcher'] ) ? $args['status_fetcher'] : null,
+				// Sem HEAD no envio (#348): o status vem do que o cron diário gravou.
+				isset( $args['status_fetcher'] ) ? $args['status_fetcher'] : 'uonix_intelligence_executive_page_status_cached',
 				isset( $args['labeler'] ) ? $args['labeler'] : null
 			),
 			'generated_on' => $hoje,

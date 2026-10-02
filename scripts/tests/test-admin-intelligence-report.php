@@ -155,6 +155,8 @@ function uonix_ksio_can_configure_insights() {
 	return (bool) $GLOBALS['uox_dono'];
 }
 
+$GLOBALS['uox_ia'] = array();
+function uonix_intelligence_ai_suggestion_for( $row ) { return $GLOBALS['uox_ia'][ $row['query'] ?? '' ] ?? array( 'status' => 'pending' ); }
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
@@ -301,10 +303,93 @@ uox_assert( false !== strpos( $assunto_com, '23/08/2026 a 21/09/2026' ), 'Assunt
 uox_assert( false === strpos( $assunto_sem, '(' ), 'Assunto sem período não deixa parêntese vazio' );
 
 // ---------------------------------------------------------------------------
+// #308: selo e assunto com a SEMANA do relatório; o período do snapshot vai para a
+// procedência do bloco de SEO. Sem o contexto executivo, o selo antigo continua certo.
+// ---------------------------------------------------------------------------
+$exec_semana = array( 'scorecard' => array( 'windows' => array( 'week' => array( 'start' => '2026-09-24', 'end' => '2026-09-30', 'days' => 7 ) ) ) );
+uox_assert( 'Semana de 24/09 a 30/09/2026' === uonix_intelligence_report_badge_label( $exec_semana, '01/09/2026 a 30/09/2026' ), '#308: com o contexto executivo, o selo é a semana do relatório; obteve ' . var_export( uonix_intelligence_report_badge_label( $exec_semana, 'x' ), true ) );
+uox_assert( '01/09/2026 a 30/09/2026' === uonix_intelligence_report_badge_label( null, '01/09/2026 a 30/09/2026' ), '#308: sem o contexto executivo, o selo antigo (período do SEO)' );
+$exec_virada = array( 'scorecard' => array( 'windows' => array( 'week' => array( 'start' => '2026-12-29', 'end' => '2027-01-04', 'days' => 7 ) ) ) );
+uox_assert( 'Semana de 29/12/2026 a 04/01/2027' === uonix_intelligence_report_badge_label( $exec_virada, 'x' ), '#308: na virada de ano o selo mostra os dois anos (BAIXO 4 da revisão do PR #370); obteve ' . var_export( uonix_intelligence_report_badge_label( $exec_virada, 'x' ), true ) );
+uox_assert( '01/09/2026 a 30/09/2026' === uonix_intelligence_report_badge_label( array( 'scorecard' => array( 'windows' => array() ) ), '01/09/2026 a 30/09/2026' ), '#308: janelas inválidas caem no selo antigo' );
+uox_assert( '01/09/2026 a 30/09/2026' === uonix_intelligence_report_badge_label( array( 'scorecard' => array( 'windows' => array( 'week' => array( 'start' => 'x', 'end' => '2026-09-30' ) ) ) ), '01/09/2026 a 30/09/2026' ), '#308: semana com data ilegível cai no selo antigo' );
+uox_assert( '23/08 a 21/09 (30 dias)' === uonix_intelligence_report_seo_window_label( uox_snapshot( array() ) ), '#308: o período do snapshot de SEO, com os dias; obteve ' . var_export( uonix_intelligence_report_seo_window_label( uox_snapshot( array() ) ), true ) );
+uox_assert( '' === uonix_intelligence_report_seo_window_label( uox_snapshot( array(), false ) ) && '' === uonix_intelligence_report_seo_window_label( false ), '#308: sem período no snapshot, nada inventado' );
+$invertido = uox_snapshot( array() );
+$invertido['periods']['current'] = array( 'start' => '2026-09-21', 'end' => '2026-08-23' );
+uox_assert( '' === uonix_intelligence_report_seo_window_label( $invertido ), '#308: janela com o fim antes do início não vira "(-28 dias)"' );
+$assunto_semana = uonix_intelligence_report_subject( array( 'period_label' => uonix_intelligence_report_badge_label( $exec_semana, '01/09/2026 a 30/09/2026' ) ) );
+uox_assert( false !== strpos( $assunto_semana, '(Semana de 24/09 a 30/09/2026)' ) && false === strpos( $assunto_semana, '01/09/2026' ), '#308: o assunto leva a semana, não o período do SEO; obteve ' . $assunto_semana );
+// A ligação: o contexto monta o selo pela semana e guarda o período do SEO à parte.
+$ctx_semana = uonix_intelligence_report_context( array( 'snapshot' => uox_snapshot( array() ), 'executive' => $exec_semana ) );
+uox_assert( 'Semana de 24/09 a 30/09/2026' === ( $ctx_semana['period_label'] ?? '' ) && '23/08 a 21/09 (30 dias)' === ( $ctx_semana['seo_period_label'] ?? '' ), '#308: o contexto usa a semana no selo e guarda o período do SEO; obteve ' . var_export( array( $ctx_semana['period_label'] ?? null, $ctx_semana['seo_period_label'] ?? null ), true ) );
+$ctx_antigo = uonix_intelligence_report_context( array( 'snapshot' => uox_snapshot( array() ), 'executive' => null ) );
+uox_assert( '23/08/2026 a 21/09/2026' === ( $ctx_antigo['period_label'] ?? '' ), '#308: sem o contexto executivo, o contexto mantém o selo antigo' );
+$html_seo = uonix_intelligence_report_html( array( 'analysis' => uox_analysis( array() ), 'period_label' => 'Semana de 24/09 a 30/09/2026', 'seo_period_label' => '23/08 a 21/09 (30 dias)', 'environment' => 'production', 'panel_url' => '' ) );
+uox_assert( false !== strpos( $html_seo, 'Fonte: Search Console · 23/08 a 21/09 (30 dias) · sincronizado em' ), '#308: a procedência do bloco de SEO declara o período dele' );
+uox_assert( false !== strpos( $html_seo, '>Semana de 24/09 a 30/09/2026<' ), '#308: o selo do cabeçalho mostra a semana' );
+
+// ---------------------------------------------------------------------------
+// #291: o e-mail diz quantas oportunidades ficaram no painel, e só quando há resto.
+// O número é o que o painel mostra a mais (ele lista até `panel_limit`), nunca o universo.
+// ---------------------------------------------------------------------------
+$tres = array(
+	array( 'query' => 'um', 'position' => 9.0, 'impressions' => 90, 'ctr' => 0, 'clicks' => 0 ),
+	array( 'query' => 'dois', 'position' => 9.0, 'impressions' => 80, 'ctr' => 0, 'clicks' => 0 ),
+	array( 'query' => 'tres', 'position' => 9.0, 'impressions' => 70, 'ctr' => 0, 'clicks' => 0 ),
+);
+$resto = static function ( $rows, $matched, $universe = null, $painel = 'https://uonix.com.br/wp-admin/admin.php?page=uonix-analytics&tab=intelligence', $limite = 5 ) {
+	$a = uox_analysis( $rows );
+	if ( null !== $matched ) {
+		$a['matched'] = $matched;
+	}
+	if ( null !== $universe ) {
+		$a['universe'] = $universe;
+	}
+	return uonix_intelligence_report_html( array( 'analysis' => $a, 'period_label' => '', 'environment' => 'production', 'panel_url' => $painel, 'panel_limit' => $limite ) );
+};
+$h = $resto( $tres, 5 );
+uox_assert( false !== strpos( $h, 'Mais 2 oportunidades no painel.' ), '#291: 5 oportunidades e 3 no e-mail: "Mais 2 oportunidades no painel."' );
+uox_assert( 1 === substr_count( $h, 'Mais 2 oportunidades no painel.' ) && 1 === preg_match( '#<a href="https://uonix\.com\.br/wp-admin/admin\.php\?page=uonix-analytics&tab=intelligence"[^>]*>Mais 2 oportunidades no painel\.</a>#', $h ), '#291: a frase leva ao painel' );
+uox_assert( false !== strpos( $resto( $tres, 4 ), 'Mais 1 oportunidade no painel.' ), '#291: singular com 1 a mais' );
+$sem_resto = $resto( $tres, 3 );
+uox_assert( false === strpos( $sem_resto, 'Mais ' ) && false === strpos( $sem_resto, 'oportunidades no painel' ), '#291: sem resto, a frase não aparece' );
+$muitas = $resto( $tres, 12, 113 );
+uox_assert( false !== strpos( $muitas, 'Mais 2 oportunidades no painel.' ) && false === strpos( $muitas, 'Mais 9' ) && false === strpos( $muitas, 'Mais 110' ), '#291: com 12 oportunidades o painel mostra 5, então "Mais 2", nunca o resto bruto nem o universo' );
+uox_assert( false !== strpos( $resto( $tres, 5, null, '' ), 'Mais 2 oportunidades no painel.' ) && false === strpos( $resto( $tres, 5, null, '' ), 'href=""' ), '#291: sem URL do painel, a frase sai sem link quebrado' );
+uox_assert( false === strpos( $resto( $tres, null ), 'Mais ' ), '#291: análise sem `matched` não inventa resto' );
+$maliciosa = $resto( $tres, 5, null, 'https://uonix.com.br/wp-admin/admin.php?page=x"><script>alert(1)</script>' );
+uox_assert( false !== strpos( $maliciosa, 'Mais 2 oportunidades no painel.' ) && false === strpos( $maliciosa, '<script>' ), '#291: a URL do painel no link da frase é escapada' );
+uox_assert( false === strpos( $resto( $tres, 5, null, 'https://x', 0 ), 'Mais ' ), '#291: sem o limite do painel no contexto, não inventa resto' );
+$vazia = $resto( array(), 0 );
+uox_assert( false !== strpos( $vazia, 'Nenhuma consulta atendeu aos critérios' ) && false === strpos( $vazia, 'Mais ' ), '#291: sem oportunidade, a mensagem de vazio continua e a frase não aparece' );
+// MÉDIO 1 da revisão do PR #370: o contexto CONSOME email_limit, e a frase sai de um contexto
+// real, não de uma análise montada à mão.
+$cinco = array();
+foreach ( range( 1, 5 ) as $i ) {
+	$cinco[] = uox_q( 'consulta ' . $i, 8.0, 100 - $i, .0 );
+}
+$ctx_cinco = uonix_intelligence_report_context( array( 'snapshot' => uox_snapshot( $cinco ), 'executive' => null ) );
+uox_assert( 3 === count( $ctx_cinco['analysis']['rows'] ?? array() ) && 5 === ( $ctx_cinco['analysis']['matched'] ?? null ), '#291: o contexto corta em email_limit (3) e guarda matched (5); obteve ' . count( $ctx_cinco['analysis']['rows'] ?? array() ) );
+uox_assert( false !== strpos( uonix_intelligence_report_html( $ctx_cinco ), 'Mais 2 oportunidades no painel.' ), '#291: o e-mail de um contexto real com 5 oportunidades diz "Mais 2"' );
+$ctx_limite = uonix_intelligence_report_context( array( 'snapshot' => uox_snapshot( array() ), 'executive' => null ) );
+uox_assert( 5 === ( $ctx_limite['panel_limit'] ?? null ), '#291: o contexto leva o limite do painel das regras do 55' );
+
+// ---------------------------------------------------------------------------
+// #351: o rodapé só diz que o envio depende de tráfego quando o WP-Cron roda por visita.
+// ---------------------------------------------------------------------------
+$rod_visita   = uonix_intelligence_report_html( array( 'analysis' => uox_analysis( array() ), 'period_label' => '', 'environment' => 'production', 'panel_url' => '', 'cron_by_visit' => true ) );
+$rod_servidor = uonix_intelligence_report_html( array( 'analysis' => uox_analysis( array() ), 'period_label' => '', 'environment' => 'production', 'panel_url' => '', 'cron_by_visit' => false ) );
+uox_assert( false !== strpos( $rod_visita, 'depende de tráfego no site' ), '#351: com WP-Cron por visita, o rodapé mantém a frase do tráfego' );
+uox_assert( false === strpos( $rod_servidor, 'tráfego' ) && false !== strpos( $rod_servidor, 'não depende de visitas ao site' ), '#351: sem WP-Cron por visita, o rodapé diz que o envio não depende de visitas, e não fala em tráfego' );
+uox_assert( false === strpos( $rod_servidor, 'servidor roda' ) && false === strpos( $rod_servidor, 'pontual' ), '#351: o rodapé não promete um agendador que o PHP não enxerga' );
+uox_assert( true === ( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) )['cron_by_visit'] ?? null ), '#351: o contexto lê o modo do cron (sem a constante, por visita)' );
+
+// ---------------------------------------------------------------------------
 // Corpo HTML com dados.
 // ---------------------------------------------------------------------------
 $html = uonix_intelligence_report_html( array(
-	'analysis' => uox_analysis( array( array( 'query' => 'linha de vida nbr', 'position' => 6.4, 'impressions' => 820, 'ctr' => .012, 'clicks' => 10, 'suggestion' => array( 'Aço Inox 304/316' ) ) ) ),
+	'analysis' => uox_analysis( array( array( 'query' => 'linha de vida nbr', 'position' => 6.4, 'impressions' => 820, 'ctr' => .012, 'clicks' => 10 ) ) ),
 	'period_label' => '23/08/2026 a 21/09/2026',
 	'environment' => 'production',
 	'panel_url' => 'https://uonix.com.br/wp-admin/admin.php?page=uonix-analytics',
@@ -312,7 +397,30 @@ $html = uonix_intelligence_report_html( array(
 uox_assert( false !== strpos( $html, '#0b1c2c' ), 'Cabeçalho usa a cor da identidade definida no contrato' );
 uox_assert( false !== strpos( $html, '23/08/2026 a 21/09/2026' ), 'Badge de período aparece no corpo' );
 uox_assert( false !== strpos( $html, 'linha de vida nbr' ), 'Consulta aparece na tabela do e-mail' );
-uox_assert( false !== strpos( $html, 'Aço Inox 304/316' ), 'Sugestão de título aparece no e-mail' );
+uox_assert( false === strpos( $html, 'Acrescentar ao título' ), 'A sugestão determinística não aparece mais no e-mail (#309)' );
+$GLOBALS['uox_ia'] = array( 'linha de vida nbr' => array( 'status' => 'ok', 'title' => 'Linha de Vida <b>NBR</b>', 'description' => 'x', 'current_title' => 'y', 'current_description' => '', 'generated_at' => '', 'post_id' => 1 ) );
+$html_ia = uonix_intelligence_report_html( array(
+	'analysis' => uox_analysis( array( array( 'query' => 'linha de vida nbr', 'position' => 6.4, 'impressions' => 820, 'ctr' => .012, 'clicks' => 10, 'target_page' => '/servico/linha-de-vida/' ) ) ),
+	'period_label' => '', 'environment' => 'production', 'panel_url' => 'https://uonix.com.br/wp-admin/admin.php?page=uonix-analytics',
+) );
+uox_assert( false !== strpos( $html_ia, 'Página: /servico/linha-de-vida/' ), 'E-mail mostra a página líder' );
+// #343: endereço antigo que redireciona. O título sugerido é da página real, então o e-mail
+// mostra o destino ao lado do endereço que a Search Console reportou.
+$GLOBALS['uox_ia'] = array( 'teste predial' => array( 'status' => 'ok', 'title' => 'Ensaio de Arrancamento | Uônix', 'description' => 'x', 'current_title' => 'y', 'current_description' => '', 'generated_at' => '', 'post_id' => 15, 'redirected_to' => '/servico/ensaios-de-arrancamento/' ) );
+$html_301 = uonix_intelligence_report_html( array(
+	'analysis' => uox_analysis( array( array( 'query' => 'teste predial', 'position' => 7.4, 'impressions' => 23, 'ctr' => 0, 'clicks' => 0, 'target_page' => '/teste-de-arrancamento' ) ) ),
+	'period_label' => '', 'environment' => 'production', 'panel_url' => '',
+) );
+uox_assert( false !== strpos( $html_301, 'Página: /teste-de-arrancamento → /servico/ensaios-de-arrancamento/' ), '#343: o e-mail mostra o destino do 301 ao lado do endereço antigo' );
+$GLOBALS['uox_ia'] = array( 'linha de vida nbr' => array( 'status' => 'ok', 'title' => 'Linha de Vida <b>NBR</b>', 'description' => 'x', 'current_title' => 'y', 'current_description' => '', 'generated_at' => '', 'post_id' => 1 ) );
+uox_assert( false !== strpos( $html_ia, 'Título sugerido (IA): Linha de Vida &lt;b&gt;NBR&lt;/b&gt;' ), 'E-mail mostra o título sugerido, escapado' );
+$GLOBALS['uox_ia'] = array( 'linha de vida nbr' => array( 'status' => 'unavailable' ) );
+$html_sem = uonix_intelligence_report_html( array(
+	'analysis' => uox_analysis( array( array( 'query' => 'linha de vida nbr', 'position' => 6.4, 'impressions' => 820, 'ctr' => .012, 'clicks' => 10, 'target_page' => null ) ) ),
+	'period_label' => '', 'environment' => 'production', 'panel_url' => '',
+) );
+uox_assert( false === strpos( $html_sem, 'Título sugerido' ) && false === strpos( $html_sem, 'Página:' ) && false === strpos( $html_sem, 'unavailable' ), 'Sem sugestão nem página, o e-mail omite as linhas, sem motivo técnico' );
+$GLOBALS['uox_ia'] = array();
 uox_assert( false !== strpos( $html, 'Fonte: Search Console' ), 'Bloco do e-mail declara a fonte' );
 uox_assert( false !== strpos( $html, 'sincronizado em' ), 'Bloco do e-mail declara o horário de sincronização' );
 uox_assert( false !== strpos( $html, '<table' ) && false !== strpos( $html, 'role="presentation"' ), 'Layout usa tabela, necessário para Outlook' );
@@ -344,7 +452,7 @@ uox_assert( false !== strpos( $html_qa, 'não produtiva' ), 'Fora de produção 
 // Escape: a consulta vem do Search Console.
 // ---------------------------------------------------------------------------
 $html_xss = uonix_intelligence_report_html( array(
-	'analysis' => uox_analysis( array( array( 'query' => 'olhal <script>alert(1)</script> "x"', 'position' => 6.0, 'impressions' => 500, 'ctr' => .01, 'clicks' => 1, 'suggestion' => array() ) ) ),
+	'analysis' => uox_analysis( array( array( 'query' => 'olhal <script>alert(1)</script> "x"', 'position' => 6.0, 'impressions' => 500, 'ctr' => .01, 'clicks' => 1 ) ) ),
 	'period_label' => '', 'environment' => 'production', 'panel_url' => '',
 ) );
 uox_assert( false === strpos( $html_xss, '<script>alert(1)</script>' ), 'Consulta com tag não vai crua para o e-mail' );
@@ -543,6 +651,20 @@ $_GET         = array();
 uox_assert( false !== strpos( $cfg_suspenso, 'uonix-license-notice' ), 'Com a licença suspensa a aba de configurações mostra o aviso' );
 uox_assert( false !== strpos( $cfg_suspenso, 'fale com a ksio.dev' ), 'O aviso manda falar com a ksio.dev' );
 uox_assert( false !== strpos( $cfg_suspenso, 'a licença da Central de Inteligência está inativa' ), 'O resultado do envio de teste explica que a licença está inativa' );
+
+// ---------------------------------------------------------------------------
+// #351 no painel de Configurações. Fica no fim porque constante não se desfaz.
+// ---------------------------------------------------------------------------
+ob_start();
+uonix_intelligence_render_settings_panel( 'settings' );
+$cfg_visita = (string) ob_get_clean();
+uox_assert( false !== strpos( $cfg_visita, 'depende de tráfego no site' ), '#351: sem DISABLE_WP_CRON, as Configurações mantêm a frase do tráfego' );
+define( 'DISABLE_WP_CRON', true );
+ob_start();
+uonix_intelligence_render_settings_panel( 'settings' );
+$cfg_servidor = (string) ob_get_clean();
+uox_assert( false === strpos( $cfg_servidor, 'depende de tráfego' ) && false !== strpos( $cfg_servidor, 'DISABLE_WP_CRON' ) && false !== strpos( $cfg_servidor, 'agendador do servidor' ), '#351: com DISABLE_WP_CRON, as Configurações dizem que o envio depende do agendador do servidor' );
+uox_assert( false === uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) )['cron_by_visit'], '#351: com DISABLE_WP_CRON, o contexto do e-mail sai sem WP-Cron por visita' );
 
 if ( $failures > 0 ) {
 	fwrite( STDERR, "FALHAS: {$failures}\n" );

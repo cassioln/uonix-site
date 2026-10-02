@@ -122,6 +122,27 @@ function esc_url( $url ) {
 	return filter_var( $url, FILTER_SANITIZE_URL ) ?: '';
 }
 
+/*
+ * O card de manutenção também renderiza a lista de atualizações pendentes. Sem
+ * pendências nos transients, ela mostra só "Tudo atualizado"; a lista em si é
+ * coberta por test-admin-atualizacoes-pendentes.php.
+ */
+function get_site_transient( $key ) {
+	return false;
+}
+
+function get_plugins() {
+	return array();
+}
+
+function esc_html( $text ) {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+
+function esc_attr( $text ) {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/39-admin-editor-dashboard.php';
 
 $failures = 0;

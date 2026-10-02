@@ -148,10 +148,11 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 	 */
 	function uonix_intelligence_render_panel( $active_tab ) {
 		$is_active = 'intelligence' === $active_tab;
+		$rules     = function_exists( 'uonix_intelligence_seo_rules' ) ? uonix_intelligence_seo_rules() : array( 'min_position' => 4, 'max_position' => 12, 'min_impressions' => 5, 'max_ctr' => 0.03 );
+		// O mesmo limite que o e-mail usa para dizer "mais N no painel" (#291).
 		$analysis  = function_exists( 'uonix_intelligence_seo_opportunities' )
-			? uonix_intelligence_seo_opportunities( null, 5 )
+			? uonix_intelligence_seo_opportunities( null, isset( $rules['panel_limit'] ) ? (int) $rules['panel_limit'] : 5 )
 			: array( 'available' => false, 'reason' => 'snapshot_missing', 'source' => 'search_console', 'synced_at' => '', 'stale' => true, 'universe' => 0, 'rows' => array() );
-		$rules = function_exists( 'uonix_intelligence_seo_rules' ) ? uonix_intelligence_seo_rules() : array( 'min_position' => 4, 'max_position' => 12, 'min_impressions' => 5, 'max_ctr' => 0.03 );
 		$rows  = isset( $analysis['rows'] ) && is_array( $analysis['rows'] ) ? $analysis['rows'] : array();
 		?>
 		<section id="uonix-panel-intelligence" role="tabpanel" aria-labelledby="uonix-tab-intelligence"<?php echo $is_active ? '' : ' hidden'; ?>>
@@ -197,7 +198,8 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 								<th scope="col">Posição</th>
 								<th scope="col">Impressões</th>
 								<th scope="col">Taxa de clique</th>
-								<th scope="col">Diferenciais a acrescentar no título</th>
+								<th scope="col">Página Alvo</th>
+								<th scope="col">Sugestão (IA)</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -207,11 +209,47 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 									<td><?php echo esc_html( uonix_intelligence_number( $row['position'], 1 ) ); ?></td>
 									<td><?php echo esc_html( uonix_intelligence_number( $row['impressions'], 0 ) ); ?></td>
 									<td><?php echo esc_html( uonix_intelligence_format_ctr( $row['ctr'] ) ); ?></td>
+									<?php
+									$alvo     = array_key_exists( 'target_page', $row ) ? $row['target_page'] : null;
+									// Post ou termo (#344): o link leva ao editor de cada um.
+									if ( is_string( $alvo ) && '' !== $alvo && function_exists( 'uonix_intelligence_ai_page_object' ) ) {
+										$objeto = uonix_intelligence_ai_page_object( $alvo );
+									} else {
+										$post_id = is_string( $alvo ) && '' !== $alvo && function_exists( 'uonix_intelligence_ai_page_post_id' ) ? uonix_intelligence_ai_page_post_id( $alvo ) : 0;
+										$objeto  = $post_id > 0 ? array( 'type' => 'post', 'id' => $post_id ) : null;
+									}
+									$ia       = function_exists( 'uonix_intelligence_ai_suggestion_for' ) ? uonix_intelligence_ai_suggestion_for( $row ) : array( 'status' => 'not_configured' );
+									// Endereço antigo que redireciona (#343): a página que se edita é o destino.
+									$destino_301 = isset( $ia['redirected_to'] ) && is_string( $ia['redirected_to'] ) && '' !== $ia['redirected_to'] && '/' === $ia['redirected_to'][0] ? $ia['redirected_to'] : '';
+									if ( null === $objeto && '' !== $destino_301 && function_exists( 'uonix_intelligence_ai_page_object' ) ) {
+										$objeto = uonix_intelligence_ai_page_object( $destino_301 );
+									}
+									$ia_texto = function_exists( 'uonix_intelligence_ai_state_message' ) ? uonix_intelligence_ai_state_message( isset( $ia['status'] ) ? (string) $ia['status'] : '' ) : 'IA não configurada.';
+									?>
 									<td>
-										<?php if ( empty( $row['suggestion'] ) ) : ?>
-											<em>A consulta já cobre os diferenciais mapeados.</em>
+										<?php if ( null === $alvo ) : ?>
+											<em>Aguardando a próxima sincronização.</em>
+										<?php elseif ( '' === $alvo ) : ?>
+											<em>Não identificada.</em>
 										<?php else : ?>
-											<?php echo esc_html( implode( ' · ', array_map( 'strval', (array) $row['suggestion'] ) ) ); ?>
+											<a href="<?php echo esc_url( home_url( $alvo ) ); ?>"><?php echo esc_html( $alvo ); ?></a>
+											<?php if ( '' !== $destino_301 ) : ?>
+												→ <a href="<?php echo esc_url( home_url( $destino_301 ) ); ?>"><?php echo esc_html( $destino_301 ); ?></a>
+											<?php endif; ?>
+											<?php if ( is_array( $objeto ) && 'post' === $objeto['type'] && current_user_can( 'edit_post', $objeto['id'] ) ) : ?>
+												<br><a href="<?php echo esc_url( (string) get_edit_post_link( $objeto['id'] ) ); ?>">Editar página</a>
+											<?php elseif ( is_array( $objeto ) && 'term' === $objeto['type'] && function_exists( 'get_edit_term_link' ) && current_user_can( 'edit_term', $objeto['id'] ) ) : ?>
+												<br><a href="<?php echo esc_url( (string) get_edit_term_link( $objeto['id'], $objeto['taxonomy'] ) ); ?>"><?php echo esc_html( 'Editar ' . ( function_exists( 'uonix_intelligence_ai_term_kind' ) ? uonix_intelligence_ai_term_kind( $objeto['taxonomy'] ) : 'termo' ) ); ?></a>
+											<?php endif; ?>
+										<?php endif; ?>
+									</td>
+									<td>
+										<?php if ( isset( $ia['status'] ) && 'ok' === $ia['status'] ) : ?>
+											<p><strong>Título</strong><br>Atual: <?php echo esc_html( (string) $ia['current_title'] ); ?><br>Sugerido: <?php echo esc_html( (string) $ia['title'] ); ?></p>
+											<p><strong>Descrição</strong><br>Atual: <?php echo esc_html( '' !== (string) $ia['current_description'] ? (string) $ia['current_description'] : '(vazia)' ); ?><br>Sugerida: <?php echo esc_html( (string) $ia['description'] ); ?></p>
+											<p class="description"><?php echo esc_html( 'Gerada por IA' . ( '' !== (string) $ia['generated_at'] && false !== strtotime( (string) $ia['generated_at'] ) ? ' em ' . wp_date( 'd/m', strtotime( (string) $ia['generated_at'] ) ) : '' ) . ' — revise antes de publicar.' ); ?></p>
+										<?php else : ?>
+											<em><?php echo esc_html( $ia_texto ); ?></em>
 										<?php endif; ?>
 									</td>
 								</tr>
@@ -308,7 +346,11 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 
 			<?php if ( false === $momento ) : ?>
 				<div class="notice notice-info inline">
-					<p>A primeira verificação ainda não rodou. Ela é disparada pelo agendador do WordPress, que depende de tráfego no site — então acontece na primeira visita depois do horário agendado, e não em horário fixo.</p>
+					<?php if ( ! function_exists( 'uonix_intelligence_cron_by_visit' ) || uonix_intelligence_cron_by_visit() ) : ?>
+						<p>A primeira verificação ainda não rodou. Ela é disparada pelo agendador do WordPress, que depende de tráfego no site — então acontece na primeira visita depois do horário agendado, e não em horário fixo.</p>
+					<?php else : ?>
+						<p>A primeira verificação ainda não rodou. Neste ambiente o WP-Cron por visita está desligado (<code>DISABLE_WP_CRON</code>): ela depende do agendador do servidor, e não de visitas ao site.</p>
+					<?php endif; ?>
 				</div>
 			<?php endif; ?>
 
@@ -548,7 +590,11 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 				</tr>
 			</table>
 			<p class="description">
-				O envio é disparado pelo agendador do WordPress, que depende de tráfego no site e não de relógio.
+				<?php if ( ! function_exists( 'uonix_intelligence_cron_by_visit' ) || uonix_intelligence_cron_by_visit() ) : ?>
+					O envio é disparado pelo agendador do WordPress, que depende de tráfego no site e não de relógio.
+				<?php else : ?>
+					Neste ambiente o WP-Cron por visita está desligado (<code>DISABLE_WP_CRON</code>): o envio depende do agendador do servidor, e não de tráfego no site. Sem esse agendador, nenhum envio acontece.
+				<?php endif; ?>
 				Por isso esta tela informa a frequência e o próximo disparo realmente agendado, e não promete um horário fixo.
 			</p>
 

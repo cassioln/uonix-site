@@ -43,7 +43,7 @@ A issue #193 descreve o produto corretamente e o repositório incorretamente. As
 | Token de desenvolvedor do Google Ads disponível | Não existe no repositório. Não há uma linha de código de Google Ads API |
 | "Metadados CAPI no banco"; auditoria de EMQ | **Meta CAPI não está implementado**: nenhuma chamada a `graph.facebook.com` em código executável (`mu-plugins/`, `themes/`, `scripts/`); as ocorrências no repositório estão em documentação de skill. Sem CAPI não há EMQ para medir. O Pixel é client-side via GTM |
 | "Transients de 12 horas já existentes no Uônix Insights" | **Zero transients no Insights.** O padrão é snapshot em `wp_options` com frescor de 24h e lock |
-| `scripts/cron/send-weekly-executive-report.php` | `scripts/cron/` não existe; nenhum cronjob de servidor documentado; nenhum workflow com `schedule:` |
+| `scripts/cron/send-weekly-executive-report.php` | `scripts/cron/` não existe e nenhum workflow tem `schedule:`. O envio é um evento do WP-Cron (`57`). Em produção, desde 2026-10-01, o próprio WP-Cron roda pelo `crontab` do sistema (#348, `docs/ambientes.md`), sem script dedicado ao relatório |
 | `page=uonix-insights`, submenu `> Central de Inteligência` | Slug é `uonix-analytics`. A Central de Inteligência é uma **aba** da página, não submenu. Desde o PR #310 o Insights é submenu de `ksio.dev` para o `ksiodev`, e item próprio para os demais quando liberado |
 | `_uonix_utm_*` no Fluent Forms | Lá é **uma linha JSON** com `meta_key='uonix_attribution'`, só para os formulários de captura, contato e newsletter, e **nunca lida** |
 
@@ -108,7 +108,11 @@ Lista em `wp_options`. E-mail de destinatário não é segredo; token de API é 
 
 WP-Cron `weekly`. O painel exibe o **próximo disparo real** lido do agendador (`wp_next_scheduled`) e o horário do último envio. O texto ao usuário declara apenas a **frequência** — "semanal" — sem horário e **sem período do dia**.
 
-É proibido prometer horário ou período do dia na interface e no e-mail, incluindo formulações brandas como "às segundas pela manhã". WP-Cron dispara por tráfego, não por relógio, e o site não tem cronjob de servidor: a deriva pode atravessar o dia inteiro, o que torna "pela manhã" tão insustentável quanto "08:00". A única afirmação que o sistema consegue provar é a frequência somada ao próximo disparo agendado.
+É proibido prometer horário ou período do dia na interface e no e-mail, incluindo formulações brandas como "às segundas pela manhã". A única afirmação que o sistema consegue provar é a frequência somada ao próximo disparo agendado.
+
+- **Em QA e no local,** o WP-Cron dispara por tráfego, não por relógio: a deriva pode atravessar o dia inteiro, o que torna "pela manhã" tão insustentável quanto "08:00".
+- **Em produção, desde 2026-10-01 (#348),** o WP-Cron roda pelo `crontab` do sistema a cada 5 minutos, com `DISABLE_WP_CRON` (`docs/ambientes.md`). O PHP não enxerga o `crontab`: se a linha sumir, nada roda, e o código não tem como saber.
+- **Os textos seguem o que o código consegue ver (#351).** `uonix_intelligence_cron_by_visit()` (`55`) usa o mesmo critério do WordPress. Com o WP-Cron por visita, o painel e o e-mail dizem que o envio depende de tráfego. Sem ele, o e-mail diz só que o agendamento não depende de visitas, e o painel, que ele depende do agendador do servidor. Nenhum dos dois afirma que esse agendador está rodando.
 
 #### Quem cria o evento: o invariante dos destinatários
 
@@ -252,7 +256,7 @@ Qualquer revisão futura deste piso deve ser feita contra a distribuição medid
 
 A consulta por `query` do Search Console precisa sair do limite de 10 linhas usado hoje para a ordem de mil, para que a mineração tenha universo. A sanitização de query existente em `53:117-132` — que rejeita padrão de e-mail, telefone e URL — continua valendo integralmente: ampliar o volume amplia a superfície de PII na mesma proporção.
 
-A sugestão de Title/Description é **determinística por regra** na primeira entrega. Integração com LLM é escopo separado.
+A sugestão de Title/Description é feita por IA (Gemini) desde 2026-09-30: ver "Sugestão de Title/Description por IA (Gemini)", abaixo. A regra determinística anterior saiu, junto com o defeito da #309.
 
 ### Minimização de PII no universo de mineração
 
@@ -317,6 +321,94 @@ Então o residual é **≥ 10 consultas com texto**, e o número exato depende d
 
 **O filtro de PII não foi ampliado** — ver a rejeição da heurística de nome próprio acima.
 
+### Sugestão de Title/Description por IA (Gemini)
+
+Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma sugestão de Title e Description **reescritos** pelo Gemini. Nada é aplicado no Rank Math: a sugestão é exibida para revisão humana.
+
+| Arquivo | Papel |
+|---|---|
+| `53` | A sincronização diária faz uma chamada a mais à Search Console, com `query` + `page`. Ela grava `search_console.query_pages`, que dá, para cada consulta, a página de mais impressões (empate pelo caminho). Só entra consulta cujo texto `queries_extended` já retém (#253). **O dado é acessório:** se a chamada falhar, o snapshot sai sem a chave, e a sincronização não cai. |
+| `55` | Cada oportunidade ganha `target_page`: `null` quando o snapshot não tem `query_pages`, `''` quando a consulta não tem página, ou o caminho. `uonix_intelligence_seo_differentiators()` é a lista dos cinco rótulos que a IA pode afirmar. |
+| `54` | O cliente do Gemini e o cron diário `uonix_intelligence_ai_daily`. Ele monta o pedido, valida a resposta e grava o cache `uonix_intelligence_ai_suggestions`, com autoload desligado. O leitor `uonix_intelligence_ai_suggestion_for()` é o que o painel e o e-mail usam. |
+| `56` | Colunas **Página Alvo**, com link para a página e para editá-la, e **Sugestão (IA)**, com o texto atual ao lado do sugerido e o aviso "revise antes de publicar", ou o texto do estado. |
+| `57` e `59` | O e-mail mostra "Página: /caminho" e "Título sugerido (IA): …", e o destaque de SEO cita o título sugerido. Sem sugestão, as linhas são omitidas. |
+
+**Configuração**, no `wp-config.php` de cada ambiente (ver [ambientes.md](ambientes.md)):
+- `UONIX_GEMINI_API_KEY`. Sem ela, nada chama o Gemini.
+- `UONIX_GEMINI_MODEL`, opcional, com o padrão fixo `gemini-3.8-flash`. Não usar apelido `-latest`.
+
+**O pedido:**
+- Uma chamada por oportunidade (até 5 por execução), e só quando a entrada mudou desde a última sugestão aceita.
+- **A entrada, para o cache, é:** a consulta, a página, o título e a descrição atuais, a lista de diferenciais e o modelo. As métricas vão no pedido, mas ficam fora do hash: a janela de 30 dias termina ontem e muda a cada sincronização diária. Com elas no hash, cada sincronização invalidaria a sugestão (revisão do PR #329).
+- A chave vai no cabeçalho `x-goog-api-key`, nunca na URL.
+- O corpo é montado chave por chave, com estes campos:
+  - a consulta, as impressões, a posição e o CTR;
+  - a URL da página, com o título e a descrição atuais;
+  - o tipo de página (`tipo_de_pagina`), só quando ela é um termo, por exemplo "categoria de produtos";
+  - os diferenciais permitidos.
+- Nenhum dado de lead vai ao Gemini.
+- O título atual vem de `rank_math_title`, com as variáveis resolvidas pelo Rank Math quando ele expõe o resolvedor. Se sobrar variável sem resolver, vale o título do post.
+- A página líder precisa ter post **publicado** ou ser o arquivo de um termo de taxonomia pública. A home vai para `page_on_front`, e endereço que dá 404 vira `no_page`. A exceção é a URL antiga do próprio termo, como `/product-category/olhal-de-ancoragem/`: o WordPress a canonicaliza por 301, e ela resolve para o termo de destino. Feed e embed do termo não valem como página.
+- **Endereço antigo que redireciona (#343).** No cron, e só nele, `uonix_intelligence_ai_follow_redirect()` segue a cadeia por HEAD (`uonix_intelligence_executive_page_status()`, do `59`).
+  - **Quando o destino vale:** os saltos são do próprio domínio, no máximo `max_hops` (3) e sem ciclo, e o destino responde 2xx e é post publicado ou termo.
+  - **O que a entrada descreve:** o destino, que é a página que se edita. O cache guarda `redirected_to`, e o leitor do painel e do e-mail o usa **sem HTTP**.
+  - **O destino entra no hash pela URL e pelo título.** Se o redirecionamento mudar, a sugestão é refeita.
+  - **O painel e o e-mail mostram o destino** ao lado do endereço antigo: "/teste-de-arrancamento → /servico/ensaios-de-arrancamento/".
+  - **Sem resposta não apaga:** HEAD sem resposta, ou o orçamento de `head_max` (10) HEADs por execução esgotado, é "não sei". O cron mantém a entrada anterior, e o leitor revalida o destino a cada leitura.
+  - **301 para a raiz não vale:** é o padrão de página removida mandada para a home, e a sugestão iria para a home.
+  - **Limite:** o normalizador do `53` só aceita `uonix.com.br` num `Location` absoluto. No QA, o `Location` absoluto de `uonix.ksio.dev` não é seguido, como já acontece com a conferência de status do `59`. Um `Location` relativo, sem host, é seguido em qualquer ambiente.
+- **Categoria e tag (#344).** Sem post, `uonix_intelligence_resolve_term_path()` (`55`) percorre as regras de reescrita como o `url_to_postid()` do core e devolve o termo que a URL abre.
+  - **A regra decide, e não o slug.** O slug `olhal-de-ancoragem` existe em três taxonomias (`product_cat` 34, `post_tag` 510 e `product_tag` 465, medido no local em 2026-10-02), e só a regra diz que `/olhal-de-ancoragem/` é a categoria de produto.
+  - **Título e descrição:** os de `rank_math_title` e `rank_math_description` do termo. Sem meta, o nome e a descrição do termo.
+  - **O tipo de página vai ao Gemini e entra no hash** só para termos. O hash dos posts é o mesmo de antes.
+  - **No painel,** o link leva ao editor do termo: "Editar categoria de produtos".
+  - **O rótulo do Módulo 4 usa o mesmo resolvedor (#307):** `/olhal-de-ancoragem/` sai como "Olhal de Ancoragem", e não pelo caminho.
+
+**Texto da consulta ao Gemini.** Decisão do Cassio em 2026-09-30: o texto vai, **mesmo no plano gratuito** da API, o que aceita que o Google use o conteúdo para melhorar os produtos dele.
+- O que pesou: a consulta já vem do Google, pela Search Console, e já aparece no painel e no e-mail.
+- O filtro de PII continua **insuficiente por construção**, como está registrado acima.
+- Ver a entrada 09 do [ROPA](legal/ropa-inventario-dados-uonix.md).
+
+**Validação.** A sugestão só é aceita se tudo abaixo valer. Se algo falhar, o estado é `rejected`, e nada do texto recusado é exibido.
+1. A resposta é JSON com exatamente `title`, `description` e `differentiators_used`.
+2. O título tem de 1 a 60 caracteres, e a descrição de 1 a 155.
+3. Não há HTML.
+4. Todo diferencial declarado está na lista.
+5. Declarado é igual a presente no texto, comparado sem acento e sem caixa.
+
+**Limite declarado:** uma afirmação inventada fora da lista não é detectável pela validação. Na primeira chamada real, o modelo escreveu "máxima resistência e segurança". A proteção é a instrução do pedido e a revisão humana.
+
+**Cache e estados:**
+- Cada entrada do cache é chaveada por `sha256` de consulta + caminho, e a consulta não fica em texto puro.
+- Entrada nova faz uma chamada, e o resultado substitui o anterior, inclusive quando falha. Assim, a sugestão de um título que já não existe nunca sobrevive.
+- O leitor recalcula a entrada. Se o título ou a descrição mudaram depois da geração, o estado é `pending`. Mudança só nas métricas não muda nada.
+- Oportunidade que saiu da lista sai do cache.
+- O cache está em `protected_options_where()` e não atravessa ambientes no clone.
+
+| Estado | Painel |
+|---|---|
+| `ok` | atual e sugerido, com "Gerada por IA em DD/MM — revise antes de publicar" |
+| `not_configured` | IA não configurada: defina UONIX_GEMINI_API_KEY no wp-config.php. |
+| `pending` | Aguardando a próxima geração diária. |
+| `unavailable` | O Gemini não respondeu. Nova tentativa na próxima geração diária. |
+| `rejected` | Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista. |
+| `no_page` | Sem página publicada para esta consulta: removida ou redirecionada. |
+| `model_missing` | Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php. |
+
+No e-mail, todo estado diferente de `ok` só omite a linha.
+
+**Medido em 2026-09-30:**
+- `thinkingBudget: 0` foi aceito pelo `gemini-3.8-flash`: `STOP`, sem token de raciocínio. Com `maxOutputTokens: 20` e o raciocínio ligado, o modelo voltou sem texto (`MAX_TOKENS`), e por isso o limite é 1024.
+- 503 ("high demand") em 3 de 4 chamadas seguidas. Por isso 429 e 503 ganham **uma** nova tentativa. Os demais erros esperam o cron do dia seguinte.
+- `gemini-2.5-flash` deu 404 para chave nova. Por isso existe o estado `model_missing`.
+
+**O que não entrega:**
+- destaques por IA no e-mail executivo;
+- o Radar de Pautas (Módulo 8);
+- aplicar a sugestão no Rank Math;
+- botão para regenerar;
+- detecção automática de afirmação inventada fora da lista.
+
 ## Módulo 4 — Relatório Executivo
 
 O e-mail semanal existente (`57`) passa a abrir com um scorecard de quatro caixas e até três destaques, e ganha um bloco de páginas mais encontradas na busca. A camada de dados é o `59`, que não renderiza e não grava nada. Sem ela carregada, o e-mail sai exatamente como antes.
@@ -337,6 +429,19 @@ As janelas terminam **ontem** porque o relatório sai segunda às 08:00, e "hoje
 Para o GA4, o que foi **medido** em 2026-09-28 é que o dado intradiário chega em horas — às 13:00 já havia dado parcial do próprio dia. **Não foi medido que o dia anterior esteja fechado às 08:00**, e a revisão do PR #301 apontou a diferença: o processamento diário pode seguir refinando o domingo depois disso. O tamanho do erro possível foi medido no mesmo dia: o domingo 27/09 teve 2 das 65 visitas da semana (~3%). O viés possível na variação semanal de visitas é dessa ordem, para baixo, e fica declarado.
 
 A Search Console segue com ~3 dias de atraso (medido de novo no mesmo dia), e por isso a caixa de impressões reusa as janelas assentadas do Módulo 5 em vez de somar a série de novo. Reimplementar ali seria reabrir os pontos cegos que duas revisões fecharam.
+
+### O selo e o assunto são a semana do relatório (#308)
+
+- **Selo do cabeçalho e assunto:** "Semana de 24/09 a 30/09/2026", a janela `week` de `uonix_intelligence_executive_windows()`, com os 7 dias até ontem. É a mesma de Orçamentos e Visitas, e vem de `uonix_intelligence_report_badge_label()`.
+- **O período do snapshot de SEO,** de 30 dias, vai para a procedência do bloco de oportunidades: "Fonte: Search Console · 01/09 a 30/09 (30 dias) · sincronizado em …". Antes ele estava no selo, e quem lia o topo entendia que o relatório inteiro cobria 30 dias.
+- **Sem o `59`,** o selo continua sendo o período do SEO. Aí o e-mail só tem esse bloco, e o selo está certo.
+
+### O e-mail diz quantas oportunidades ficaram no painel (#291)
+
+- **Os limites:** o e-mail lista `email_limit` (3) oportunidades, e o painel `panel_limit` (5). As duas são regras de `uonix_intelligence_seo_rules()`, no `55`. O e-mail é um resumo de propósito.
+- **A frase:** abaixo da tabela sai "Mais N oportunidades no painel.", com o link para o painel, e só quando N > 0.
+- **O número:** N = min(`matched`, `panel_limit`) − linhas no e-mail. Ele não passa do que o painel mostra a mais.
+- **`matched` não é `universe`:** `matched` é o total de oportunidades antes do corte, e `universe` conta todas as consultas peneiradas, oportunidade ou não. Em 23/09 eram 5 contra 113.
 
 ### "Mudança detectável" é um teste, não um limiar
 
@@ -403,9 +508,24 @@ Quando uma cadeia passa de `max_hops`, o endereço de partida fica "não verific
 
 O orçamento **não** existe por causa do `max_execution_time`: no Linux ele não conta o tempo gasto em operação de rede (nota de `set_time_limit()` no manual do PHP). O limite de relógio real vem do servidor web e do PHP-FPM, e não foi medido. O orçamento existe para as conferências HEAD não somarem mais que ~28 s a esse limite desconhecido. **Ele não protege a execução inteira:** as três chamadas ao Google (GA4, série e páginas), cada uma com o próprio pedido de token e timeout de 20 s, somam até 120 s no pior caso, fora dele. Então o botão "Enviar Teste Agora" continua dependendo de um limite que ninguém mediu.
 
+**Desde 2026-10-01 (#348), as conferências HEAD não rodam mais no envio.**
+- **O que foi medido:** em produção, com as conferências dentro do envio, `uonix_intelligence_executive_collect()` levava 27,8 s de relógio, e o relatório inteiro (`uonix_intelligence_report_context()`) 29,5 s; e um clique em "Enviar Teste Agora" não completou o envio. A causa exata daquele corte não está provada.
+- **O cron diário `uonix_intelligence_page_status_daily`** (`uonix_intelligence_executive_refresh_page_status()`) busca as páginas da mesma janela do envio (`uonix_intelligence_executive_pages_window()`). Ele roda o mesmo `top_pages()`, com teto, orçamento e cadeias, e a conferência real fica por trás de um gravador.
+- **O que ele grava** em `uonix_intelligence_page_status_cache`, por caminho: estado, código, destino e hora.
+  - Não grava texto de consulta nem métrica.
+  - `unknown` com qualquer código é gravado, porque é resposta do servidor. Com código ≥ 400 ele é fim de cadeia; abaixo de 400 (3xx sem `Location`, 300, 304...), sem fim. Sem resposta (código 0) não é gravado, e o registro anterior ainda válido daquele caminho fica.
+  - O status de hoje sempre substitui o anterior.
+  - Registros não reconferidos hoje ficam até `status_max_age`, e os vencidos ou com hora no futuro saem. O leitor também recusa hora no futuro.
+  - Grava sem autoload.
+  - A opção está em `protected_options_where()`, porque é estado da origem.
+- **Se a busca de páginas falhar, ou faltar credencial,** o cache anterior fica intacto.
+- **Com o cache em dia, o envio chega às mesmas linhas** que chegaria conferindo na hora, porque roda o mesmo algoritmo sobre os mesmos status.
+- **O envio** lê esse cache (`uonix_intelligence_executive_page_status_cached()`) e não faz nenhuma requisição HEAD. Registro ausente, malformado ou com mais de `status_max_age` (2 dias) vira "não verificado".
+- **O que continua no envio:** as três chamadas ao Google.
+
 A requisição passa pelo Rank Math, e isso tem um custo que o User-Agent **não** resolve:
 
-- **O contador do redirecionamento ganha um acesso artificial por semana**, por endereço antigo conferido. Ele grava só acessos e a data do último, sem User-Agent, então não há como separar esse acesso dos visitantes pelo contador.
+- **O contador do redirecionamento ganha um acesso artificial por dia**, por endereço antigo conferido, desde que a conferência passou para o cron diário (#348). Ele grava só acessos e a data do último, sem User-Agent, então não há como separar esse acesso dos visitantes pelo contador.
 - **O monitor de 404 não registra a requisição.** O WordPress encerra HEAD logo depois de `template_redirect`, antes do template, e o monitor captura em `get_header` ou `wp_head`.
 
 As duas coisas foram conferidas pela terceira revisão do PR #301 no código do Rank Math e do WordPress. A versão anterior deste contrato afirmava o contrário das duas. O User-Agent `Uonix-Relatorio-Executivo/1.0` fica porque serve ao log de acesso do servidor.
@@ -415,7 +535,7 @@ As duas coisas foram conferidas pela terceira revisão do PR #301 no código do 
 ### O que o Módulo 4 ainda não entrega
 
 - **Custo por Lead**, até existir fonte de gasto de anúncio.
-- **Destaques por LLM.** Integração com Gemini é fatia separada e exige migrar `GEMINI_API_KEY` para o `wp-config.php`.
+- **Destaques por LLM.** O cliente do Gemini existe (`54-admin-intelligence-ai.php`, usado pela sugestão de Title/Description do Módulo 3), mas os destaques do e-mail executivo continuam determinísticos.
 - **Painel.** Nesta fatia o relatório executivo existe só no e-mail; o botão "Enviar Teste Agora" é a forma de vê-lo sob demanda.
 
 ## Ordem de entrega dos módulos

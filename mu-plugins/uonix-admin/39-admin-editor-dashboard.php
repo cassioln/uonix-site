@@ -141,9 +141,6 @@ add_action('admin_bar_menu', function ($wp_admin_bar) {
         return;
     }
 
-    // Remove o botão "Personalizar"
-    $wp_admin_bar->remove_node('customize');
-
     // Remove submenus do nome do site na barra superior
     $wp_admin_bar->remove_node('dashboard');
     $wp_admin_bar->remove_node('themes');
@@ -210,10 +207,6 @@ function uonix_editor_admin_bar_front_css()
     }
 
     echo '<style>
-        #wpadminbar #wp-admin-bar-customize {
-            display: none !important;
-        }
-
         #wpadminbar #wp-admin-bar-site-name .ab-sub-wrapper {
             display: none !important;
         }
@@ -1276,6 +1269,454 @@ function uox_render_manutencao_cache()
             <button type="submit" class="uox-btn uox-btn-primary">Limpar Cache do Servidor</button>
         </form>
     </div>
+    <?php
+    uox_render_lista_atualizacoes_pendentes();
+}
+
+// Classifica a gravidade de plugins/temas comparando major/minor: o
+// WordPress não informa "quantas versões atrasadas", só a atual e a mais
+// nova disponível. O núcleo não passa por aqui — ver uox_get_atualizacoes_pendentes().
+function uox_get_gravidade_atualizacao($versao_atual, $versao_nova)
+{
+    $atual = array_pad(array_map('intval', explode('.', (string) $versao_atual)), 3, 0);
+    $nova = array_pad(array_map('intval', explode('.', (string) $versao_nova)), 3, 0);
+
+    if ($nova[0] > $atual[0]) {
+        return 'alta';
+    }
+
+    if ($nova[0] === $atual[0] && $nova[1] > $atual[1]) {
+        return 'media';
+    }
+
+    return 'baixa';
+}
+
+// Ordem de prioridade das gravidades, da mais urgente para a mais branda.
+function uox_ordem_gravidade($gravidade)
+{
+    $ordem = array('critica' => 0, 'alta' => 1, 'media' => 2, 'baixa' => 3);
+
+    return $ordem[$gravidade] ?? 99;
+}
+
+// Lê os transients que o próprio WordPress já mantém via cron de verificação
+// de atualizações (wp_version_check/wp_update_plugins/wp_update_themes) —
+// sem chamada extra à API do wordpress.org nesta função. Retorna os itens já
+// agrupados por aba (plugins/core/temas) e ordenados da gravidade mais alta
+// para a mais baixa dentro de cada grupo.
+function uox_get_atualizacoes_pendentes()
+{
+    $grupos = array(
+        'plugins' => array(),
+        'core' => array(),
+        'temas' => array(),
+    );
+
+    // WordPress (núcleo): gravidade sempre "crítica", fixa — é a base de todo
+    // o site e normalmente carrega correções de segurança, independente da
+    // distância numérica entre as versões.
+    global $wp_version;
+    $core_updates = get_site_transient('update_core');
+
+    if (!empty($core_updates->updates[0]) && 'latest' !== $core_updates->updates[0]->response) {
+        $grupos['core'][] = array(
+            'nome' => 'WordPress (núcleo)',
+            'versao_atual' => $wp_version,
+            'versao_nova' => $core_updates->updates[0]->current,
+            'gravidade' => 'critica',
+        );
+    }
+
+    // Plugins.
+    if (!function_exists('get_plugins')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    $plugin_updates = get_site_transient('update_plugins');
+
+    if (!empty($plugin_updates->response) && is_array($plugin_updates->response)) {
+        $instalados = get_plugins();
+
+        foreach ($plugin_updates->response as $arquivo_plugin => $dados) {
+            // O transient só é refeito pelo cron: um plugin apagado fora do
+            // WordPress (deploy, SSH) continuaria aparecendo como "? → x.y.z",
+            // com gravidade "Alta" (intval('?') = 0). Não instalado, não lista.
+            if (!isset($instalados[$arquivo_plugin])) {
+                continue;
+            }
+
+            $versao_atual = $instalados[$arquivo_plugin]['Version'] ?? '?';
+            $versao_nova = $dados->new_version ?? '?';
+
+            $grupos['plugins'][] = array(
+                'nome' => $instalados[$arquivo_plugin]['Name'] ?? $arquivo_plugin,
+                'versao_atual' => $versao_atual,
+                'versao_nova' => $versao_nova,
+                'gravidade' => uox_get_gravidade_atualizacao($versao_atual, $versao_nova),
+            );
+        }
+    }
+
+    // Temas (todos os instalados com atualização pendente, não só o ativo —
+    // o site usa tema filho, então o pai também pode aparecer aqui).
+    $theme_updates = get_site_transient('update_themes');
+
+    if (!empty($theme_updates->response) && is_array($theme_updates->response)) {
+        foreach ($theme_updates->response as $stylesheet => $dados) {
+            $tema = wp_get_theme($stylesheet);
+
+            // Mesmo caso dos plugins: tema removido fora do WordPress não lista.
+            if (!$tema->exists()) {
+                continue;
+            }
+
+            $versao_atual = $tema->get('Version');
+            // A API de temas devolve array nativo (diferente de plugins, que usa objeto).
+            $versao_nova = is_array($dados) ? ($dados['new_version'] ?? '?') : ($dados->new_version ?? '?');
+
+            $grupos['temas'][] = array(
+                'nome' => $tema->get('Name'),
+                'versao_atual' => $versao_atual,
+                'versao_nova' => $versao_nova,
+                'gravidade' => uox_get_gravidade_atualizacao($versao_atual, $versao_nova),
+            );
+        }
+    }
+
+    foreach ($grupos as &$itens_grupo) {
+        usort($itens_grupo, function ($a, $b) {
+            return uox_ordem_gravidade($a['gravidade']) <=> uox_ordem_gravidade($b['gravidade']);
+        });
+    }
+    unset($itens_grupo);
+
+    return $grupos;
+}
+
+// Somente informativo: sem link, formulário ou atalho para disparar
+// atualização — os únicos botões são de navegação (abas e paginação). O papel
+// editor não tem (e não deve ganhar aqui) a capability
+// update_plugins/update_core/update_themes.
+function uox_render_lista_atualizacoes_pendentes()
+{
+    $grupos = uox_get_atualizacoes_pendentes();
+
+    // Sem nenhuma pendência, o bloco inteiro some do card.
+    if (0 === array_sum(array_map('count', $grupos))) {
+        return;
+    }
+
+    $cores_gravidade = array(
+        'critica' => array('bg' => '#450a0a', 'cor' => '#ffffff', 'label' => 'Crítica'),
+        'alta' => array('bg' => '#fee2e2', 'cor' => '#b91c1c', 'label' => 'Alta'),
+        'media' => array('bg' => '#fef3c7', 'cor' => '#92400e', 'label' => 'Média'),
+        'baixa' => array('bg' => '#dbeafe', 'cor' => '#1e40af', 'label' => 'Baixa'),
+    );
+
+    $rotulos_categoria = array(
+        'plugins' => 'Plugin',
+        'core' => null,
+        'temas' => 'Tema',
+    );
+
+    // "Todos" junta as categorias, da gravidade mais alta para a mais baixa;
+    // cada item leva a categoria para ser identificado fora da própria aba —
+    // menos o núcleo, cujo nome já diz "WordPress".
+    $todos = array();
+
+    foreach (array('core', 'plugins', 'temas') as $chave) {
+        foreach ($grupos[$chave] as $item) {
+            if (null !== $rotulos_categoria[$chave]) {
+                $item['categoria'] = $rotulos_categoria[$chave];
+            }
+
+            $todos[] = $item;
+        }
+    }
+
+    usort($todos, function ($a, $b) {
+        return uox_ordem_gravidade($a['gravidade']) <=> uox_ordem_gravidade($b['gravidade']);
+    });
+
+    $paineis = array(
+        'todos' => array('rotulo' => 'Todos', 'itens' => $todos),
+        'plugins' => array('rotulo' => 'Plugins', 'itens' => $grupos['plugins']),
+        'core' => array('rotulo' => 'WordPress', 'itens' => $grupos['core']),
+        'temas' => array('rotulo' => 'Tema', 'itens' => $grupos['temas']),
+    );
+
+    // Categoria sem pendência não ganha aba.
+    $paineis = array_filter($paineis, function ($painel) {
+        return !empty($painel['itens']);
+    });
+
+    // Com uma categoria só, "Todos" repetiria a mesma lista: fica a aba única.
+    if (2 === count($paineis)) {
+        unset($paineis['todos']);
+    }
+
+    // Abre na primeira aba que sobrou — "Todos", quando existe.
+    $aba_ativa = array_key_first($paineis);
+
+    // Limite por página, para o card não crescer sem fim no dashboard.
+    $por_pagina = 10;
+    $estilo_botao_pagina = 'font-size:12px; padding:3px 10px; border-radius:6px; border:1px solid #cbd5e1; background:#ffffff; color:#334155; cursor:pointer;';
+
+    echo '<div class="uox-atualizacoes-sistemicas" id="uox-atualizacoes-sistemicas" style="margin-top: 18px; padding-top: 15px; border-top: 1px solid #e2e8f0;">';
+    // Os itens têm display:flex inline, que venceria o [hidden] do navegador —
+    // sem esta regra, as páginas 2+ e os painéis ocultos continuariam à vista.
+    echo '<style>#uox-atualizacoes-sistemicas [hidden]{display:none !important;}#uox-atualizacoes-sistemicas [data-uox-pagina-acao]:disabled{opacity:.45;cursor:default;}</style>';
+    echo '<p style="font-size: 13px; font-weight: 600; color: #334155; margin: 0 0 10px 0;">Atualizações Sistêmicas</p>';
+    echo '<div class="uox-atualizacoes-tabs" role="tablist" aria-label="Categorias de atualização" style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">';
+
+    foreach ($paineis as $chave => $painel) {
+        $ativa = $aba_ativa === $chave;
+
+        printf(
+            '<button type="button" class="uox-atualizacoes-tab%1$s" id="uox-atualizacoes-tab-%2$s" data-uox-aba="%2$s" role="tab" aria-selected="%3$s" aria-controls="uox-atualizacoes-painel-%2$s" tabindex="%4$s" style="font-size:12px; font-weight:600; padding:5px 12px; border-radius:999px; border:1px solid #cbd5e1; background:%5$s; color:%6$s; cursor:pointer;">%7$s (%8$d)</button>',
+            $ativa ? ' is-active' : '',
+            esc_attr($chave),
+            $ativa ? 'true' : 'false',
+            $ativa ? '0' : '-1',
+            $ativa ? '#334155' : '#f1f5f9',
+            $ativa ? '#ffffff' : '#334155',
+            esc_html($painel['rotulo']),
+            count($painel['itens'])
+        );
+    }
+
+    echo '</div>';
+
+    // Altura travada pelo JS na maior página entre as abas (normalmente a 1 de
+    // "Todos"), para o card não mudar de tamanho ao trocar de aba ou de página.
+    echo '<div class="uox-atualizacoes-paineis" style="position: relative; overflow-y: auto;">';
+
+    foreach ($paineis as $chave => $painel) {
+        $paginas = (int) ceil(count($painel['itens']) / $por_pagina);
+
+        printf(
+            '<div class="uox-atualizacoes-painel" data-uox-painel="%1$s" id="uox-atualizacoes-painel-%1$s" role="tabpanel" aria-labelledby="uox-atualizacoes-tab-%1$s" tabindex="0" data-uox-pagina-atual="1" data-uox-paginas="%2$d" style="display:flex; flex-direction:column; min-height:100%%; box-sizing:border-box;"%3$s>',
+            esc_attr($chave),
+            $paginas,
+            $aba_ativa === $chave ? '' : ' hidden'
+        );
+
+        echo '<ul style="list-style: none; margin: 0; padding: 0; font-size: 13px; color: #334155;">';
+
+        foreach (array_values($painel['itens']) as $indice => $item) {
+            $gravidade = $cores_gravidade[$item['gravidade']];
+            $pagina = intdiv($indice, $por_pagina) + 1;
+
+            printf(
+                '<li data-uox-pagina="%d"%s style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 0; border-bottom:1px solid #f1f5f9;">
+                    <span>%s%s <span style="color:#94a3b8;">(%s &rarr; %s)</span></span>
+                    <span style="background:%s; color:%s; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; white-space:nowrap;">%s</span>
+                </li>',
+                $pagina,
+                $pagina > 1 ? ' hidden' : '',
+                isset($item['categoria']) ? '<span style="color:#94a3b8; font-size:11px;">' . esc_html($item['categoria']) . ' &middot;</span> ' : '',
+                esc_html($item['nome']),
+                esc_html($item['versao_atual']),
+                esc_html($item['versao_nova']),
+                esc_attr($gravidade['bg']),
+                esc_attr($gravidade['cor']),
+                esc_html($gravidade['label'])
+            );
+        }
+
+        echo '</ul>';
+
+        if ($paginas > 1) {
+            printf(
+                // margin-top:auto cola a paginação no fundo da área de altura
+                // fixa, mesmo numa última página com poucos itens.
+                '<div class="uox-atualizacoes-paginacao" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-top:auto; padding-top:8px; font-size:12px; color:#64748b;">
+                    <button type="button" data-uox-pagina-acao="anterior" disabled style="%1$s">&lsaquo; Anterior</button>
+                    <span data-uox-pagina-status aria-live="polite">Página 1 de %2$d</span>
+                    <button type="button" data-uox-pagina-acao="proxima" style="%1$s">Próxima &rsaquo;</button>
+                </div>',
+                esc_attr($estilo_botao_pagina),
+                $paginas
+            );
+        }
+
+        echo '</div>';
+    }
+
+    echo '</div>';
+
+    echo '<p class="uox-atualizacoes-aviso" style="margin: 12px 0 0 0; padding: 8px 10px; border-left: 3px solid #b91c1c; background: #fef2f2; color: #7f1d1d; font-size: 12px; line-height: 1.5;"><strong>&#9888; Atenção:</strong> atualizações atrasadas deixam o site exposto a falhas de segurança e invasões. Elas devem ser aplicadas no perfil de <strong>administrador</strong>, sempre depois de um <strong>backup completo</strong>.</p>';
+    echo '</div>';
+    ?>
+    <script>
+        (function () {
+            var wrap = document.getElementById('uox-atualizacoes-sistemicas');
+
+            if (!wrap || wrap.dataset.uoxTabsBound) {
+                return;
+            }
+
+            wrap.dataset.uoxTabsBound = '1';
+
+            var caixa = wrap.querySelector('.uox-atualizacoes-paineis');
+
+            // Trava a altura da área dos painéis na maior página entre todas as
+            // abas — normalmente a página 1 de "Todos", que contém as demais;
+            // nomes longos quebrando linha podem fazer outra página passar dela.
+            // Mede clones invisíveis, sem mexer no que está à vista.
+            function fixarAltura() {
+                if (!caixa) {
+                    return;
+                }
+
+                var maior = 0;
+
+                caixa.querySelectorAll('[data-uox-painel]').forEach(function (painel) {
+                    var paginas = parseInt(painel.dataset.uoxPaginas, 10) || 1;
+
+                    for (var pagina = 1; pagina <= paginas; pagina++) {
+                        var clone = painel.cloneNode(true);
+                        clone.removeAttribute('data-uox-painel');
+                        clone.removeAttribute('id');
+                        clone.removeAttribute('tabindex');
+                        clone.hidden = false;
+                        clone.setAttribute('aria-hidden', 'true');
+                        // Atribuição (=), não concatenação: precisa descartar o
+                        // min-height:100% inline do painel, senão o clone mede ao
+                        // menos a altura já travada e a trava nunca encolhe.
+                        clone.style.cssText = 'position:absolute; top:0; left:0; right:0; visibility:hidden; pointer-events:none;';
+                        clone.querySelectorAll('[data-uox-pagina]').forEach(function (item) {
+                            item.hidden = String(pagina) !== item.dataset.uoxPagina;
+                        });
+
+                        caixa.appendChild(clone);
+                        maior = Math.max(maior, clone.offsetHeight);
+                        caixa.removeChild(clone);
+                    }
+                });
+
+                // Medida 0 = widget recolhido ou oculto em "Opções de tela":
+                // travar em 0 esconderia a lista até o próximo resize.
+                caixa.style.height = maior > 0 ? maior + 'px' : '';
+            }
+
+            fixarAltura();
+            window.addEventListener('load', fixarAltura);
+
+            // A largura muda a quebra de linha dos itens — por resize da janela,
+            // mas também ao abrir o widget recolhido, arrastá-lo de coluna ou
+            // mudar o número de colunas, que não disparam resize. Só a largura
+            // importa: a altura que este código trava não pode realimentá-lo.
+            if ('ResizeObserver' in window) {
+                var larguraMedida = -1;
+
+                new ResizeObserver(function () {
+                    if (wrap.clientWidth === larguraMedida) {
+                        return;
+                    }
+
+                    larguraMedida = wrap.clientWidth;
+                    fixarAltura();
+                }).observe(wrap);
+            } else {
+                window.addEventListener('resize', fixarAltura);
+            }
+
+            function irParaPagina(painel, pagina) {
+                var total = parseInt(painel.dataset.uoxPaginas, 10) || 1;
+                pagina = Math.min(Math.max(pagina, 1), total);
+                painel.dataset.uoxPaginaAtual = String(pagina);
+
+                painel.querySelectorAll('[data-uox-pagina]').forEach(function (item) {
+                    item.hidden = parseInt(item.dataset.uoxPagina, 10) !== pagina;
+                });
+
+                var status = painel.querySelector('[data-uox-pagina-status]');
+                var anterior = painel.querySelector('[data-uox-pagina-acao="anterior"]');
+                var proxima = painel.querySelector('[data-uox-pagina-acao="proxima"]');
+
+                if (status) {
+                    status.textContent = 'Página ' + pagina + ' de ' + total;
+                }
+
+                if (anterior) {
+                    anterior.disabled = pagina <= 1;
+                }
+
+                if (proxima) {
+                    proxima.disabled = pagina >= total;
+                }
+            }
+
+            wrap.addEventListener('click', function (event) {
+                var acao = event.target.closest('[data-uox-pagina-acao]');
+
+                if (acao) {
+                    var painelAtual = acao.closest('[data-uox-painel]');
+                    var atual = parseInt(painelAtual.dataset.uoxPaginaAtual, 10) || 1;
+                    irParaPagina(painelAtual, 'proxima' === acao.dataset.uoxPaginaAcao ? atual + 1 : atual - 1);
+                    return;
+                }
+
+                var tab = event.target.closest('[data-uox-aba]');
+
+                if (tab) {
+                    ativarAba(tab);
+                }
+            });
+
+            // Teclado no padrão ARIA de abas: setas, Home e End movem o foco e
+            // ativam a aba; só a aba ativa fica na ordem do Tab (tabindex 0).
+            wrap.querySelector('[role="tablist"]').addEventListener('keydown', function (event) {
+                var abas = Array.prototype.slice.call(wrap.querySelectorAll('[data-uox-aba]'));
+                var atual = abas.indexOf(document.activeElement);
+
+                if (-1 === atual) {
+                    return;
+                }
+
+                var destino = {
+                    ArrowRight: (atual + 1) % abas.length,
+                    ArrowLeft: (atual - 1 + abas.length) % abas.length,
+                    Home: 0,
+                    End: abas.length - 1
+                }[event.key];
+
+                if (undefined === destino) {
+                    return;
+                }
+
+                event.preventDefault();
+                ativarAba(abas[destino]);
+                abas[destino].focus();
+            });
+
+            function ativarAba(tab) {
+                var aba = tab.dataset.uoxAba;
+
+                // Trocar de aba recomeça a paginação de todas na página 1.
+                if (!tab.classList.contains('is-active')) {
+                    wrap.querySelectorAll('[data-uox-painel]').forEach(function (painel) {
+                        irParaPagina(painel, 1);
+                    });
+                }
+
+                wrap.querySelectorAll('[data-uox-aba]').forEach(function (botao) {
+                    var ativo = botao === tab;
+                    botao.classList.toggle('is-active', ativo);
+                    botao.setAttribute('aria-selected', ativo ? 'true' : 'false');
+                    botao.tabIndex = ativo ? 0 : -1;
+                    botao.style.background = ativo ? '#334155' : '#f1f5f9';
+                    botao.style.color = ativo ? '#ffffff' : '#334155';
+                });
+
+                wrap.querySelectorAll('[data-uox-painel]').forEach(function (painel) {
+                    painel.hidden = painel.dataset.uoxPainel !== aba;
+                });
+            }
+        })();
+    </script>
     <?php
 }
 

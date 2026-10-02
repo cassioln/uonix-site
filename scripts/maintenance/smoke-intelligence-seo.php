@@ -133,7 +133,7 @@ if ( ! $analysis['available'] ) {
 			. ' — posição ' . number_format( (float) $row['position'], 1 )
 			. ', ' . (int) $row['impressions'] . ' impressões'
 			. ', CTR ' . number_format( (float) $row['ctr'] * 100, 2 ) . '%'
-			. ( array() !== $row['suggestion'] ? ' → ' . implode( ' · ', $row['suggestion'] ) : '' )
+			. ' — página: ' . ( null === $row['target_page'] ? '(aguardando sincronização)' : ( '' === $row['target_page'] ? '(não identificada)' : $row['target_page'] ) )
 			. "\n";
 		// Coerência: se a regra funciona, toda linha devolvida respeita os limiares.
 		if ( $row['position'] < $rules['min_position'] || $row['position'] > $rules['max_position'] ) {

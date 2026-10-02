@@ -45,26 +45,38 @@ if ( ! function_exists( 'uonix_intelligence_seo_rules' ) ) {
 			'min_impressions' => 5,
 			'max_ctr'         => 0.03,
 			'period_days'     => 30,
+			// Quantas oportunidades cada saída lista. O e-mail é um resumo de propósito, e
+			// diz quantas ficaram no painel (#291).
+			'panel_limit'     => 5,
+			'email_limit'     => 3,
 		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_cron_by_visit' ) ) {
+	/**
+	 * O WP-Cron deste ambiente roda por visita? Mesmo critério do WordPress
+	 * (`_wp_cron()`, em `wp-includes/cron.php`): `DISABLE_WP_CRON` definida e verdadeira o
+	 * desliga.
+	 *
+	 * Serve só para os textos do painel e do e-mail dizerem a verdade sobre o horário
+	 * (#351). Em produção, desde 2026-10-01, o WP-Cron roda pelo `crontab` do sistema, com a
+	 * constante ligada (`docs/ambientes.md`). QA e local seguem por visita. O PHP não enxerga
+	 * o `crontab`: com a constante ligada, o que se pode afirmar é que o envio NÃO depende de
+	 * visita, e não que existe um agendador do servidor rodando.
+	 */
+	function uonix_intelligence_cron_by_visit() {
+		return ! ( defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON );
 	}
 }
 
 if ( ! function_exists( 'uonix_intelligence_seo_differentiators' ) ) {
 	/**
-	 * Diferenciais técnicos sugeridos para Title/Description, e os termos cuja
-	 * presença na consulta indica que o diferencial já está coberto.
-	 *
-	 * Determinístico por desenho: nenhuma chamada a LLM nesta camada. Integração
-	 * com Gemini é escopo separado, conforme o contrato.
+	 * Diferenciais que a sugestão por IA (54) pode afirmar, e só eles. Confirmados
+	 * pela Uônix como verdadeiros e completos em 2026-09-30.
 	 */
 	function uonix_intelligence_seo_differentiators() {
-		return array(
-			array( 'label' => 'Aço Inox 304/316', 'covered_by' => array( 'inox', 'aco inox', 'aço inox', '304', '316' ) ),
-			array( 'label' => 'Laudo com ART', 'covered_by' => array( 'laudo', 'art', 'engenheiro' ) ),
-			array( 'label' => 'Conforme NBR 16325', 'covered_by' => array( 'nbr', 'norma', '16325', 'nr 35', 'nr35' ) ),
-			array( 'label' => 'Ensaio de Arrancamento', 'covered_by' => array( 'ensaio', 'arrancamento', 'teste de carga' ) ),
-			array( 'label' => 'Pronta Entrega', 'covered_by' => array( 'entrega', 'prazo', 'estoque' ) ),
-		);
+		return array( 'Aço Inox 304/316', 'Laudo com ART', 'Conforme NBR 16325', 'Ensaio de Arrancamento', 'Pronta Entrega' );
 	}
 }
 
@@ -87,41 +99,6 @@ if ( ! function_exists( 'uonix_intelligence_normalize_term' ) ) {
 	}
 }
 
-if ( ! function_exists( 'uonix_intelligence_title_suggestion' ) ) {
-	/**
-	 * Sugere até dois diferenciais ausentes da consulta, para entrar no Title.
-	 *
-	 * Determinístico: mesma consulta produz sempre a mesma sugestão, na ordem de
-	 * `uonix_intelligence_seo_differentiators()`. Devolve lista vazia quando a
-	 * consulta já cobre todos os diferenciais — nesse caso não há sugestão honesta
-	 * a dar, e a ausência é informação, não falha.
-	 */
-	function uonix_intelligence_title_suggestion( $query, $max = 2 ) {
-		$haystack = uonix_intelligence_normalize_term( $query );
-		if ( '' === $haystack ) {
-			return array();
-		}
-		$max = is_int( $max ) && $max > 0 ? $max : 2;
-		$suggestions = array();
-		foreach ( uonix_intelligence_seo_differentiators() as $differentiator ) {
-			$covered = false;
-			foreach ( $differentiator['covered_by'] as $token ) {
-				if ( false !== strpos( $haystack, uonix_intelligence_normalize_term( $token ) ) ) {
-					$covered = true;
-					break;
-				}
-			}
-			if ( ! $covered ) {
-				$suggestions[] = $differentiator['label'];
-			}
-			if ( count( $suggestions ) >= $max ) {
-				break;
-			}
-		}
-		return $suggestions;
-	}
-}
-
 if ( ! function_exists( 'uonix_intelligence_unavailable' ) ) {
 	/**
 	 * Resposta padronizada quando não há base para afirmar nada.
@@ -139,6 +116,7 @@ if ( ! function_exists( 'uonix_intelligence_unavailable' ) ) {
 				'stale'       => true,
 				'period_days' => uonix_intelligence_seo_rules()['period_days'],
 				'universe'    => 0,
+				'matched'     => 0,
 				'rows'        => array(),
 			),
 			is_array( $extra ) ? $extra : array()
@@ -197,6 +175,12 @@ if ( ! function_exists( 'uonix_intelligence_seo_opportunities' ) ) {
 		}
 		$universe = $snapshot['search_console']['queries_extended'];
 
+		// Página líder por consulta (53). Ausente no snapshot é `null`, "aguardando a
+		// próxima sincronização"; presente sem a consulta é '', "não identificada".
+		$query_pages = isset( $snapshot['search_console']['query_pages'] ) && is_array( $snapshot['search_console']['query_pages'] )
+			? $snapshot['search_console']['query_pages']
+			: null;
+
 		$matches = array();
 		foreach ( $universe as $row ) {
 			if ( ! is_array( $row ) || ! isset( $row['query'], $row['impressions'], $row['ctr'], $row['position'] ) ) {
@@ -224,7 +208,7 @@ if ( ! function_exists( 'uonix_intelligence_seo_opportunities' ) ) {
 				'impressions' => $impressions,
 				'ctr'         => $ctr,
 				'clicks'      => isset( $row['clicks'] ) ? (float) $row['clicks'] : 0.0,
-				'suggestion'  => uonix_intelligence_title_suggestion( $query ),
+				'target_page' => null === $query_pages ? null : ( isset( $query_pages[ $query ] ) && is_string( $query_pages[ $query ] ) ? $query_pages[ $query ] : '' ),
 			);
 		}
 
@@ -249,6 +233,9 @@ if ( ! function_exists( 'uonix_intelligence_seo_opportunities' ) ) {
 			'stale'       => $stale,
 			'period_days' => $rules['period_days'],
 			'universe'    => count( $universe ),
+			// Oportunidades antes do corte. Não é o `universe`, que conta todas as consultas
+			// peneiradas, oportunidade ou não (#291).
+			'matched'     => count( $matches ),
 			'rows'        => array_slice( $matches, 0, $limit ),
 		);
 	}
@@ -429,3 +416,113 @@ if ( ! function_exists( 'uonix_intelligence_recipients_guard_write' ) ) {
 	}
 }
 add_filter( 'pre_update_option_' . uonix_intelligence_recipients_option(), 'uonix_intelligence_recipients_guard_write', PHP_INT_MAX, 2 );
+
+if ( ! function_exists( 'uonix_intelligence_resolve_term_path' ) ) {
+	/**
+	 * Termo de taxonomia pública que um caminho do site abre, ou null (#307, #344).
+	 *
+	 * `url_to_postid()` só resolve post: categoria de produto, categoria e tag do blog ficam
+	 * de fora. `/olhal-de-ancoragem/`, a terceira página mais encontrada na busca, é o arquivo
+	 * da `product_cat` #34, servido por uma regra do Rank Math que tira a base da categoria.
+	 *
+	 * **A regra de reescrita decide, e não o slug.** O slug `olhal-de-ancoragem` existe em três
+	 * taxonomias (product_cat, post_tag e product_tag, medido em produção em 2026-10-01).
+	 * Procurá-lo em cada taxonomia escolheria pela ordem da busca. Aqui as regras são
+	 * percorridas na ordem gravada, como em `url_to_postid()` do core:
+	 *   - a primeira regra que casa decide;
+	 *   - a regra de página é pulada quando a página não existe (`use_verbose_page_rules`);
+	 *   - se a regra que decide não for de taxonomia pública, não há termo;
+	 *   - feed e embed do termo, e regra que também identifica um post, não contam.
+	 *
+	 * Endereço que o WordPress redireciona para o termo, como a URL com a base antiga
+	 * (`/product-category/olhal-de-ancoragem/`, canonicalizada por `redirect_canonical()`),
+	 * resolve para o próprio termo de destino.
+	 *
+	 * Só lê: a opção `rewrite_rules`, que é autoload, e o termo pelo slug.
+	 *
+	 * @param string     $path  Caminho ou URL do próprio site.
+	 * @param array|null $rules Para teste; o padrão é a opção `rewrite_rules`.
+	 * @return array{taxonomy: string, id: int, name: string, description: string}|null
+	 */
+	function uonix_intelligence_resolve_term_path( $path, $rules = null ) {
+		$caminho = is_string( $path ) ? (string) wp_parse_url( $path, PHP_URL_PATH ) : '';
+		$pedido  = trim( $caminho, '/' );
+		if ( '' === $pedido || ! function_exists( 'get_taxonomies' ) || ! function_exists( 'get_term_by' ) ) {
+			return null;
+		}
+		$regras = null === $rules ? ( function_exists( 'get_option' ) ? get_option( 'rewrite_rules' ) : array() ) : $rules;
+		if ( ! is_array( $regras ) || array() === $regras ) {
+			return null;
+		}
+
+		$por_variavel = array();
+		foreach ( (array) get_taxonomies( array( 'public' => true ), 'objects' ) as $nome => $taxonomia ) {
+			if ( is_object( $taxonomia ) && ! empty( $taxonomia->query_var ) && is_string( $taxonomia->query_var ) ) {
+				$por_variavel[ $taxonomia->query_var ] = (string) $nome;
+			}
+		}
+		global $wp_rewrite;
+		$verboso = is_object( $wp_rewrite ) && ! empty( $wp_rewrite->use_verbose_page_rules );
+
+		foreach ( $regras as $expressao => $consulta ) {
+			if ( ! is_string( $consulta ) ) {
+				continue;
+			}
+			// O core casa o pedido cru; o `WP::parse_request()` também tenta decodificado.
+			if ( 1 !== preg_match( '#^' . $expressao . '#', $pedido, $m ) && 1 !== preg_match( '#^' . $expressao . '#', urldecode( $pedido ), $m ) ) {
+				continue;
+			}
+			if ( $verboso && 1 === preg_match( '/pagename=\$matches\[([0-9]+)\]/', $consulta, $vm ) ) {
+				$pagina = isset( $m[ $vm[1] ] ) && function_exists( 'get_page_by_path' ) ? get_page_by_path( $m[ $vm[1] ] ) : null;
+				if ( ! $pagina ) {
+					continue;
+				}
+			}
+			$query = preg_replace( '!^.+\?!', '', $consulta );
+			$query = preg_replace_callback(
+				'/\$matches\[([0-9]+)\]/',
+				static function ( $x ) use ( $m ) {
+					return isset( $m[ (int) $x[1] ] ) ? urlencode( $m[ (int) $x[1] ] ) : '';
+				},
+				$query
+			);
+			parse_str( $query, $vars );
+			// Feed e embed do termo não são a página que se otimiza. Regra que também identifica
+			// um post (`name`, `p`, `pagename`… ou a `query_var` de um tipo de post) serve o post,
+			// e não o arquivo do termo (BAIXOS 1 e 2 da revisão do PR #372).
+			$de_post = array( 'name', 'p', 'pagename', 'page_id', 'attachment', 'attachment_id' );
+			if ( function_exists( 'get_post_types' ) ) {
+				foreach ( (array) get_post_types( array( 'public' => true ), 'objects' ) as $tipo ) {
+					if ( is_object( $tipo ) && ! empty( $tipo->query_var ) && is_string( $tipo->query_var ) ) {
+						$de_post[] = $tipo->query_var;
+					}
+				}
+			}
+			if ( isset( $vars['feed'] ) || isset( $vars['embed'] ) || array() !== array_intersect( $de_post, array_keys( array_filter( $vars, static function ( $v ) { return is_string( $v ) && '' !== $v; } ) ) ) ) {
+				return null;
+			}
+			foreach ( $vars as $variavel => $valor ) {
+				if ( ! isset( $por_variavel[ $variavel ] ) || ! is_string( $valor ) || '' === trim( $valor, '/' ) ) {
+					continue;
+				}
+				// Categoria aninhada chega como `pai/filha`: o termo é o último segmento.
+				$partes = explode( '/', trim( $valor, '/' ) );
+				$termo  = get_term_by( 'slug', (string) end( $partes ), $por_variavel[ $variavel ] );
+				if ( ! is_object( $termo ) || ! isset( $termo->term_id ) ) {
+					return null;
+				}
+
+				return array(
+					'taxonomy'    => $por_variavel[ $variavel ],
+					'id'          => (int) $termo->term_id,
+					'name'        => isset( $termo->name ) ? (string) $termo->name : '',
+					'description' => isset( $termo->description ) ? (string) $termo->description : '',
+				);
+			}
+
+			return null;
+		}
+
+		return null;
+	}
+}

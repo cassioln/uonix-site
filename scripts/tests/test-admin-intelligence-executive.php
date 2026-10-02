@@ -58,12 +58,14 @@ class Uox_WPDB {
 }
 $GLOBALS['wpdb'] = new Uox_WPDB();
 
-function add_action( $hook, $callback, $priority = 10, $args = 1 ) { return true; }
+$GLOBALS['uox_actions'] = array();
+function add_action( $hook, $callback, $priority = 10, $args = 1 ) { $GLOBALS['uox_actions'][] = array( $hook, $callback, $priority, $args ); return true; }
 function add_filter( $hook, $callback, $priority = 10, $args = 1 ) { return true; }
 function add_shortcode( $tag, $callback ) { return true; }
 function add_menu_page() { return ''; }
 function get_option( $key, $default = false ) { return array_key_exists( $key, $GLOBALS['uox_options'] ) ? $GLOBALS['uox_options'][ $key ] : $default; }
-function update_option( $key, $value, $autoload = null ) { $GLOBALS['uox_options'][ $key ] = $value; return true; }
+$GLOBALS['uox_autoload'] = array();
+function update_option( $key, $value, $autoload = null ) { $GLOBALS['uox_options'][ $key ] = $value; $GLOBALS['uox_autoload'][ $key ] = $autoload; return true; }
 function add_option( $key, $value, $d = '', $autoload = null ) { if ( array_key_exists( $key, $GLOBALS['uox_options'] ) ) return false; $GLOBALS['uox_options'][ $key ] = $value; return true; }
 function delete_option( $key ) { unset( $GLOBALS['uox_options'][ $key ] ); return true; }
 function get_transient( $key ) { return false; }
@@ -93,7 +95,8 @@ function esc_textarea( $text ) { return htmlspecialchars( (string) $text, ENT_QU
 function wp_nonce_field( $action = -1 ) { echo ''; }
 function number_format_i18n( $number, $decimals = 0 ) { return number_format( (float) $number, (int) $decimals, ',', '.' ); }
 function wp_next_scheduled( $hook ) { return $GLOBALS['uox_cron'][ $hook ] ?? false; }
-function wp_schedule_event( $ts, $rec, $hook ) { $GLOBALS['uox_cron'][ $hook ] = $ts; return true; }
+$GLOBALS['uox_cron_rec'] = array();
+function wp_schedule_event( $ts, $rec, $hook ) { $GLOBALS['uox_cron'][ $hook ] = $ts; $GLOBALS['uox_cron_rec'][ $hook ] = $rec; return true; }
 function wp_clear_scheduled_hook( $hook ) { unset( $GLOBALS['uox_cron'][ $hook ] ); }
 function wp_get_schedules() { return $GLOBALS['uox_schedules']; }
 function wp_timezone() { return new DateTimeZone( $GLOBALS['uox_timezone'] ); }
@@ -104,6 +107,15 @@ function wp_remote_retrieve_response_code( $r ) { return is_array( $r ) && isset
 function wp_remote_retrieve_body( $r ) { return ''; }
 function wp_remote_retrieve_header( $r, $name ) { return is_array( $r ) && isset( $r['headers'][ strtolower( $name ) ] ) ? $r['headers'][ strtolower( $name ) ] : ''; }
 function home_url( $path = '' ) { return 'https://uonix.com.br' . $path; }
+// #307: termos para o rótulo das páginas de categoria. O resolvedor (55) tem teste próprio
+// na suíte da IA; aqui importa que o rótulo o use.
+function get_taxonomies( $args = array(), $output = 'names' ) {
+	return array( 'product_cat' => (object) array( 'name' => 'product_cat', 'query_var' => 'product_cat' ) );
+}
+function get_term_by( $campo, $valor, $taxonomia ) {
+	$termos = array( 'olhal-de-ancoragem' => array( 34, 'Olhal de Ancoragem' ), 'acessorios' => array( 160, 'Acessórios &amp; Peças' ) );
+	return 'product_cat' === $taxonomia && isset( $termos[ $valor ] ) ? (object) array( 'term_id' => $termos[ $valor ][0], 'name' => $termos[ $valor ][1], 'description' => '' ) : false;
+}
 // Respostas HTTP por URL, e registro dos argumentos de cada HEAD.
 $GLOBALS['uox_http']      = array();
 $GLOBALS['uox_http_args'] = array();
@@ -125,6 +137,8 @@ function uonix_analytics_metrics_search_console_rows( $access_token, $site_url, 
 }
 
 $RAIZ = dirname( __DIR__, 2 );
+$GLOBALS['uox_ia'] = array();
+function uonix_intelligence_ai_suggestion_for( $row ) { return $GLOBALS['uox_ia'][ $row['query'] ?? '' ] ?? array( 'status' => 'pending' ); }
 require_once $RAIZ . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
@@ -371,7 +385,7 @@ uox_assert( 'no_sessions' === ( uonix_intelligence_executive_conversion_box( $le
 // 9. Destaques: determinísticos, até 3, e nunca enchimento.
 // ---------------------------------------------------------------------------
 
-$seo = array( 'available' => true, 'rows' => array( array( 'query' => 'olhal de ancoragem', 'impressions' => 55, 'position' => 11.2, 'clicks' => 0, 'ctr' => 0.0, 'suggestion' => array( 'Aço Inox 304/316' ) ) ) );
+$seo = array( 'available' => true, 'rows' => array( array( 'query' => 'olhal de ancoragem', 'impressions' => 55, 'position' => 11.2, 'clicks' => 0, 'ctr' => 0.0 ) ) );
 
 $placar = uonix_intelligence_executive_scorecard( array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'ga4' => $ga4Real, 'organic' => uonix_intelligence_anomaly_organic_drop( $fetcherGsc( 130 ), $CFG, $HOJE ) ) );
 $dest   = uonix_intelligence_executive_insights( $placar, $seo );
@@ -379,6 +393,11 @@ uox_assert( 3 === count( $dest ), 'com os três dados disponíveis devem sair tr
 uox_assert( false !== strpos( $dest[0]['text'] ?? '', 'sem mudança detectável' ), 'destaque de orçamentos deve dizer que 4 contra 3 não é mudança' );
 uox_assert( false !== strpos( $dest[1]['text'] ?? '', '+30,0%' ) && false !== strpos( $dest[1]['text'], 'abaixo do limiar de 35%' ), 'variação abaixo do limiar não é chamada de relevante, obteve: ' . ( $dest[1]['text'] ?? '' ) );
 uox_assert( false !== strpos( $dest[2]['text'] ?? '', 'olhal de ancoragem' ) && false !== strpos( $dest[2]['text'], 'nenhum clique' ), 'destaque de SEO deve nomear a consulta e a ausência de clique' );
+uox_assert( false === strpos( $dest[2]['text'], 'Acrescentar ao título' ) && false === strpos( $dest[2]['text'], 'sugerido' ), 'Sem sugestão de IA, o destaque de SEO não cita título' );
+$GLOBALS['uox_ia'] = array( 'olhal de ancoragem' => array( 'status' => 'ok', 'title' => 'Olhal de Ancoragem em Aço Inox 304/316', 'description' => 'x', 'current_title' => 'y', 'current_description' => '', 'generated_at' => '', 'post_id' => 1 ) );
+$dest_ia = uonix_intelligence_executive_insights( $placar, $seo );
+uox_assert( false !== strpos( $dest_ia[2]['text'] ?? '', 'Título sugerido (IA): “Olhal de Ancoragem em Aço Inox 304/316”.' ), 'Com sugestão de IA, o destaque de SEO cita o título sugerido; obteve ' . ( $dest_ia[2]['text'] ?? '' ) );
+$GLOBALS['uox_ia'] = array();
 
 // FRONTEIRA do limiar de impressões: exatamente +35% é relevante; +34,x% não.
 $placar35 = uonix_intelligence_executive_scorecard( array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'ga4' => $ga4Real, 'organic' => uonix_intelligence_anomaly_organic_drop( $fetcherGsc( 135 ), $CFG, $HOJE ) ) );
@@ -683,6 +702,18 @@ $alem   = uonix_intelligence_executive_top_pages( uox_linhas( array( '/t1' => 10
 uox_assert( '/t5' === ( $alem['rows'][0]['path'] ?? '' ) && 110.0 === $alem['rows'][0]['impressions'], 'a sexta página, que redireciona, é conferida e soma no topo: /t5 com 60 + 50 = 110; obteve ' . json_encode( array_column( $alem['rows'], 'impressions', 'path' ) ) );
 
 uox_assert( 'Página inicial' === uonix_intelligence_executive_page_label( '/' ), 'a raiz deve ser rotulada como Página inicial' );
+// #307: `/olhal-de-ancoragem/` é o arquivo da product_cat #34, servido por uma regra do Rank
+// Math. url_to_postid() não o resolve; o rótulo vem do termo que a regra abre.
+$GLOBALS['uox_options']['rewrite_rules'] = array(
+	'olhal-de-ancoragem/?$'    => 'index.php?product_cat=olhal-de-ancoragem',
+	'acessorios/?$'            => 'index.php?product_cat=acessorios',
+	'(.?.+?)(?:/([0-9]+))?/?$' => 'index.php?pagename=$matches[1]&page=$matches[2]',
+);
+uox_assert( 'Olhal de Ancoragem' === uonix_intelligence_executive_page_label( '/olhal-de-ancoragem/' ), '#307: a página de categoria é rotulada pelo nome do termo; obteve ' . var_export( uonix_intelligence_executive_page_label( '/olhal-de-ancoragem/' ), true ) );
+uox_assert( 'Acessórios & Peças' === uonix_intelligence_executive_page_label( '/acessorios/' ), '#307: o nome do termo sai sem entidade HTML' );
+uox_assert( '/sem-termo/' === uonix_intelligence_executive_page_label( '/sem-termo/' ), '#307: sem post e sem termo, o caminho continua sendo o rótulo' );
+unset( $GLOBALS['uox_options']['rewrite_rules'] );
+uox_assert( '/olhal-de-ancoragem/' === uonix_intelligence_executive_page_label( '/olhal-de-ancoragem/' ), '#307: sem as regras gravadas, o caminho' );
 uox_assert( 'pages_fetch_failed' === ( uonix_intelligence_executive_top_pages( new WP_Error( 'x' ), $janelaPag )['reason'] ?? '' ), 'falha de busca deixa o bloco indisponível com motivo' );
 
 // A conferência HTTP de VERDADE, com as respostas que a produção deu em 2026-09-28.
@@ -963,6 +994,190 @@ uox_assert( false === strpos( uonix_intelligence_report_html( array( 'analysis' 
 $htmlAntigo = uonix_intelligence_report_html( array( 'analysis' => $analise, 'period_label' => '', 'environment' => 'production', 'panel_url' => '' ) );
 uox_assert( false === strpos( $htmlAntigo, 'Resumo da semana' ) && false === strpos( $htmlAntigo, 'Páginas mais encontradas' ), 'sem contexto executivo nenhum bloco do Módulo 4 pode aparecer' );
 uox_assert( false !== strpos( $htmlAntigo, 'Oportunidades de busca a um passo do topo' ), 'e o bloco de SEO continua lá' );
+
+// ---------------------------------------------------------------------------
+// 12. Status das páginas fora do envio (#348): o cron diário confere com HEAD de
+//     verdade e grava; o envio do relatório só lê o que foi gravado.
+// ---------------------------------------------------------------------------
+$opcaoStatus = uonix_intelligence_executive_status_cache_option();
+uox_assert( 'uonix_intelligence_page_status_cache' === $opcaoStatus, 'nome da opção do cache de status das páginas' );
+uox_assert( 'uonix_intelligence_page_status_daily' === uonix_intelligence_executive_status_hook(), 'nome do hook do cron de status' );
+$agora = time();
+
+// Leitor: fresco devolve o gravado; velho, ausente ou malformado viram unknown. Sem HEAD.
+$GLOBALS['uox_options'] = array(
+	$opcaoStatus => array(
+		'/fresca/' => array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/destino/', 'checked_at' => $agora - 3600 ),
+		'/velha/'  => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $agora - 3 * DAY_IN_SECONDS ),
+		'/sem-hora/' => array( 'state' => 'ok', 'code' => 200, 'location' => '' ),
+		'/ruim/'   => 'lixo',
+	),
+);
+$headAntes = count( $GLOBALS['uox_http_args'] );
+uox_assert( array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/destino/' ) === uonix_intelligence_executive_page_status_cached( '/fresca/', $agora ), 'status fresco vem do cache, com destino e código' );
+foreach ( array( '/velha/', '/sem-hora/', '/ruim/', '/ausente/' ) as $c ) {
+	uox_assert( 'unknown' === ( uonix_intelligence_executive_page_status_cached( $c, $agora )['state'] ?? '' ), "status de {$c} vira unknown (não verificado)" );
+}
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/ontem/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $agora - 30 * HOUR_IN_SECONDS ) ) );
+uox_assert( 'ok' === uonix_intelligence_executive_page_status_cached( '/ontem/', $agora )['state'], 'conferido há 30 h ainda vale: o cron é diário e o envio pode cair até ~1 dia depois (revisão do #349, M2)' );
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/anteontem/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $agora - 47 * HOUR_IN_SECONDS ) ) );
+uox_assert( 'ok' === uonix_intelligence_executive_page_status_cached( '/anteontem/', $agora )['state'], 'conferido há 47 h ainda vale: cobre um dia em que o cron não rodou (revisão do #349, B9)' );
+// B6: hora no futuro (relógio adiantado e depois corrigido) não é status conferido.
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/futuro/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $agora + HOUR_IN_SECONDS ) ) );
+uox_assert( 'unknown' === uonix_intelligence_executive_page_status_cached( '/futuro/', $agora )['state'], 'registro com hora no futuro vira unknown (revisão do #349, B6)' );
+$GLOBALS['uox_options'] = array( $opcaoStatus => 'lixo' );
+uox_assert( 'unknown' === uonix_intelligence_executive_page_status_cached( '/fresca/', $agora )['state'], 'cache inteiro malformado: unknown' );
+uox_assert( $headAntes === count( $GLOBALS['uox_http_args'] ), 'o leitor do cache nunca faz HEAD' );
+
+// Cron de status: confere com o fetcher real (injetado), segue o redirecionamento e grava.
+$consultasRefresh = array();
+$mapaRefresh      = array( '/antiga/' => 'https://uonix.com.br/servico/nova/', '/morta/' => '404' );
+$periodoRefresh   = null;
+$linhasRefresh    = array( 'rows' => uox_linhas( array( '/antiga/' => 300, '/servico/nova/' => 100, '/morta/' => 50, '/ok/' => 40 ) ), 'truncated' => false );
+$fetcherRefresh   = static function ( $config, $period ) use ( $linhasRefresh, &$periodoRefresh ) {
+	$periodoRefresh = $period;
+	return $linhasRefresh;
+};
+$GLOBALS['uox_options'] = array();
+$refresh = uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherRefresh, 'status_fetcher' => uox_status_mapa( $mapaRefresh, $consultasRefresh ), 'now' => $agora ) );
+$cacheStatus = get_option( $opcaoStatus );
+uox_assert( '' === ( $refresh['reason'] ?? 'x' ) && 4 === ( $refresh['checked'] ?? 0 ), 'o cron confere e grava as 4 páginas (o destino do 301 uma vez só); obteve ' . var_export( $refresh, true ) );
+uox_assert( is_array( $cacheStatus ) && 'redirect' === ( $cacheStatus['/antiga/']['state'] ?? '' ) && 'https://uonix.com.br/servico/nova/' === ( $cacheStatus['/antiga/']['location'] ?? '' ) && $agora === ( $cacheStatus['/antiga/']['checked_at'] ?? 0 ), 'o redirecionamento é gravado com destino e hora' );
+uox_assert( 'not_found' === ( $cacheStatus['/morta/']['state'] ?? '' ) && 'ok' === ( $cacheStatus['/servico/nova/']['state'] ?? '' ), 'not_found e ok gravados' );
+$chavesCache = array_keys( (array) $cacheStatus );
+sort( $chavesCache );
+uox_assert( array( '/antiga/', '/morta/', '/ok/', '/servico/nova/' ) === $chavesCache, 'o cache guarda exatamente os caminhos consultados; obteve ' . var_export( $chavesCache, true ) );
+uox_assert( false === strpos( serialize( $cacheStatus ), 'olhal' ) && false === strpos( serialize( $cacheStatus ), 'impressions' ), 'o cache não guarda texto de consulta nem métrica' );
+uox_assert( false === ( $GLOBALS['uox_autoload'][ $opcaoStatus ] ?? null ), 'o cache de status é gravado sem autoload' );
+uox_assert( $periodoRefresh === $periodoPaginas, 'o cron usa a MESMA janela de páginas do envio; obteve ' . var_export( $periodoRefresh, true ) );
+
+// O envio, sem status_fetcher, monta o bloco a partir do cache e não faz HEAD nenhum.
+$headAntes = count( $GLOBALS['uox_http_args'] );
+$fetcherRefreshEnvio = static function ( $config, $period ) use ( $linhasRefresh ) {
+	return $linhasRefresh;
+};
+$execCache = uonix_intelligence_executive_collect( array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'config' => $CFG, 'ga4_fetcher' => $fetcherGa4, 'gsc_fetcher' => $fetcherGsc( 130 ), 'pages_fetcher' => $fetcherRefreshEnvio, 'labeler' => $rotulo ) );
+// #308: o selo do e-mail sai do `collect()` real, sem montar o contexto à mão. Com hoje em
+// 28/09, a semana do relatório é 21/09 a 27/09, a mesma das caixas de orçamentos e visitas.
+uox_assert( 'Semana de 21/09 a 27/09/2026' === uonix_intelligence_report_badge_label( $execCache, 'antigo' ), '#308: o selo vem da semana do collect() real; obteve ' . var_export( uonix_intelligence_report_badge_label( $execCache, 'antigo' ), true ) );
+uox_assert( $headAntes === count( $GLOBALS['uox_http_args'] ), 'o envio do relatório não faz HEAD: o status vem do cache (#348)' );
+$porCaminho = array();
+foreach ( (array) ( $execCache['top_pages']['rows'] ?? array() ) as $linhaEx ) {
+	$porCaminho[ $linhaEx['path'] ] = $linhaEx;
+}
+uox_assert( 'ok' === ( $porCaminho['/servico/nova/']['state'] ?? '' ) && 400.0 === (float) ( $porCaminho['/servico/nova/']['impressions'] ?? 0 ), 'com o cache, o 301 é somado ao destino como antes (300 + 100); obteve ' . var_export( $porCaminho['/servico/nova/'] ?? null, true ) );
+uox_assert( 'not_found' === ( $porCaminho['/morta/']['state'] ?? '' ), 'com o cache, a página morta continua marcada' );
+
+// Sem cache, o envio sai com tudo "não verificado", e ainda sem HEAD.
+$GLOBALS['uox_options'] = array();
+$headAntes  = count( $GLOBALS['uox_http_args'] );
+$execVazio  = uonix_intelligence_executive_collect( array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'config' => $CFG, 'ga4_fetcher' => $fetcherGa4, 'gsc_fetcher' => $fetcherGsc( 130 ), 'pages_fetcher' => $fetcherRefreshEnvio, 'labeler' => $rotulo ) );
+$estadosVazio = array_unique( array_column( (array) ( $execVazio['top_pages']['rows'] ?? array() ), 'state' ) );
+uox_assert( $headAntes === count( $GLOBALS['uox_http_args'] ) && array( 'unknown' ) === array_values( $estadosVazio ), 'sem cache, as páginas saem "não verificado" e nenhum HEAD é feito; obteve ' . var_export( $estadosVazio, true ) );
+
+// O cron não grava unknown: falha de rede de hoje não vira estado.
+$GLOBALS['uox_options'] = array();
+$tudoDesconhecido = static function ( $p ) { return array( 'state' => 'unknown', 'code' => 0, 'location' => '' ); };
+$refreshUnk = uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherRefresh, 'status_fetcher' => $tudoDesconhecido, 'now' => $agora ) );
+uox_assert( 0 === ( $refreshUnk['checked'] ?? -1 ) && array() === get_option( $opcaoStatus ), 'status unknown não é gravado' );
+
+
+// M1 da revisão do #349: 301 para uma página que RESPONDE com erro (503). A conferência
+// real devolve unknown com código >= 400, e o top_pages() trata isso como fim de cadeia
+// e soma o 301 nela. Pelo cache, o envio tem de chegar às MESMAS linhas.
+$statusComErro = static function ( $p ) {
+	if ( '/antiga/' === $p ) {
+		return array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/fora-do-ar/' );
+	}
+	if ( '/fora-do-ar/' === $p ) {
+		return array( 'state' => 'unknown', 'code' => 503, 'location' => '' );
+	}
+	return array( 'state' => 'ok', 'code' => 200, 'location' => '' );
+};
+$linhasErro = array( 'rows' => uox_linhas( array( '/antiga/' => 300, '/fora-do-ar/' => 100, '/ok/' => 40 ) ), 'truncated' => false );
+$fetcherErro = static function ( $config, $period ) use ( $linhasErro ) {
+	return $linhasErro;
+};
+$resumo = static function ( $exec ) {
+	$saida = array();
+	foreach ( (array) ( $exec['top_pages']['rows'] ?? array() ) as $l ) {
+		$saida[] = array( $l['path'], (float) $l['impressions'], $l['state'] );
+	}
+	return $saida;
+};
+$argsErro = array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'config' => $CFG, 'ga4_fetcher' => $fetcherGa4, 'gsc_fetcher' => $fetcherGsc( 130 ), 'pages_fetcher' => $fetcherErro, 'labeler' => $rotulo );
+$direto = $resumo( uonix_intelligence_executive_collect( $argsErro + array( 'status_fetcher' => $statusComErro ) ) );
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherErro, 'status_fetcher' => $statusComErro, 'now' => time() ) );
+$viaCache = $resumo( uonix_intelligence_executive_collect( $argsErro ) );
+uox_assert( in_array( array( '/fora-do-ar/', 400.0, 'unknown' ), $direto, true ), 'a conferência direta soma o 301 na página que responde 503; obteve ' . var_export( $direto, true ) );
+uox_assert( $direto === $viaCache, 'pelo cache, o envio chega às mesmas linhas da conferência direta, inclusive com 301 para uma página que responde 503; direto=' . var_export( $direto, true ) . ' cache=' . var_export( $viaCache, true ) );
+
+// B2 da revisão do #349: se todas as conferências de hoje falharem por rede, o status
+// ainda válido de ontem não é apagado.
+$ontem = time() - 20 * HOUR_IN_SECONDS;
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/antiga/' => array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/servico/nova/', 'checked_at' => $ontem ), '/vencida/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => time() - 5 * DAY_IN_SECONDS ) ) );
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherRefresh, 'status_fetcher' => $tudoDesconhecido, 'now' => time() ) );
+$depoisDaFalha = get_option( $opcaoStatus );
+uox_assert( isset( $depoisDaFalha['/antiga/'] ) && $ontem === $depoisDaFalha['/antiga/']['checked_at'], 'falha de rede em todas as conferências de hoje não apaga o status válido de ontem' );
+uox_assert( ! isset( $depoisDaFalha['/vencida/'] ), 'o registro que já passou da idade máxima sai do cache' );
+$GLOBALS['uox_options'] = array();
+
+
+// M5 da revisão do #349: o status de hoje vence o registro anterior ainda válido.
+$umaHora = time() - HOUR_IN_SECONDS;
+$GLOBALS['uox_options'] = array( $opcaoStatus => array(
+	'/morta/'  => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $umaHora ),
+	'/antiga/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $umaHora ),
+) );
+$consultasM5 = array();
+$agoraM5     = time();
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherRefresh, 'status_fetcher' => uox_status_mapa( $mapaRefresh, $consultasM5 ), 'now' => $agoraM5 ) );
+$depoisM5 = get_option( $opcaoStatus );
+uox_assert( 'not_found' === ( $depoisM5['/morta/']['state'] ?? '' ) && $agoraM5 === ( $depoisM5['/morta/']['checked_at'] ?? 0 ), 'o 404 de hoje substitui o "ok" de 1 h atrás; obteve ' . var_export( $depoisM5['/morta/'] ?? null, true ) );
+uox_assert( 'redirect' === ( $depoisM5['/antiga/']['state'] ?? '' ) && $agoraM5 === ( $depoisM5['/antiga/']['checked_at'] ?? 0 ), 'o 301 de hoje substitui o "ok" de 1 h atrás' );
+uox_assert( 'not_found' === uonix_intelligence_executive_page_status_cached( '/morta/' )['state'], 'o envio lê o status de hoje, não o de 1 h atrás' );
+
+// B6: registro com hora no futuro não sobrevive à mescla.
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/futuro/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => time() + 30 * DAY_IN_SECONDS ) ) );
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherRefresh, 'status_fetcher' => $tudoDesconhecido, 'now' => time() ) );
+uox_assert( ! isset( get_option( $opcaoStatus )['/futuro/'] ), 'registro com hora no futuro sai do cache na mescla (revisão do #349, B6)' );
+
+// B7: resposta sem fim (302 sem Location) é gravada como unknown com o código, e
+// substitui o "ok" anterior: o envio chega às mesmas linhas da conferência direta.
+$status302 = static function ( $p ) {
+	if ( '/ok/' === $p ) {
+		return array( 'state' => 'unknown', 'code' => 302, 'location' => '' );
+	}
+	return array( 'state' => 'ok', 'code' => 200, 'location' => '' );
+};
+$argsB7  = array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'config' => $CFG, 'ga4_fetcher' => $fetcherGa4, 'gsc_fetcher' => $fetcherGsc( 130 ), 'pages_fetcher' => $fetcherErro, 'labeler' => $rotulo );
+$diretoB7 = $resumo( uonix_intelligence_executive_collect( $argsB7 + array( 'status_fetcher' => $status302 ) ) );
+$GLOBALS['uox_options'] = array( $opcaoStatus => array( '/ok/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => time() - HOUR_IN_SECONDS ) ) );
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherErro, 'status_fetcher' => $status302, 'now' => time() ) );
+$gravadoB7 = get_option( $opcaoStatus );
+uox_assert( 'unknown' === ( $gravadoB7['/ok/']['state'] ?? '' ) && 302 === ( $gravadoB7['/ok/']['code'] ?? 0 ), 'o 302 sem Location é gravado como unknown com o código; obteve ' . var_export( $gravadoB7['/ok/'] ?? null, true ) );
+uox_assert( in_array( array( '/ok/', 40.0, 'unknown' ), $diretoB7, true ) && $diretoB7 === $resumo( uonix_intelligence_executive_collect( $argsB7 ) ), 'com o 302 sem Location, o envio pelo cache chega às linhas da conferência direta; direto=' . var_export( $diretoB7, true ) );
+$GLOBALS['uox_options'] = array();
+
+// Falha da busca de páginas ou falta de credencial: o cache anterior fica intacto.
+$cacheAnterior = array( '/x/' => array( 'state' => 'ok', 'code' => 200, 'location' => '', 'checked_at' => $agora ) );
+$GLOBALS['uox_options'] = array( $opcaoStatus => $cacheAnterior );
+$refreshErro = uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => static function () { return new WP_Error( 'google_http_500' ); }, 'status_fetcher' => $tudoDesconhecido, 'now' => $agora ) );
+uox_assert( 'pages_fetch_failed' === ( $refreshErro['reason'] ?? '' ) && $cacheAnterior === get_option( $opcaoStatus ), 'falha da busca de páginas não apaga o cache anterior' );
+$chamouSemCfg = false;
+$refreshSemCfg = uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => null, 'pages_fetcher' => static function () use ( &$chamouSemCfg ) { $chamouSemCfg = true; return array(); }, 'now' => $agora ) );
+uox_assert( 'config_missing' === ( $refreshSemCfg['reason'] ?? '' ) && false === $chamouSemCfg && $cacheAnterior === get_option( $opcaoStatus ), 'sem credencial, nenhuma busca e o cache fica' );
+
+// Agendamento diário, com o callback sem argumentos.
+$GLOBALS['uox_cron'] = array();
+uonix_intelligence_executive_schedule_status();
+uox_assert( isset( $GLOBALS['uox_cron']['uonix_intelligence_page_status_daily'] ) && 'daily' === ( $GLOBALS['uox_cron_rec']['uonix_intelligence_page_status_daily'] ?? '' ), 'o cron de status é diário' );
+$registrado = array_filter( $GLOBALS['uox_actions'], static function ( $a ) { return 'uonix_intelligence_page_status_daily' === $a[0] && 'uonix_intelligence_executive_refresh_page_status' === $a[1] && 0 === $a[3]; } );
+uox_assert( 1 === count( $registrado ), 'o hook roda o cron de status sem argumentos' );
+$agendaInit = array_filter( $GLOBALS['uox_actions'], static function ( $a ) { return 'init' === $a[0] && 'uonix_intelligence_executive_schedule_status' === $a[1]; } );
+uox_assert( 1 === count( $agendaInit ), 'o agendamento roda no init' );
+$GLOBALS['uox_options'] = array();
 
 // ---------------------------------------------------------------------------
 

@@ -53,7 +53,9 @@ function get_transient( $key ) { return false; }
 function set_transient( $key, $value ) { return true; }
 function delete_transient( $key ) { return true; }
 
-function current_user_can( $capability ) { return (bool) $GLOBALS['uox_can']; }
+// Registra capacidade e objeto: o link do editor do termo exige `edit_term` sobre o termo.
+$GLOBALS['uox_caps'] = array();
+function current_user_can( $capability, ...$args ) { $GLOBALS['uox_caps'][] = array( $capability, $args[0] ?? null ); return (bool) $GLOBALS['uox_can']; }
 // Registra a ação verificada para o teste confrontá-la com a emitida pelo
 // formulário. Stub que ignora o argumento deixaria passar uma divergência que
 // recusaria 100% das gravações legítimas em produção, em silêncio.
@@ -106,6 +108,31 @@ function uonix_ksio_can_configure_insights() {
 	++$GLOBALS['uox_dono_consultas'];
 	return (bool) $GLOBALS['uox_dono'];
 }
+
+// Sugestão por IA (54) substituída por interruptores: o 54 tem teste próprio, e aqui
+// importa que o painel exiba cada estado e escape o texto.
+$GLOBALS['uox_ia'] = array();
+function uonix_intelligence_ai_suggestion_for( $row ) { return $GLOBALS['uox_ia'][ $row['query'] ?? '' ] ?? array( 'status' => 'pending' ); }
+function uonix_intelligence_ai_state_message( $status ) { return 'ESTADO-IA:' . $status; }
+function uonix_intelligence_ai_page_post_id( $path ) { return '/produtos/olhal/' === $path ? 10 : 0; }
+function home_url( $p = '' ) { return 'https://uonix.com.br' . $p; }
+function get_edit_post_link( $id ) { return 'https://uonix.com.br/wp-admin/post.php?post=' . (int) $id . '&action=edit'; }
+// #344: a página líder pode ser um termo. O 54 tem teste próprio do resolvedor; aqui
+// importa que o painel leve ao editor certo.
+function uonix_intelligence_ai_page_object( $path ) {
+	if ( '/produtos/olhal/' === $path ) {
+		return array( 'type' => 'post', 'id' => 10 );
+	}
+	if ( '/servico/ensaios-de-arrancamento/' === $path ) {
+		return array( 'type' => 'post', 'id' => 15 );
+	}
+	if ( '/servico/projeto-andaime-fachadeiro/' === $path ) {
+		return array( 'type' => 'post', 'id' => 16 );
+	}
+	return '/olhal-de-ancoragem/' === $path ? array( 'type' => 'term', 'taxonomy' => 'product_cat', 'id' => 34 ) : null;
+}
+function uonix_intelligence_ai_term_kind( $taxonomy ) { return 'product_cat' === $taxonomy ? 'categoria de produtos' : 'arquivo de taxonomia'; }
+function get_edit_term_link( $id, $taxonomy = '' ) { return 'https://uonix.com.br/wp-admin/term.php?taxonomy=' . $taxonomy . '&tag_ID=' . (int) $id; }
 
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
@@ -161,6 +188,41 @@ uox_assert( false !== strpos( $html, 'Dado atualizado' ), 'Snapshot fresco é ro
 $html_stale = uox_render_intelligence( 'intelligence', uox_snapshot( array( uox_q( 'olhal', 6.0, 500, .01 ) ), gmdate( 'c', time() - ( 4 * DAY_IN_SECONDS ) ) ) );
 uox_assert( false !== strpos( $html_stale, 'Dado desatualizado' ), 'Bloco com snapshot vencido se declara desatualizado' );
 uox_assert( false !== strpos( $html_stale, '<table' ), 'Bloco desatualizado ainda mostra o dado que tem' );
+
+// ---------------------------------------------------------------------------
+// Página Alvo e Sugestão (IA).
+// ---------------------------------------------------------------------------
+$snap_ia = uox_snapshot( array( uox_q( 'olhal inox', 6.0, 50, .0 ), uox_q( 'sem pagina', 7.0, 40, .0 ), uox_q( 'categoria olhal', 8.0, 30, .0 ), uox_q( 'teste predial', 9.0, 20, .0 ), uox_q( 'andaime antigo', 9.5, 15, .0 ) ) );
+$snap_ia['search_console']['query_pages'] = array( 'olhal inox' => '/produtos/olhal/', 'categoria olhal' => '/olhal-de-ancoragem/', 'teste predial' => '/teste-de-arrancamento', 'andaime antigo' => '/projeto-de-andaime-fachadeiro' );
+$GLOBALS['uox_ia'] = array(
+	'olhal inox' => array( 'status' => 'ok', 'title' => 'Olhal <script>x</script>', 'description' => 'Descrição sugerida', 'current_title' => 'Título atual', 'current_description' => '', 'generated_at' => '2026-10-01T09:00:00+00:00', 'post_id' => 10 ),
+	'sem pagina' => array( 'status' => 'no_page' ),
+	'andaime antigo' => array( 'status' => 'pending', 'object' => array( 'type' => 'post', 'id' => 16 ), 'redirected_to' => '/servico/projeto-andaime-fachadeiro/' ),
+	'teste predial' => array( 'status' => 'ok', 'title' => 'Ensaio de Arrancamento | Uônix', 'description' => 'd', 'current_title' => 'Ensaio de Arrancamento com Laudo | Uônix', 'current_description' => '', 'generated_at' => '', 'post_id' => 15, 'object' => array( 'type' => 'post', 'id' => 15 ), 'redirected_to' => '/servico/ensaios-de-arrancamento/' ),
+);
+$html_ia = uox_render_intelligence( 'intelligence', $snap_ia );
+uox_assert( false !== strpos( $html_ia, '>Página Alvo<' ) && false !== strpos( $html_ia, '>Sugestão (IA)<' ), 'Tabela ganha as colunas Página Alvo e Sugestão (IA)' );
+// O stub de esc_url deste teste não converte `&`; o que importa aqui é o link existir.
+uox_assert( false !== strpos( $html_ia, 'href="https://uonix.com.br/produtos/olhal/"' ) && false !== strpos( $html_ia, 'post.php?post=10&action=edit' ), 'Página Alvo traz link para a página e para editar' );
+uox_assert( false !== strpos( $html_ia, 'Título atual' ) && false !== strpos( $html_ia, 'Descrição sugerida' ) && false !== strpos( $html_ia, 'revise antes de publicar' ), 'Sugestão mostra atual e sugerido, com o aviso de revisão' );
+uox_assert( false === strpos( $html_ia, '<script>x' ) && false !== strpos( $html_ia, '&lt;script&gt;' ), 'Texto vindo da IA sai escapado' );
+uox_assert( false !== strpos( $html_ia, 'ESTADO-IA:no_page' ) && false !== strpos( $html_ia, 'Não identificada' ), 'Sem página: estado da IA e Página Alvo não identificada' );
+uox_assert( false !== strpos( $html_ia, 'term.php?taxonomy=product_cat&tag_ID=34' ) && false !== strpos( $html_ia, '>Editar categoria de produtos<' ), '#344: página de categoria leva ao editor do termo' );
+uox_assert( in_array( array( 'edit_term', 34 ), $GLOBALS['uox_caps'], true ), '#344: o link do editor do termo confere edit_term sobre o termo 34 (BAIXO 3 da revisão do PR #372)' );
+uox_assert( false !== strpos( $html_ia, '→ <a href="https://uonix.com.br/servico/projeto-andaime-fachadeiro/">' ) && false !== strpos( $html_ia, 'post.php?post=16&action=edit' ), '#343: fora do estado ok (pending), o painel também mostra o destino e o link de edição (BAIXO 3 da revisão do PR #373)' );
+uox_assert( false !== strpos( $html_ia, '→ <a href="https://uonix.com.br/servico/ensaios-de-arrancamento/">/servico/ensaios-de-arrancamento/</a>' ) && false !== strpos( $html_ia, 'post.php?post=15&action=edit' ), '#343: endereço antigo mostra o destino do 301 e leva ao editor da página real' );
+uox_assert( false === strpos( $html_ia, 'Diferenciais a acrescentar' ), 'A coluna determinística saiu (#309)' );
+// #291 (MÉDIO 1 da revisão do PR #370): o painel CONSOME panel_limit. Com 7 oportunidades,
+// a tabela sai com exatamente 5 linhas, e é isso que o "Mais N no painel" do e-mail promete.
+$sete = array();
+foreach ( range( 1, 7 ) as $i ) {
+	$sete[] = uox_q( 'consulta ' . $i, 8.0, 100 - $i, .0 );
+}
+$html_sete = uox_render_intelligence( 'intelligence', uox_snapshot( $sete ) );
+uox_assert( 5 === substr_count( $html_sete, '<td><strong>consulta ' ) && false !== strpos( $html_sete, '<td><strong>consulta 5</strong>' ) && false === strpos( $html_sete, '<td><strong>consulta 6</strong>' ), '#291: com 7 oportunidades o painel lista panel_limit (5); obteve ' . substr_count( $html_sete, '<td><strong>consulta ' ) );
+$html_sem_mapa = uox_render_intelligence( 'intelligence', uox_snapshot( array( uox_q( 'olhal inox', 6.0, 50, .0 ) ) ) );
+uox_assert( false !== strpos( $html_sem_mapa, 'Aguardando a próxima sincronização' ), 'Snapshot sem query_pages: Página Alvo aguardando a sincronização' );
+$GLOBALS['uox_ia'] = array();
 
 // ---------------------------------------------------------------------------
 // Escape: a consulta vem do Search Console, ou seja, de fora.
