@@ -1036,6 +1036,9 @@ $fetcherRefreshEnvio = static function ( $config, $period ) use ( $linhasRefresh
 	return $linhasRefresh;
 };
 $execCache = uonix_intelligence_executive_collect( array( 'today' => $HOJE, 'lead_counts' => $leadsFlat, 'config' => $CFG, 'ga4_fetcher' => $fetcherGa4, 'gsc_fetcher' => $fetcherGsc( 130 ), 'pages_fetcher' => $fetcherRefreshEnvio, 'labeler' => $rotulo ) );
+// #308: o selo do e-mail sai do `collect()` real, sem montar o contexto à mão. Com hoje em
+// 28/09, a semana do relatório é 21/09 a 27/09, a mesma das caixas de orçamentos e visitas.
+uox_assert( 'Semana de 21/09 a 27/09/2026' === uonix_intelligence_report_badge_label( $execCache, 'antigo' ), '#308: o selo vem da semana do collect() real; obteve ' . var_export( uonix_intelligence_report_badge_label( $execCache, 'antigo' ), true ) );
 uox_assert( $headAntes === count( $GLOBALS['uox_http_args'] ), 'o envio do relatório não faz HEAD: o status vem do cache (#348)' );
 $porCaminho = array();
 foreach ( (array) ( $execCache['top_pages']['rows'] ?? array() ) as $linhaEx ) {
