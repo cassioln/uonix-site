@@ -226,8 +226,8 @@ jobs:
       - name: Test admin pending updates list
         run: php scripts/tests/test-admin-atualizacoes-pendentes.php
 
-      - name: Test footer widgets in Customizer for editor
-        run: php scripts/tests/test-admin-customizer-widgets-rodape.php
+      - name: Test editor without Customizer access
+        run: php scripts/tests/test-admin-editor-sem-personalizador.php
 
       - name: Test block widgets without content from Max Mega Menu
         run: php scripts/tests/test-navigation-mega-menu-widget-bloco.php
