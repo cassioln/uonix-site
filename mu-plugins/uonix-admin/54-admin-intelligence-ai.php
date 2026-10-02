@@ -440,28 +440,34 @@ if ( ! function_exists( 'uonix_intelligence_ai_validate' ) ) {
 	}
 }
 
-if ( ! function_exists( 'uonix_intelligence_ai_call' ) ) {
+if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 	/**
-	 * Uma chamada ao Gemini para uma entrada.
+	 * Transporte de um pedido ao Gemini, sem saber o que o pedido pede.
+	 *
+	 * Separado de `uonix_intelligence_ai_call()` para o Radar de Pautas (63) usar o mesmo
+	 * endereço, a mesma chave no cabeçalho e a mesma nova tentativa, com outro pedido e
+	 * outro validador. Devolve o texto cru: validar é de quem chamou.
 	 *
 	 * 429 e 503 ganham UMA nova tentativa após `$pause` segundos. Medido em
 	 * 2026-09-30: o gemini-3.8-flash respondeu 503 ("high demand") em 3 de 4
 	 * chamadas seguidas. Os demais erros não são repetidos: o próximo cron diário
 	 * tenta de novo.
 	 *
-	 * @return array{status: string, suggestion?: array}
+	 * @param array  $body  Corpo do `generateContent`.
+	 * @param string $model Modelo, como `uonix_intelligence_ai_model()` devolve.
+	 * @return array{status: string, text?: string} `text` só com `ok`.
 	 */
-	function uonix_intelligence_ai_call( array $input, $pause = 2 ) {
+	function uonix_intelligence_ai_generate( array $body, $model, $pause = 2 ) {
 		$chave = uonix_intelligence_ai_api_key();
 		if ( '' === $chave ) {
 			return array( 'status' => 'not_configured' );
 		}
 		$limites = uonix_intelligence_ai_limits();
-		$url     = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( (string) $input['model'] ) . ':generateContent';
+		$url     = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( (string) $model ) . ':generateContent';
 		$args    = array(
 			'timeout' => $limites['timeout'],
 			'headers' => array( 'x-goog-api-key' => $chave, 'Content-Type' => 'application/json' ),
-			'body'    => (string) wp_json_encode( uonix_intelligence_ai_request_body( $input ) ),
+			'body'    => (string) wp_json_encode( $body ),
 		);
 
 		$codigo   = 0;
@@ -498,7 +504,24 @@ if ( ! function_exists( 'uonix_intelligence_ai_call' ) ) {
 				$texto .= $parte['text'];
 			}
 		}
-		$sugestao = uonix_intelligence_ai_validate( $texto, (array) $input['differentiators'] );
+
+		return array( 'status' => 'ok', 'text' => $texto );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_ai_call' ) ) {
+	/**
+	 * Uma chamada ao Gemini para uma oportunidade do Módulo 3: monta o pedido de
+	 * título e descrição, usa o transporte e valida a resposta.
+	 *
+	 * @return array{status: string, suggestion?: array}
+	 */
+	function uonix_intelligence_ai_call( array $input, $pause = 2 ) {
+		$resposta = uonix_intelligence_ai_generate( uonix_intelligence_ai_request_body( $input ), (string) $input['model'], $pause );
+		if ( 'ok' !== $resposta['status'] ) {
+			return array( 'status' => $resposta['status'] );
+		}
+		$sugestao = uonix_intelligence_ai_validate( $resposta['text'], (array) $input['differentiators'] );
 
 		return null === $sugestao ? array( 'status' => 'rejected' ) : array( 'status' => 'ok', 'suggestion' => $sugestao );
 	}
