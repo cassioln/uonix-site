@@ -35,6 +35,7 @@ uonix_mu_require_files(
 		'60-admin-customizer-widgets-rodape.php',
 		'61-admin-widgets-rodape-fundo-escuro.php',
 		'62-admin-widgets-lote-rest.php',
+		'65-admin-editor-politicas-lgpd.php',
 	),
 	'uonix-admin'
 );

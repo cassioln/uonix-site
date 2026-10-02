@@ -244,6 +244,9 @@ jobs:
       - name: Test editor footer-only widgets screen
         run: php scripts/tests/test-admin-editor-rodape.php
 
+      - name: Test editor policies and LGPD menu
+        run: php scripts/tests/test-admin-editor-politicas-lgpd.php
+
   shell-and-config:
     name: Shell, workflows, Node and Compose
     runs-on: ubuntu-latest
