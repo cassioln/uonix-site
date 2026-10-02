@@ -219,6 +219,11 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 										$objeto  = $post_id > 0 ? array( 'type' => 'post', 'id' => $post_id ) : null;
 									}
 									$ia       = function_exists( 'uonix_intelligence_ai_suggestion_for' ) ? uonix_intelligence_ai_suggestion_for( $row ) : array( 'status' => 'not_configured' );
+									// Endereço antigo que redireciona (#343): a página que se edita é o destino.
+									$destino_301 = isset( $ia['redirected_to'] ) && is_string( $ia['redirected_to'] ) && '' !== $ia['redirected_to'] && '/' === $ia['redirected_to'][0] ? $ia['redirected_to'] : '';
+									if ( null === $objeto && '' !== $destino_301 && function_exists( 'uonix_intelligence_ai_page_object' ) ) {
+										$objeto = uonix_intelligence_ai_page_object( $destino_301 );
+									}
 									$ia_texto = function_exists( 'uonix_intelligence_ai_state_message' ) ? uonix_intelligence_ai_state_message( isset( $ia['status'] ) ? (string) $ia['status'] : '' ) : 'IA não configurada.';
 									?>
 									<td>
@@ -228,6 +233,9 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 											<em>Não identificada.</em>
 										<?php else : ?>
 											<a href="<?php echo esc_url( home_url( $alvo ) ); ?>"><?php echo esc_html( $alvo ); ?></a>
+											<?php if ( '' !== $destino_301 ) : ?>
+												→ <a href="<?php echo esc_url( home_url( $destino_301 ) ); ?>"><?php echo esc_html( $destino_301 ); ?></a>
+											<?php endif; ?>
 											<?php if ( is_array( $objeto ) && 'post' === $objeto['type'] && current_user_can( 'edit_post', $objeto['id'] ) ) : ?>
 												<br><a href="<?php echo esc_url( (string) get_edit_post_link( $objeto['id'] ) ); ?>">Editar página</a>
 											<?php elseif ( is_array( $objeto ) && 'term' === $objeto['type'] && function_exists( 'get_edit_term_link' ) && current_user_can( 'edit_term', $objeto['id'] ) ) : ?>

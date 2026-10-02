@@ -123,6 +123,12 @@ function uonix_intelligence_ai_page_object( $path ) {
 	if ( '/produtos/olhal/' === $path ) {
 		return array( 'type' => 'post', 'id' => 10 );
 	}
+	if ( '/servico/ensaios-de-arrancamento/' === $path ) {
+		return array( 'type' => 'post', 'id' => 15 );
+	}
+	if ( '/servico/projeto-andaime-fachadeiro/' === $path ) {
+		return array( 'type' => 'post', 'id' => 16 );
+	}
 	return '/olhal-de-ancoragem/' === $path ? array( 'type' => 'term', 'taxonomy' => 'product_cat', 'id' => 34 ) : null;
 }
 function uonix_intelligence_ai_term_kind( $taxonomy ) { return 'product_cat' === $taxonomy ? 'categoria de produtos' : 'arquivo de taxonomia'; }
@@ -186,11 +192,13 @@ uox_assert( false !== strpos( $html_stale, '<table' ), 'Bloco desatualizado aind
 // ---------------------------------------------------------------------------
 // Página Alvo e Sugestão (IA).
 // ---------------------------------------------------------------------------
-$snap_ia = uox_snapshot( array( uox_q( 'olhal inox', 6.0, 50, .0 ), uox_q( 'sem pagina', 7.0, 40, .0 ), uox_q( 'categoria olhal', 8.0, 30, .0 ) ) );
-$snap_ia['search_console']['query_pages'] = array( 'olhal inox' => '/produtos/olhal/', 'categoria olhal' => '/olhal-de-ancoragem/' );
+$snap_ia = uox_snapshot( array( uox_q( 'olhal inox', 6.0, 50, .0 ), uox_q( 'sem pagina', 7.0, 40, .0 ), uox_q( 'categoria olhal', 8.0, 30, .0 ), uox_q( 'teste predial', 9.0, 20, .0 ), uox_q( 'andaime antigo', 9.5, 15, .0 ) ) );
+$snap_ia['search_console']['query_pages'] = array( 'olhal inox' => '/produtos/olhal/', 'categoria olhal' => '/olhal-de-ancoragem/', 'teste predial' => '/teste-de-arrancamento', 'andaime antigo' => '/projeto-de-andaime-fachadeiro' );
 $GLOBALS['uox_ia'] = array(
 	'olhal inox' => array( 'status' => 'ok', 'title' => 'Olhal <script>x</script>', 'description' => 'Descrição sugerida', 'current_title' => 'Título atual', 'current_description' => '', 'generated_at' => '2026-10-01T09:00:00+00:00', 'post_id' => 10 ),
 	'sem pagina' => array( 'status' => 'no_page' ),
+	'andaime antigo' => array( 'status' => 'pending', 'object' => array( 'type' => 'post', 'id' => 16 ), 'redirected_to' => '/servico/projeto-andaime-fachadeiro/' ),
+	'teste predial' => array( 'status' => 'ok', 'title' => 'Ensaio de Arrancamento | Uônix', 'description' => 'd', 'current_title' => 'Ensaio de Arrancamento com Laudo | Uônix', 'current_description' => '', 'generated_at' => '', 'post_id' => 15, 'object' => array( 'type' => 'post', 'id' => 15 ), 'redirected_to' => '/servico/ensaios-de-arrancamento/' ),
 );
 $html_ia = uox_render_intelligence( 'intelligence', $snap_ia );
 uox_assert( false !== strpos( $html_ia, '>Página Alvo<' ) && false !== strpos( $html_ia, '>Sugestão (IA)<' ), 'Tabela ganha as colunas Página Alvo e Sugestão (IA)' );
@@ -201,6 +209,8 @@ uox_assert( false === strpos( $html_ia, '<script>x' ) && false !== strpos( $html
 uox_assert( false !== strpos( $html_ia, 'ESTADO-IA:no_page' ) && false !== strpos( $html_ia, 'Não identificada' ), 'Sem página: estado da IA e Página Alvo não identificada' );
 uox_assert( false !== strpos( $html_ia, 'term.php?taxonomy=product_cat&tag_ID=34' ) && false !== strpos( $html_ia, '>Editar categoria de produtos<' ), '#344: página de categoria leva ao editor do termo' );
 uox_assert( in_array( array( 'edit_term', 34 ), $GLOBALS['uox_caps'], true ), '#344: o link do editor do termo confere edit_term sobre o termo 34 (BAIXO 3 da revisão do PR #372)' );
+uox_assert( false !== strpos( $html_ia, '→ <a href="https://uonix.com.br/servico/projeto-andaime-fachadeiro/">' ) && false !== strpos( $html_ia, 'post.php?post=16&action=edit' ), '#343: fora do estado ok (pending), o painel também mostra o destino e o link de edição (BAIXO 3 da revisão do PR #373)' );
+uox_assert( false !== strpos( $html_ia, '→ <a href="https://uonix.com.br/servico/ensaios-de-arrancamento/">/servico/ensaios-de-arrancamento/</a>' ) && false !== strpos( $html_ia, 'post.php?post=15&action=edit' ), '#343: endereço antigo mostra o destino do 301 e leva ao editor da página real' );
 uox_assert( false === strpos( $html_ia, 'Diferenciais a acrescentar' ), 'A coluna determinística saiu (#309)' );
 // #291 (MÉDIO 1 da revisão do PR #370): o painel CONSOME panel_limit. Com 7 oportunidades,
 // a tabela sai com exatamente 5 linhas, e é isso que o "Mais N no painel" do e-mail promete.
