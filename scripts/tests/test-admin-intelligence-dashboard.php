@@ -137,6 +137,7 @@ function get_edit_term_link( $id, $taxonomy = '' ) { return 'https://uonix.com.b
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
+require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php';
 
 function uox_snapshot( array $universe, $updated_at = null, $period = 30 ) {
 	return array(
@@ -544,6 +545,75 @@ foreach ( array( true, false ) as $pode ) {
 }
 $GLOBALS['uox_can']  = true;
 $GLOBALS['uox_dono'] = true;
+
+// ---------------------------------------------------------------------------
+// Módulo 8: seção "Radar de Pautas", no fim da aba de oportunidades.
+// ---------------------------------------------------------------------------
+function uox_render_radar( array $opcoes, array $get = array() ) {
+	$GLOBALS['uox_options'] = $opcoes;
+	$_GET                   = $get;
+	ob_start();
+	uonix_intelligence_render_radar_section();
+	return (string) ob_get_clean();
+}
+function uox_dash_radar_cand( $consulta, array $ai, array $pagina = array() ) {
+	return array(
+		'key'         => uonix_intelligence_radar_query_key( $consulta ),
+		'query'       => $consulta,
+		'impressions' => 106,
+		'clicks'      => 1,
+		'position'    => 59.1,
+		'page'        => $pagina + array( 'path' => '/norma-ancoragem-predial', 'kind' => 'página', 'title' => 'Norma de Ancoragem Predial', 'redirected_to' => '' ),
+		'ai'          => $ai,
+	);
+}
+$opcao_radar  = uonix_intelligence_radar_option();
+$k_ap         = uonix_intelligence_radar_query_key( 'ancoragem predial' );
+$ok_nova      = array( 'status' => 'ok', 'generated_at' => '2026-10-05T03:00:00+00:00', 'suggestion' => array( 'caminho' => 'nova', 'titulo' => 'Ancoragem predial: guia', 'angulo' => 'Do projeto à inspeção.', 'intencao' => 'informacional' ) );
+$ok_reforco   = array( 'status' => 'ok', 'suggestion' => array( 'caminho' => 'reforcar', 'titulo' => 'Teste de arrancamento <script>', 'angulo' => 'Aprofundar o laudo & a norma.', 'intencao' => 'comercial' ) );
+$estado_radar = static function ( array $cands, array $extra = array() ) use ( $opcao_radar ) {
+	return array( $opcao_radar => $extra + array( 'status' => 'ok', 'updated_at' => '2026-10-05T03:00:00+00:00', 'list_updated_at' => '2026-10-05T03:00:00+00:00', 'window' => array( 'start' => '2026-07-05', 'end' => '2026-10-02' ), 'truncated' => false, 'candidates' => $cands ) );
+};
+$GLOBALS['uox_can']           = true;
+$GLOBALS['uox_ksio_pode']     = true;
+$GLOBALS['uox_nonce_actions'] = array();
+uox_assert( false !== strpos( uox_render_radar( array() ), 'O Radar ainda não rodou. Ele roda uma vez por dia.' ), 'Radar: sem execução, o painel diz que ainda não rodou' );
+uox_assert( false !== strpos( uox_render_radar( $estado_radar( array() ) ), 'Nenhuma consulta nesta janela passa na regra do Radar' ), 'Radar: sem candidata, diz que é resultado' );
+$html_r = uox_render_radar( $estado_radar( array(
+	uox_dash_radar_cand( 'ancoragem predial', $ok_nova ),
+	uox_dash_radar_cand( 'teste de arrancamento', $ok_reforco, array( 'path' => '/teste-de-arrancamento', 'kind' => 'página de serviço', 'title' => 'Ensaios de Arrancamento', 'redirected_to' => '/servico/ensaios-de-arrancamento/' ) ),
+	uox_dash_radar_cand( 'barra <b>roscada</b>', array( 'status' => 'not_configured' ) ),
+	uox_dash_radar_cand( 'ancoragem estrutural', array( 'status' => 'deferred' ), array( 'path' => '', 'kind' => '', 'title' => '', 'redirected_to' => '' ) ),
+) ) );
+uox_assert( false !== strpos( $html_r, 'id="uonix-radar-title"' ) && false !== strpos( $html_r, 'de 05/07 a 02/10' ) && false !== strpos( $html_r, 'atualizado em 05/10/2026 03:00 (UTC)' ), 'Radar: título, janela e hora da lista' );
+uox_assert( false !== strpos( $html_r, 'Post novo' ) && false !== strpos( $html_r, 'Ancoragem predial: guia' ) && false !== strpos( $html_r, 'Intenção: informacional. Gerada por IA em 05/10' ), 'Radar: pauta nova com título, intenção e data' );
+uox_assert( false !== strpos( $html_r, 'Reforçar esta página' ) && false !== strpos( $html_r, 'Teste de arrancamento &lt;script&gt;' ) && false === strpos( $html_r, '<script>' ) && false !== strpos( $html_r, 'Aprofundar o laudo &amp; a norma.' ), 'Radar: reforço com o texto escapado' );
+uox_assert( false !== strpos( $html_r, 'barra &lt;b&gt;roscada&lt;/b&gt;' ), 'Radar: consulta escapada' );
+uox_assert( false !== strpos( $html_r, 'Sem a chave do Gemini: a candidata aparece sem pauta.' ) && false !== strpos( $html_r, 'Pauta não gerada. O Radar tenta de novo amanhã.' ), 'Radar: mensagem de cada estado da pauta' );
+uox_assert( false !== strpos( $html_r, 'Endereço antigo /teste-de-arrancamento redireciona para cá.' ) && false !== strpos( $html_r, 'post.php?post=15&action=edit' ), 'Radar: 301 mostra o destino e leva ao editor dele' );
+uox_assert( false !== strpos( $html_r, 'Sem página do site para esta consulta.' ), 'Radar: sem página líder' );
+uox_assert( 4 === substr_count( $html_r, 'value="uonix_intelligence_radar_dismiss"' ) && in_array( 'uonix_intelligence_radar_dismiss_' . $k_ap, $GLOBALS['uox_nonce_actions'], true ), 'Radar: um Descartar por linha, com nonce por chave' );
+$GLOBALS['uox_ksio_pode'] = false;
+uox_assert( false === strpos( uox_render_radar( $estado_radar( array( uox_dash_radar_cand( 'ancoragem predial', $ok_nova ) ) ) ), 'uonix_intelligence_radar_dismiss' ), 'Radar: sem acesso à ferramenta, sem botão' );
+$GLOBALS['uox_ksio_pode'] = true;
+$GLOBALS['uox_can']       = false;
+$sem_cap                  = uox_render_radar( $estado_radar( array( uox_dash_radar_cand( 'teste de arrancamento', $ok_reforco, array( 'path' => '/teste-de-arrancamento', 'kind' => 'página de serviço', 'title' => 'Ensaios de Arrancamento', 'redirected_to' => '/servico/ensaios-de-arrancamento/' ) ) ) ) );
+uox_assert( false === strpos( $sem_cap, 'uonix_intelligence_radar_dismiss' ) && false === strpos( $sem_cap, 'Editar página' ), 'Radar: sem permissão, nem botão nem link de edição' );
+$GLOBALS['uox_can'] = true;
+$html_d             = uox_render_radar( $estado_radar( array( uox_dash_radar_cand( 'ancoragem predial', $ok_nova ), uox_dash_radar_cand( 'teste de ancoragem', $ok_nova ) ) ) + array( uonix_intelligence_radar_dismissed_option() => array( $k_ap => '2026-10-05T10:00:00+00:00' ) ) );
+uox_assert( false !== strpos( $html_d, 'Descartadas (1)' ) && false !== strpos( $html_d, 'value="uonix_intelligence_radar_restore"' ) && 1 === substr_count( $html_d, 'value="uonix_intelligence_radar_dismiss"' ), 'Radar: a descartada sai da tabela e vai para "Descartadas", com Restaurar' );
+$html_f = uox_render_radar( $estado_radar( array( uox_dash_radar_cand( 'ancoragem predial', $ok_nova ) ), array( 'status' => 'gsc_failed', 'updated_at' => '2026-10-06T03:00:00+00:00' ) ) );
+uox_assert( false !== strpos( $html_f, 'Search Console indisponível na última execução. Mostrando a lista de 05/10.' ) && false !== strpos( $html_f, 'Ancoragem predial: guia' ), 'Radar: falha do Search Console mostra a lista anterior, com a data dela' );
+uox_assert( false !== strpos( uox_render_radar( array( $opcao_radar => array( 'status' => 'config_missing', 'updated_at' => '2026-10-06T03:00:00+00:00' ) ) ), 'Search Console indisponível. O Radar tenta de novo amanhã.' ), 'Radar: falha sem lista anterior' );
+uox_assert( false !== strpos( uox_render_radar( $estado_radar( array(), array( 'truncated' => true ) ) ), 'veio no limite de linhas' ), 'Radar: corte de linhas avisado' );
+uox_assert( false !== strpos( uox_render_radar( $estado_radar( array() ), array( 'uonix_radar' => 'dismiss' ) ), 'Pauta descartada.' ) && false === strpos( uox_render_radar( $estado_radar( array() ), array( 'uonix_radar' => array( 'x' ) ) ), 'Pauta descartada' ), 'Radar: aviso depois de descartar, e marcador malformado ignorado' );
+uox_assert( false !== strpos( uox_render_radar( array( $opcao_radar => 'lixo' ) ), 'O Radar ainda não rodou' ), 'Radar: opção malformada não quebra o painel (foco de revisão 4)' );
+$GLOBALS['uox_options'] = array();
+$_GET                   = array();
+ob_start();
+uonix_intelligence_render_panel( 'intelligence' );
+$aba = (string) ob_get_clean();
+uox_assert( false !== strpos( $aba, 'id="uonix-radar-title"' ) && strpos( $aba, 'uonix-radar-title' ) > strpos( $aba, 'uonix-intelligence-title' ) && strpos( $aba, 'uonix-radar-title' ) < strpos( $aba, '</section>' ), 'Radar: a seção fica no fim da aba de oportunidades, dentro dela' );
 
 if ( $failures > 0 ) {
 	fwrite( STDERR, "FALHAS: {$failures}\n" );

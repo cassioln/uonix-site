@@ -101,6 +101,9 @@ jobs:
       - name: Test Uônix Insights license kill-switch
         run: php scripts/tests/test-admin-intelligence-license.php
 
+      - name: Test Uônix Insights content radar (Module 8)
+        run: php scripts/tests/test-admin-intelligence-content-radar.php
+
       - name: Test GTM conversions and AdOpt contract
         run: php scripts/tests/test-gtm-conversoes-e-adopt.php
 

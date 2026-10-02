@@ -161,6 +161,7 @@ require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/57-admin-intelligence-report.php';
+require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php';
 
 // Sem o 50 a licença conta como inativa: nada sai. Só dá para provar antes de carregá-lo.
 $GLOBALS['uox_mail_result'] = true;
@@ -555,6 +556,74 @@ try {
 uox_assert( 1 === count( $GLOBALS['uox_mail_calls'] ), 'Envio de teste válido dispara um e-mail' );
 uox_assert( false !== strpos( $redirect, 'uonix_test_sent=1' ), 'Redirect informa que o envio saiu' );
 uox_assert( false !== strpos( $redirect, 'tab=settings' ), 'Redirect volta para a aba de configurações' );
+
+// ---------------------------------------------------------------------------
+// Módulo 8: "Pautas novas para o blog", e a marcação só no envio agendado real.
+// ---------------------------------------------------------------------------
+function uox_radar_cand( $consulta, $caminho = 'nova', $status = 'ok' ) {
+	$ai = 'ok' === $status
+		? array( 'status' => 'ok', 'input_hash' => str_repeat( 'a', 64 ), 'suggestion' => array( 'caminho' => $caminho, 'titulo' => 'Pauta <' . $consulta . '>', 'angulo' => 'Ângulo & ' . $consulta . '.', 'intencao' => 'informacional' ) )
+		: array( 'status' => $status );
+	return array(
+		'key'         => uonix_intelligence_radar_query_key( $consulta ),
+		'query'       => $consulta,
+		'impressions' => 106,
+		'clicks'      => 1,
+		'position'    => 59.1,
+		'page'        => array( 'path' => '/norma-ancoragem-predial', 'kind' => 'página', 'title' => 'Norma de Ancoragem Predial', 'redirected_to' => '' ),
+		'ai'          => $ai,
+	);
+}
+function uox_radar_opcoes( array $cands ) {
+	return array(
+		uonix_intelligence_recipients_option() => array( 'cassio@uonix.com.br' ),
+		uonix_intelligence_radar_option()       => array( 'status' => 'ok', 'updated_at' => '2026-10-05T03:00:00+00:00', 'list_updated_at' => '2026-10-05T03:00:00+00:00', 'window' => array( 'start' => '2026-07-05', 'end' => '2026-10-02' ), 'truncated' => false, 'candidates' => $cands ),
+	);
+}
+$GLOBALS['uox_options'] = uox_radar_opcoes( array( uox_radar_cand( 'ancoragem predial', 'reforcar' ), uox_radar_cand( 'teste de ancoragem' ), uox_radar_cand( 'ancoragem estrutural' ), uox_radar_cand( 'barra roscada' ) ) );
+$html_radar = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) );
+uox_assert( false !== strpos( $html_radar, 'Pautas novas para o blog' ), 'Com pauta nova, o e-mail traz o bloco do Radar' );
+uox_assert( 3 === substr_count( $html_radar, 'Pauta &lt;' ) && false === strpos( $html_radar, 'Pauta <' ), 'No máximo 3 pautas, com o título escapado' );
+uox_assert( false !== strpos( $html_radar, 'Reforçar: Norma de Ancoragem Predial' ) && false !== strpos( $html_radar, 'Post novo' ), 'O caminho aparece: reforço com o título da página, ou post novo' );
+uox_assert( false !== strpos( $html_radar, 'Ângulo &amp; ancoragem predial.' ) && false !== strpos( $html_radar, 'Consulta: ancoragem predial · posição 59,1 · 106 impressões em 90 dias' ), 'Ângulo e números aparecem, escapados' );
+uox_assert( false !== strpos( $html_radar, 'Mais 1 pauta no painel.' ), 'Diz quantas ficaram no painel' );
+uox_assert( strpos( $html_radar, 'Pautas novas para o blog' ) > strpos( $html_radar, 'Oportunidades de busca a um passo do topo' ), 'O bloco vem depois das oportunidades' );
+$GLOBALS['uox_options'] = uox_radar_opcoes( array( uox_radar_cand( 'ancoragem predial', 'nova', 'unavailable' ) ) );
+uox_assert( false === strpos( uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) ), 'Pautas novas' ), 'Sem pauta pronta, o bloco não aparece' );
+uox_assert( '' === uonix_intelligence_report_radar_html( array( 'content_radar' => 'lixo' ) ) && '' === uonix_intelligence_report_radar_html( array( 'content_radar' => array( 'items' => 'lixo' ) ) ) && '' === uonix_intelligence_report_radar_html( array() ), 'Contexto malformado não produz bloco (foco de revisão 4)' );
+$html_lixo = uonix_intelligence_report_radar_html( array( 'content_radar' => array( 'items' => array( array( 'key' => str_repeat( 'a', 64 ), 'query' => 'x y', 'impressions' => 9, 'position' => 20.0, 'page' => 'lixo', 'ai' => array( 'status' => 'ok', 'suggestion' => 'lixo' ) ) ), 'panel_count' => 1 ) ) );
+uox_assert( false !== strpos( $html_lixo, 'Consulta: x y' ) && false === strpos( $html_lixo, 'Post novo' ), 'Item com sugestão malformada sai só com a consulta e os números' );
+
+$GLOBALS['uox_options']     = uox_radar_opcoes( array( uox_radar_cand( 'ancoragem predial' ), uox_radar_cand( 'teste de ancoragem' ) ) );
+$chaves_radar               = array( uonix_intelligence_radar_query_key( 'ancoragem predial' ), uonix_intelligence_radar_query_key( 'teste de ancoragem' ) );
+$GLOBALS['uox_mail_calls']  = array();
+$GLOBALS['uox_mail_result'] = true;
+$rr                         = uonix_intelligence_send_report();
+uox_assert( true === $rr['sent'] && $chaves_radar === $rr['radar_keys'], 'O envio devolve as chaves das pautas que foram no corpo' );
+uox_assert( array() === get_option( uonix_intelligence_radar_emailed_option(), array() ), 'send_report sozinho não marca: o envio de teste passa por ele' );
+$GLOBALS['uox_mail_calls'] = array();
+try {
+	uonix_intelligence_handle_test_send();
+} catch ( Uox_Redirect_Exception $e ) {
+	unset( $e );
+}
+uox_assert( 1 === count( $GLOBALS['uox_mail_calls'] ) && false !== strpos( $GLOBALS['uox_mail_calls'][0]['message'], 'Pautas novas para o blog' ), 'O envio de teste mostra o bloco' );
+uox_assert( array() === get_option( uonix_intelligence_radar_emailed_option(), array() ), 'O envio de teste não gasta a novidade' );
+$GLOBALS['uox_mail_result'] = false;
+uonix_intelligence_send_scheduled_report();
+uox_assert( array() === get_option( uonix_intelligence_radar_emailed_option(), array() ), 'Envio agendado que falha não marca' );
+$GLOBALS['uox_mail_result'] = true;
+$ra                         = uonix_intelligence_send_scheduled_report();
+uox_assert( true === $ra['sent'] && $chaves_radar === array_keys( get_option( uonix_intelligence_radar_emailed_option(), array() ) ), 'Envio agendado real marca exatamente as pautas enviadas' );
+$GLOBALS['uox_mail_calls'] = array();
+uonix_intelligence_send_scheduled_report();
+uox_assert( isset( $GLOBALS['uox_mail_calls'][0] ) && false === strpos( $GLOBALS['uox_mail_calls'][0]['message'], 'Pautas novas para o blog' ), 'Na semana seguinte, as mesmas pautas não voltam ao e-mail' );
+uox_assert( 'uonix_intelligence_send_scheduled_report' === $GLOBALS['uox_actions'][ uonix_intelligence_report_hook() ]['callback'] && 0 === $GLOBALS['uox_actions'][ uonix_intelligence_report_hook() ]['accepted_args'], 'O evento semanal chama o envio agendado, sem argumentos' );
+$GLOBALS['uox_options'] = array( uonix_intelligence_radar_option() => uox_radar_opcoes( array( uox_radar_cand( 'barra roscada' ) ) )[ uonix_intelligence_radar_option() ] );
+$sem_dest               = uonix_intelligence_send_scheduled_report();
+uox_assert( false === $sem_dest['sent'] && array() === $sem_dest['radar_keys'] && array() === get_option( uonix_intelligence_radar_emailed_option(), array() ), 'Sem destinatário: radar_keys vazio e nada marcado' );
+$GLOBALS['uox_options']    = array( uonix_intelligence_recipients_option() => array( 'cassio@uonix.com.br' ) );
+$GLOBALS['uox_mail_calls'] = array();
 
 // ---------------------------------------------------------------------------
 // Mensagens de falha explicam o caso mais provável em vez de culpar o operador.

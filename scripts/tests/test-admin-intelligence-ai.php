@@ -296,6 +296,41 @@ $GLOBALS['uox_http'] = array( $partes_com_pensamento );
 uox_ai_assert( 'ok' === uonix_intelligence_ai_call( $in, 0 )['status'], 'Parte marcada como thought é ignorada' );
 
 // ---------------------------------------------------------------------------
+// 5b. Transporte separado (Módulo 8): `uonix_intelligence_ai_generate()` não sabe o
+//     que o pedido pede, e devolve o texto cru para quem chamou validar.
+// ---------------------------------------------------------------------------
+$corpo_livre = array( 'contents' => array( array( 'role' => 'user', 'parts' => array( array( 'text' => 'qualquer pedido' ) ) ) ) );
+$GLOBALS['uox_http']    = array( uox_gemini( '{"livre":true}' ) );
+$GLOBALS['uox_pedidos'] = array();
+$g = uonix_intelligence_ai_generate( $corpo_livre, 'gemini-3.8-flash', 0 );
+uox_ai_assert( array( 'status' => 'ok', 'text' => '{"livre":true}' ) === $g, 'generate devolve o texto cru, sem validar; obteve ' . var_export( $g, true ) );
+uox_ai_assert( json_encode( $corpo_livre ) === ( $GLOBALS['uox_pedidos'][0]['args']['body'] ?? '' ), 'generate envia exatamente o corpo recebido' );
+$GLOBALS['uox_http']    = array( uox_gemini( 'x' ) );
+$GLOBALS['uox_pedidos'] = array();
+uonix_intelligence_ai_generate( $corpo_livre, 'gemini-9-flash', 0 );
+$pg = $GLOBALS['uox_pedidos'][0] ?? array();
+uox_ai_assert( 'https://generativelanguage.googleapis.com/v1beta/models/gemini-9-flash:generateContent' === ( $pg['url'] ?? '' ) && 'chave-de-teste' === ( $pg['args']['headers']['x-goog-api-key'] ?? '' ) && 15 === ( $pg['args']['timeout'] ?? 0 ), 'generate usa o modelo recebido, a chave no cabeçalho e o timeout de 15 s' );
+$casos_generate = array(
+	'503 e depois 200'   => array( array( uox_http( 503 ), uox_gemini( 'ok' ) ), 'ok', 2 ),
+	'429 duas vezes'     => array( array( uox_http( 429 ), uox_http( 429 ) ), 'unavailable', 2 ),
+	'500'                => array( array( uox_http( 500 ) ), 'unavailable', 1 ),
+	'404 do modelo'      => array( array( uox_http( 404 ) ), 'model_missing', 1 ),
+	'SAFETY'             => array( array( uox_gemini( '', 'SAFETY' ) ), 'rejected', 1 ),
+	'MAX_TOKENS'         => array( array( uox_gemini( '', 'MAX_TOKENS' ) ), 'unavailable', 1 ),
+	'erro de transporte' => array( array( new WP_Error( 'http_request_failed' ) ), 'unavailable', 1 ),
+);
+foreach ( $casos_generate as $caso => $c ) {
+	$GLOBALS['uox_http']    = $c[0];
+	$GLOBALS['uox_pedidos'] = array();
+	$r = uonix_intelligence_ai_generate( $corpo_livre, 'gemini-3.8-flash', 0 );
+	uox_ai_assert( $c[1] === $r['status'] && $c[2] === count( $GLOBALS['uox_pedidos'] ) && ( 'ok' === $c[1] ) === isset( $r['text'] ), "generate {$caso}: status {$c[1]} com {$c[2]} pedido(s), texto só no ok; obteve " . var_export( $r, true ) );
+}
+$GLOBALS['uox_http'] = array( uox_gemini( 'não é json' ) );
+uox_ai_assert( 'não é json' === ( uonix_intelligence_ai_generate( $corpo_livre, 'gemini-3.8-flash', 0 )['text'] ?? null ), 'Texto que não é JSON vai para quem chamou: a validação é de cada pedido' );
+$GLOBALS['uox_http'] = array( $partes_com_pensamento );
+uox_ai_assert( json_encode( $ok, JSON_UNESCAPED_UNICODE ) === ( uonix_intelligence_ai_generate( $corpo_livre, 'gemini-3.8-flash', 0 )['text'] ?? null ), 'generate ignora a parte de pensamento' );
+
+// ---------------------------------------------------------------------------
 // 6. Execução com cache.
 // ---------------------------------------------------------------------------
 function uox_analise( array $linhas ) { return array( 'available' => true, 'rows' => $linhas ); }
@@ -597,6 +632,11 @@ $codigo = 'define("ABSPATH", 1); function add_action() {} function add_filter() 
 	. 'echo json_encode(array(uonix_intelligence_ai_run(array("available" => true, "rows" => array(array("query" => "x", "target_page" => "/a/")))), uonix_intelligence_ai_suggestion_for(array("query" => "x", "target_page" => "/a/"))));';
 $saida = (string) shell_exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg( $codigo ) . ' 2>&1' );
 uox_ai_assert( false === strpos( $saida, 'CHAMOU' ) && '[{"called":0,"skipped":"not_configured"},{"status":"not_configured"}]' === trim( $saida ), 'Sem UONIX_GEMINI_API_KEY: nenhuma chamada e estado not_configured; obteve ' . $saida );
+$codigo_g = 'define("ABSPATH", 1); function add_action() {} function add_filter() {} function get_option($k, $d = false) { return $d; } function wp_remote_post() { echo "CHAMOU"; return null; } '
+	. 'require ' . var_export( $RAIZ . '/mu-plugins/uonix-admin/54-admin-intelligence-ai.php', true ) . '; '
+	. 'echo json_encode(uonix_intelligence_ai_generate(array(), "gemini-3.8-flash", 0));';
+$saida_g = (string) shell_exec( escapeshellarg( PHP_BINARY ) . ' -r ' . escapeshellarg( $codigo_g ) . ' 2>&1' );
+uox_ai_assert( '{"status":"not_configured"}' === trim( $saida_g ), 'Sem chave, generate não chama nada; obteve ' . $saida_g );
 
 if ( $failures > 0 ) {
 	fwrite( STDERR, "FALHAS: {$failures}\n" );

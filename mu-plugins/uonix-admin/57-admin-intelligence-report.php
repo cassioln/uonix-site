@@ -132,6 +132,11 @@ if ( ! function_exists( 'uonix_intelligence_report_context' ) ) {
 				: null;
 		}
 
+		// Módulo 8. Opcional: sem o 63 carregado, o e-mail sai sem o bloco de pautas.
+		$radar = array_key_exists( 'content_radar', $args )
+			? $args['content_radar']
+			: ( function_exists( 'uonix_intelligence_radar_email_items' ) ? uonix_intelligence_radar_email_items() : null );
+
 		return array(
 			'analysis'         => $analysis,
 			'executive'        => $executive,
@@ -141,6 +146,7 @@ if ( ! function_exists( 'uonix_intelligence_report_context' ) ) {
 			'cron_by_visit'    => function_exists( 'uonix_intelligence_cron_by_visit' ) ? uonix_intelligence_cron_by_visit() : true,
 			'environment'      => defined( 'UONIX_ENV' ) ? (string) UONIX_ENV : '',
 			'panel_url'        => function_exists( 'admin_url' ) ? admin_url( 'admin.php?page=uonix-analytics&tab=intelligence' ) : '',
+			'content_radar'    => $radar,
 		);
 	}
 }
@@ -569,6 +575,9 @@ if ( ! function_exists( 'uonix_intelligence_report_html' ) ) {
 		}
 		$html .= '</td></tr>';
 
+		// Módulo 8: só quando há pauta nova (63).
+		$html .= uonix_intelligence_report_radar_html( $context );
+
 		if ( null !== $executivo ) {
 			$html .= uonix_intelligence_report_executive_pages_html( $executivo );
 		}
@@ -595,6 +604,55 @@ if ( ! function_exists( 'uonix_intelligence_report_html' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_report_radar_html' ) ) {
+	/**
+	 * Bloco "Pautas novas para o blog" (Módulo 8). Vazio quando não há pauta nova: o
+	 * e-mail não repete toda semana a mesma lista. A seleção é do 63
+	 * (`uonix_intelligence_radar_email_items()`); aqui só se formata.
+	 */
+	function uonix_intelligence_report_radar_html( $context ) {
+		$radar = isset( $context['content_radar'] ) && is_array( $context['content_radar'] ) ? $context['content_radar'] : array();
+		$itens = isset( $radar['items'] ) && is_array( $radar['items'] ) ? $radar['items'] : array();
+		if ( array() === $itens ) {
+			return '';
+		}
+		$painel = isset( $context['panel_url'] ) ? (string) $context['panel_url'] : '';
+		$html   = '<tr><td style="padding:24px 28px 8px 28px;">';
+		$html  .= '<div style="color:#0e3780;font-size:16px;font-weight:bold;">Pautas novas para o blog</div>';
+		$html  .= '<div style="color:#64748b;font-size:11px;padding-top:6px;">Fonte: Search Console, 90 dias · consultas em que o site aparece depois da 15.ª posição</div>';
+		$html  .= '</td></tr>';
+		$html  .= '<tr><td style="padding:8px 28px 24px 28px;">';
+		foreach ( $itens as $c ) {
+			if ( ! is_array( $c ) || ! isset( $c['query'] ) || ! is_string( $c['query'] ) ) {
+				continue;
+			}
+			$pauta = function_exists( 'uonix_intelligence_radar_suggestion' ) ? uonix_intelligence_radar_suggestion( $c ) : null;
+			$html .= '<div style="padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:13px;line-height:1.5;color:#1e293b;">';
+			if ( null !== $pauta ) {
+				$html .= '<strong>' . esc_html( $pauta['titulo'] ) . '</strong>';
+			}
+			$html .= '<div style="color:#64748b;font-size:11px;padding-top:3px;">' . esc_html( 'Consulta: ' . $c['query'] . ' · posição ' . number_format( (float) ( $c['position'] ?? 0 ), 1, ',', '.' ) . ' · ' . number_format( (float) ( $c['impressions'] ?? 0 ), 0, ',', '.' ) . ' impressões em 90 dias' ) . '</div>';
+			if ( null !== $pauta ) {
+				$pagina = isset( $c['page'] ) && is_array( $c['page'] ) ? $c['page'] : array();
+				$nome   = isset( $pagina['title'] ) && is_string( $pagina['title'] ) && '' !== $pagina['title'] ? $pagina['title'] : ( isset( $pagina['path'] ) && is_string( $pagina['path'] ) ? $pagina['path'] : '' );
+				$html  .= '<div style="color:#334155;font-size:12px;padding-top:3px;">' . esc_html( 'reforcar' === $pauta['caminho'] ? 'Reforçar: ' . $nome : 'Post novo' ) . '</div>';
+				$html  .= '<div style="color:#334155;font-size:12px;padding-top:3px;">' . esc_html( $pauta['angulo'] ) . '</div>';
+			}
+			$html .= '</div>';
+		}
+		$a_mais = ( isset( $radar['panel_count'] ) ? (int) $radar['panel_count'] : 0 ) - count( $itens );
+		if ( $a_mais > 0 ) {
+			$frase = 'Mais ' . $a_mais . ( 1 === $a_mais ? ' pauta' : ' pautas' ) . ' no painel.';
+			$html .= '<div style="padding-top:10px;font-size:12px;color:#334155;">';
+			$html .= '' !== $painel ? '<a href="' . esc_url( $painel ) . '" style="color:#0e3780;">' . esc_html( $frase ) . '</a>' : esc_html( $frase );
+			$html .= '</div>';
+		}
+		$html .= '</td></tr>';
+
+		return $html;
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_send_report' ) ) {
 	/**
 	 * Envia o relatório para os destinatários cadastrados.
@@ -606,12 +664,12 @@ if ( ! function_exists( 'uonix_intelligence_send_report' ) ) {
 	 * Com a licença inativa também não envia, e isso vale para o envio de teste,
 	 * que passa por aqui.
 	 *
-	 * @return array{sent: bool, reason: string, recipients: int}
+	 * @return array{sent: bool, reason: string, recipients: int, radar_keys: string[]}
 	 */
 	function uonix_intelligence_send_report( $recipients = null ) {
 		// Sem o 50 carregado, a licença conta como inativa (50-admin-intelligence-license.php).
 		if ( ! function_exists( 'uonix_intelligence_license_state' ) || empty( uonix_intelligence_license_state()['sending'] ) ) {
-			return array( 'sent' => false, 'reason' => 'license_inactive', 'recipients' => 0 );
+			return array( 'sent' => false, 'reason' => 'license_inactive', 'recipients' => 0, 'radar_keys' => array() );
 		}
 
 		$lista = null === $recipients && function_exists( 'uonix_intelligence_get_recipients' )
@@ -620,7 +678,7 @@ if ( ! function_exists( 'uonix_intelligence_send_report' ) ) {
 		$lista = is_array( $lista ) ? $lista : array();
 
 		if ( array() === $lista ) {
-			return array( 'sent' => false, 'reason' => 'no_recipients', 'recipients' => 0 );
+			return array( 'sent' => false, 'reason' => 'no_recipients', 'recipients' => 0, 'radar_keys' => array() );
 		}
 
 		$context = uonix_intelligence_report_context();
@@ -631,10 +689,20 @@ if ( ! function_exists( 'uonix_intelligence_send_report' ) ) {
 			array( 'Content-Type: text/html; charset=UTF-8' )
 		);
 
+		// Chaves das pautas que foram no corpo. Só o envio agendado as marca como enviadas.
+		$pautas = isset( $context['content_radar']['items'] ) && is_array( $context['content_radar']['items'] ) ? $context['content_radar']['items'] : array();
+		$chaves = array();
+		foreach ( $pautas as $pauta ) {
+			if ( is_array( $pauta ) && isset( $pauta['key'] ) && is_string( $pauta['key'] ) ) {
+				$chaves[] = $pauta['key'];
+			}
+		}
+
 		return array(
 			'sent'       => (bool) $enviado,
 			'reason'     => $enviado ? '' : 'mail_failed',
 			'recipients' => count( $lista ),
+			'radar_keys' => $chaves,
 		);
 	}
 }
@@ -643,8 +711,26 @@ if ( ! function_exists( 'uonix_intelligence_send_report' ) ) {
 // agendado aqui: carregar um arquivo não deve escrever no agendador, e em
 // mu-plugin isso roda antes de `init`, antes dos plugins. Quem agenda é o
 // callback de `init` abaixo.
+if ( ! function_exists( 'uonix_intelligence_send_scheduled_report' ) ) {
+	/**
+	 * O envio semanal agendado. É o único que marca as pautas do Radar como enviadas (63),
+	 * e só quando o e-mail sai: o envio de teste chama `uonix_intelligence_send_report()`
+	 * direto e não gasta a novidade do e-mail da diretoria.
+	 *
+	 * @return array{sent: bool, reason: string, recipients: int, radar_keys: string[]}
+	 */
+	function uonix_intelligence_send_scheduled_report() {
+		$resultado = uonix_intelligence_send_report();
+		if ( ! empty( $resultado['sent'] ) && ! empty( $resultado['radar_keys'] ) && function_exists( 'uonix_intelligence_radar_mark_emailed' ) ) {
+			uonix_intelligence_radar_mark_emailed( $resultado['radar_keys'] );
+		}
+
+		return $resultado;
+	}
+}
+
 if ( function_exists( 'uonix_intelligence_report_hook' ) ) {
-	add_action( uonix_intelligence_report_hook(), 'uonix_intelligence_send_report', 10, 0 );
+	add_action( uonix_intelligence_report_hook(), 'uonix_intelligence_send_scheduled_report', 10, 0 );
 }
 
 if ( ! function_exists( 'uonix_intelligence_report_first_run' ) ) {

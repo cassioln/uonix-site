@@ -61,6 +61,7 @@ Módulos novos seguem `NN-slug.php` dentro de `mu-plugins/uonix-<domínio>/`, in
 | `mu-plugins/uonix-admin/57-admin-intelligence-report.php` | Relatório executivo semanal por e-mail e seu agendamento |
 | `mu-plugins/uonix-admin/58-admin-intelligence-anomalies.php` | Módulo 5: detecção de anomalias, estado, alerta e verificação diária |
 | `mu-plugins/uonix-admin/59-admin-intelligence-executive.php` | Módulo 4: scorecard, destaques e páginas mais encontradas do e-mail semanal |
+| `mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php` | Módulo 8: Radar de Pautas — cron diário, candidatas, pauta por IA, descartes e o que vai ao e-mail |
 
 Dados precedem render no array. Não inflar o `52`, que já tem mais de 1.500 linhas com CSS inline.
 
@@ -404,7 +405,6 @@ No e-mail, todo estado diferente de `ok` só omite a linha.
 
 **O que não entrega:**
 - destaques por IA no e-mail executivo;
-- o Radar de Pautas (Módulo 8);
 - aplicar a sugestão no Rank Math;
 - botão para regenerar;
 - detecção automática de afirmação inventada fora da lista.
@@ -538,6 +538,84 @@ As duas coisas foram conferidas pela terceira revisão do PR #301 no código do 
 - **Destaques por LLM.** O cliente do Gemini existe (`54-admin-intelligence-ai.php`, usado pela sugestão de Title/Description do Módulo 3), mas os destaques do e-mail executivo continuam determinísticos.
 - **Painel.** Nesta fatia o relatório executivo existe só no e-mail; o botão "Enviar Teste Agora" é a forma de vê-lo sob demanda.
 
+## Módulo 8 — Radar de Pautas
+
+Arquivo: `mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php`. Decisões do Cassio em 2026-10-02 (#193):
+- só dados próprios: o Search Console e o Gemini que já está em produção;
+- quem escreve os posts é a equipe da Uônix, e o Radar entrega uma lista curta e priorizada;
+- a lista fica no painel, e o e-mail semanal só traz pauta nova;
+- a pauta sai da lista sozinha, ou pelo botão "Descartar".
+
+### O que é candidata
+
+- **A busca** roda num cron diário, `uonix_intelligence_content_radar_daily`, e faz duas chamadas ao Search Console numa janela de 90 dias que termina 3 dias antes de hoje:
+  - por consulta, que dá as métricas exatas;
+  - por consulta e página, que dá a página líder, a de **mais** impressões. As linhas de página não se somam, porque duas páginas na mesma busca contariam a impressão duas vezes.
+- **Uma consulta é candidata** quando passa em todas as regras:
+  - posição média **acima de 15**;
+  - **5 impressões ou mais** na janela;
+  - sem aspas e sem operador (`site:`, `inurl:`, `intitle:`, `intext:`, `allinurl:`, `allintitle:`);
+  - sem a marca ("uonix" ou "uônix"), e sem cara de domínio (`fulano.com.br`), que é busca de navegação;
+  - aceita por `uonix_analytics_metrics_sanitize_query()` (53), que recusa e-mail, telefone, link e mais de 120 caracteres;
+  - sem sinal de HTML nem entidade depois do saneamento. O 53 tira as tags antes de decodificar, então `&amp;lt;b&amp;gt;` sairia dele como `<b>` (MÉDIO 1 da revisão do PR #378).
+- **Limite:** até 10 candidatas, por impressões. O limite conta depois de tirar as descartadas. Duas grafias com a mesma chave (consulta normalizada) viram uma candidata.
+- **Medido em 2026-10-02:** 163 consultas em 90 dias, e de 5 a 10 passam. A forma de pergunta não é fonte: eram 12 consultas, com 1 impressão cada. 4 das 15 maiores acima da posição 15 eram buscas de spammer, sempre entre aspas.
+- **Entre as posições 12 e 15, nenhum módulo lista a consulta.** A faixa do Módulo 3 vai até 12, e a consulta já está perto do topo.
+
+### A pauta da IA
+
+- **O que vai ao Gemini:**
+  - a consulta, as impressões em 90 dias e a posição média;
+  - a página que aparece hoje, com caminho, tipo e título. Ela é resolvida pelo 54: post, termo (#344) ou o destino de um 301 (#343, até 10 HEADs por execução).
+- **O que volta:** um JSON com `caminho` (`nova` ou `reforcar`), `titulo` (até 80 caracteres), `angulo` (até 300) e `intencao` (`informacional`, `comercial`, `transacional` ou `navegacional`).
+  - Sem HTML e sem link.
+  - Sem página resolvida, só `nova` é aceita.
+- **A instrução proíbe inventar** norma, número, prazo, preço, certificação e superlativo. Ela só deixa citar NR ou NBR que já esteja na consulta ou no título da página.
+- **No reforço, a página é sempre a líder,** fixada pelo código.
+- **Cache e custo:**
+  - o hash cobre a consulta, a página (caminho, destino, tipo e título) e o modelo, sem as métricas;
+  - uma pauta `ok` com o mesmo hash não é refeita;
+  - qualquer outro status é tentado de novo no dia seguinte;
+  - descartadas não chamam o Gemini;
+  - depois de **150 s do início** da execução, nenhuma página é resolvida (nenhum HEAD) e nenhuma chamada começa; as restantes ficam `deferred`. O `crontab` de produção corta em 290 s, e o corte derrubaria também os outros eventos do mesmo ciclo.
+- **"Não sei" não é "não há página":** HEAD sem resposta, ou orçamento de HEAD esgotado, reaproveita a página de ontem, e a pauta pronta fica. Sem página anterior, a pauta fica `deferred`, sem chamada. Tratar o "não sei" como página ausente refazia uma pauta "reforcar" boa como "nova" (MÉDIO 2 da revisão do PR #378, a mesma lição do #373).
+  - A página de ontem só vale para o **mesmo** caminho líder.
+  - Uma página que ontem já era "não sei" fica marcada (`page_unknown`) e não vale como a de ontem: sem isso, o segundo "não sei" seguido chamava o Gemini sem página.
+- **Transporte:** é o mesmo da sugestão de título, `uonix_intelligence_ai_generate()`, com uma nova tentativa em 429 e 503.
+
+### O que é gravado
+
+São três opções, sem autoload e protegidas no clone:
+
+| Opção | Conteúdo |
+|---|---|
+| `uonix_intelligence_content_radar` | `updated_at`, `list_updated_at`, `status` (`ok`, `gsc_failed` ou `config_missing`), `window`, `truncated` e as candidatas (visíveis e descartadas), cada uma com a consulta, as métricas, a página e a pauta |
+| `uonix_intelligence_content_radar_dismissed` | hash da consulta => data do descarte. **Sem texto** |
+| `uonix_intelligence_content_radar_emailed` | hash da consulta => data em que foi ao e-mail. **Sem texto.** Cada registro vale 180 dias, e data no futuro não conta |
+
+- **Privacidade (#253):** o texto de consulta só existe nas candidatas. O resto da resposta da API fica em memória e é descartado.
+- **Falha do Search Console, ou falta de credencial,** grava só `status` e `updated_at`. A lista anterior fica, com a hora dela em `list_updated_at`.
+
+### E-mail e painel
+
+- **E-mail:** o bloco "Pautas novas para o blog" vem depois das oportunidades e só aparece quando há pauta nova.
+  - Pauta nova quer dizer: visível, com pauta `ok` e não enviada nos últimos 180 dias. Sem a chave do Gemini, vão as candidatas sem pauta.
+  - Vão no máximo 3, com "Mais N no painel".
+  - Os 180 dias impedem que uma consulta oscilando em torno do limite gere e-mail toda semana (#297).
+- **Quem marca uma pauta como enviada** é só `uonix_intelligence_send_scheduled_report()`, o envio semanal agendado, e só quando o e-mail sai. O "Enviar Teste Agora" mostra o mesmo bloco e não gasta a novidade.
+- **Painel:** a seção "Radar de Pautas" fica no fim da aba "Oportunidades SEO".
+  - A tabela mostra consulta, posição, impressões, a página que aparece hoje (com o 301 e o link "Editar") e a pauta.
+  - Há mensagens para cada estado: ainda não rodou, sem candidata, Search Console indisponível, corte de linhas, sem chave e pauta não gerada.
+  - **"Descartar" e "Restaurar"** valem para quem vê a Central, com `edit_posts` e `uonix_ksio_can_access_tool( 'analytics' )`, e usam nonce por chave. O descarte vale na hora, e as descartadas ficam numa área recolhida enquanto ainda passarem na regra.
+
+### O que o Módulo 8 não entrega
+
+- rascunho de post escrito pela IA;
+- marcar a pauta como "Feita" e acompanhar o post publicado;
+- pautas a partir de concorrentes, que é o Módulo 7 (#377);
+- consulta em forma de pergunta como fonte;
+- aplicar qualquer coisa sozinho no WordPress.
+
 ## Ordem de entrega dos módulos
 
 Credencial faltante crescente:
@@ -546,7 +624,10 @@ Credencial faltante crescente:
 2. **Módulos 4, 5 e 6** — Relatório Executivo, Alerta de Anomalias e Atribuição de Origem. Usam GA4 e o banco local; nenhuma credencial nova.
 3. **Módulo 1** — Desperdício em Google Ads. Exige decidir entre leitura via GA4 e API direta; hoje não há token nem código.
 4. **Módulo 2** — Desperdício em Meta Ads, **sem o indicador de EMQ**. Exige acesso aprovado.
-5. **Módulos 7 e 8** — Radar de Concorrentes (exige crawler, inexistente) e Radar de Pautas (exige LLM).
+5. **Módulo 8** — Radar de Pautas, com dados próprios do Search Console e o Gemini. Ver a seção do módulo.
+6. **Módulo 7** — Radar de Concorrentes. Adiado em 2026-10-02 (#377): falta fonte de dados de concorrência.
+
+Em 2026-10-02, os Módulos 1, 2 e 6 foram parados porque a Uônix não tem gasto com anúncios: #374, #375 e #376, cada uma com a condição para retomar.
 
 O Módulo 4 não entrega Custo por Lead enquanto não houver fonte de gasto de anúncio. O Módulo 6 entrega **cobertura declarada**: como a captura de origem é gated por consentimento de marketing, parte dos leads nunca terá origem conhecida, e o relatório declara a fração coberta. É proibido substituir o dado negado por inferência server-side equivalente — seria o mesmo tratamento de dado que o consentimento nega, por outra via.
 

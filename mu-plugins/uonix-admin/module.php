@@ -29,6 +29,7 @@ uonix_mu_require_files(
 		'57-admin-intelligence-report.php',
 		'58-admin-intelligence-anomalies.php',
 		'59-admin-intelligence-executive.php',
+		'63-admin-intelligence-content-radar.php',
 		'52-admin-analytics-dashboard.php',
 		'60-admin-customizer-widgets-rodape.php',
 		'61-admin-widgets-rodape-fundo-escuro.php',
