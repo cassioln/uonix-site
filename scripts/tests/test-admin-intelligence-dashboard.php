@@ -53,7 +53,9 @@ function get_transient( $key ) { return false; }
 function set_transient( $key, $value ) { return true; }
 function delete_transient( $key ) { return true; }
 
-function current_user_can( $capability ) { return (bool) $GLOBALS['uox_can']; }
+// Registra capacidade e objeto: o link do editor do termo exige `edit_term` sobre o termo.
+$GLOBALS['uox_caps'] = array();
+function current_user_can( $capability, ...$args ) { $GLOBALS['uox_caps'][] = array( $capability, $args[0] ?? null ); return (bool) $GLOBALS['uox_can']; }
 // Registra a ação verificada para o teste confrontá-la com a emitida pelo
 // formulário. Stub que ignora o argumento deixaria passar uma divergência que
 // recusaria 100% das gravações legítimas em produção, em silêncio.
@@ -198,6 +200,7 @@ uox_assert( false !== strpos( $html_ia, 'Título atual' ) && false !== strpos( $
 uox_assert( false === strpos( $html_ia, '<script>x' ) && false !== strpos( $html_ia, '&lt;script&gt;' ), 'Texto vindo da IA sai escapado' );
 uox_assert( false !== strpos( $html_ia, 'ESTADO-IA:no_page' ) && false !== strpos( $html_ia, 'Não identificada' ), 'Sem página: estado da IA e Página Alvo não identificada' );
 uox_assert( false !== strpos( $html_ia, 'term.php?taxonomy=product_cat&tag_ID=34' ) && false !== strpos( $html_ia, '>Editar categoria de produtos<' ), '#344: página de categoria leva ao editor do termo' );
+uox_assert( in_array( array( 'edit_term', 34 ), $GLOBALS['uox_caps'], true ), '#344: o link do editor do termo confere edit_term sobre o termo 34 (BAIXO 3 da revisão do PR #372)' );
 uox_assert( false === strpos( $html_ia, 'Diferenciais a acrescentar' ), 'A coluna determinística saiu (#309)' );
 $html_sem_mapa = uox_render_intelligence( 'intelligence', uox_snapshot( array( uox_q( 'olhal inox', 6.0, 50, .0 ) ) ) );
 uox_assert( false !== strpos( $html_sem_mapa, 'Aguardando a próxima sincronização' ), 'Snapshot sem query_pages: Página Alvo aguardando a sincronização' );

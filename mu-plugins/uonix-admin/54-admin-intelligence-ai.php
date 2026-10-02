@@ -93,7 +93,8 @@ if ( ! function_exists( 'uonix_intelligence_ai_page_object' ) ) {
 	 *
 	 * Post primeiro, pelo caminho de sempre. Sem post, o termo que a regra de reescrita abre
 	 * (`uonix_intelligence_resolve_term_path()`, no 55): categoria de produto, categoria e tag
-	 * do blog (#344). Endereço que redireciona continua sem página (#343).
+	 * do blog (#344). A URL antiga do termo que o WordPress canonicaliza por 301 resolve para
+	 * o próprio termo; os demais endereços que redirecionam continuam sem página (#343).
 	 *
 	 * @return array{type: string, id: int, taxonomy?: string}|null
 	 */
@@ -151,7 +152,8 @@ if ( ! function_exists( 'uonix_intelligence_ai_meta_text' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_ai_input' ) ) {
 	/**
-	 * Entrada do pedido para uma oportunidade, ou null sem consulta ou sem post publicado.
+	 * Entrada do pedido para uma oportunidade, ou null sem consulta ou sem página (post
+	 * publicado ou termo).
 	 *
 	 * Fronteira de dados: cada chave é montada uma a uma a partir da linha. Nada mais
 	 * da linha passa, mesmo que um dia ela carregue outros campos.

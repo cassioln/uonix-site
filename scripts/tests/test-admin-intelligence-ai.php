@@ -385,8 +385,15 @@ uox_ai_assert( 'nenhum' === $termo( '/privada/x/', $R ), '#344: taxonomia não p
 uox_ai_assert( 'nenhum' === $termo( '/servico/teste/', $R ) && 'nenhum' === $termo( '/home-real/', $R ), '#344: a primeira regra que casa é de post ou de página: nenhum termo' );
 uox_ai_assert( 'nenhum' === $termo( '/sem-pagina/', $R ), '#344: a regra de página sem página existente é pulada, como no core, e nada mais casa' );
 uox_ai_assert( 'nenhum' === $termo( '/', $R ) && 'nenhum' === $termo( '', $R ) && 'nenhum' === $termo( null, $R ), '#344: raiz e caminho vazio: nenhum' );
+// Feed e embed do termo não são a página que se otimiza (BAIXO 1 da revisão do PR #372).
+$R_feed = array( 'olhal-de-ancoragem/feed/(feed|rdf|rss|rss2|atom)/?$' => 'index.php?product_cat=olhal-de-ancoragem&feed=$matches[1]', 'olhal-de-ancoragem/embed/?$' => 'index.php?product_cat=olhal-de-ancoragem&embed=true', 'olhal-de-ancoragem/page/?([0-9]{1,})/?$' => 'index.php?product_cat=olhal-de-ancoragem&paged=$matches[1]' );
+uox_ai_assert( 'nenhum' === $termo( '/olhal-de-ancoragem/feed/rss2/', $R_feed ) && 'nenhum' === $termo( '/olhal-de-ancoragem/embed/', $R_feed ), '#344: feed e embed do termo não valem como página' );
+uox_ai_assert( 'product_cat:34' === $termo( '/olhal-de-ancoragem/page/2/', $R_feed ), '#344: a paginação do arquivo continua sendo o termo' );
+// Regra que também identifica post não devolve termo (BAIXO 2 da revisão do PR #372).
+uox_ai_assert( 'nenhum' === $termo( '/normas/um-post/', array( '([^/]+)/([^/]+)/?$' => 'index.php?category_name=$matches[1]&name=$matches[2]' ) ), '#344: regra com categoria E post serve o post, não o termo' );
 // A primeira regra que casa decide, mesmo havendo depois uma de taxonomia que também casaria.
 uox_ai_assert( 'nenhum' === $termo( '/olhal-de-ancoragem/', array( '(.+)/?$' => 'index.php?post_type=servicos&name=$matches[1]', 'olhal-de-ancoragem/?$' => 'index.php?product_cat=olhal-de-ancoragem' ) ), '#344: uma regra de post antes da de categoria decide, como no core' );
+uox_ai_assert( 'nenhum' === $termo( '/olhal-de-ancoragem/', array( '(.+)/?$' => 'index.php?s=$matches[1]', 'olhal-de-ancoragem/?$' => 'index.php?product_cat=olhal-de-ancoragem' ) ), '#344: uma regra que não é de taxonomia nem de post decide sem termo, sem tentar a seguinte' );
 // A regra de página só decide quando a página existe; senão é pulada e a seguinte decide.
 $pagina_antes = array( '(.?.+?)(?:/([0-9]+))?/?$' => 'index.php?pagename=$matches[1]&page=$matches[2]', 'olhal-de-ancoragem/?$' => 'index.php?product_cat=olhal-de-ancoragem', 'home-real/?$' => 'index.php?product_cat=acessorios' );
 uox_ai_assert( 'product_cat:34' === $termo( '/olhal-de-ancoragem/', $pagina_antes ), '#344: regra de página sem página é pulada e a de categoria decide' );
@@ -402,6 +409,24 @@ uox_ai_assert( 0 === uonix_intelligence_ai_page_post_id( '/olhal-de-ancoragem/' 
 $obj = uonix_intelligence_ai_page_object( '/olhal-de-ancoragem/' );
 uox_ai_assert( array( 'type' => 'term', 'taxonomy' => 'product_cat', 'id' => 34 ) === $obj, '#344: o objeto da página é o termo; obteve ' . var_export( $obj, true ) );
 uox_ai_assert( array( 'type' => 'post', 'id' => 10 ) === uonix_intelligence_ai_page_object( '/produtos/olhal-inox/' ) && null === uonix_intelligence_ai_page_object( '/rascunho/' ), '#344: post publicado continua post, e rascunho continua sem página' );
+
+// O Rank Math resolve as variáveis da meta sobre o TERMO real (BAIXO 3 da revisão do PR
+// #372). Stub do resolvedor declarado só aqui, para os casos anteriores rodarem sem ele.
+function get_term( $id, $taxonomia = '' ) {
+	foreach ( $GLOBALS['uox_termos'][ $taxonomia ] ?? array() as $slug => $t ) {
+		if ( $id === $t['id'] ) {
+			return (object) array( 'term_id' => $t['id'], 'name' => $t['name'], 'taxonomy' => $taxonomia, 'slug' => $slug );
+		}
+	}
+	return null;
+}
+eval( 'namespace RankMath; class Helper { public static $alvos = array(); public static function replace_vars( $texto, $alvo = null ) { self::$alvos[] = $alvo; return str_replace( "%term%", is_object( $alvo ) && isset( $alvo->name ) ? $alvo->name : "", $texto ); } }' );
+$GLOBALS['uox_termos']['product_cat']['acessorios']['meta']['rank_math_title'] = '%term% para Ancoragem | Uônix';
+$in_vars = uonix_intelligence_ai_input( uox_linha( 'acessorios', '/acessorios/' ) );
+$ultimo  = end( \RankMath\Helper::$alvos );
+uox_ai_assert( is_array( $in_vars ) && 'Acessórios & Peças para Ancoragem | Uônix' === $in_vars['title'], '#344: a variável %term% da meta é resolvida pelo Rank Math; obteve ' . var_export( $in_vars['title'] ?? null, true ) );
+uox_ai_assert( is_object( $ultimo ) && 160 === ( $ultimo->term_id ?? null ) && 'product_cat' === ( $ultimo->taxonomy ?? '' ), '#344: o Rank Math recebe o termo real, e não um post' );
+$GLOBALS['uox_termos']['product_cat']['acessorios']['meta'] = array();
 
 // Entrada com termo: título e descrição da meta do Rank Math do termo.
 $in_t = uonix_intelligence_ai_input( uox_linha( 'olhal de ancoragem', '/olhal-de-ancoragem/' ) );

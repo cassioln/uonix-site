@@ -406,7 +406,12 @@ if ( ! function_exists( 'uonix_intelligence_resolve_term_path' ) ) {
 	 * percorridas na ordem gravada, como em `url_to_postid()` do core:
 	 *   - a primeira regra que casa decide;
 	 *   - a regra de página é pulada quando a página não existe (`use_verbose_page_rules`);
-	 *   - se a regra que decide não for de taxonomia pública, não há termo.
+	 *   - se a regra que decide não for de taxonomia pública, não há termo;
+	 *   - feed e embed do termo, e regra que também identifica um post, não contam.
+	 *
+	 * Endereço que o WordPress redireciona para o termo, como a URL com a base antiga
+	 * (`/product-category/olhal-de-ancoragem/`, canonicalizada por `redirect_canonical()`),
+	 * resolve para o próprio termo de destino.
 	 *
 	 * Só lê: a opção `rewrite_rules`, que é autoload, e o termo pelo slug.
 	 *
@@ -457,6 +462,20 @@ if ( ! function_exists( 'uonix_intelligence_resolve_term_path' ) ) {
 				$query
 			);
 			parse_str( $query, $vars );
+			// Feed e embed do termo não são a página que se otimiza. Regra que também identifica
+			// um post (`name`, `p`, `pagename`… ou a `query_var` de um tipo de post) serve o post,
+			// e não o arquivo do termo (BAIXOS 1 e 2 da revisão do PR #372).
+			$de_post = array( 'name', 'p', 'pagename', 'page_id', 'attachment', 'attachment_id' );
+			if ( function_exists( 'get_post_types' ) ) {
+				foreach ( (array) get_post_types( array( 'public' => true ), 'objects' ) as $tipo ) {
+					if ( is_object( $tipo ) && ! empty( $tipo->query_var ) && is_string( $tipo->query_var ) ) {
+						$de_post[] = $tipo->query_var;
+					}
+				}
+			}
+			if ( isset( $vars['feed'] ) || isset( $vars['embed'] ) || array() !== array_intersect( $de_post, array_keys( array_filter( $vars, static function ( $v ) { return is_string( $v ) && '' !== $v; } ) ) ) ) {
+				return null;
+			}
 			foreach ( $vars as $variavel => $valor ) {
 				if ( ! isset( $por_variavel[ $variavel ] ) || ! is_string( $valor ) || '' === trim( $valor, '/' ) ) {
 					continue;
