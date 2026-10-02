@@ -11,8 +11,9 @@
  * 3. Os menus que só agrupam atalhos, "Seções do Site" e "Políticas e LGPD"
  *    (65-admin-editor-politicas-lgpd.php), não navegam ao clicar: abrem e
  *    fecham o submenu no lugar, como um menu pai aberto do WordPress. Com o
- *    menu recolhido ou em tela estreita o clique só não navega; o submenu
- *    aparece pelo comportamento do próprio WordPress.
+ *    menu recolhido (inclusive o recolhido automático entre 783 e 960px) ou
+ *    em tela estreita, o clique só não navega; o submenu aparece pelo
+ *    comportamento do próprio WordPress.
  *
  * Administrador (manage_options) não é afetado.
  */
@@ -104,26 +105,39 @@ function uonix_admin_editor_menus_blog() {
 		return;
 	}
 
-	$comentarios = null;
+	$posicao_comentarios = null;
 	foreach ( $menu as $posicao => $item ) {
 		if ( 'edit.php' === $item[2] ) {
 			$menu[ $posicao ][0] = 'Blog'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 		} elseif ( 'edit-comments.php' === $item[2] ) {
-			$comentarios = $item[0];
-			unset( $menu[ $posicao ] );
+			$posicao_comentarios = $posicao;
 		}
 	}
 
-	if ( null === $comentarios || ! isset( $submenu['edit.php'] ) ) {
+	// Só tira Comentários do menu principal se houver onde pô-lo.
+	if ( null === $posicao_comentarios || ! isset( $submenu['edit.php'] ) ) {
 		return;
 	}
 
-	// O submenu do núcleo sob edit-comments.php faria a tela achar outro pai.
-	unset( $submenu['edit-comments.php'] );
+	$comentarios = $menu[ $posicao_comentarios ][0];
+	unset( $menu[ $posicao_comentarios ] );
 
 	// 5 = Todos os posts, 10 = Adicionar post; 11 fica logo depois.
 	$submenu['edit.php'][11] = array( $comentarios, 'edit_posts', 'edit-comments.php' ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 	ksort( $submenu['edit.php'] );
+
+	// O item "Todos os comentários" do núcleo sob edit-comments.php faria a
+	// tela achar outro pai; sai só ele. Páginas que plugins penduraram ali
+	// ficam: o hookname delas (comments_page_*) depende desse pai, e movê-las
+	// negaria o acesso.
+	foreach ( $submenu['edit-comments.php'] ?? array() as $chave => $item ) {
+		if ( 'edit-comments.php' === $item[2] ) {
+			unset( $submenu['edit-comments.php'][ $chave ] );
+		}
+	}
+	if ( empty( $submenu['edit-comments.php'] ) ) {
+		unset( $submenu['edit-comments.php'] );
+	}
 }
 add_action( 'admin_menu', 'uonix_admin_editor_menus_blog', 1001 );
 
@@ -221,7 +235,10 @@ function uonix_admin_editor_menus_clique_grupo() {
 document.querySelectorAll( '#adminmenu li.uonix-menu-grupo > a' ).forEach( function ( link ) {
 	link.addEventListener( 'click', function ( evento ) {
 		evento.preventDefault();
-		if ( document.body.classList.contains( 'folded' ) || window.innerWidth < 783 ) {
+		// Recolhido (folded), recolhido automático entre 783 e 960px (auto-fold)
+		// ou tela estreita: o submenu é flyout/toque do núcleo; só não navega.
+		var corpo = document.body.classList;
+		if ( corpo.contains( 'folded' ) || ( corpo.contains( 'auto-fold' ) && window.matchMedia( '(max-width: 960px)' ).matches ) || window.matchMedia( '(max-width: 782px)' ).matches ) {
 			return;
 		}
 		var abrir = ! link.parentNode.classList.contains( 'wp-menu-open' );

@@ -147,6 +147,20 @@ uox_mn_assert( array( 5, 10, 11, 15 ) === array_keys( $GLOBALS['submenu']['edit.
 uox_mn_assert( array( $comentarios_html, 'edit_posts', 'edit-comments.php' ) === $GLOBALS['submenu']['edit.php'][11], 'Comentários com o contador do núcleo' );
 uox_mn_assert( 'Páginas' === $GLOBALS['menu'][20][0], 'outros menus não mudam' );
 
+// Página de plugin sob Comentários fica com o pai dela (hookname comments_page_*).
+uox_mn_menu_do_nucleo();
+$GLOBALS['submenu']['edit-comments.php'][10] = array( 'Spam', 'moderate_comments', 'plugin-spam' );
+uonix_admin_editor_menus_blog();
+uox_mn_assert( array( 10 => array( 'Spam', 'moderate_comments', 'plugin-spam' ) ) === ( $GLOBALS['submenu']['edit-comments.php'] ?? null ), 'página de plugin fica sob edit-comments.php, sem o item do núcleo' );
+uox_mn_assert( isset( $GLOBALS['submenu']['edit.php'][11] ), 'Comentários entra no Blog mesmo com página de plugin' );
+
+// Sem submenu do Blog, Comentários não some do menu principal.
+uox_mn_menu_do_nucleo();
+unset( $GLOBALS['submenu']['edit.php'] );
+uonix_admin_editor_menus_blog();
+uox_mn_assert( isset( $GLOBALS['menu'][25] ) && 'edit-comments.php' === $GLOBALS['menu'][25][2], 'sem onde pôr, Comentários fica no menu principal' );
+uox_mn_assert( isset( $GLOBALS['submenu']['edit-comments.php'] ), 'sem onde pôr, o submenu de Comentários fica' );
+
 // Sem o menu de Comentários (usuário sem acesso), Blog só renomeia.
 uox_mn_menu_do_nucleo();
 unset( $GLOBALS['menu'][25] );
@@ -202,6 +216,8 @@ $script = (string) ob_get_clean();
 uox_mn_assert( false !== strpos( $script, "'#adminmenu li.uonix-menu-grupo > a'" ), 'script mira só os menus de grupo' );
 uox_mn_assert( false !== strpos( $script, 'evento.preventDefault()' ), 'clique no grupo não navega' );
 uox_mn_assert( false !== strpos( $script, "'wp-menu-open'" ) && false !== strpos( $script, "'wp-has-current-submenu'" ), 'script abre o submenu como menu pai aberto' );
+uox_mn_assert( false !== strpos( $script, "'wp-not-current-submenu', ! abrir" ), 'script tira o estado de flyout ao abrir' );
+uox_mn_assert( false !== strpos( $script, "'auto-fold'" ) && false !== strpos( $script, "'folded'" ), 'script respeita menu recolhido e recolhido automático' );
 
 if ( $failures > 0 ) {
 	fwrite( STDERR, "{$failures} falha(s).\n" );
