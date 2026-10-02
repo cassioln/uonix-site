@@ -611,9 +611,9 @@ $kB    = uonix_intelligence_radar_query_key( 'teste de arrancamento' );
 $saida = uox_rd_curar( 'dismiss', $kB );
 uox_rd_assert( 0 === strpos( $saida, 'redirect:https://uonix.com.br/wp-admin/admin.php?' ) && false !== strpos( $saida, 'tab=intelligence' ) && false !== strpos( $saida, 'uonix_radar=dismiss' ) && '#uonix-radar' === substr( $saida, -12 ), 'Descartar volta para a seção, com o aviso; obteve ' . $saida );
 uox_rd_assert( isset( uonix_intelligence_radar_dismissed()[ $kB ] ) && false === $GLOBALS['uox_autoload'][ $desc ] && false === strpos( serialize( get_option( $desc ) ), 'arrancamento' ), 'Descarte gravado, sem autoload e sem texto' );
-uox_rd_assert( 'uonix_intelligence_radar_dismiss_' . $kB === $GLOBALS['uox_referer_action'], 'O nonce é por ação e por chave' );
+uox_rd_assert( 'uonix_intelligence_radar_dismiss' === $GLOBALS['uox_referer_action'], 'O nonce é por ação: um formulário serve várias pautas' );
 uox_rd_curar( 'restore', $kB );
-uox_rd_assert( ! isset( uonix_intelligence_radar_dismissed()[ $kB ] ) && 'uonix_intelligence_radar_restore_' . $kB === $GLOBALS['uox_referer_action'], 'Restaurar tira o descarte' );
+uox_rd_assert( ! isset( uonix_intelligence_radar_dismissed()[ $kB ] ) && 'uonix_intelligence_radar_restore' === $GLOBALS['uox_referer_action'], 'Restaurar tira o descarte' );
 $antes = get_option( $desc );
 foreach ( array( 'curta' => 'curta', 'fora das candidatas' => str_repeat( 'd', 64 ), 'vazia' => '', 'array' => array( 'x' ) ) as $caso => $ruim ) {
 	$s = uox_rd_curar( 'dismiss', $ruim );
@@ -677,6 +677,52 @@ $res_ns      = static function ( $consulta, $caminho, &$orcamento ) use ( &$cami
 $GLOBALS['uox_options'] = array();
 uonix_intelligence_radar_run( array_merge( $base, array( 'query' => $busc_rep, 'page_resolver' => $res_ns ) ) );
 uox_rd_assert( 1 === ( array_count_values( $caminhos_ns )['/norma-ancoragem-predial'] ?? 0 ), '"Não sei" de um endereço vale para a execução inteira: nenhum HEAD repetido' );
+$GLOBALS['uox_options'] = array();
+
+// ---------------------------------------------------------------------------
+// 13. Descartar e restaurar em lote (pedido do Cassio em 2026-10-02).
+// ---------------------------------------------------------------------------
+function uox_rd_lote( $acao, array $chaves, $linha = null ) {
+	$_POST = array( 'uonix_radar_keys' => $chaves, 'uonix_radar_bulk' => '1' );
+	if ( null !== $linha ) {
+		$_POST['uonix_radar_key'] = $linha;
+	}
+	try {
+		if ( 'dismiss' === $acao ) {
+			uonix_intelligence_radar_handle_dismiss();
+		} else {
+			uonix_intelligence_radar_handle_restore();
+		}
+	} catch ( Uox_Redirect $r ) {
+		return $r->url;
+	} catch ( Uox_Die $d ) {
+		return 'die:' . $d->getMessage();
+	}
+	return 'nada';
+}
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( $base );
+$kL1 = uonix_intelligence_radar_query_key( 'ancoragem predial' );
+$kL2 = uonix_intelligence_radar_query_key( 'teste de arrancamento' );
+$kL3 = uonix_intelligence_radar_query_key( 'pontos de ancoragem predial' );
+$uL  = uox_rd_lote( 'dismiss', array( $kL1, $kL2, str_repeat( 'd', 64 ), 'lixo', $kL1, array( 'x' ) ) );
+$dL  = uonix_intelligence_radar_dismissed();
+uox_rd_assert( isset( $dL[ $kL1 ], $dL[ $kL2 ] ) && 2 === count( $dL ) && false !== strpos( $uL, 'uonix_radar=dismiss' ) && false !== strpos( $uL, 'uonix_radar_n=2' ), 'Lote: as duas válidas são descartadas; repetida e inválidas são ignoradas; o aviso traz o número; obteve ' . $uL );
+uox_rd_assert( 'uonix_intelligence_radar_dismiss' === $GLOBALS['uox_referer_action'], 'Lote usa o nonce da ação' );
+uox_rd_lote( 'dismiss', array( $kL3 ), $kL2 );
+uox_rd_assert( ! isset( uonix_intelligence_radar_dismissed()[ $kL3 ] ), 'O botão de uma linha vale só para ela, mesmo com outras caixas marcadas' );
+$uR = uox_rd_lote( 'restore', array( $kL1, $kL2 ) );
+uox_rd_assert( array() === uonix_intelligence_radar_dismissed() && false !== strpos( $uR, 'uonix_radar=restore' ) && false !== strpos( $uR, 'uonix_radar_n=2' ), 'Restaurar em lote; obteve ' . $uR );
+$antesL = get_option( uonix_intelligence_radar_dismissed_option() );
+uox_rd_assert( false !== strpos( uox_rd_lote( 'dismiss', array( 'lixo', str_repeat( 'e', 64 ) ) ), 'uonix_radar=invalid' ) && $antesL === get_option( uonix_intelligence_radar_dismissed_option() ), 'Lote sem chave válida: nada gravado, aviso invalid' );
+uox_rd_assert( false !== strpos( uox_rd_lote( 'dismiss', array() ), 'uonix_radar=invalid' ), 'Lote vazio: aviso invalid' );
+$vinte = array_map( static function ( $i ) { return 'lixo' . $i; }, range( 1, 20 ) );
+uox_rd_assert( false !== strpos( uox_rd_lote( 'dismiss', array_merge( $vinte, array( $kL1 ) ) ), 'uonix_radar=invalid' ) && ! isset( uonix_intelligence_radar_dismissed()[ $kL1 ] ), 'No máximo 20 chaves por pedido: a 21.ª é ignorada' );
+$GLOBALS['uox_caps']           = array();
+$GLOBALS['uox_referer_action'] = null;
+uox_rd_assert( 0 === strpos( uox_rd_lote( 'dismiss', array( $kL1 ) ), 'die:' ) && null === $GLOBALS['uox_referer_action'] && ! isset( uonix_intelligence_radar_dismissed()[ $kL1 ] ), 'Lote sem permissão: recusado antes do nonce' );
+$GLOBALS['uox_caps'] = array( 'edit_posts' );
+$_POST               = array();
 $GLOBALS['uox_options'] = array();
 
 // FIM DAS SEÇÕES — as seções das tarefas seguintes entram acima desta linha.

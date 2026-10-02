@@ -608,7 +608,9 @@ São três opções, sem autoload e protegidas no clone:
 - **Painel:** a seção "Radar de Pautas" fica no fim da aba "Oportunidades SEO".
   - A tabela mostra consulta, posição, impressões, a página que aparece hoje (com o 301 e o link "Editar") e a pauta.
   - Há mensagens para cada estado: ainda não rodou, sem candidata, Search Console indisponível, corte de linhas, sem chave e pauta não gerada.
-  - **"Descartar" e "Restaurar"** valem para quem vê a Central, com `edit_posts` e `uonix_ksio_can_access_tool( 'analytics' )`, e usam nonce por chave. O descarte vale na hora, e as descartadas ficam numa área recolhida enquanto ainda passarem na regra.
+  - **"Descartar" e "Restaurar"** valem para quem vê a Central, com `edit_posts` e `uonix_ksio_can_access_tool( 'analytics' )`. O descarte vale na hora, e as descartadas ficam numa tabela recolhida enquanto ainda passarem na regra.
+  - **Em lote** (pedido do Cassio em 2026-10-02): cada tabela é um formulário, com uma caixa por linha, "selecionar todas" e "Descartar selecionadas" ou "Restaurar selecionadas". O botão de uma linha vale só para ela, mesmo com outras caixas marcadas.
+  - **Limites e segurança:** no máximo 20 chaves por pedido. O nonce é por ação, porque um formulário serve várias pautas, e cada chave continua conferida contra as candidatas gravadas. O aviso diz quantas foram.
 
 ### O que o Módulo 8 não entrega
 

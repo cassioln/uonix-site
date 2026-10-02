@@ -937,9 +937,14 @@ if ( ! function_exists( 'uonix_intelligence_radar_can_curate' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_radar_handle_curation' ) ) {
 	/**
-	 * Descarta ou restaura uma candidata. A permissão vem antes do nonce, que é por ação e
-	 * por chave. A chave tem de ser válida e estar entre as candidatas gravadas; fora disso,
-	 * nada é gravado, e o painel diz por quê.
+	 * Descarta ou restaura uma ou várias candidatas (lote pedido pelo Cassio em 2026-10-02).
+	 *
+	 * - A permissão vem antes do nonce, e o nonce é por ação: um formulário serve várias pautas.
+	 * - O botão de uma linha (`uonix_radar_key`) vale só para ela, mesmo com outras caixas
+	 *   marcadas. O botão do lote usa as caixas marcadas (`uonix_radar_keys[]`).
+	 * - No máximo 20 chaves por pedido, que é o que cabe nas duas tabelas. Cada chave tem de
+	 *   ser válida e estar entre as candidatas gravadas; as outras são ignoradas. Sem nenhuma
+	 *   válida, nada é gravado, e o painel diz por quê.
 	 *
 	 * @param string $acao `dismiss` ou `restore`.
 	 */
@@ -947,8 +952,20 @@ if ( ! function_exists( 'uonix_intelligence_radar_handle_curation' ) ) {
 		if ( ! uonix_intelligence_radar_can_curate() ) {
 			wp_die( esc_html__( 'Sem permissão para alterar o Radar de Pautas.', 'uonix' ), '', array( 'response' => 403 ) );
 		}
-		$chave = isset( $_POST['uonix_radar_key'] ) && is_string( $_POST['uonix_radar_key'] ) ? (string) wp_unslash( $_POST['uonix_radar_key'] ) : '';
-		check_admin_referer( 'uonix_intelligence_radar_' . $acao . '_' . $chave );
+		check_admin_referer( 'uonix_intelligence_radar_' . $acao );
+
+		$linha   = isset( $_POST['uonix_radar_key'] ) && is_string( $_POST['uonix_radar_key'] ) ? (string) wp_unslash( $_POST['uonix_radar_key'] ) : '';
+		$pedidas = array();
+		if ( '' !== $linha ) {
+			$pedidas = array( $linha );
+		} elseif ( isset( $_POST['uonix_radar_keys'] ) && is_array( $_POST['uonix_radar_keys'] ) ) {
+			foreach ( wp_unslash( $_POST['uonix_radar_keys'] ) as $chave ) {
+				if ( is_string( $chave ) ) {
+					$pedidas[] = $chave;
+				}
+			}
+		}
+		$pedidas = array_slice( array_values( array_unique( $pedidas ) ), 0, 20 );
 
 		$gravado = get_option( uonix_intelligence_radar_option(), array() );
 		$chaves  = array();
@@ -957,13 +974,20 @@ if ( ! function_exists( 'uonix_intelligence_radar_handle_curation' ) ) {
 				$chaves[] = $c['key'];
 			}
 		}
-		$valida = uonix_intelligence_radar_is_key( $chave ) && in_array( $chave, $chaves, true );
-		if ( $valida ) {
+		$validas = array();
+		foreach ( $pedidas as $chave ) {
+			if ( uonix_intelligence_radar_is_key( $chave ) && in_array( $chave, $chaves, true ) ) {
+				$validas[] = $chave;
+			}
+		}
+		if ( array() !== $validas ) {
 			$descartes = uonix_intelligence_radar_dismissed();
-			if ( 'dismiss' === $acao ) {
-				$descartes[ $chave ] = gmdate( 'c' );
-			} else {
-				unset( $descartes[ $chave ] );
+			foreach ( $validas as $chave ) {
+				if ( 'dismiss' === $acao ) {
+					$descartes[ $chave ] = gmdate( 'c' );
+				} else {
+					unset( $descartes[ $chave ] );
+				}
 			}
 			update_option( uonix_intelligence_radar_dismissed_option(), $descartes, false );
 		}
@@ -971,9 +995,10 @@ if ( ! function_exists( 'uonix_intelligence_radar_handle_curation' ) ) {
 		wp_safe_redirect(
 			add_query_arg(
 				array(
-					'page'        => 'uonix-analytics',
-					'tab'         => 'intelligence',
-					'uonix_radar' => $valida ? $acao : 'invalid',
+					'page'          => 'uonix-analytics',
+					'tab'           => 'intelligence',
+					'uonix_radar'   => array() !== $validas ? $acao : 'invalid',
+					'uonix_radar_n' => count( $validas ),
 				),
 				admin_url( 'admin.php' )
 			) . '#uonix-radar'
