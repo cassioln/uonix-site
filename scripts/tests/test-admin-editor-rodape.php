@@ -143,7 +143,7 @@ uox_er_assert( false !== strpos( $loader, "'64-admin-editor-rodape.php'" ), 'mod
 // Áreas do rodapé.
 uox_er_assert( uonix_admin_editor_rodape_area_do_rodape( 'footer1' ), 'footer1 é rodapé' );
 uox_er_assert( uonix_admin_editor_rodape_area_do_rodape( 'footer6' ), 'footer6 é rodapé' );
-foreach ( array( 'sidebar-primary', 'sidebar-secondary', 'mega-menu', 'wp_inactive_widgets', 'footer1-x', 'xfooter1', '' ) as $nao ) {
+foreach ( array( 'sidebar-primary', 'sidebar-secondary', 'mega-menu', 'wp_inactive_widgets', 'footer1-x', 'xfooter1', 'footer', 'footer7', 'footer0', 'FOOTER1', '' ) as $nao ) {
 	uox_er_assert( ! uonix_admin_editor_rodape_area_do_rodape( $nao ), "{$nao} não é rodapé" );
 }
 uox_er_assert( ! uonix_admin_editor_rodape_area_do_rodape( null ), 'null não é rodapé' );
@@ -189,7 +189,10 @@ uonix_admin_editor_rodape_titulo_js( 'widgets.php' );
 $script = $GLOBALS['uox_test_inline'][0] ?? array();
 uox_er_assert( 'wp-edit-widgets' === ( $script['handle'] ?? null ), 'script do título vai no wp-edit-widgets' );
 uox_er_assert( 'before' === ( $script['position'] ?? null ), 'script do título roda antes do editor' );
-uox_er_assert( false !== strpos( (string) ( $script['data'] ?? '' ), "'i18n.gettext'" ), 'script usa o filtro i18n.gettext' );
+// __( 'Widgets' ) do editor vem sem domínio: o i18n.gettext genérico recebe
+// undefined e não casaria com 'default'. Só o gettext_default serve.
+uox_er_assert( false !== strpos( (string) ( $script['data'] ?? '' ), "'i18n.gettext_default'" ), 'script usa o filtro i18n.gettext_default' );
+uox_er_assert( false === strpos( (string) ( $script['data'] ?? '' ), 'dominio' ), 'script não depende do domínio recebido' );
 uox_er_assert( false !== strpos( (string) ( $script['data'] ?? '' ), 'Editar Rodapé' ), 'script troca para Editar Rodapé' );
 
 // Listagens.
@@ -259,7 +262,20 @@ uox_er_assert( null === uox_er_guarda( 'PUT', '/wp/v2/widgets/block-99', array( 
 uox_er_assert( uox_er_recusou( uox_er_guarda( 'POST', '/wp/v2/widgets', array( 'sidebar' => 'mega-menu' ) ) ), 'criar widget no megamenu é recusado' );
 uox_er_assert( uox_er_recusou( uox_er_guarda( 'POST', '/wp/v2/widgets' ) ), 'criar widget sem área é recusado' );
 uox_er_assert( null === uox_er_guarda( 'POST', '/wp/v2/widgets', array( 'sidebar' => 'footer4' ) ), 'criar widget no rodapé passa' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'POST', '/wp/v2/widgets', array( 'sidebar' => 'footer1', 'id' => 'block-85', 'instance' => array() ) ) ), 'POST com id do megamenu (sobrescreve e move) é recusado' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'POST', '/wp/v2/widgets', array( 'sidebar' => 'footer1', 'id' => 'block-30' ) ) ), 'POST com id de widget inativo é recusado' );
+uox_er_assert( null === uox_er_guarda( 'POST', '/wp/v2/widgets', array( 'sidebar' => 'footer2', 'id' => 'block-10' ) ), 'POST com id de widget do rodapé passa' );
 uox_er_assert( null === uox_er_guarda( 'GET', '/wp/v2/widgets' ), 'listar widgets passa (filtrado na saída)' );
+
+// Rotas com maiúsculas: o núcleo casa com a flag i, então a guarda também.
+// Vale para ?rest_route= e para cada item de batch/v1 e uonix/v1/lote.
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'PUT', '/wp/v2/SIDEBARS/mega-menu', array( 'widgets' => array() ) ) ), 'PUT em /wp/v2/SIDEBARS/mega-menu é recusado' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'PUT', '/wp/v2/Sidebars/mega-menu/', array( 'widgets' => array() ) ) ), 'PUT em /wp/v2/Sidebars/mega-menu/ é recusado' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'PUT', '/WP/V2/sidebars/footer1', array( 'widgets' => array( 'block-85' ) ) ) ), 'PUT em /WP/V2/sidebars/footer1 puxando o megamenu é recusado' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'DELETE', '/WP/V2/widgets/block-85' ) ), 'DELETE em /WP/V2/widgets/block-85 é recusado' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'PUT', '/wp/v2/Widgets/block-10', array( 'sidebar' => 'wp_inactive_widgets' ) ) ), 'PUT em /wp/v2/Widgets mandando para inativos é recusado' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'POST', '/wp/v2/WIDGETS', array( 'sidebar' => 'mega-menu' ) ) ), 'POST em /wp/v2/WIDGETS no megamenu é recusado' );
+uox_er_assert( uox_er_recusou( uox_er_guarda( 'POST', '/wp/v2/WIDGETS', array( 'sidebar' => 'footer1', 'id' => 'block-85' ) ) ), 'POST em /wp/v2/WIDGETS com id do megamenu é recusado' );
 uox_er_assert( null === uox_er_guarda( 'PUT', '/wp/v2/posts/1' ), 'outras rotas passam' );
 
 // Resposta já definida por outro filtro segue intacta.

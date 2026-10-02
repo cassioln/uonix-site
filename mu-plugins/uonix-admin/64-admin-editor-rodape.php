@@ -45,7 +45,7 @@ function uonix_admin_editor_rodape_ativo() {
  * @return bool
  */
 function uonix_admin_editor_rodape_area_do_rodape( $id ) {
-	return is_string( $id ) && 1 === preg_match( '/^footer\d*$/', $id );
+	return is_string( $id ) && 1 === preg_match( '/^footer[1-6]$/', $id );
 }
 
 /**
@@ -110,10 +110,12 @@ function uonix_admin_editor_rodape_gettext( $traducao, $texto, $dominio ) {
 add_filter( 'gettext', 'uonix_admin_editor_rodape_gettext', 10, 3 );
 
 /**
- * Título do editor em blocos: filtro i18n.gettext antes do wp-edit-widgets.
+ * Título do editor em blocos: filtro i18n.gettext_default antes do wp-edit-widgets.
  *
- * A categoria de bloco "Widgets" usa _x() com contexto e passa por outro
- * filtro (i18n.gettext_with_context), então não é renomeada.
+ * O editor chama __( 'Widgets' ) sem domínio. O filtro genérico i18n.gettext
+ * recebe o domínio como veio (undefined); só o i18n.gettext_default já vem
+ * com o domínio normalizado. A categoria de bloco "Widgets" usa _x() com
+ * contexto e passa por outro filtro, então não é renomeada.
  *
  * @param string $hook_suffix Tela atual.
  * @return void
@@ -125,7 +127,7 @@ function uonix_admin_editor_rodape_titulo_js( $hook_suffix ) {
 
 	wp_add_inline_script(
 		'wp-edit-widgets',
-		"wp.hooks.addFilter( 'i18n.gettext', 'uonix/editar-rodape', function ( traducao, texto, dominio ) { return ( 'Widgets' === texto && 'default' === dominio ) ? 'Editar Rodapé' : traducao; } );",
+		"wp.hooks.addFilter( 'i18n.gettext_default', 'uonix/editar-rodape', function ( traducao, texto ) { return 'Widgets' === texto ? 'Editar Rodapé' : traducao; } );",
 		'before'
 	);
 }
@@ -182,10 +184,12 @@ function uonix_admin_editor_rodape_guarda( $resposta, $handler, $request ) {
 		return $resposta;
 	}
 
+	// O núcleo casa as rotas sem diferenciar maiúsculas (flag i), então a
+	// guarda também; o id capturado fica como veio, igual ao do controlador.
 	$rota   = untrailingslashit( (string) $request->get_route() );
 	$metodo = strtoupper( (string) $request->get_method() );
 
-	if ( 1 === preg_match( '#^/wp/v2/sidebars/([\w-]+)$#', $rota, $m ) ) {
+	if ( 1 === preg_match( '#^/wp/v2/sidebars/([\w-]+)$#i', $rota, $m ) ) {
 		if ( ! uonix_admin_editor_rodape_area_do_rodape( $m[1] ) ) {
 			return uonix_admin_editor_rodape_recusa();
 		}
@@ -202,7 +206,7 @@ function uonix_admin_editor_rodape_guarda( $resposta, $handler, $request ) {
 		return $resposta;
 	}
 
-	if ( 1 === preg_match( '#^/wp/v2/widgets/([\w-]+)$#', $rota, $m ) ) {
+	if ( 1 === preg_match( '#^/wp/v2/widgets/([\w-]+)$#i', $rota, $m ) ) {
 		$area = uonix_admin_editor_rodape_area_do_widget( $m[1] );
 
 		if ( null !== $area && ! uonix_admin_editor_rodape_area_do_rodape( $area ) ) {
@@ -217,8 +221,15 @@ function uonix_admin_editor_rodape_guarda( $resposta, $handler, $request ) {
 		return $resposta;
 	}
 
-	if ( '/wp/v2/widgets' === $rota && 'POST' === $metodo ) {
+	if ( 0 === strcasecmp( $rota, '/wp/v2/widgets' ) && 'POST' === $metodo ) {
 		if ( ! uonix_admin_editor_rodape_area_do_rodape( $request->get_param( 'sidebar' ) ) ) {
+			return uonix_admin_editor_rodape_recusa();
+		}
+
+		// Com "id", o POST grava por cima do widget existente e o tira da área
+		// onde estava (save_widget + wp_assign_widget_to_sidebar).
+		$id = $request->get_param( 'id' );
+		if ( null !== $id && ! uonix_admin_editor_rodape_widget_liberado( $id ) ) {
 			return uonix_admin_editor_rodape_recusa();
 		}
 	}
@@ -245,9 +256,9 @@ function uonix_admin_editor_rodape_filtra_listas( $resposta, $handler, $request 
 	}
 
 	$rota = untrailingslashit( (string) $request->get_route() );
-	if ( '/wp/v2/sidebars' === $rota ) {
+	if ( 0 === strcasecmp( $rota, '/wp/v2/sidebars' ) ) {
 		$campo = 'id';
-	} elseif ( '/wp/v2/widgets' === $rota ) {
+	} elseif ( 0 === strcasecmp( $rota, '/wp/v2/widgets' ) ) {
 		$campo = 'sidebar';
 	} else {
 		return $resposta;
