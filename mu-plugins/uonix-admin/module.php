@@ -32,10 +32,10 @@ uonix_mu_require_files(
 		'63-admin-intelligence-content-radar.php',
 		'64-admin-editor-rodape.php',
 		'52-admin-analytics-dashboard.php',
-		'60-admin-customizer-widgets-rodape.php',
 		'61-admin-widgets-rodape-fundo-escuro.php',
 		'62-admin-widgets-lote-rest.php',
 		'65-admin-editor-politicas-lgpd.php',
+		'66-admin-editor-sem-personalizador.php',
 	),
 	'uonix-admin'
 );
