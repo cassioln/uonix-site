@@ -177,9 +177,12 @@ if ( ! function_exists( 'uonix_intelligence_radar_select' ) ) {
 	 * @param array $consultas Linhas da dimensão `query`.
 	 * @param array $paginas   Linhas das dimensões `query` e `page`.
 	 * @param array $descartes Chave => data, de `uonix_intelligence_radar_dismissed()`.
+	 * @param array $excluir   Chave => true: consultas que o Módulo 3 já lista. Saem inteiras,
+	 *                         nem visíveis nem descartadas: cada consulta fica com uma
+	 *                         recomendação só (decisão do Cassio em 2026-10-02).
 	 * @return array{visible: array, dismissed: array}
 	 */
-	function uonix_intelligence_radar_select( array $consultas, array $paginas, array $descartes = array() ) {
+	function uonix_intelligence_radar_select( array $consultas, array $paginas, array $descartes = array(), array $excluir = array() ) {
 		$regras = uonix_intelligence_radar_rules();
 
 		$lider = array();
@@ -242,6 +245,9 @@ if ( ! function_exists( 'uonix_intelligence_radar_select' ) ) {
 				continue;
 			}
 			$vistas[ $candidata['key'] ] = true;
+			if ( isset( $excluir[ $candidata['key'] ] ) ) {
+				continue;
+			}
 			if ( isset( $descartes[ $candidata['key'] ] ) ) {
 				if ( count( $descartadas ) < $limite ) {
 					$descartadas[] = $candidata;
@@ -528,6 +534,33 @@ if ( ! function_exists( 'uonix_intelligence_radar_dismissed' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_radar_module3_queries' ) ) {
+	/**
+	 * Consultas que o Módulo 3 já lista como oportunidade (55): posição de 4 a 12 nos 30 dias
+	 * do snapshot. Medido em 2026-10-02: "ensaio de arrancamento" estava nos dois blocos, na
+	 * posição 10,1 em 30 dias e 15,1 em 90. Sem snapshot, nada é excluído.
+	 *
+	 * @return string[]
+	 */
+	function uonix_intelligence_radar_module3_queries() {
+		if ( ! function_exists( 'uonix_intelligence_seo_opportunities' ) ) {
+			return array();
+		}
+		$analise = uonix_intelligence_seo_opportunities( null, 1000 );
+		if ( ! is_array( $analise ) || empty( $analise['available'] ) || ! isset( $analise['rows'] ) || ! is_array( $analise['rows'] ) ) {
+			return array();
+		}
+		$saida = array();
+		foreach ( $analise['rows'] as $linha ) {
+			if ( is_array( $linha ) && isset( $linha['query'] ) && is_string( $linha['query'] ) && '' !== $linha['query'] ) {
+				$saida[] = $linha['query'];
+			}
+		}
+
+		return $saida;
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 	/**
 	 * Cron diário do Radar: busca, seleciona, resolve a página, pede a pauta e grava.
@@ -545,7 +578,8 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 	 *
 	 * Tudo é injetável por `$args`, como em `uonix_intelligence_executive_collect()`:
 	 * `today` (Y-m-d), `now` (ISO 8601), `config`, `query` (buscador do Search Console),
-	 * `page_resolver`, `generate`, `has_key`, `clock` (segundos, float) e `pause`. O hook do
+	 * `page_resolver`, `generate`, `has_key`, `clock` (segundos, float), `pause` e `module3`
+	 * (lista de consultas do Módulo 3, que saem do Radar). O hook do
 	 * cron é registrado com `accepted_args = 0`, então só um teste injeta.
 	 *
 	 * @return array{status: string, called: int}
@@ -583,7 +617,14 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 			return $falha( 'gsc_failed' );
 		}
 
-		$selecao      = uonix_intelligence_radar_select( $dados['queries'], $dados['pages'], uonix_intelligence_radar_dismissed() );
+		$modulo3 = array_key_exists( 'module3', $args ) && is_array( $args['module3'] ) ? $args['module3'] : uonix_intelligence_radar_module3_queries();
+		$excluir = array();
+		foreach ( $modulo3 as $consulta ) {
+			if ( is_string( $consulta ) && '' !== $consulta ) {
+				$excluir[ uonix_intelligence_radar_query_key( $consulta ) ] = true;
+			}
+		}
+		$selecao      = uonix_intelligence_radar_select( $dados['queries'], $dados['pages'], uonix_intelligence_radar_dismissed(), $excluir );
 		$ia_antes     = array();
 		$pagina_antes = array();
 		foreach ( isset( $anterior['candidates'] ) && is_array( $anterior['candidates'] ) ? $anterior['candidates'] : array() as $c ) {
@@ -604,14 +645,23 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 		$heads     = (int) $regras['head_max'];
 		$chamadas  = 0;
 		$gravadas  = array();
+		// Um endereço é resolvido uma vez por execução, e o "não sei" também é lembrado. Medido
+		// em 2026-10-02: duas candidatas com a mesma página líder gastavam o orçamento de HEAD
+		// em dobro, e as últimas da lista nunca eram conferidas.
+		$por_caminho = array();
 
 		foreach ( $selecao['visible'] as $c ) {
 			$sem_pagina = array( 'path' => $c['page_path'], 'kind' => '', 'title' => '', 'redirected_to' => '' );
 			// Sem tempo, nenhuma página é resolvida: seguir o 301 faz HEAD, e o HEAD depois do
 			// orçamento empurrava o cron para perto dos 290 s (BAIXO 4 da revisão do PR #378).
-			$pagina = (float) call_user_func( $relogio ) - $inicio > (float) $regras['ai_budget']
-				? null
-				: call_user_func_array( $resolver, array( $c['query'], $c['page_path'], &$heads ) );
+			if ( (float) call_user_func( $relogio ) - $inicio > (float) $regras['ai_budget'] ) {
+				$pagina = null;
+			} elseif ( array_key_exists( $c['page_path'], $por_caminho ) ) {
+				$pagina = $por_caminho[ $c['page_path'] ];
+			} else {
+				$pagina                        = call_user_func_array( $resolver, array( $c['query'], $c['page_path'], &$heads ) );
+				$por_caminho[ $c['page_path'] ] = $pagina;
+			}
 			$adiar  = false;
 			if ( null === $pagina ) {
 				// "Não sei": a página de ontem vale, e sem ela a pauta espera. Tratar como "não há

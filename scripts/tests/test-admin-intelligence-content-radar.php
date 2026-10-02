@@ -635,6 +635,50 @@ foreach ( array( 'admin_post_uonix_intelligence_radar_dismiss' => 'uonix_intelli
 $_POST                  = array();
 $GLOBALS['uox_options'] = array();
 
+// ---------------------------------------------------------------------------
+// 12. Pós-deploy de 2026-10-02: endereço conferido uma vez por execução, e sem repetir o
+//     que o Módulo 3 já lista.
+// ---------------------------------------------------------------------------
+$k_tarr = uonix_intelligence_radar_query_key( 'teste de arrancamento' );
+$sel_m3 = uonix_intelligence_radar_select( $consultas, $paginas, array( $k_tarr => '2026-10-01T00:00:00+00:00' ), array( uonix_intelligence_radar_query_key( 'ancoragem predial' ) => true, $k_tarr => true ) );
+uox_rd_assert( ! in_array( 'ancoragem predial', array_column( $sel_m3['visible'], 'query' ), true ) && ! in_array( 'teste de arrancamento', array_column( array_merge( $sel_m3['visible'], $sel_m3['dismissed'] ), 'query' ), true ) && 4 === count( $sel_m3['visible'] ), 'Consulta que já é oportunidade do Módulo 3 sai do Radar, mesmo descartada' );
+$GLOBALS['uox_options'] = array();
+$pedidos_ia             = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'module3' => array( 'Ancoragem Predial', 'outra consulta' ) ) ) );
+uox_rd_assert( ! in_array( 'ancoragem predial', array_column( get_option( $opt )['candidates'], 'query' ), true ) && ! in_array( 'ancoragem predial', $pedidos_ia, true ), 'O cron tira do Radar a consulta que o Módulo 3 já lista, comparada pela chave normalizada' );
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( $base );
+uox_rd_assert( 6 === count( get_option( $opt )['candidates'] ), 'Sem oportunidades do Módulo 3 (sem snapshot), nenhuma exclusão' );
+$caminhos = array();
+$res_cam  = static function ( $consulta, $caminho, &$orcamento ) use ( &$caminhos ) {
+	$caminhos[] = $caminho;
+	return array( 'path' => $caminho, 'kind' => 'página', 'title' => 'T ' . $caminho, 'redirected_to' => '' );
+};
+$pag_rep  = array(
+	uox_rd_pagina( 'ancoragem predial', 'https://uonix.com.br/norma-ancoragem-predial', 70 ),
+	uox_rd_pagina( 'teste de ancoragem', 'https://uonix.com.br/norma-ancoragem-predial', 9 ),
+	uox_rd_pagina( 'teste de arrancamento', 'https://uonix.com.br/teste-de-arrancamento', 11 ),
+	uox_rd_pagina( 'barra roscada inox fabricante', 'https://uonix.com.br/teste-de-arrancamento', 5 ),
+);
+$busc_rep = static function ( $config, $periodo, $dimensao, $limite ) use ( $consultas, $pag_rep ) {
+	return uox_rd_resposta( 'query' === $dimensao ? $consultas : $pag_rep );
+};
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'query' => $busc_rep, 'page_resolver' => $res_cam ) ) );
+$contagem = array_count_values( $caminhos );
+uox_rd_assert( 1 === ( $contagem['/norma-ancoragem-predial'] ?? 0 ) && 1 === ( $contagem['/teste-de-arrancamento'] ?? 0 ), 'Cada endereço é resolvido uma vez por execução, mesmo com duas candidatas; obteve ' . var_export( $contagem, true ) );
+$por_rep = array_column( get_option( $opt )['candidates'], null, 'query' );
+uox_rd_assert( 'T /norma-ancoragem-predial' === $por_rep['teste de ancoragem']['page']['title'] && 'T /teste-de-arrancamento' === $por_rep['barra roscada inox fabricante']['page']['title'], 'A segunda candidata do mesmo endereço recebe a mesma página' );
+$caminhos_ns = array();
+$res_ns      = static function ( $consulta, $caminho, &$orcamento ) use ( &$caminhos_ns ) {
+	$caminhos_ns[] = $caminho;
+	return null;
+};
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_radar_run( array_merge( $base, array( 'query' => $busc_rep, 'page_resolver' => $res_ns ) ) );
+uox_rd_assert( 1 === ( array_count_values( $caminhos_ns )['/norma-ancoragem-predial'] ?? 0 ), '"Não sei" de um endereço vale para a execução inteira: nenhum HEAD repetido' );
+$GLOBALS['uox_options'] = array();
+
 // FIM DAS SEÇÕES — as seções das tarefas seguintes entram acima desta linha.
 
 if ( $failures > 0 ) {
