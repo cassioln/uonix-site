@@ -179,6 +179,7 @@ uox_pl_assert( 'edit.php' === uonix_admin_editor_politicas_parent_file( 'edit.ph
 $GLOBALS['pagenow']       = 'post.php';
 $GLOBALS['uox_test_caps'] = $admin;
 uox_pl_assert( 'edit.php?post_type=page' === uonix_admin_editor_politicas_parent_file( 'edit.php?post_type=page' ), 'administrador mantém o destaque original' );
+uox_pl_assert( 'x' === uonix_admin_editor_politicas_submenu_file( 'x' ), 'administrador mantém o submenu original' );
 
 // AdOpt em outra aba, só para o editor.
 ob_start();
