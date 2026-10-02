@@ -309,6 +309,8 @@ uox_assert( false === strpos( $assunto_sem, '(' ), 'Assunto sem período não de
 $exec_semana = array( 'scorecard' => array( 'windows' => array( 'week' => array( 'start' => '2026-09-24', 'end' => '2026-09-30', 'days' => 7 ) ) ) );
 uox_assert( 'Semana de 24/09 a 30/09/2026' === uonix_intelligence_report_badge_label( $exec_semana, '01/09/2026 a 30/09/2026' ), '#308: com o contexto executivo, o selo é a semana do relatório; obteve ' . var_export( uonix_intelligence_report_badge_label( $exec_semana, 'x' ), true ) );
 uox_assert( '01/09/2026 a 30/09/2026' === uonix_intelligence_report_badge_label( null, '01/09/2026 a 30/09/2026' ), '#308: sem o contexto executivo, o selo antigo (período do SEO)' );
+$exec_virada = array( 'scorecard' => array( 'windows' => array( 'week' => array( 'start' => '2026-12-29', 'end' => '2027-01-04', 'days' => 7 ) ) ) );
+uox_assert( 'Semana de 29/12/2026 a 04/01/2027' === uonix_intelligence_report_badge_label( $exec_virada, 'x' ), '#308: na virada de ano o selo mostra os dois anos (BAIXO 4 da revisão do PR #370); obteve ' . var_export( uonix_intelligence_report_badge_label( $exec_virada, 'x' ), true ) );
 uox_assert( '01/09/2026 a 30/09/2026' === uonix_intelligence_report_badge_label( array( 'scorecard' => array( 'windows' => array() ) ), '01/09/2026 a 30/09/2026' ), '#308: janelas inválidas caem no selo antigo' );
 uox_assert( '01/09/2026 a 30/09/2026' === uonix_intelligence_report_badge_label( array( 'scorecard' => array( 'windows' => array( 'week' => array( 'start' => 'x', 'end' => '2026-09-30' ) ) ) ), '01/09/2026 a 30/09/2026' ), '#308: semana com data ilegível cai no selo antigo' );
 uox_assert( '23/08 a 21/09 (30 dias)' === uonix_intelligence_report_seo_window_label( uox_snapshot( array() ) ), '#308: o período do snapshot de SEO, com os dias; obteve ' . var_export( uonix_intelligence_report_seo_window_label( uox_snapshot( array() ) ), true ) );
@@ -361,6 +363,15 @@ uox_assert( false !== strpos( $maliciosa, 'Mais 2 oportunidades no painel.' ) &&
 uox_assert( false === strpos( $resto( $tres, 5, null, 'https://x', 0 ), 'Mais ' ), '#291: sem o limite do painel no contexto, não inventa resto' );
 $vazia = $resto( array(), 0 );
 uox_assert( false !== strpos( $vazia, 'Nenhuma consulta atendeu aos critérios' ) && false === strpos( $vazia, 'Mais ' ), '#291: sem oportunidade, a mensagem de vazio continua e a frase não aparece' );
+// MÉDIO 1 da revisão do PR #370: o contexto CONSOME email_limit, e a frase sai de um contexto
+// real, não de uma análise montada à mão.
+$cinco = array();
+foreach ( range( 1, 5 ) as $i ) {
+	$cinco[] = uox_q( 'consulta ' . $i, 8.0, 100 - $i, .0 );
+}
+$ctx_cinco = uonix_intelligence_report_context( array( 'snapshot' => uox_snapshot( $cinco ), 'executive' => null ) );
+uox_assert( 3 === count( $ctx_cinco['analysis']['rows'] ?? array() ) && 5 === ( $ctx_cinco['analysis']['matched'] ?? null ), '#291: o contexto corta em email_limit (3) e guarda matched (5); obteve ' . count( $ctx_cinco['analysis']['rows'] ?? array() ) );
+uox_assert( false !== strpos( uonix_intelligence_report_html( $ctx_cinco ), 'Mais 2 oportunidades no painel.' ), '#291: o e-mail de um contexto real com 5 oportunidades diz "Mais 2"' );
 $ctx_limite = uonix_intelligence_report_context( array( 'snapshot' => uox_snapshot( array() ), 'executive' => null ) );
 uox_assert( 5 === ( $ctx_limite['panel_limit'] ?? null ), '#291: o contexto leva o limite do painel das regras do 55' );
 

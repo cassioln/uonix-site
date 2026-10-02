@@ -43,7 +43,7 @@ A issue #193 descreve o produto corretamente e o repositório incorretamente. As
 | Token de desenvolvedor do Google Ads disponível | Não existe no repositório. Não há uma linha de código de Google Ads API |
 | "Metadados CAPI no banco"; auditoria de EMQ | **Meta CAPI não está implementado**: nenhuma chamada a `graph.facebook.com` em código executável (`mu-plugins/`, `themes/`, `scripts/`); as ocorrências no repositório estão em documentação de skill. Sem CAPI não há EMQ para medir. O Pixel é client-side via GTM |
 | "Transients de 12 horas já existentes no Uônix Insights" | **Zero transients no Insights.** O padrão é snapshot em `wp_options` com frescor de 24h e lock |
-| `scripts/cron/send-weekly-executive-report.php` | `scripts/cron/` não existe; nenhum cronjob de servidor documentado; nenhum workflow com `schedule:` |
+| `scripts/cron/send-weekly-executive-report.php` | `scripts/cron/` não existe e nenhum workflow tem `schedule:`. O envio é um evento do WP-Cron (`57`). Em produção, desde 2026-10-01, o próprio WP-Cron roda pelo `crontab` do sistema (#348, `docs/ambientes.md`), sem script dedicado ao relatório |
 | `page=uonix-insights`, submenu `> Central de Inteligência` | Slug é `uonix-analytics`. A Central de Inteligência é uma **aba** da página, não submenu. Desde o PR #310 o Insights é submenu de `ksio.dev` para o `ksiodev`, e item próprio para os demais quando liberado |
 | `_uonix_utm_*` no Fluent Forms | Lá é **uma linha JSON** com `meta_key='uonix_attribution'`, só para os formulários de captura, contato e newsletter, e **nunca lida** |
 

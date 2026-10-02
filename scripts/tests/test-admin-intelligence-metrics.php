@@ -377,7 +377,7 @@ $r = uonix_intel_sub( 'function uonix_ksio_can_configure_insights() { return fal
 uonix_intel_assert( 'velho' === $r, 'o 49 dizendo que não é o dono mantém o valor antigo na trava dos destinatários; obteve ' . var_export( $r, true ) );
 
 // #351: o texto sobre o agendador depende de o WP-Cron rodar por visita. Mesmo critério
-// do WordPress (`wp-cron.php` e `spawn_cron()`): DISABLE_WP_CRON definida e verdadeira.
+// do WordPress (`_wp_cron()`, em `wp-includes/cron.php`): DISABLE_WP_CRON definida e verdadeira.
 $r = uonix_intel_sub( '', 'uonix_intelligence_cron_by_visit()', $arquivo_55 );
 uonix_intel_assert( true === $r, '#351: sem DISABLE_WP_CRON, o WP-Cron roda por visita; obteve ' . var_export( $r, true ) );
 $r = uonix_intel_sub( 'define("DISABLE_WP_CRON", true);', 'uonix_intelligence_cron_by_visit()', $arquivo_55 );

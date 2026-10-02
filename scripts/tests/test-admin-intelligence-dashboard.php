@@ -188,6 +188,14 @@ uox_assert( false !== strpos( $html_ia, 'Título atual' ) && false !== strpos( $
 uox_assert( false === strpos( $html_ia, '<script>x' ) && false !== strpos( $html_ia, '&lt;script&gt;' ), 'Texto vindo da IA sai escapado' );
 uox_assert( false !== strpos( $html_ia, 'ESTADO-IA:no_page' ) && false !== strpos( $html_ia, 'Não identificada' ), 'Sem página: estado da IA e Página Alvo não identificada' );
 uox_assert( false === strpos( $html_ia, 'Diferenciais a acrescentar' ), 'A coluna determinística saiu (#309)' );
+// #291 (MÉDIO 1 da revisão do PR #370): o painel CONSOME panel_limit. Com 7 oportunidades,
+// a tabela sai com exatamente 5 linhas, e é isso que o "Mais N no painel" do e-mail promete.
+$sete = array();
+foreach ( range( 1, 7 ) as $i ) {
+	$sete[] = uox_q( 'consulta ' . $i, 8.0, 100 - $i, .0 );
+}
+$html_sete = uox_render_intelligence( 'intelligence', uox_snapshot( $sete ) );
+uox_assert( 5 === substr_count( $html_sete, '<td><strong>consulta ' ) && false !== strpos( $html_sete, '<td><strong>consulta 5</strong>' ) && false === strpos( $html_sete, '<td><strong>consulta 6</strong>' ), '#291: com 7 oportunidades o painel lista panel_limit (5); obteve ' . substr_count( $html_sete, '<td><strong>consulta ' ) );
 $html_sem_mapa = uox_render_intelligence( 'intelligence', uox_snapshot( array( uox_q( 'olhal inox', 6.0, 50, .0 ) ) ) );
 uox_assert( false !== strpos( $html_sem_mapa, 'Aguardando a próxima sincronização' ), 'Snapshot sem query_pages: Página Alvo aguardando a sincronização' );
 $GLOBALS['uox_ia'] = array();

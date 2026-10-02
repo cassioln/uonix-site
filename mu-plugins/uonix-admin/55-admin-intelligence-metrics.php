@@ -56,7 +56,8 @@ if ( ! function_exists( 'uonix_intelligence_seo_rules' ) ) {
 if ( ! function_exists( 'uonix_intelligence_cron_by_visit' ) ) {
 	/**
 	 * O WP-Cron deste ambiente roda por visita? Mesmo critério do WordPress
-	 * (`spawn_cron()`, `wp-cron.php`): `DISABLE_WP_CRON` definida e verdadeira o desliga.
+	 * (`_wp_cron()`, em `wp-includes/cron.php`): `DISABLE_WP_CRON` definida e verdadeira o
+	 * desliga.
 	 *
 	 * Serve só para os textos do painel e do e-mail dizerem a verdade sobre o horário
 	 * (#351). Em produção, desde 2026-10-01, o WP-Cron roda pelo `crontab` do sistema, com a

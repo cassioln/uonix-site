@@ -81,9 +81,15 @@ if ( ! function_exists( 'uonix_intelligence_report_badge_label' ) ) {
 	function uonix_intelligence_report_badge_label( $executive, $fallback ) {
 		$semana = is_array( $executive ) && isset( $executive['scorecard']['windows']['week'] ) ? $executive['scorecard']['windows']['week'] : null;
 		$rotulo = uonix_intelligence_report_window_label( $semana );
-		$fim    = is_array( $semana ) && isset( $semana['end'] ) ? DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $semana['end'], new DateTimeZone( 'UTC' ) ) : false;
-		if ( '' === $rotulo || false === $fim ) {
+		$fuso   = new DateTimeZone( 'UTC' );
+		$inicio = is_array( $semana ) && isset( $semana['start'] ) ? DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $semana['start'], $fuso ) : false;
+		$fim    = is_array( $semana ) && isset( $semana['end'] ) ? DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $semana['end'], $fuso ) : false;
+		if ( '' === $rotulo || false === $inicio || false === $fim ) {
 			return (string) $fallback;
+		}
+		// Na virada de ano, os dois anos: "29/12/2026 a 04/01/2027" (BAIXO 4 da revisão do PR #370).
+		if ( $inicio->format( 'Y' ) !== $fim->format( 'Y' ) ) {
+			return 'Semana de ' . $inicio->format( 'd/m/Y' ) . ' a ' . $fim->format( 'd/m/Y' );
 		}
 
 		return 'Semana de ' . $rotulo . '/' . $fim->format( 'Y' );
@@ -643,10 +649,11 @@ if ( ! function_exists( 'uonix_intelligence_report_first_run' ) ) {
 	/**
 	 * Momento do primeiro disparo: próxima segunda-feira, 08:00 no fuso do site.
 	 *
-	 * O horário é arbitrário **de propósito**. Sem cronjob de servidor, WP-Cron
-	 * dispara por tráfego, não por relógio: a deriva pode atravessar o dia. Por
-	 * isso o contrato proíbe prometer horário na interface, e por isso não vale
-	 * gastar decisão escolhendo um. Segunda-feira é só a âncora semanal.
+	 * O horário é arbitrário **de propósito**. Em QA e no local, o WP-Cron dispara por
+	 * tráfego, não por relógio, e a deriva pode atravessar o dia. Em produção ele roda
+	 * pelo `crontab` desde 2026-10-01 (#348), mas o PHP não enxerga o `crontab`. Por
+	 * isso o contrato proíbe prometer horário na interface, e por isso não vale gastar
+	 * decisão escolhendo um. Segunda-feira é só a âncora semanal.
 	 *
 	 * @return int Timestamp Unix.
 	 */
