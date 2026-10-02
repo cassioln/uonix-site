@@ -238,6 +238,64 @@ uox_rd_assert( is_wp_error( uonix_intelligence_radar_fetch( array(), $jan, stati
 $vazia = uonix_intelligence_radar_fetch( array(), $jan, static function () { return '{"responseAggregationType":"byProperty"}'; } );
 uox_rd_assert( is_array( $vazia ) && array() === $vazia['queries'] && array() === $vazia['pages'], 'Resposta sem linhas é vazio legítimo' );
 
+// ---------------------------------------------------------------------------
+// 6. Pedido e validação da pauta.
+// ---------------------------------------------------------------------------
+$pag   = array( 'path' => '/norma-ancoragem-predial', 'kind' => 'página', 'title' => 'Norma de Ancoragem Predial: NBR 16325 | Uônix', 'redirected_to' => '' );
+$ent   = array( 'query' => 'ancoragem predial', 'impressions' => 106, 'position' => 59.1, 'page' => $pag, 'model' => 'gemini-3.8-flash' );
+$corpo = uonix_intelligence_radar_request_body( $ent );
+$gc    = $corpo['generationConfig'];
+uox_rd_assert( 'application/json' === $gc['responseMimeType'] && 0.2 === $gc['temperature'] && 1024 === $gc['maxOutputTokens'] && array( 'thinkingBudget' => 0 ) === $gc['thinkingConfig'], 'Configuração de geração igual à medida no #329' );
+uox_rd_assert( array( 'caminho', 'titulo', 'angulo', 'intencao' ) === $gc['responseSchema']['required'] && ! isset( $gc['responseSchema']['properties']['caminho']['enum'] ), 'Esquema exige as 4 chaves, sem enum: não foi medido no gemini-3.8-flash, e a validação garante' );
+$txt = $corpo['contents'][0]['parts'][0]['text'];
+foreach ( array( 'português do Brasil', '"reforcar"', '"nova"', 'no máximo 80', 'no máximo 300', 'Não invente norma', 'Só cite NR ou NBR', 'Sem HTML e sem link', 'Sem página atual, responda "nova"' ) as $trecho ) {
+	uox_rd_assert( false !== strpos( $txt, $trecho ), "A instrução diz: {$trecho}" );
+}
+$uox_rd_dados = static function ( array $entrada ) {
+	$t = uonix_intelligence_radar_request_body( $entrada )['contents'][0]['parts'][0]['text'];
+	return json_decode( substr( $t, (int) strrpos( $t, "\n" ) + 1 ), true );
+};
+$json = $uox_rd_dados( $ent );
+uox_rd_assert( is_array( $json ) && array( 'consulta', 'impressoes_90_dias', 'posicao_media', 'pagina_atual' ) === array_keys( $json ) && array( 'caminho' => '/norma-ancoragem-predial', 'tipo' => 'página', 'titulo' => 'Norma de Ancoragem Predial: NBR 16325 | Uônix' ) === $json['pagina_atual'], 'Os dados enviados têm só as 4 chaves; obteve ' . var_export( $json, true ) );
+$com301                          = $ent;
+$com301['page']['redirected_to'] = '/servico/ensaios-de-arrancamento/';
+uox_rd_assert( '/servico/ensaios-de-arrancamento/' === $uox_rd_dados( $com301 )['pagina_atual']['caminho'], 'Com 301, o caminho enviado é o do destino' );
+$sem_pag         = $ent;
+$sem_pag['page'] = array( 'path' => '/removida', 'kind' => '', 'title' => '', 'redirected_to' => '' );
+uox_rd_assert( null === $uox_rd_dados( $sem_pag )['pagina_atual'], 'Sem página resolvida, pagina_atual vai null' );
+
+uox_rd_assert( uonix_intelligence_radar_input_hash( $ent ) === uonix_intelligence_radar_input_hash( array_merge( $ent, array( 'impressions' => 200, 'position' => 40.0 ) ) ), 'As métricas ficam fora do hash: a janela anda todo dia' );
+foreach ( array( 'título' => array( 'title' => 'Outro' ), 'caminho' => array( 'path' => '/x' ), 'tipo' => array( 'kind' => 'produto' ), 'destino' => array( 'redirected_to' => '/y/' ) ) as $campo => $troca ) {
+	$outra         = $ent;
+	$outra['page'] = array_merge( $ent['page'], $troca );
+	uox_rd_assert( uonix_intelligence_radar_input_hash( $ent ) !== uonix_intelligence_radar_input_hash( $outra ), "O hash muda com a página: {$campo}" );
+}
+uox_rd_assert( uonix_intelligence_radar_input_hash( $ent ) !== uonix_intelligence_radar_input_hash( array_merge( $ent, array( 'query' => 'outra' ) ) ) && uonix_intelligence_radar_input_hash( $ent ) !== uonix_intelligence_radar_input_hash( array_merge( $ent, array( 'model' => 'gemini-9-flash' ) ) ), 'O hash muda com a consulta e com o modelo' );
+
+$boa = array( 'caminho' => 'nova', 'titulo' => 'Ancoragem predial: o que é e como funciona', 'angulo' => 'Explicar o sistema completo, do projeto à inspeção.', 'intencao' => 'informacional' );
+uox_rd_assert( $boa === uonix_intelligence_radar_validate( json_encode( $boa ), true ), 'Pauta válida é aceita' );
+uox_rd_assert( array_merge( $boa, array( 'titulo' => 'Título' ) ) === uonix_intelligence_radar_validate( json_encode( array_merge( $boa, array( 'titulo' => '  Título  ' ) ) ), true ), 'Espaços nas pontas são aparados' );
+foreach ( array(
+	'chave a mais'    => $boa + array( 'extra' => 'x' ),
+	'chave faltando'  => array_diff_key( $boa, array( 'angulo' => 1 ) ),
+	'caminho fora'    => array_merge( $boa, array( 'caminho' => 'reescrever' ) ),
+	'intenção fora'   => array_merge( $boa, array( 'intencao' => 'curiosidade' ) ),
+	'título vazio'    => array_merge( $boa, array( 'titulo' => '   ' ) ),
+	'título de 81'    => array_merge( $boa, array( 'titulo' => str_repeat( 'a', 81 ) ) ),
+	'ângulo de 301'   => array_merge( $boa, array( 'angulo' => str_repeat( 'a', 301 ) ) ),
+	'HTML'            => array_merge( $boa, array( 'titulo' => 'Ancoragem <b>predial</b>' ) ),
+	'link http'       => array_merge( $boa, array( 'angulo' => 'Veja https://exemplo.com' ) ),
+	'link www'        => array_merge( $boa, array( 'angulo' => 'Veja www.exemplo.com' ) ),
+	'domínio .com.br' => array_merge( $boa, array( 'angulo' => 'Compare com concorrente.com.br' ) ),
+	'valor não texto' => array_merge( $boa, array( 'titulo' => 42 ) ),
+) as $caso => $dados_ruins ) {
+	uox_rd_assert( null === uonix_intelligence_radar_validate( json_encode( $dados_ruins ), true ), "Pauta recusada: {$caso}" );
+}
+uox_rd_assert( null === uonix_intelligence_radar_validate( 'não é json', true ) && null === uonix_intelligence_radar_validate( null, true ) && null === uonix_intelligence_radar_validate( '[]', true ), 'Texto que não é objeto JSON é recusado' );
+uox_rd_assert( is_array( uonix_intelligence_radar_validate( json_encode( array_merge( $boa, array( 'titulo' => str_repeat( 'á', 80 ), 'angulo' => str_repeat( 'ç', 300 ) ) ) ), true ) ), '80 e 300 caracteres acentuados cabem: conta caractere, não byte' );
+$reforco = array_merge( $boa, array( 'caminho' => 'reforcar' ) );
+uox_rd_assert( is_array( uonix_intelligence_radar_validate( json_encode( $reforco ), true ) ) && null === uonix_intelligence_radar_validate( json_encode( $reforco ), false ), 'Reforço só vale com página resolvida (foco de revisão 3)' );
+
 // FIM DAS SEÇÕES — as seções das tarefas seguintes entram acima desta linha.
 
 if ( $failures > 0 ) {

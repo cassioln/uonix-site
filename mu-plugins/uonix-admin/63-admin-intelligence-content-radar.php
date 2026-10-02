@@ -299,3 +299,142 @@ if ( ! function_exists( 'uonix_intelligence_radar_fetch' ) ) {
 		return $saida;
 	}
 }
+
+if ( ! function_exists( 'uonix_intelligence_radar_input_hash' ) ) {
+	/**
+	 * Hash do que define a pauta: a consulta, a página que aparece hoje e o modelo.
+	 *
+	 * As métricas vão no pedido, mas ficam fora do hash: a janela de 90 dias anda todo
+	 * dia, e com elas no hash toda execução refazia a pauta (a mesma lição do #329, A1).
+	 */
+	function uonix_intelligence_radar_input_hash( array $entrada ) {
+		$pagina = isset( $entrada['page'] ) && is_array( $entrada['page'] ) ? $entrada['page'] : array();
+
+		return hash(
+			'sha256',
+			(string) wp_json_encode(
+				array(
+					isset( $entrada['query'] ) ? (string) $entrada['query'] : '',
+					isset( $pagina['path'] ) ? (string) $pagina['path'] : '',
+					isset( $pagina['redirected_to'] ) ? (string) $pagina['redirected_to'] : '',
+					isset( $pagina['kind'] ) ? (string) $pagina['kind'] : '',
+					isset( $pagina['title'] ) ? (string) $pagina['title'] : '',
+					isset( $entrada['model'] ) ? (string) $entrada['model'] : '',
+				)
+			)
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_request_body' ) ) {
+	/**
+	 * Corpo do `generateContent` para uma candidata. Só os quatro campos abaixo vão ao
+	 * Gemini; com 301, o caminho enviado é o do destino, que é a página que se edita.
+	 *
+	 * Sem `enum` no esquema: não foi medido no gemini-3.8-flash. A instrução pede os
+	 * valores, e `uonix_intelligence_radar_validate()` garante.
+	 */
+	function uonix_intelligence_radar_request_body( array $entrada ) {
+		$pagina = isset( $entrada['page'] ) && is_array( $entrada['page'] ) ? $entrada['page'] : array();
+		$titulo = isset( $pagina['title'] ) ? (string) $pagina['title'] : '';
+		$dados  = array(
+			'consulta'           => isset( $entrada['query'] ) ? (string) $entrada['query'] : '',
+			'impressoes_90_dias' => isset( $entrada['impressions'] ) ? (int) $entrada['impressions'] : 0,
+			'posicao_media'      => isset( $entrada['position'] ) ? (float) $entrada['position'] : 0.0,
+			'pagina_atual'       => '' === $titulo ? null : array(
+				'caminho' => isset( $pagina['redirected_to'] ) && '' !== (string) $pagina['redirected_to'] ? (string) $pagina['redirected_to'] : (string) ( $pagina['path'] ?? '' ),
+				'tipo'    => isset( $pagina['kind'] ) ? (string) $pagina['kind'] : '',
+				'titulo'  => $titulo,
+			),
+		);
+		$instrucao = implode(
+			"\n",
+			array(
+				'Você propõe uma pauta de conteúdo para o blog do site da Uônix, fabricante de ancoragens e de acessórios para trabalho em altura.',
+				'A consulta abaixo aparece na busca do Google, mas o site aparece mal para ela: posição média acima de 15.',
+				'Regras:',
+				'- Escreva em português do Brasil.',
+				'- Em "caminho", responda "reforcar" quando a página atual já trata do assunto da consulta e falta profundidade, e "nova" quando ela trata de outra coisa. Sem página atual, responda "nova".',
+				'- "titulo": o título do post, com no máximo 80 caracteres.',
+				'- "angulo": o que o texto deve cobrir e em que se diferencia do que já existe, com no máximo 300 caracteres.',
+				'- "intencao": "informacional", "comercial", "transacional" ou "navegacional".',
+				'- Não invente norma, número, prazo, preço, certificação nem superlativo como "máxima" ou "melhor".',
+				'- Só cite NR ou NBR que já esteja na consulta ou no título da página atual.',
+				'- Sem HTML e sem link.',
+				'Dados (JSON):',
+				(string) wp_json_encode( $dados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ),
+			)
+		);
+		$limites = function_exists( 'uonix_intelligence_ai_limits' ) ? uonix_intelligence_ai_limits() : array( 'max_output_tokens' => 1024 );
+
+		return array(
+			'contents'         => array( array( 'role' => 'user', 'parts' => array( array( 'text' => $instrucao ) ) ) ),
+			'generationConfig' => array(
+				'temperature'      => 0.2,
+				'maxOutputTokens'  => (int) $limites['max_output_tokens'],
+				'responseMimeType' => 'application/json',
+				'responseSchema'   => array(
+					'type'       => 'OBJECT',
+					'properties' => array(
+						'caminho'  => array( 'type' => 'STRING' ),
+						'titulo'   => array( 'type' => 'STRING' ),
+						'angulo'   => array( 'type' => 'STRING' ),
+						'intencao' => array( 'type' => 'STRING' ),
+					),
+					'required'   => array( 'caminho', 'titulo', 'angulo', 'intencao' ),
+				),
+				// Medido em 2026-09-30 no gemini-3.8-flash: aceito, STOP, nenhum token de raciocínio.
+				'thinkingConfig'   => array( 'thinkingBudget' => 0 ),
+			),
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_radar_validate' ) ) {
+	/**
+	 * Aceita a pauta só se TODAS as regras valerem; senão devolve null.
+	 *
+	 * Norma inventada não é detectável aqui. A proteção é a instrução do pedido e a
+	 * revisão humana: a pauta só é exibida, e quem escreve o post confere.
+	 *
+	 * @param mixed $texto      Texto devolvido pelo modelo.
+	 * @param bool  $com_pagina Se a página líder foi resolvida. Sem ela, "reforcar" não tem o que reforçar.
+	 * @return array{caminho: string, titulo: string, angulo: string, intencao: string}|null
+	 */
+	function uonix_intelligence_radar_validate( $texto, $com_pagina ) {
+		$dados = is_string( $texto ) ? json_decode( $texto, true ) : null;
+		if ( ! is_array( $dados ) ) {
+			return null;
+		}
+		$chaves = array_keys( $dados );
+		sort( $chaves );
+		if ( array( 'angulo', 'caminho', 'intencao', 'titulo' ) !== $chaves ) {
+			return null;
+		}
+		foreach ( $dados as $valor ) {
+			if ( ! is_string( $valor ) ) {
+				return null;
+			}
+		}
+		$pauta = array(
+			'caminho'  => trim( $dados['caminho'] ),
+			'titulo'   => trim( $dados['titulo'] ),
+			'angulo'   => trim( $dados['angulo'] ),
+			'intencao' => trim( $dados['intencao'] ),
+		);
+		if ( ! in_array( $pauta['caminho'], array( 'nova', 'reforcar' ), true ) || ( 'reforcar' === $pauta['caminho'] && ! $com_pagina ) ) {
+			return null;
+		}
+		if ( ! in_array( $pauta['intencao'], array( 'informacional', 'comercial', 'transacional', 'navegacional' ), true ) ) {
+			return null;
+		}
+		foreach ( array( array( $pauta['titulo'], 80 ), array( $pauta['angulo'], 300 ) ) as $par ) {
+			$tamanho = function_exists( 'mb_strlen' ) ? mb_strlen( $par[0], 'UTF-8' ) : strlen( $par[0] );
+			if ( $tamanho < 1 || $tamanho > $par[1] || 1 === preg_match( '/<[^>]*>/', $par[0] ) || 1 === preg_match( '#(https?://|www\.|\.com\.br\b)#i', $par[0] ) ) {
+				return null;
+			}
+		}
+
+		return $pauta;
+	}
+}
