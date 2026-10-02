@@ -247,6 +247,9 @@ jobs:
       - name: Test editor policies and LGPD menu
         run: php scripts/tests/test-admin-editor-politicas-lgpd.php
 
+      - name: Test editor side menu organization
+        run: php scripts/tests/test-admin-editor-menus.php
+
   shell-and-config:
     name: Shell, workflows, Node and Compose
     runs-on: ubuntu-latest
