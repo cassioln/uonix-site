@@ -39,7 +39,10 @@ if ( ! function_exists( 'uonix_intelligence_ai_limits' ) ) {
 		// `max_hops`: saltos de redirecionamento seguidos no cron (#343), o mesmo teto do 59.
 		// `head_max`: HEADs por execução do cron. 10 × `head_timeout` (8 s) = 80 s no pior caso,
 		// dentro do `timeout 290` do `crontab` de produção (BAIXO 1 da revisão do PR #373).
-		return array( 'title' => 60, 'description' => 155, 'per_run' => 5, 'timeout' => 15, 'max_output_tokens' => 1024, 'max_hops' => 3, 'head_max' => 10 );
+		// `quota_wait`: `retryDelay` de 429, em segundos, acima do qual a cota não volta nesta
+		// execução. Uma janela por minuto nunca pede mais de 60 s (#384).
+		// `failure_streak`: falhas seguidas que param o cron (#384).
+		return array( 'title' => 60, 'description' => 155, 'per_run' => 5, 'timeout' => 15, 'max_output_tokens' => 1024, 'max_hops' => 3, 'head_max' => 10, 'quota_wait' => 60, 'failure_streak' => 2 );
 	}
 }
 
@@ -440,6 +443,41 @@ if ( ! function_exists( 'uonix_intelligence_ai_validate' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_ai_quota_info' ) ) {
+	/**
+	 * Lê o corpo de um 429 do Gemini: se a cota não volta nesta execução, e quanto esperar.
+	 *
+	 * Cota que não volta: um `QuotaFailure` com `quotaId` diário (`...PerDay...`), ou um
+	 * `RetryInfo` com `retryDelay` acima de `quota_wait`. Medido em 2026-10-02:
+	 * `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limite 20, `retryDelay` de 27223s.
+	 * Detalhe malformado é ignorado.
+	 *
+	 * @param mixed $corpo Corpo cru da resposta.
+	 * @return array{daily: bool, retry_after: int} `retry_after` em segundos, 0 quando o corpo não diz.
+	 */
+	function uonix_intelligence_ai_quota_info( $corpo ) {
+		$dados    = is_string( $corpo ) ? json_decode( $corpo, true ) : null;
+		$detalhes = is_array( $dados ) && isset( $dados['error']['details'] ) && is_array( $dados['error']['details'] ) ? $dados['error']['details'] : array();
+		$diaria   = false;
+		$espera   = 0;
+		foreach ( $detalhes as $detalhe ) {
+			$tipo = is_array( $detalhe ) && isset( $detalhe['@type'] ) && is_string( $detalhe['@type'] ) ? $detalhe['@type'] : '';
+			if ( 'type.googleapis.com/google.rpc.QuotaFailure' === $tipo && isset( $detalhe['violations'] ) && is_array( $detalhe['violations'] ) ) {
+				foreach ( $detalhe['violations'] as $violacao ) {
+					if ( is_array( $violacao ) && isset( $violacao['quotaId'] ) && is_string( $violacao['quotaId'] ) && false !== strpos( $violacao['quotaId'], 'PerDay' ) ) {
+						$diaria = true;
+					}
+				}
+			} elseif ( 'type.googleapis.com/google.rpc.RetryInfo' === $tipo && isset( $detalhe['retryDelay'] ) && is_string( $detalhe['retryDelay'] )
+				&& 1 === preg_match( '/^([0-9]{1,9})(\.[0-9]+)?s$/D', $detalhe['retryDelay'], $m ) ) {
+				$espera = (int) $m[1];
+			}
+		}
+
+		return array( 'daily' => $diaria || $espera > (int) uonix_intelligence_ai_limits()['quota_wait'], 'retry_after' => $espera );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 	/**
 	 * Transporte de um pedido ao Gemini, sem saber o que o pedido pede.
@@ -453,9 +491,15 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 	 * chamadas seguidas. Os demais erros não são repetidos: o próximo cron diário
 	 * tenta de novo.
 	 *
+	 * O 429 de cota diária (`uonix_intelligence_ai_quota_info()`) não é repetido e volta como
+	 * `quota_exhausted`, com a espera que o Gemini pediu (#384).
+	 *
 	 * @param array  $body  Corpo do `generateContent`.
 	 * @param string $model Modelo, como `uonix_intelligence_ai_model()` devolve.
-	 * @return array{status: string, text?: string} `text` só com `ok`.
+	 * @return array{status: string, http?: int, attempts?: int, retry_after?: int, text?: string}
+	 *         `http` é o código da última resposta (0 em erro de transporte) e `attempts` os pedidos
+	 *         feitos; os dois só faltam em `not_configured`. `text` só com `ok`; `retry_after` só
+	 *         com `quota_exhausted`, quando o corpo diz.
 	 */
 	function uonix_intelligence_ai_generate( array $body, $model, $pause = 2 ) {
 		$chave = uonix_intelligence_ai_api_key();
@@ -472,10 +516,12 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 
 		$codigo   = 0;
 		$resposta = null;
+		$cota     = null;
 		for ( $tentativa = 1; $tentativa <= 2; ++$tentativa ) {
 			$resposta = wp_remote_post( $url, $args );
 			$codigo   = is_wp_error( $resposta ) ? 0 : (int) wp_remote_retrieve_response_code( $resposta );
-			if ( 1 === $tentativa && in_array( $codigo, array( 429, 503 ), true ) ) {
+			$cota     = 429 === $codigo ? uonix_intelligence_ai_quota_info( wp_remote_retrieve_body( $resposta ) ) : null;
+			if ( 1 === $tentativa && in_array( $codigo, array( 429, 503 ), true ) && ! ( is_array( $cota ) && $cota['daily'] ) ) {
 				if ( (int) $pause > 0 ) {
 					sleep( (int) $pause );
 				}
@@ -483,11 +529,15 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 			}
 			break;
 		}
+		$feito = array( 'http' => $codigo, 'attempts' => $tentativa );
+		if ( is_array( $cota ) && $cota['daily'] ) {
+			return array( 'status' => 'quota_exhausted' ) + $feito + ( $cota['retry_after'] > 0 ? array( 'retry_after' => $cota['retry_after'] ) : array() );
+		}
 		if ( 404 === $codigo ) {
-			return array( 'status' => 'model_missing' );
+			return array( 'status' => 'model_missing' ) + $feito;
 		}
 		if ( 200 !== $codigo ) {
-			return array( 'status' => 'unavailable' );
+			return array( 'status' => 'unavailable' ) + $feito;
 		}
 
 		$corpo     = json_decode( (string) wp_remote_retrieve_body( $resposta ), true );
@@ -495,7 +545,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 		$fim       = isset( $candidato['finishReason'] ) && is_string( $candidato['finishReason'] ) ? $candidato['finishReason'] : '';
 		if ( 'STOP' !== $fim ) {
 			// Sem candidato, ou cortado por tamanho: transitório. Bloqueio por segurança e afins: recusa.
-			return array( 'status' => ( '' === $fim || 'MAX_TOKENS' === $fim ) ? 'unavailable' : 'rejected' );
+			return array( 'status' => ( '' === $fim || 'MAX_TOKENS' === $fim ) ? 'unavailable' : 'rejected' ) + $feito;
 		}
 		$texto  = '';
 		$partes = isset( $candidato['content']['parts'] ) && is_array( $candidato['content']['parts'] ) ? $candidato['content']['parts'] : array();
@@ -505,7 +555,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 			}
 		}
 
-		return array( 'status' => 'ok', 'text' => $texto );
+		return array( 'status' => 'ok' ) + $feito + array( 'text' => $texto );
 	}
 }
 
@@ -514,16 +564,18 @@ if ( ! function_exists( 'uonix_intelligence_ai_call' ) ) {
 	 * Uma chamada ao Gemini para uma oportunidade do Módulo 3: monta o pedido de
 	 * título e descrição, usa o transporte e valida a resposta.
 	 *
-	 * @return array{status: string, suggestion?: array}
+	 * @return array{status: string, http?: int, attempts?: int, retry_after?: int, suggestion?: array}
+	 *         O que o transporte devolve, menos o texto (#384).
 	 */
 	function uonix_intelligence_ai_call( array $input, $pause = 2 ) {
 		$resposta = uonix_intelligence_ai_generate( uonix_intelligence_ai_request_body( $input ), (string) $input['model'], $pause );
 		if ( 'ok' !== $resposta['status'] ) {
-			return array( 'status' => $resposta['status'] );
+			return $resposta;
 		}
+		$feito    = array_intersect_key( $resposta, array( 'http' => true, 'attempts' => true ) );
 		$sugestao = uonix_intelligence_ai_validate( $resposta['text'], (array) $input['differentiators'] );
 
-		return null === $sugestao ? array( 'status' => 'rejected' ) : array( 'status' => 'ok', 'suggestion' => $sugestao );
+		return null === $sugestao ? array( 'status' => 'rejected' ) + $feito : array( 'status' => 'ok', 'suggestion' => $sugestao ) + $feito;
 	}
 }
 
@@ -535,6 +587,11 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 	 * chamada, e o resultado substitui o anterior, inclusive quando falha. Assim, a
 	 * sugestão de um título que já não existe nunca sobrevive. Oportunidade que saiu
 	 * da lista sai do cache. Não toca o snapshot nem o e-mail.
+	 *
+	 * Depois de um `quota_exhausted`, ou de `failure_streak` falhas seguidas (`unavailable` ou
+	 * `model_missing`), nenhuma chamada começa: as entradas que precisariam de uma ficam
+	 * `deferred`, com o motivo em `reason` (#384). Medido em 2026-10-03: uma rodada com falhas
+	 * gastou a cota do dia. Cada chamada grava o `http` e os `attempts`.
 	 *
 	 * @param array|null $analysis Resultado de uonix_intelligence_seo_opportunities(), ou null para ler.
 	 * @return array{called: int, skipped: string}
@@ -557,6 +614,8 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 		$chamadas  = 0;
 		$agora     = gmdate( 'c' );
 		$orcamento = (int) $limites['head_max'];
+		$parada    = array();
+		$seguidas  = 0;
 		foreach ( array_slice( $analysis['rows'], 0, $limites['per_run'] ) as $row ) {
 			if ( ! is_array( $row ) || ! isset( $row['query'] ) || ! is_string( $row['query'] ) ) {
 				continue;
@@ -584,15 +643,38 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 				$novo[ $chave ] = $anterior;
 				continue;
 			}
+			if ( array() !== $parada ) {
+				$entrada = array( 'status' => 'deferred' ) + $parada + array( 'input_hash' => $hash, 'attempted_at' => $agora, 'model' => $input['model'] );
+				if ( '' !== $input['redirected_to'] ) {
+					$entrada['redirected_to'] = $input['redirected_to'];
+				}
+				$novo[ $chave ] = $entrada;
+				continue;
+			}
 			$resultado = uonix_intelligence_ai_call( $input, $pause );
 			++$chamadas;
 			$entrada = array( 'status' => $resultado['status'], 'input_hash' => $hash, 'attempted_at' => $agora, 'model' => $input['model'] );
+			$entrada += array_intersect_key( $resultado, array( 'http' => true, 'attempts' => true ) );
 			if ( '' !== $input['redirected_to'] ) {
 				$entrada['redirected_to'] = $input['redirected_to'];
 			}
 			if ( 'ok' === $resultado['status'] ) {
 				$entrada['suggestion']   = $resultado['suggestion'];
 				$entrada['generated_at'] = $agora;
+			}
+			if ( 'quota_exhausted' === $resultado['status'] ) {
+				$parada = array( 'reason' => 'quota_exhausted' );
+				if ( ! empty( $resultado['retry_after'] ) && false !== strtotime( $agora ) ) {
+					$entrada['retry_at'] = gmdate( 'c', strtotime( $agora ) + (int) $resultado['retry_after'] );
+					$parada['retry_at']  = $entrada['retry_at'];
+				}
+			} elseif ( in_array( $resultado['status'], array( 'unavailable', 'model_missing' ), true ) ) {
+				++$seguidas;
+				if ( $seguidas >= (int) $limites['failure_streak'] ) {
+					$parada = array( 'reason' => 'failures' );
+				}
+			} else {
+				$seguidas = 0;
 			}
 			$novo[ $chave ] = $entrada;
 		}
@@ -633,7 +715,15 @@ if ( ! function_exists( 'uonix_intelligence_ai_suggestion_for' ) ) {
 		}
 		$status = isset( $entrada['status'] ) && is_string( $entrada['status'] ) ? $entrada['status'] : 'pending';
 		if ( 'ok' !== $status ) {
-			return array( 'status' => in_array( $status, array( 'unavailable', 'rejected', 'model_missing' ), true ) ? $status : 'pending' ) + $pagina;
+			$conhecido = in_array( $status, array( 'unavailable', 'rejected', 'model_missing', 'quota_exhausted', 'deferred' ), true );
+			// A hora da renovação e o motivo da parada, para o texto do painel (#384).
+			$detalhe = array();
+			foreach ( $conhecido ? array( 'reason', 'retry_at' ) : array() as $campo ) {
+				if ( isset( $entrada[ $campo ] ) && is_string( $entrada[ $campo ] ) && '' !== $entrada[ $campo ] ) {
+					$detalhe[ $campo ] = $entrada[ $campo ];
+				}
+			}
+			return array( 'status' => $conhecido ? $status : 'pending' ) + $detalhe + $pagina;
 		}
 		$sugestao = $entrada['suggestion'] ?? null;
 		if ( ! is_array( $sugestao ) || ! isset( $sugestao['title'], $sugestao['description'] ) || ! is_string( $sugestao['title'] ) || ! is_string( $sugestao['description'] ) ) {
@@ -658,18 +748,35 @@ if ( ! function_exists( 'uonix_intelligence_ai_state_message' ) ) {
 	/**
 	 * Texto para o operador de cada estado sem sugestão. Estado desconhecido cai em
 	 * "aguardando", que é honesto: nada foi gerado para esta entrada.
+	 *
+	 * @param array $detalhe `reason` e `retry_at`, como `uonix_intelligence_ai_suggestion_for()`
+	 *                       devolve. A hora da renovação só entra na cota (#384).
 	 */
-	function uonix_intelligence_ai_state_message( $status ) {
+	function uonix_intelligence_ai_state_message( $status, $detalhe = array() ) {
 		$mapa = array(
-			'not_configured' => 'IA não configurada: defina UONIX_GEMINI_API_KEY no wp-config.php.',
-			'pending'        => 'Aguardando a próxima geração diária.',
-			'unavailable'    => 'O Gemini não respondeu. Nova tentativa na próxima geração diária.',
-			'rejected'       => 'Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista.',
-			'no_page'        => 'Sem página publicada para esta consulta: removida ou redirecionada.',
-			'model_missing'  => 'Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php.',
+			'not_configured'  => 'IA não configurada: defina UONIX_GEMINI_API_KEY no wp-config.php.',
+			'pending'         => 'Aguardando a próxima geração diária.',
+			'unavailable'     => 'O Gemini não respondeu. Nova tentativa na próxima geração diária.',
+			'rejected'        => 'Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista.',
+			'no_page'         => 'Sem página publicada para esta consulta: removida ou redirecionada.',
+			'model_missing'   => 'Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php.',
+			'quota_exhausted' => 'Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária.',
+			'deferred'        => 'Não pedida nesta geração. Nova tentativa na próxima geração diária.',
 		);
+		$detalhe = is_array( $detalhe ) ? $detalhe : array();
+		$motivo  = isset( $detalhe['reason'] ) ? $detalhe['reason'] : '';
+		if ( 'deferred' === $status && 'quota_exhausted' === $motivo ) {
+			$mapa['deferred'] = 'Não pedida: a cota diária do Gemini acabou nesta geração. Nova tentativa na próxima geração diária.';
+		} elseif ( 'deferred' === $status && 'failures' === $motivo ) {
+			$mapa['deferred'] = 'Não pedida: o Gemini falhou duas vezes seguidas nesta geração. Nova tentativa na próxima geração diária.';
+		}
+		$texto = isset( $mapa[ $status ] ) ? $mapa[ $status ] : $mapa['pending'];
+		$volta = isset( $detalhe['retry_at'] ) && is_string( $detalhe['retry_at'] ) ? strtotime( $detalhe['retry_at'] ) : false;
+		if ( false !== $volta && ( 'quota_exhausted' === $status || ( 'deferred' === $status && 'quota_exhausted' === $motivo ) ) ) {
+			$texto .= ' A cota renova por volta de ' . gmdate( 'd/m H:i', $volta ) . ' (UTC).';
+		}
 
-		return isset( $mapa[ $status ] ) ? $mapa[ $status ] : $mapa['pending'];
+		return $texto;
 	}
 }
 

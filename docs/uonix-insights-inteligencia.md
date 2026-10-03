@@ -382,6 +382,8 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 **Cache e estados:**
 - Cada entrada do cache é chaveada por `sha256` de consulta + caminho, e a consulta não fica em texto puro.
 - Entrada nova faz uma chamada, e o resultado substitui o anterior, inclusive quando falha. Assim, a sugestão de um título que já não existe nunca sobrevive.
+- Cada chamada grava o código HTTP da última resposta (`http`, 0 em erro de transporte) e os pedidos feitos (`attempts`).
+- **Parada (#384):** depois de um `quota_exhausted`, ou de duas falhas seguidas (`unavailable` ou `model_missing`), nenhuma chamada começa na execução. As entradas que precisariam de uma ficam `deferred`, com o motivo em `reason` (`quota_exhausted` ou `failures`). A sugestão `ok` com a mesma entrada continua, porque não precisava de chamada.
 - O leitor recalcula a entrada. Se o título ou a descrição mudaram depois da geração, o estado é `pending`. Mudança só nas métricas não muda nada.
 - Oportunidade que saiu da lista sai do cache.
 - O cache está em `protected_options_where()` e não atravessa ambientes no clone.
@@ -395,12 +397,19 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 | `rejected` | Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista. |
 | `no_page` | Sem página publicada para esta consulta: removida ou redirecionada. |
 | `model_missing` | Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php. |
+| `quota_exhausted` | Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária. Com o `retryDelay` do Gemini, acrescenta "A cota renova por volta de DD/MM HH:MM (UTC)." |
+| `deferred` | Não pedida: a cota diária do Gemini acabou nesta geração (ou: o Gemini falhou duas vezes seguidas nesta geração). Nova tentativa na próxima geração diária. |
 
 No e-mail, todo estado diferente de `ok` só omite a linha.
 
 **Medido em 2026-09-30:**
 - `thinkingBudget: 0` foi aceito pelo `gemini-3.8-flash`: `STOP`, sem token de raciocínio. Com `maxOutputTokens: 20` e o raciocínio ligado, o modelo voltou sem texto (`MAX_TOKENS`), e por isso o limite é 1024.
 - 503 ("high demand") em 3 de 4 chamadas seguidas. Por isso 429 e 503 ganham **uma** nova tentativa. Os demais erros esperam o cron do dia seguinte.
+
+**Medido em 2026-10-02 e 2026-10-03 (#384):**
+- A chave é do plano gratuito: 429 com `QuotaFailure`, `quotaId` `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limite 20 por dia, somando o Módulo 3 e o Radar, e `RetryInfo.retryDelay` de horas.
+- Às 00:08 UTC, logo depois da renovação, o Radar teve 1 pauta ok e 8 falhas, e às 00:14 a cota do dia já tinha acabado.
+- Por isso o 429 de cota que não volta nesta execução **não é repetido** e vira `quota_exhausted`. Ele é reconhecido por um `quotaId` com `PerDay`, ou por um `retryDelay` acima de 60 s, que é o máximo de uma janela por minuto. O 429 por minuto e o 503 continuam com a nova tentativa.
 - `gemini-2.5-flash` deu 404 para chave nova. Por isso existe o estado `model_missing`.
 
 **O que não entrega:**
@@ -583,7 +592,8 @@ Arquivo: `mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php`. Decis
 - **"Não sei" não é "não há página":** HEAD sem resposta, ou orçamento de HEAD esgotado, reaproveita a página de ontem, e a pauta pronta fica. Sem página anterior, a pauta fica `deferred`, sem chamada. Tratar o "não sei" como página ausente refazia uma pauta "reforcar" boa como "nova" (MÉDIO 2 da revisão do PR #378, a mesma lição do #373).
   - A página de ontem só vale para o **mesmo** caminho líder.
   - Uma página que ontem já era "não sei" fica marcada (`page_unknown`) e não vale como a de ontem: sem isso, o segundo "não sei" seguido chamava o Gemini sem página.
-- **Transporte:** é o mesmo da sugestão de título, `uonix_intelligence_ai_generate()`, com uma nova tentativa em 429 e 503.
+- **Transporte:** é o mesmo da sugestão de título, `uonix_intelligence_ai_generate()`, com uma nova tentativa em 429 e 503, menos no 429 de cota diária.
+- **Parada (#384):** depois de um `quota_exhausted`, ou de duas falhas seguidas, nenhuma chamada começa. As restantes ficam `deferred`, com o motivo em `reason`, e a cota esgotada grava a hora da renovação em `retry_at`. O painel tem texto próprio para cada caso. Cada chamada grava `http` e `attempts`.
 
 ### O que é gravado
 

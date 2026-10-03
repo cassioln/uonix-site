@@ -225,7 +225,7 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 									if ( null === $objeto && '' !== $destino_301 && function_exists( 'uonix_intelligence_ai_page_object' ) ) {
 										$objeto = uonix_intelligence_ai_page_object( $destino_301 );
 									}
-									$ia_texto = function_exists( 'uonix_intelligence_ai_state_message' ) ? uonix_intelligence_ai_state_message( isset( $ia['status'] ) ? (string) $ia['status'] : '' ) : 'IA não configurada.';
+									$ia_texto = function_exists( 'uonix_intelligence_ai_state_message' ) ? uonix_intelligence_ai_state_message( isset( $ia['status'] ) ? (string) $ia['status'] : '', $ia ) : 'IA não configurada.';
 									?>
 									<td>
 										<?php if ( null === $alvo ) : ?>
@@ -371,13 +371,32 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_page_cell' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_render_radar_pauta_cell' ) ) {
 	/**
-	 * A pauta da IA, ou o motivo de não haver uma.
+	 * A pauta da IA, ou o motivo de não haver uma. A cota esgotada e a parada por falhas
+	 * seguidas têm texto próprio, com a hora da renovação que o cron gravou (#384).
 	 */
 	function uonix_intelligence_render_radar_pauta_cell( array $c ) {
 		$pauta = uonix_intelligence_radar_suggestion( $c );
 		if ( null === $pauta ) {
-			$status = isset( $c['ai']['status'] ) && is_string( $c['ai']['status'] ) ? $c['ai']['status'] : '';
-			echo '<em>' . esc_html( 'not_configured' === $status ? 'Sem a chave do Gemini: a candidata aparece sem pauta.' : 'Pauta não gerada. O Radar tenta de novo amanhã.' ) . '</em>';
+			$ai     = isset( $c['ai'] ) && is_array( $c['ai'] ) ? $c['ai'] : array();
+			$status = isset( $ai['status'] ) && is_string( $ai['status'] ) ? $ai['status'] : '';
+			$motivo = isset( $ai['reason'] ) && is_string( $ai['reason'] ) ? $ai['reason'] : '';
+			$volta  = isset( $ai['retry_at'] ) && is_string( $ai['retry_at'] ) ? strtotime( $ai['retry_at'] ) : false;
+			$cota   = 'quota_exhausted' === $status || ( 'deferred' === $status && 'quota_exhausted' === $motivo );
+			if ( 'not_configured' === $status ) {
+				$texto = 'Sem a chave do Gemini: a candidata aparece sem pauta.';
+			} elseif ( 'quota_exhausted' === $status ) {
+				$texto = 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã.';
+			} elseif ( $cota ) {
+				$texto = 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã.';
+			} elseif ( 'deferred' === $status && 'failures' === $motivo ) {
+				$texto = 'Não pedida: o Gemini falhou duas vezes seguidas nesta execução. O Radar tenta de novo amanhã.';
+			} else {
+				$texto = 'Pauta não gerada. O Radar tenta de novo amanhã.';
+			}
+			if ( $cota && false !== $volta ) {
+				$texto .= ' A cota renova por volta de ' . gmdate( 'd/m H:i', $volta ) . ' (UTC).';
+			}
+			echo '<em>' . esc_html( $texto ) . '</em>';
 			return;
 		}
 		$gerada = isset( $c['ai']['generated_at'] ) && is_string( $c['ai']['generated_at'] ) ? strtotime( $c['ai']['generated_at'] ) : false;
