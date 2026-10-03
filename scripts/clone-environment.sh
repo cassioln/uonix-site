@@ -41,11 +41,18 @@ COMPRESSX_CRITICAL_IMAGE_PATHS=(
   /wp-content/uploads/2026/01/alfa_servicos-e-treinamentos.webp
 )
 
+# Metadados e temporários são excluídos como regra PERECÍVEL (`-p`), e não com
+# `--exclude`: no rsync, um arquivo excluído também fica protegido do `--delete`,
+# então um diretório que só exista no destino e contenha apenas `.DS_Store` não
+# esvazia e sobrevive ao espelho (#396). A regra perecível é ignorada só dentro
+# de diretórios que estão sendo apagados; nos demais, continua sem copiar nem
+# apagar. As exclusões de diretório abaixo seguem protegendo o destino.
+# Medido em openrsync (Mac) e GNU rsync 3.4, nos dois sentidos.
 EXCLUDED_RSYNC_ARGS=(
-  --exclude='.DS_Store'
-  --exclude='._*'
-  --exclude='*~'
-  --exclude='*.log'
+  --filter='-p .DS_Store'
+  --filter='-p ._*'
+  --filter='-p *~'
+  --filter='-p *.log'
   --exclude='cache/'
   --exclude='wc-logs/'
   --exclude='wp-staging/'
