@@ -377,6 +377,10 @@ $corpo_estranho = array( 'code' => 429, 'body' => json_encode( array( 'error' =>
 $GLOBALS['uox_http']    = array( $corpo_estranho, $corpo_estranho );
 $GLOBALS['uox_pedidos'] = array();
 uox_ai_assert( 'unavailable' === uonix_intelligence_ai_generate( $corpo_livre, 'gemini-3.8-flash', 0 )['status'] && 2 === count( $GLOBALS['uox_pedidos'] ), '429 com detalhes malformados não quebra e é o 429 comum, com a nova tentativa' );
+$outro_tipo = array( 'code' => 429, 'body' => json_encode( array( 'error' => array( 'details' => array( array( '@type' => 'type.googleapis.com/google.rpc.PreconditionFailure', 'violations' => array( array( 'quotaId' => $dia ) ) ) ) ) ) ) );
+$GLOBALS['uox_http']    = array( $outro_tipo, $outro_tipo );
+$GLOBALS['uox_pedidos'] = array();
+uox_ai_assert( 'unavailable' === uonix_intelligence_ai_generate( $corpo_livre, 'gemini-3.8-flash', 0 )['status'] && 2 === count( $GLOBALS['uox_pedidos'] ), '#384: só o detalhe QuotaFailure diz a cota; outro tipo com o mesmo quotaId não conta' );
 $GLOBALS['uox_http']    = array( uox_429( $dia, '27223s' ) );
 $GLOBALS['uox_pedidos'] = array();
 $rc = uonix_intelligence_ai_call( $in, 0 );
@@ -756,6 +760,15 @@ $cache_rej[ $k_301 ]['status'] = 'rejected';
 update_option( uonix_intelligence_ai_option(), $cache_rej, false );
 $sug_rej = uonix_intelligence_ai_suggestion_for( $linha_301 );
 uox_ai_assert( 'rejected' === $sug_rej['status'] && '/servico/ensaios-de-arrancamento/' === ( $sug_rej['redirected_to'] ?? '' ), '#343: sugestão recusada também traz o destino; obteve ' . var_export( $sug_rej, true ) );
+
+// #384: adiada pela cota, a entrada do endereço antigo guarda o destino, e o leitor mostra a
+// página real, e não "sem página".
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http'] = array( uox_429( $dia, '27223s' ) );
+uonix_intelligence_ai_run( uox_analise( array( uox_linha( 'outra consulta' ), $linha_301 ) ), 0 );
+$adiada_301 = get_option( uonix_intelligence_ai_option() )[ $k_301 ];
+$leitor_301 = uonix_intelligence_ai_suggestion_for( $linha_301 );
+uox_ai_assert( 'deferred' === $adiada_301['status'] && '/servico/ensaios-de-arrancamento/' === ( $adiada_301['redirected_to'] ?? '' ) && 'deferred' === $leitor_301['status'] && '/servico/ensaios-de-arrancamento/' === ( $leitor_301['redirected_to'] ?? '' ), '#384: a adiada do endereço antigo guarda o destino do 301; obteve ' . var_export( $leitor_301, true ) );
 
 // Página que deixou de redirecionar e passou a dar 404: a entrada vira no_page no cron.
 $GLOBALS['uox_status']['/teste-de-arrancamento'] = array( 'state' => 'not_found', 'code' => 404, 'location' => '' );

@@ -440,6 +440,7 @@ $cenarios_rd = array(
 	'falha, ok, falha, ok…'      => array( array( $fora, 'ok', $fora, 'ok', 'ok', 'ok' ), 6, array( 'unavailable', 'ok', 'unavailable', 'ok', 'ok', 'ok' ) ),
 	'a recusa interrompe a sequência' => array( array( $fora, array( 'status' => 'ok', 'http' => 200, 'text' => '{"caminho":"x"}' ), $fora, 'ok', 'ok', 'ok' ), 6, array( 'unavailable', 'rejected', 'unavailable', 'ok', 'ok', 'ok' ) ),
 	'resposta sem status conta como falha' => array( array( null, 'lixo', 'ok', 'ok', 'ok', 'ok' ), 2, array( 'unavailable', 'unavailable', 'deferred', 'deferred', 'deferred', 'deferred' ) ),
+	'404 do modelo em todas'     => array( array( array( 'status' => 'model_missing', 'http' => 404, 'attempts' => 1 ), array( 'status' => 'model_missing', 'http' => 404, 'attempts' => 1 ), 'ok', 'ok', 'ok', 'ok' ), 2, array( 'model_missing', 'model_missing', 'deferred', 'deferred', 'deferred', 'deferred' ) ),
 );
 foreach ( $cenarios_rd as $caso => $c ) {
 	$GLOBALS['uox_options'] = array();
