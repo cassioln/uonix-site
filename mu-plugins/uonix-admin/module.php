@@ -37,6 +37,7 @@ uonix_mu_require_files(
 		'65-admin-editor-politicas-lgpd.php',
 		'66-admin-editor-sem-personalizador.php',
 		'67-admin-editor-menus.php',
+		'68-admin-editor-marketing.php',
 	),
 	'uonix-admin'
 );

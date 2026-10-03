@@ -8,8 +8,9 @@
  *    (39-admin-editor-dashboard.php).
  * 2. "Posts" vira "Blog", e "Comentários" (com o contador de moderação do
  *    núcleo) passa a ser item dele, depois de "Adicionar post".
- * 3. Os menus que só agrupam atalhos, "Seções do Site" e "Políticas e LGPD"
- *    (65-admin-editor-politicas-lgpd.php), não navegam ao clicar: abrem e
+ * 3. Os menus que só agrupam atalhos, "Seções do Site", "Políticas e LGPD"
+ *    (65-admin-editor-politicas-lgpd.php) e "Marketing"
+ *    (68-admin-editor-marketing.php), não navegam ao clicar: abrem e
  *    fecham o submenu no lugar, como um menu pai aberto do WordPress. Com o
  *    menu recolhido (inclusive o recolhido automático entre 783 e 960px) ou
  *    em tela estreita, o clique só não navega; o submenu aparece pelo
@@ -60,6 +61,10 @@ function uonix_admin_editor_menus_grupos() {
 		if ( '' !== $politicas ) {
 			$grupos[] = $politicas;
 		}
+	}
+
+	if ( function_exists( 'uonix_admin_editor_marketing_menu' ) ) {
+		$grupos[] = 'uonix-marketing';
 	}
 
 	return $grupos;

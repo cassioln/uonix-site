@@ -723,6 +723,28 @@ uonix_dashboard_assert( false !== strpos( $auto_array, 'data-uonix-auto-refresh=
 $_GET = array();
 echo "ok   Auto-refresh de métricas restrito à própria aba\n";
 
+// Tela de destinos compartilhada com a Visão Geral do menu Marketing (68).
+$destinos = uonix_analytics_destinations_context();
+ob_start();
+uonix_analytics_render_destinations( $destinos );
+$com_adopt = (string) ob_get_clean();
+ob_start();
+uonix_analytics_render_destinations( $destinos, false );
+$sem_adopt = (string) ob_get_clean();
+uonix_dashboard_assert( 7 === substr_count( $com_adopt, 'class="uonix-marketing-card"' ) && false !== strpos( $com_adopt, 'LGPD AdOpt:' ) && false !== strpos( $com_adopt, 'uonix-sc-icon-adopt' ), 'Destinos do Insights mantêm os 7 cards e o status do AdOpt' );
+uonix_dashboard_assert( 6 === substr_count( $sem_adopt, 'class="uonix-marketing-card"' ), 'Destinos sem AdOpt mostram 6 cards' );
+uonix_dashboard_assert( false === stripos( $sem_adopt, 'adopt' ), 'Destinos sem AdOpt não citam o AdOpt' );
+foreach ( array( 'Google Tag Manager', 'Google Analytics 4', 'Google Ads via GTM', 'Meta Pixel', 'Google Search Console', 'Google Looker Studio' ) as $card ) {
+	uonix_dashboard_assert( false !== strpos( $sem_adopt, '<h3>' . $card . '</h3>' ), "Destinos sem AdOpt mantêm o card {$card}" );
+}
+uonix_dashboard_assert( 6 === substr_count( $com_adopt, 'class="uonix-status-item"' ), 'Destinos do Insights mostram 6 status' );
+uonix_dashboard_assert( 5 === substr_count( $sem_adopt, 'class="uonix-status-item"' ), 'Destinos sem AdOpt mostram 5 status (GTM, GA4, Ads, Meta, Search Console)' );
+ob_start();
+uonix_analytics_print_dashboard_css();
+$css = (string) ob_get_clean();
+uonix_dashboard_assert( false !== strpos( $css, '.uonix-marketing-card {' ) && false !== strpos( $css, '.uonix-status-strip {' ), 'CSS compartilhado traz as regras dos destinos' );
+echo "ok   Tela de destinos compartilhada com e sem AdOpt\n";
+
 if ( 0 !== $failures ) {
 	exit( 1 );
 }
