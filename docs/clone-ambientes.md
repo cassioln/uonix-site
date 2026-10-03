@@ -240,8 +240,10 @@ Essa é uma **sincronização de espelho**, não uma mesclagem:
   pois o transporte não usa `--delete-excluded`;
 - a exceção são os metadados e temporários (`.DS_Store`, `._*`, `*~` e `*.log`),
   que entram como regra **perecível** (`--filter='-p …'`): continuam sem ser
-  copiados e, em diretório que segue existindo, sem ser apagados, mas não impedem
-  a remoção de um diretório que só exista no destino. Sem isso, uma pasta de
+  copiados e, em diretório que também existe na origem, sem ser apagados, mas não
+  impedem a remoção de um diretório que só exista no destino. Dentro desse
+  diretório, eles são apagados mesmo quando um subdiretório protegido (como
+  `cache/`) o mantém de pé. Sem isso, uma pasta de
   plugin que contenha apenas o `.DS_Store` do Finder sobrevive ao espelho (#396);
 - se um dos três diretórios inteiros não existir na origem, esse diretório é
   ignorado e o correspondente no destino fica como está;

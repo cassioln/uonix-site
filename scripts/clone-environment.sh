@@ -47,7 +47,6 @@ COMPRESSX_CRITICAL_IMAGE_PATHS=(
 # esvazia e sobrevive ao espelho (#396). A regra perecível é ignorada só dentro
 # de diretórios que estão sendo apagados; nos demais, continua sem copiar nem
 # apagar. As exclusões de diretório abaixo seguem protegendo o destino.
-# Medido em openrsync (Mac) e GNU rsync 3.4, nos dois sentidos.
 EXCLUDED_RSYNC_ARGS=(
   --filter='-p .DS_Store'
   --filter='-p ._*'
