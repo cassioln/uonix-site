@@ -50,6 +50,11 @@ function add_submenu_page( $parent_slug, $page_title, $menu_title, $capability, 
 	return 'marketing_page_uonix-marketing';
 }
 
+// Como o núcleo, troca & por &#038;: prova que o href do atalho passou por ele.
+function esc_url( $url ) {
+	return str_replace( '&', '&#038;', $url );
+}
+
 function esc_html__( $text, $domain = 'default' ) {
 	return $text;
 }
@@ -62,7 +67,7 @@ function wp_die( $message = '' ) {
 function uonix_analytics_destinations_context() {
 	return array(
 		'gtm_url'         => 'https://tagmanager.google.com/#/container/x',
-		'ga4_url'         => 'https://analytics.google.com/analytics/web/',
+		'ga4_url'         => 'https://analytics.google.com/analytics/web/?a=1&b=2',
 		'google_ads_url'  => 'https://ads.google.com/aw/overview',
 		'meta_events_url' => 'https://business.facebook.com/events_manager2',
 		'gsc_domain_url'  => 'https://search.google.com/search-console?resource_id=sc-domain:uonix.com.br',
@@ -106,6 +111,11 @@ $GLOBALS['uox_test_caps'] = $admin;
 uonix_admin_editor_marketing_menu();
 uox_mk_assert( array() === $GLOBALS['uox_test_menus'] && array() === $GLOBALS['submenu'], 'administrador não ganha o menu Marketing' );
 
+// Autor e colaborador (edit_posts sem edit_theme_options) também não.
+$GLOBALS['uox_test_caps'] = array( 'edit_posts', 'publish_posts' );
+uonix_admin_editor_marketing_menu();
+uox_mk_assert( array() === $GLOBALS['uox_test_menus'] && array() === $GLOBALS['submenu'], 'autor não ganha o menu Marketing' );
+
 // Editor: menu, Visão Geral e os seis atalhos, na ordem dos cards, sem AdOpt.
 $GLOBALS['uox_test_caps'] = $editor;
 uonix_admin_editor_marketing_menu();
@@ -118,7 +128,7 @@ uox_mk_assert(
 	array(
 		array( 'Visão Geral', 'edit_posts', 'uonix-marketing', 'Marketing — Visão Geral' ),
 		array( 'Google Tag Manager', 'edit_posts', 'https://tagmanager.google.com/#/container/x' ),
-		array( 'Google Analytics 4', 'edit_posts', 'https://analytics.google.com/analytics/web/' ),
+		array( 'Google Analytics 4', 'edit_posts', 'https://analytics.google.com/analytics/web/?a=1&#038;b=2' ),
 		array( 'Google Ads', 'edit_posts', 'https://ads.google.com/aw/overview' ),
 		array( 'Meta Pixel', 'edit_posts', 'https://business.facebook.com/events_manager2' ),
 		array( 'Search Console', 'edit_posts', 'https://search.google.com/search-console?resource_id=sc-domain:uonix.com.br' ),

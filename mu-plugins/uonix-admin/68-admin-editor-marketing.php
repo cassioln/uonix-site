@@ -23,10 +23,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * O usuário atual é o editor que recebe o menu?
  *
+ * Mesmo critério de 64 e 67 (edit_theme_options sem manage_options): autor e
+ * colaborador têm edit_posts, mas não recebem o menu.
+ *
  * @return bool
  */
 function uonix_admin_editor_marketing_ativo() {
-	return current_user_can( 'edit_posts' ) && ! current_user_can( 'manage_options' );
+	return current_user_can( 'edit_theme_options' ) && ! current_user_can( 'manage_options' );
 }
 
 /**
@@ -65,11 +68,12 @@ function uonix_admin_editor_marketing_menu() {
 		return;
 	}
 
-	// Itens direto no $submenu, como a AdOpt em 65: o href sai do próprio item.
+	// Itens direto no $submenu, como a AdOpt em 65: o núcleo imprime o href do
+	// item sem escapar (menu-header.php), então o esc_url é aqui.
 	$destinos = uonix_analytics_destinations_context();
 	foreach ( uonix_admin_editor_marketing_atalhos() as $titulo => $chave ) {
 		if ( ! empty( $destinos[ $chave ] ) ) {
-			$submenu['uonix-marketing'][] = array( $titulo, 'edit_posts', $destinos[ $chave ] ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+			$submenu['uonix-marketing'][] = array( $titulo, 'edit_posts', esc_url( $destinos[ $chave ] ) ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 		}
 	}
 }
