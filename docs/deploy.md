@@ -4,21 +4,21 @@ O contrato canônico de ambientes fica em [ambientes.md](ambientes.md). A topolo
 
 - Produção: `https://uonix.com.br/` na branch `master` e Locaweb (cutover concluído em 2026-08-15).
 - QA: `https://uonix.ksio.dev/` na branch `qa` e HostGator.
-- DEV: `https://test.uonix.ksio.dev/` na branch `dev` e HostGator.
 - Local: `http://localhost:8080/` em Podman no Mac; não possui deploy remoto.
 
 ## Guardas e aprovação
 
-Todos os deploys são fail-closed enquanto a guarda explícita do respectivo ambiente estiver desativada. A validação do workflow pode executar em um push, mas isso não autoriza publicação de arquivos. Não habilite uma guarda, faça dispatch ou altere configurações do host sem a aprovação operacional correspondente.
+As guardas de QA e de produção **estão habilitadas** (`ENABLE_DEPLOY_QA=true`, `ENABLE_DEPLOY_PRODUCTION=true`), por decisão do responsável para agilizar publicação. Estado confirmado em 2026-09-22 nas *repository variables* — o valor vive no GitHub, não neste arquivo; confira com `gh variable list`.
 
-Produção não tem deploy automático autorizado. Qualquer publicação para `uonix.com.br` requer aprovação humana explícita, preflight, backup validado, smoke test e rollback disponível.
+Consequência prática: **push na branch `qa` publica em QA automaticamente.** Em produção, o que impede publicação acidental não é a guarda, e sim o gatilho `workflow_dispatch` exclusivo, a frase de confirmação `PUBLICAR <SHA>` e a validação do host no próprio workflow.
+
+Produção continua sem deploy automático. Qualquer publicação para `uonix.com.br` requer aprovação humana explícita, preflight, backup validado, smoke test e rollback disponível. Não altere configurações do host nem faça dispatch sem a aprovação operacional correspondente.
 
 ## Workflows
 
-- `.github/workflows/deploy-production.yml`: produção provisória em `master`, protegida por `ENABLE_DEPLOY_PRODUCTION=false` até aprovação posterior.
-- `.github/workflows/deploy-qa.yml`: QA em `qa`, protegida por `ENABLE_DEPLOY_QA=false` até validação posterior.
-- `.github/workflows/deploy-development.yml`: DEV em `dev`, protegida por `ENABLE_DEPLOY_DEVELOPMENT=false` até validação posterior.
-- `.github/workflows/_deploy-hostgator.yml`: implementação reutilizável para QA e DEV; não é acionada diretamente.
+- `.github/workflows/deploy-production.yml`: produção em `master`, apenas por `workflow_dispatch` com a frase `PUBLICAR <SHA>`. A guarda `ENABLE_DEPLOY_PRODUCTION` está `true`; a proteção efetiva é o gatilho manual e a confirmação.
+- `.github/workflows/deploy-qa.yml`: QA em `qa`, disparada por `push` na branch. A guarda `ENABLE_DEPLOY_QA` está `true`, portanto o push publica.
+- `.github/workflows/_deploy-hostgator.yml`: implementação reutilizável para QA; não é acionada diretamente.
 - `.github/workflows/clone-environment.yml`: workflow manual de clone, separado do deploy de código.
 
 ## Transporte
@@ -30,3 +30,15 @@ O deploy transfere somente o tema filho e os MU-plugins gerenciados. Não versio
 ## Pós-deploy aprovado
 
 Após uma publicação autorizada, confirmar limpeza de cache, `wp cache flush` quando WP-CLI estiver disponível e smoke tests HTTP no URL canônico do ambiente. Uma falha em preflight, backup, manifesto, publicação ou smoke test exige a rota de rollback definida antes da mutação.
+
+### Limite conhecido: a borda da Cloudflare não é purgada
+
+Todos os hosts do projeto passam por Cloudflare, e **nenhuma etapa do deploy nem o botão de limpeza no painel administrativo invalidam a borda** — não há chamada à API de purge. A borda expira somente por TTL, o que pode levar cerca de uma hora.
+
+Consequência prática: uma correção publicada e confirmada na origem pode continuar ausente na URL pública. Antes de concluir que o deploy falhou, distinguir os dois casos:
+
+```bash
+curl -sI https://uonix.com.br/ | grep -iE 'cf-cache-status|^age|cache-control'
+```
+
+`cf-cache-status: HIT` com `age` alto indica resposta da borda, não da origem. Para ver a origem imediatamente, acrescentar uma query string qualquer à URL (`?v=1`), que a borda trata como recurso distinto. Purgar a borda de verdade exige a conta Cloudflare — ou a implementação da purga automática, rastreada em issue própria.

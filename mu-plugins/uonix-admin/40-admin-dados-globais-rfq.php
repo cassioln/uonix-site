@@ -33,18 +33,16 @@ function uox_menu_dados_globais() {
 }
 
 // =========================================================================
-// 2. RENDERIZA A TELA ORGANIZADA EM ABAS COM DESIGN CLEAN
+// 2. MAPA DE CAMPOS - fonte unica da tela e da allowlist de gravacao
 // =========================================================================
-function uox_render_dados_page() {
-    if (isset($_POST['uox_salvar_dados'])) {
-        foreach ($_POST['uox_dados'] as $chave => $valor) {
-            update_option('uox_' . sanitize_text_field($chave), sanitize_text_field($valor));
-        }
-        echo '<div class="notice notice-success is-dismissible"><p>Dados atualizados com sucesso!</p></div>';
-    }
-
-    // Estruturação dos dados mapeados por ID de aba
-    $campos = [
+/**
+ * Campos institucionais editaveis, agrupados por aba.
+ *
+ * Fonte unica: a tela renderiza a partir daqui e a gravacao so aceita chave que
+ * exista aqui. Manter duas listas separadas faria uma divergir da outra.
+ */
+function uox_dados_globais_campos() {
+    return [
         'contatos' => [
             'label'  => '📞 Contatos',
             'inputs' => [
@@ -117,7 +115,92 @@ function uox_render_dados_page() {
             ]
         ]
     ];
+}
+
+/**
+ * Lista achatada das chaves aceitas na gravacao, derivada do mapa de campos.
+ */
+function uox_dados_globais_chaves_permitidas() {
+    $chaves = [];
+    foreach (uox_dados_globais_campos() as $secao) {
+        if (!isset($secao['inputs']) || !is_array($secao['inputs'])) {
+            continue;
+        }
+        foreach (array_keys($secao['inputs']) as $chave) {
+            $chaves[] = (string) $chave;
+        }
+    }
+    return $chaves;
+}
+
+// =========================================================================
+// 3. GRAVACAO - admin-post com capability, nonce e allowlist
+// =========================================================================
+add_action('admin_post_uox_salvar_dados_globais', 'uox_salvar_dados_globais');
+
+/**
+ * Persiste os dados globais.
+ *
+ * Tres guardas, na ordem em que importam:
+ *
+ * 1. Capability: a mesma do menu (`edit_pages`). O defeito corrigido aqui era a
+ *    ausencia de verificacao de intencao, nao o nivel de acesso; elevar para
+ *    `manage_options` quebraria o fluxo do Editor, que e a razao da tela existir.
+ * 2. Nonce: antes a gravacao acontecia no render, disparada apenas pela presenca
+ *    de um campo no POST. Era CSRF: um Editor levado a visitar uma pagina
+ *    preparada por terceiro gravava options em nome proprio.
+ * 3. Allowlist: o nome da option vinha do POST, entao era possivel criar ou
+ *    sobrescrever qualquer option `uox_*`, inclusive inexistente.
+ */
+function uox_salvar_dados_globais() {
+    if (!current_user_can('edit_pages')) {
+        wp_die(esc_html__('Sem permissao para alterar os dados globais da Uonix.', 'uonix'), '', ['response' => 403]);
+    }
+
+    check_admin_referer('uox_salvar_dados_globais');
+
+    $permitidas = uox_dados_globais_chaves_permitidas();
+    $enviados   = isset($_POST['uox_dados']) && is_array($_POST['uox_dados']) ? wp_unslash($_POST['uox_dados']) : [];
+
+    $salvos    = 0;
+    $recusados = 0;
+
+    foreach ($enviados as $chave => $valor) {
+        if (!is_string($chave) || !in_array($chave, $permitidas, true) || !is_scalar($valor)) {
+            ++$recusados;
+            continue;
+        }
+        update_option('uox_' . $chave, sanitize_text_field((string) $valor));
+        ++$salvos;
+    }
+
+    wp_safe_redirect(
+        add_query_arg(
+            [
+                'page'          => 'uox-dados-globais',
+                'uox_salvos'    => $salvos,
+                'uox_recusados' => $recusados,
+            ],
+            admin_url('admin.php')
+        )
+    );
+    exit;
+}
+
+// =========================================================================
+// 4. RENDERIZA A TELA ORGANIZADA EM ABAS COM DESIGN CLEAN
+// =========================================================================
+function uox_render_dados_page() {
+    $campos    = uox_dados_globais_campos();
+    $salvos    = isset($_GET['uox_salvos']) ? (int) $_GET['uox_salvos'] : -1;
+    $recusados = isset($_GET['uox_recusados']) ? (int) $_GET['uox_recusados'] : 0;
     ?>
+    <?php if ($salvos >= 0) : ?>
+        <div class="notice notice-success is-dismissible"><p><?php echo esc_html(sprintf('%d campo(s) atualizado(s).', $salvos)); ?></p></div>
+    <?php endif; ?>
+    <?php if ($recusados > 0) : ?>
+        <div class="notice notice-warning is-dismissible"><p><?php echo esc_html(sprintf('%d campo(s) recusado(s) por nao constarem no mapa de campos.', $recusados)); ?></p></div>
+    <?php endif; ?>
     <div class="wrap" style="background: #ffffff; padding: 25px 35px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); margin-top: 20px; max-width: 1050px; border: 1px solid #e2e8f0;">
         
         <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #f1f5f9; padding-bottom: 20px; margin-bottom: 25px;">
@@ -138,7 +221,10 @@ function uox_render_dados_page() {
             <?php $is_first = false; endforeach; ?>
         </h2>
 
-        <form method="POST" action="">
+        <form method="POST" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+            <input type="hidden" name="action" value="uox_salvar_dados_globais">
+            <?php wp_nonce_field('uox_salvar_dados_globais'); ?>
+
             
             <?php $is_first = true; foreach ($campos as $id => $secao): ?>
                 <div id="uox-tab-<?php echo $id; ?>" class="uox-tab-content" style="<?php echo $is_first ? '' : 'display:none;'; ?> padding: 10px 5px;">
@@ -175,7 +261,7 @@ function uox_render_dados_page() {
             <?php $is_first = false; endforeach; ?>
 
             <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #f1f5f9; display: flex; justify-content: flex-end;">
-                <button type="submit" name="uox_salvar_dados" class="button button-primary" style="height: 42px; padding: 0 30px; font-size: 14px; font-weight: 700; border-radius: 6px; background-color: #0e3780; border-color: #0e3780; box-shadow: 0 4px 10px rgba(14, 55, 128, 0.15);">Salvar Todas as Configurações</button>
+                <button type="submit" class="button button-primary" style="height: 42px; padding: 0 30px; font-size: 14px; font-weight: 700; border-radius: 6px; background-color: #0e3780; border-color: #0e3780; box-shadow: 0 4px 10px rgba(14, 55, 128, 0.15);">Salvar Todas as Configurações</button>
             </div>
         </form>
     </div>

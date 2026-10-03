@@ -7,24 +7,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-add_action( 'admin_menu', 'uox_clone_register_menu', 20 );
-
-function uox_clone_register_menu() {
-	add_submenu_page(
-		'ksio-dev',
-		'Clone de Ambientes',
-		'Clone de Ambientes',
-		'manage_options',
-		'ksio-dev-clone-ambientes',
-		'uox_clone_render_page'
-	);
-}
+// O menu desta ferramenta é registrado em 49-admin-ksio-governanca.php.
 
 function uox_clone_env_labels() {
 	return array(
 		'prod'  => 'Produção',
 		'qa'    => 'QA',
-		'dev'   => 'DEV',
 		'local' => 'Local',
 	);
 }
@@ -33,7 +21,6 @@ function uox_clone_env_details() {
 	return array(
 		'prod'  => array( 'url' => 'https://uonix.com.br', 'host' => 'Locaweb' ),
 		'qa'    => array( 'url' => 'https://uonix.ksio.dev', 'host' => 'HostGator / public_html' ),
-		'dev'   => array( 'url' => 'https://test.uonix.ksio.dev', 'host' => 'HostGator / dev_uonix' ),
 		'local' => array( 'url' => 'http://localhost:8080', 'host' => 'Podman no Mac' ),
 	);
 }
@@ -244,7 +231,9 @@ function uox_clone_render_notice( $result ) {
 }
 
 function uox_clone_render_page() {
-	if ( ! current_user_can( 'manage_options' ) ) {
+	// Além da capacidade, a ferramenta precisa estar liberada para quem não é o dono.
+	// O POST do clone é lido aqui dentro, então esta guarda também cobre o envio.
+	if ( ! current_user_can( 'manage_options' ) || ( function_exists( 'uonix_ksio_can_access_tool' ) && ! uonix_ksio_can_access_tool( 'clone' ) ) ) {
 		wp_die( 'Você não tem permissão para acessar esta página.' );
 	}
 
@@ -255,7 +244,7 @@ function uox_clone_render_page() {
 	?>
 	<div class="wrap">
 		<h1>Clone de Ambientes</h1>
-		<p>Ferramenta interna para clonar banco e arquivos runtime entre produção, QA, DEV e local.</p>
+		<p>Ferramenta interna para clonar banco e arquivos runtime entre produção, QA e local.</p>
 
 		<?php uox_clone_render_notice( $result ); ?>
 

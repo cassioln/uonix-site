@@ -15,22 +15,8 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-/**
- * Registra o menu "Uônix Insights" no painel administrativo.
- */
-add_action('admin_menu', 'uonix_register_analytics_dashboard_menu', 20);
-function uonix_register_analytics_dashboard_menu()
-{
-	add_menu_page(
-		__('Uônix Insights', 'uonix'),
-		__('Uônix Insights', 'uonix'),
-		'edit_posts',
-		'uonix-analytics',
-		'uonix_render_analytics_dashboard_page',
-		'dashicons-chart-area',
-		3
-	);
-}
+// O menu "Uônix Insights" é registrado em 49-admin-ksio-governanca.php: dentro de
+// ksio.dev para o dono, e como item próprio para os demais quando liberado.
 
 /**
  * Resolve visualizações de uma URL no snapshot selecionado.
@@ -131,42 +117,17 @@ function uonix_analytics_dashboard_metric_comparison( $metric )
 /**
  * Renderiza a página do Dashboard de Analytics e Desempenho.
  */
-function uonix_render_analytics_dashboard_page()
-{
-	if (!current_user_can('edit_posts')) {
-		wp_die(esc_html__('Você não tem permissão para acessar esta página.', 'uonix'));
-	}
-
-	// Consulta de dados do catálogo
-	$products_query = get_posts(array(
-		'post_type' => 'product',
-		'post_status' => 'publish',
-		'posts_per_page' => -1,
-		'orderby' => 'title',
-		'order' => 'ASC',
-	));
-
-	$posts_query = get_posts(array(
-		'post_type' => 'post',
-		'post_status' => 'publish',
-		'posts_per_page' => -1,
-		'orderby' => 'date',
-		'order' => 'DESC',
-	));
-
-	$services_query = get_posts(array(
-		'post_type' => 'servicos',
-		'post_status' => 'publish',
-		'posts_per_page' => -1,
-		'orderby' => 'title',
-		'order' => 'ASC',
-	));
-
-	$total_products = count($products_query);
-	$total_posts = count($posts_query);
-	$total_services = count($services_query);
-
-	// Verificação das integrações
+/**
+ * Configuração local dos destinos de marketing (GTM, GA4, Google Ads, Meta,
+ * Search Console, AdOpt e Looker Studio): status e endereços das plataformas.
+ *
+ * Só fatos locais; nada aqui consulta as plataformas externas. Usado pela aba
+ * "Destinos de marketing configurados" do Insights e pela Visão Geral do menu
+ * Marketing (68-admin-editor-marketing.php).
+ *
+ * @return array<string, mixed>
+ */
+function uonix_analytics_destinations_context() {
 	$general_opts = get_option('rank-math-options-general', array());
 	$has_gsc_meta = !empty($general_opts['google_verify']);
 	$analytics_configuration = function_exists('uonix_analytics_configuration') ? uonix_analytics_configuration() : false;
@@ -204,432 +165,78 @@ function uonix_render_analytics_dashboard_page()
 	$adopt_documents_url = 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/documents';
 	$adopt_settings_url = 'https://dash.goadopt.io/org/uonix/disclaimer/cookies-uonix';
 	$adopt_url = 'https://dash.goadopt.io/org/uonix/disclaimers';
-	$requested_period = isset( $_GET['uonix_period'] ) ? wp_unslash( $_GET['uonix_period'] ) : 30;
-	$metrics_period_days = function_exists( 'uonix_analytics_metrics_sanitize_period_days' ) ? uonix_analytics_metrics_sanitize_period_days( $requested_period ) : 30;
-	$metrics_snapshot = function_exists( 'uonix_analytics_metrics_get_snapshot' ) ? uonix_analytics_metrics_get_snapshot( $metrics_period_days ) : false;
-	$metrics_status = is_array( $metrics_snapshot ) ? ( $metrics_snapshot['status'] ?? 'updated' ) : 'unavailable';
-	$metrics_is_fresh = function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ) && uonix_analytics_metrics_snapshot_is_fresh( $metrics_snapshot );
-	$metrics_refresh_attempted = isset( $_GET['uonix_metrics_refresh'] ) && '1' === (string) wp_unslash( $_GET['uonix_metrics_refresh'] );
-	$metrics_auto_refresh = current_user_can( 'manage_options' ) && ! $metrics_is_fresh && ! $metrics_refresh_attempted;
-	$metrics_updated_at = is_array( $metrics_snapshot ) && isset( $metrics_snapshot['updated_at'] ) && is_string( $metrics_snapshot['updated_at'] ) ? $metrics_snapshot['updated_at'] : '';
-	$metrics_updated_timestamp = '' !== $metrics_updated_at ? strtotime( $metrics_updated_at ) : false;
-	$metrics_updated_datetime = false !== $metrics_updated_timestamp ? gmdate( 'c', $metrics_updated_timestamp ) : '';
-	$metrics_updated_label = false !== $metrics_updated_timestamp ? wp_date( 'd/m/Y H:i', $metrics_updated_timestamp ) : '';
-	$metrics_cache_class = $metrics_is_fresh ? 'uonix-cache-fresh' : ( is_array( $metrics_snapshot ) ? 'uonix-cache-stale' : 'uonix-cache-empty' );
-	$metrics_cache_label = $metrics_is_fresh ? 'Cache atualizado' : ( is_array( $metrics_snapshot ) ? 'Cache vencido' : 'Sem snapshot' );
-	$dashboard_state = function_exists( 'uonix_analytics_metrics_requested_dashboard_state' )
-		? uonix_analytics_metrics_requested_dashboard_state( $_GET )
-		: array( 'tab' => 'metrics', 'subtab' => 'aggregate', 'catalog_tab' => 'products' );
-	$active_dashboard_tab = $dashboard_state['tab'];
-	$active_metrics_subtab = $dashboard_state['subtab'];
-	$active_catalog_tab = $dashboard_state['catalog_tab'];
-	$dashboard_tab_url = static function ( $tab, $subtab, $catalog_tab ) use ( $metrics_period_days ) {
-		$state = array(
-			'tab' => $tab,
-			'subtab' => $subtab,
-			'catalog_tab' => $catalog_tab,
-		);
-		if ( function_exists( 'uonix_analytics_metrics_dashboard_url' ) ) {
-			return uonix_analytics_metrics_dashboard_url( $metrics_period_days, $state );
-		}
-		return admin_url( 'admin.php?page=uonix-analytics&uonix_period=' . $metrics_period_days );
-	};
+
+	return array(
+		'analytics_dot_class' => $analytics_dot_class,
+		'gtm_status' => $gtm_status,
+		'ga4_status' => $ga4_status,
+		'google_ads_dot_class' => $google_ads_dot_class,
+		'google_ads_status' => $google_ads_status,
+		'meta_status' => $meta_status,
+		'gsc_dot_class' => $gsc_dot_class,
+		'gsc_status' => $gsc_status,
+		'adopt_status' => $adopt_status,
+		'gtm_url' => $gtm_url,
+		'analytics_is_configured' => $analytics_is_configured,
+		'ga4_url' => $ga4_url,
+		'gtm_is_audited' => $gtm_is_audited,
+		'google_ads_id' => $google_ads_id,
+		'google_ads_url' => $google_ads_url,
+		'adopt_tags_url' => $adopt_tags_url,
+		'adopt_documents_url' => $adopt_documents_url,
+		'adopt_settings_url' => $adopt_settings_url,
+		'adopt_url' => $adopt_url,
+		'meta_events_url' => $meta_events_url,
+		'meta_diagnostics_url' => $meta_diagnostics_url,
+		'meta_test_events_url' => $meta_test_events_url,
+		'meta_suite_url' => $meta_suite_url,
+		'gsc_performance_url' => $gsc_performance_url,
+		'gsc_index_url' => $gsc_index_url,
+		'gsc_sitemaps_url' => $gsc_sitemaps_url,
+		'gsc_domain_url' => $gsc_domain_url,
+		'looker_url' => $looker_url,
+		'looker_gallery_url' => $looker_gallery_url,
+	);
+}
+
+/**
+ * Desenha o miolo da tela de destinos: cabeçalho, faixa de status e cards.
+ *
+ * @param array<string, mixed> $destinos  Resultado de uonix_analytics_destinations_context().
+ * @param bool                 $com_adopt Mostra o status e o card do AdOpt.
+ * @return void
+ */
+function uonix_analytics_render_destinations( $destinos, $com_adopt = true ) {
+	$analytics_dot_class = $destinos['analytics_dot_class'];
+	$gtm_status = $destinos['gtm_status'];
+	$ga4_status = $destinos['ga4_status'];
+	$google_ads_dot_class = $destinos['google_ads_dot_class'];
+	$google_ads_status = $destinos['google_ads_status'];
+	$meta_status = $destinos['meta_status'];
+	$gsc_dot_class = $destinos['gsc_dot_class'];
+	$gsc_status = $destinos['gsc_status'];
+	$adopt_status = $destinos['adopt_status'];
+	$gtm_url = $destinos['gtm_url'];
+	$analytics_is_configured = $destinos['analytics_is_configured'];
+	$ga4_url = $destinos['ga4_url'];
+	$gtm_is_audited = $destinos['gtm_is_audited'];
+	$google_ads_id = $destinos['google_ads_id'];
+	$google_ads_url = $destinos['google_ads_url'];
+	$adopt_tags_url = $destinos['adopt_tags_url'];
+	$adopt_documents_url = $destinos['adopt_documents_url'];
+	$adopt_settings_url = $destinos['adopt_settings_url'];
+	$adopt_url = $destinos['adopt_url'];
+	$meta_events_url = $destinos['meta_events_url'];
+	$meta_diagnostics_url = $destinos['meta_diagnostics_url'];
+	$meta_test_events_url = $destinos['meta_test_events_url'];
+	$meta_suite_url = $destinos['meta_suite_url'];
+	$gsc_performance_url = $destinos['gsc_performance_url'];
+	$gsc_index_url = $destinos['gsc_index_url'];
+	$gsc_sitemaps_url = $destinos['gsc_sitemaps_url'];
+	$gsc_domain_url = $destinos['gsc_domain_url'];
+	$looker_url = $destinos['looker_url'];
+	$looker_gallery_url = $destinos['looker_gallery_url'];
 	?>
-	<div class="wrap uonix-analytics-wrap">
-		<!-- Header Principal -->
-		<div class="uonix-analytics-header">
-			<div class="uonix-header-content">
-				<div class="uonix-header-badge">UÔNIX - ANCORAGEM PREDIAL</div>
-				<h1>Central de Desempenho, Catálogo & Analytics</h1>
-				<p>Consulte o catálogo e os artigos técnicos, e acesse as plataformas externas para verificar tráfego, tags
-					e indexação.</p>
-			</div>
-		</div>
-
-		<nav class="uonix-primary-tabs" role="tablist" aria-label="Seções do painel">
-			<a id="uonix-tab-metrics" role="tab" aria-selected="<?php echo 'metrics' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-metrics" tabindex="<?php echo 'metrics' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-metrics" data-uonix-query-key="tab" data-uonix-query-value="metrics">Métricas</a>
-			<a id="uonix-tab-destinations" role="tab" aria-selected="<?php echo 'destinations' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-destinations" tabindex="<?php echo 'destinations' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'destinations', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-destinations" data-uonix-query-key="tab" data-uonix-query-value="destinations">Destinos de marketing configurados</a>
-		</nav>
-
-		<section id="uonix-panel-metrics" role="tabpanel" aria-labelledby="uonix-tab-metrics"<?php echo 'metrics' === $active_dashboard_tab ? '' : ' hidden'; ?>>
-			<div class="uonix-panel-header uonix-metrics-panel-header">
-				<div class="uonix-metrics-copy">
-					<h2 id="uonix-metrics-title">Métricas agregadas dos últimos <?php echo esc_html( $metrics_period_days ); ?> dias</h2>
-					<p><?php echo esc_html( 'updated' === $metrics_status ? 'Fonte: GA4 Data API e Search Console API. Comparação com os ' . $metrics_period_days . ' dias anteriores.' : ( 'stale' === $metrics_status ? 'Último snapshot disponível; atualização pendente.' : 'Conexão não configurada ou sem snapshot. Nenhuma métrica é exibida.' ) ); ?></p>
-					<div class="uonix-metrics-cache-meta">
-						<span class="uonix-metrics-cache-status <?php echo esc_attr( $metrics_cache_class ); ?>"><?php echo esc_html( $metrics_cache_label ); ?></span>
-						<?php if ( '' !== $metrics_updated_label ) : ?>
-							<time datetime="<?php echo esc_attr( $metrics_updated_datetime ); ?>">Atualizado em <?php echo esc_html( $metrics_updated_label ); ?></time>
-						<?php endif; ?>
-					</div>
-				</div>
-				<div class="uonix-metrics-toolbar">
-				<form method="get" action="<?php echo esc_url( admin_url( 'admin.php' ) ); ?>" class="uonix-metrics-period-form">
-					<input type="hidden" name="page" value="uonix-analytics" />
-					<input type="hidden" name="tab" value="<?php echo esc_attr( $active_dashboard_tab ); ?>" />
-					<input type="hidden" name="subtab" value="<?php echo esc_attr( $active_metrics_subtab ); ?>" />
-					<input type="hidden" name="catalog_tab" value="<?php echo esc_attr( $active_catalog_tab ); ?>" />
-					<label for="uonix-metrics-period">Período</label>
-					<select id="uonix-metrics-period" name="uonix_period" onchange="this.form.requestSubmit()">
-						<?php foreach ( array( 7, 30, 90, 365 ) as $period_option ) : ?>
-							<option value="<?php echo esc_attr( $period_option ); ?>"<?php echo $period_option === $metrics_period_days ? ' selected="selected"' : ''; ?>>Últimos <?php echo esc_html( $period_option ); ?> dias</option>
-						<?php endforeach; ?>
-					</select>
-					<noscript><button type="submit" class="button">Aplicar período</button></noscript>
-				</form>
-				<?php if ( current_user_can( 'manage_options' ) ) : ?>
-					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="uonix-metrics-refresh-form"<?php echo $metrics_auto_refresh ? ' data-uonix-auto-refresh="1"' : ''; ?>>
-						<input type="hidden" name="action" value="uonix_analytics_metrics_refresh" />
-						<input type="hidden" name="tab" value="<?php echo esc_attr( $active_dashboard_tab ); ?>" />
-						<input type="hidden" name="subtab" value="<?php echo esc_attr( $active_metrics_subtab ); ?>" />
-						<input type="hidden" name="catalog_tab" value="<?php echo esc_attr( $active_catalog_tab ); ?>" />
-						<input type="hidden" name="uonix_period" value="<?php echo esc_attr( $metrics_period_days ); ?>" />
-						<?php wp_nonce_field( 'uonix_analytics_metrics_refresh' ); ?>
-						<button type="submit" class="button button-secondary">Atualizar métricas agora</button>
-						<span>Consulta somente leitura.</span>
-					</form>
-					<?php if ( $metrics_auto_refresh ) : ?>
-						<script>
-							document.addEventListener('DOMContentLoaded', function () {
-								var form = document.querySelector('.uonix-metrics-refresh-form[data-uonix-auto-refresh="1"]');
-								if (!form) return;
-								var button = form.querySelector('button[type="submit"]');
-								if (button) {
-									button.disabled = true;
-									button.textContent = 'Atualizando métricas…';
-								}
-								if (typeof form.requestSubmit === 'function') form.requestSubmit();
-								else form.submit();
-							});
-						</script>
-					<?php endif; ?>
-				<?php endif; ?>
-				</div>
-			</div>
-
-			<nav class="uonix-secondary-tabs" role="tablist" aria-label="Seções de métricas">
-				<a id="uonix-tab-aggregate" role="tab" aria-selected="<?php echo 'aggregate' === $active_metrics_subtab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-aggregate" tabindex="<?php echo 'aggregate' === $active_metrics_subtab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'aggregate', $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-aggregate" data-uonix-query-key="subtab" data-uonix-query-value="aggregate">Métricas agregadas</a>
-				<a id="uonix-tab-catalog" role="tab" aria-selected="<?php echo 'catalog' === $active_metrics_subtab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-catalog" tabindex="<?php echo 'catalog' === $active_metrics_subtab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-catalog" data-uonix-query-key="subtab" data-uonix-query-value="catalog">Catálogo &amp; conteúdo</a>
-			</nav>
-
-			<div id="uonix-panel-aggregate" role="tabpanel" aria-labelledby="uonix-tab-aggregate"<?php echo 'aggregate' === $active_metrics_subtab ? '' : ' hidden'; ?>>
-		<section class="uonix-marketing-section" aria-labelledby="uonix-metrics-title">
-			<?php if ( is_array( $metrics_snapshot ) && isset( $metrics_snapshot['ga4'], $metrics_snapshot['search_console'] ) ) :
-				$ga4_summary = $metrics_snapshot['ga4']['summary'];
-				$gsc_summary = $metrics_snapshot['search_console']['summary'];
-				$metric_value = static function ( $metric, $percent = false ) { return $percent ? number_format_i18n( (float) $metric['current'] * 100, 1 ) . '%' : number_format_i18n( (float) $metric['current'] ); };
-				$active_users_comparison = uonix_analytics_dashboard_metric_comparison( $ga4_summary['active_users'] );
-				$sessions_comparison = uonix_analytics_dashboard_metric_comparison( $ga4_summary['sessions'] );
-				$clicks_comparison = uonix_analytics_dashboard_metric_comparison( $gsc_summary['clicks'] );
-				$impressions_comparison = uonix_analytics_dashboard_metric_comparison( $gsc_summary['impressions'] );
-				$landing_page_chart = uonix_analytics_dashboard_chart_rows( $metrics_snapshot['ga4']['landing_pages'] ?? array(), 'path', 'sessions' );
-				foreach ( $landing_page_chart as &$row ) {
-					$row['label'] = uonix_analytics_dashboard_page_label( $row['label'] );
-				}
-				unset( $row );
-				$query_chart = uonix_analytics_dashboard_chart_rows( $metrics_snapshot['search_console']['queries'] ?? array(), 'query', 'clicks' );
-			?>
-			<div class="uonix-kpi-grid">
-				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $ga4_summary['active_users'] ) ); ?></span><span class="uonix-kpi-title">Usuários ativos</span><span class="uonix-kpi-comparison <?php echo esc_attr( $active_users_comparison['class'] ); ?>"><?php echo esc_html( $active_users_comparison['label'] ); ?></span></div></div>
-				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $ga4_summary['sessions'] ) ); ?></span><span class="uonix-kpi-title">Sessões</span><span class="uonix-kpi-comparison <?php echo esc_attr( $sessions_comparison['class'] ); ?>"><?php echo esc_html( $sessions_comparison['label'] ); ?></span></div></div>
-				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['clicks'] ) ); ?></span><span class="uonix-kpi-title">Cliques orgânicos</span><span class="uonix-kpi-comparison <?php echo esc_attr( $clicks_comparison['class'] ); ?>"><?php echo esc_html( $clicks_comparison['label'] ); ?></span></div></div>
-				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['impressions'] ) ); ?></span><span class="uonix-kpi-title">Impressões orgânicas</span><span class="uonix-kpi-comparison <?php echo esc_attr( $impressions_comparison['class'] ); ?>"><?php echo esc_html( $impressions_comparison['label'] ); ?></span></div></div>
-			</div>
-			<div class="uonix-ranking-grid">
-				<section class="uonix-ranking-chart" aria-labelledby="uonix-landing-pages-chart-title">
-					<h3 id="uonix-landing-pages-chart-title">Principais páginas de entrada</h3>
-					<?php if ( ! empty( $landing_page_chart ) ) : ?>
-						<ol class="uonix-ranking-list">
-							<?php foreach ( $landing_page_chart as $row ) :
-								$formatted_value = number_format_i18n( $row['value'] );
-							?>
-								<li aria-label="<?php echo esc_attr( $row['label'] . ': ' . $formatted_value . ' sessões' ); ?>">
-									<div class="uonix-ranking-label"><code><?php echo esc_html( $row['label'] ); ?></code><strong><?php echo esc_html( $formatted_value ); ?> sessões</strong></div>
-									<div class="uonix-ranking-bar-track" aria-hidden="true"><span class="uonix-ranking-bar-fill" style="width:<?php echo esc_attr( number_format( $row['percent'], 1, '.', '' ) ); ?>%"></span></div>
-								</li>
-							<?php endforeach; ?>
-						</ol>
-					<?php else : ?>
-						<p class="uonix-ranking-empty">Nenhuma página de entrada no período.</p>
-					<?php endif; ?>
-				</section>
-				<section class="uonix-ranking-chart" aria-labelledby="uonix-queries-chart-title">
-					<h3 id="uonix-queries-chart-title">Principais consultas orgânicas</h3>
-					<?php if ( ! empty( $query_chart ) ) : ?>
-						<ol class="uonix-ranking-list">
-							<?php foreach ( $query_chart as $row ) :
-								$formatted_value = number_format_i18n( $row['value'] );
-							?>
-								<li aria-label="<?php echo esc_attr( $row['label'] . ': ' . $formatted_value . ' cliques' ); ?>">
-									<div class="uonix-ranking-label"><span><?php echo esc_html( $row['label'] ); ?></span><strong><?php echo esc_html( $formatted_value ); ?> cliques</strong></div>
-									<div class="uonix-ranking-bar-track" aria-hidden="true"><span class="uonix-ranking-bar-fill uonix-ranking-bar-fill-search" style="width:<?php echo esc_attr( number_format( $row['percent'], 1, '.', '' ) ); ?>%"></span></div>
-								</li>
-							<?php endforeach; ?>
-						</ol>
-						<p class="uonix-ranking-note">O Search Console pode omitir linhas de baixo volume.</p>
-					<?php else : ?>
-						<p class="uonix-ranking-empty">Nenhuma consulta orgânica disponível no período.</p>
-					<?php endif; ?>
-				</section>
-			</div>
-			<?php endif; ?>
-		</section>
-			</div>
-
-			<div id="uonix-panel-catalog" role="tabpanel" aria-labelledby="uonix-tab-catalog"<?php echo 'catalog' === $active_metrics_subtab ? '' : ' hidden'; ?>>
-		<!-- Cards de Métricas Rápidas -->
-		<div class="uonix-kpi-grid">
-			<div class="uonix-kpi-card">
-				<div class="uonix-kpi-icon uonix-icon-blue"><span class="dashicons dashicons-products"></span></div>
-				<div class="uonix-kpi-data">
-					<span class="uonix-kpi-value"><?php echo esc_html($total_products); ?></span>
-					<span class="uonix-kpi-title">Produtos Cadastrados</span>
-					<span class="uonix-kpi-sub">Dispositivos & Fixações</span>
-				</div>
-			</div>
-			<div class="uonix-kpi-card">
-				<div class="uonix-kpi-icon uonix-icon-green"><span class="dashicons dashicons-welcome-write-blog"></span>
-				</div>
-				<div class="uonix-kpi-data">
-					<span class="uonix-kpi-value"><?php echo esc_html($total_posts); ?></span>
-					<span class="uonix-kpi-title">Artigos no Blog</span>
-					<span class="uonix-kpi-sub">Guias NR-35 & NBR 16325</span>
-				</div>
-			</div>
-			<div class="uonix-kpi-card">
-				<div class="uonix-kpi-icon uonix-icon-purple"><span class="dashicons dashicons-hammer"></span></div>
-				<div class="uonix-kpi-data">
-					<span class="uonix-kpi-value"><?php echo esc_html($total_services); ?></span>
-					<span class="uonix-kpi-title">Serviços Técnicos</span>
-					<span class="uonix-kpi-sub">Instalações, Ensaios & ART</span>
-				</div>
-			</div>
-			<div class="uonix-kpi-card">
-				<div class="uonix-kpi-icon uonix-icon-orange"><span class="dashicons dashicons-awards"></span></div>
-				<div class="uonix-kpi-data">
-					<span class="uonix-kpi-value">Externa</span>
-					<span class="uonix-kpi-title">Validação externa de SEO</span>
-					<span class="uonix-kpi-sub">Search Console & testes de schema</span>
-				</div>
-			</div>
-		</div>
-
-		<!-- Abas de Navegação do catálogo -->
-		<div class="uonix-tabs-nav" role="tablist" aria-label="Seções do catálogo">
-			<a id="uonix-catalog-tab-products" class="uonix-tab-btn<?php echo 'products' === $active_catalog_tab ? ' active' : ''; ?>" role="tab" aria-selected="<?php echo 'products' === $active_catalog_tab ? 'true' : 'false'; ?>" aria-controls="tab-products" tabindex="<?php echo 'products' === $active_catalog_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', 'products' ) ); ?>" data-uonix-panel="tab-products" data-uonix-query-key="catalog_tab" data-uonix-query-value="products">
-				<span class="dashicons dashicons-products"></span> Produtos (<?php echo esc_html($total_products); ?>)
-			</a>
-			<a id="uonix-catalog-tab-blog" class="uonix-tab-btn<?php echo 'blog' === $active_catalog_tab ? ' active' : ''; ?>" role="tab" aria-selected="<?php echo 'blog' === $active_catalog_tab ? 'true' : 'false'; ?>" aria-controls="tab-blog" tabindex="<?php echo 'blog' === $active_catalog_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', 'blog' ) ); ?>" data-uonix-panel="tab-blog" data-uonix-query-key="catalog_tab" data-uonix-query-value="blog">
-				<span class="dashicons dashicons-welcome-write-blog"></span> Artigos de Blog
-				(<?php echo esc_html($total_posts); ?>)
-			</a>
-			<a id="uonix-catalog-tab-services" class="uonix-tab-btn<?php echo 'services' === $active_catalog_tab ? ' active' : ''; ?>" role="tab" aria-selected="<?php echo 'services' === $active_catalog_tab ? 'true' : 'false'; ?>" aria-controls="tab-services" tabindex="<?php echo 'services' === $active_catalog_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', 'services' ) ); ?>" data-uonix-panel="tab-services" data-uonix-query-key="catalog_tab" data-uonix-query-value="services">
-				<span class="dashicons dashicons-hammer"></span> Serviços
-				(<?php echo esc_html($total_services); ?>)
-			</a>
-		</div>
-
-		<!-- Conteúdo das Abas -->
-		<div class="uonix-tab-content-wrapper">
-
-			<!-- ABA 1: PRODUTOS -->
-			<div id="tab-products" role="tabpanel" aria-labelledby="uonix-catalog-tab-products"<?php echo 'products' === $active_catalog_tab ? '' : ' hidden'; ?> class="uonix-tab-panel<?php echo 'products' === $active_catalog_tab ? ' active' : ''; ?>">
-				<div class="uonix-panel-header">
-					<h2>Catálogo de Dispositivos e Fixações (<?php echo esc_html($total_products); ?> Produtos)</h2>
-					<p>Monitore os títulos comerciais, palavras-chave de foco e consulte o desempenho de busca no Google
-						para cada produto.</p>
-				</div>
-				<div class="uonix-table-responsive">
-					<table class="uonix-table">
-						<thead>
-							<tr>
-								<th>Produto</th>
-								<th>Categoria</th>
-								<th>Palavra-Chave Principal</th>
-								<th>Título SEO (Google)</th>
-								<th>Visualizações — <?php echo esc_html( $metrics_period_days ); ?> dias</th>
-								<th style="text-align:right;">Ações Rápidas</th>
-							</tr>
-						</thead>
-						<tbody>
-							<?php foreach ($products_query as $product_post):
-								$pid = $product_post->ID;
-								$permalink = get_permalink($pid);
-								$page_view_value = uonix_analytics_dashboard_page_view_value( $metrics_snapshot, $permalink );
-								$edit_link = get_edit_post_link($pid);
-								$kw = get_post_meta($pid, 'rank_math_focus_keyword', true);
-								$seo_title = get_post_meta($pid, 'rank_math_title', true);
-								$terms = get_the_terms($pid, 'product_cat');
-								$cat_name = (!empty($terms) && !is_wp_error($terms)) ? $terms[0]->name : '—';
-								$gsc_inspect = 'https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain:uonix.com.br&page=*' . rawurlencode($product_post->post_name);
-								?>
-								<tr>
-									<td class="uonix-title-col">
-										<strong><?php echo esc_html($product_post->post_title); ?></strong>
-										<span
-											class="uonix-slug-badge">/produtos/<?php echo esc_html($product_post->post_name); ?>/</span>
-									</td>
-									<td><span class="uonix-tag"><?php echo esc_html($cat_name); ?></span></td>
-									<td><code><?php echo esc_html($kw ? $kw : '—'); ?></code></td>
-									<td class="uonix-desc-col">
-										<?php echo esc_html($seo_title ? $seo_title : $product_post->post_title); ?>
-									</td>
-									<td class="uonix-page-views-col"><?php echo esc_html( null === $page_view_value ? '—' : number_format_i18n( $page_view_value ) ); ?></td>
-									<td style="text-align:right; white-space:nowrap;">
-										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
-											title="Ver no site">
-											<span class="dashicons dashicons-visibility"></span> Ver
-										</a>
-										<a href="<?php echo esc_url($edit_link); ?>" class="button button-small"
-											title="Editar produto">
-											<span class="dashicons dashicons-edit"></span> Editar
-										</a>
-										<a href="<?php echo esc_url($gsc_inspect); ?>" target="_blank" rel="noopener"
-											class="button button-small button-secondary"
-											title="Ver buscas deste produto no Search Console">
-											<span class="dashicons dashicons-search"></span> Google
-										</a>
-									</td>
-								</tr>
-							<?php endforeach; ?>
-						</tbody>
-					</table>
-				</div>
-			</div>
-
-			<!-- ABA 2: BLOG -->
-			<div id="tab-blog" role="tabpanel" aria-labelledby="uonix-catalog-tab-blog"<?php echo 'blog' === $active_catalog_tab ? '' : ' hidden'; ?> class="uonix-tab-panel<?php echo 'blog' === $active_catalog_tab ? ' active' : ''; ?>">
-				<div class="uonix-panel-header">
-					<h2>Artigos Técnicos e Guias Normativos (<?php echo esc_html($total_posts); ?> Artigos)</h2>
-					<p>Artigos que atraem tráfego orgânico qualificado para palavras-chave de engenharia e trabalho em
-						altura.</p>
-				</div>
-				<div class="uonix-table-responsive">
-					<table class="uonix-table">
-						<thead>
-							<tr>
-								<th>Artigo</th>
-								<th>Data</th>
-								<th>Palavra-Chave Principal</th>
-								<th>Título SEO</th>
-								<th>Visualizações — <?php echo esc_html( $metrics_period_days ); ?> dias</th>
-								<th style="text-align:right;">Ações Rápidas</th>
-							</tr>
-						</thead>
-						<tbody>
-							<?php foreach ($posts_query as $blog_post):
-								$bid = $blog_post->ID;
-								$permalink = get_permalink($bid);
-								$page_view_value = uonix_analytics_dashboard_page_view_value( $metrics_snapshot, $permalink );
-								$edit_link = get_edit_post_link($bid);
-								$kw = get_post_meta($bid, 'rank_math_focus_keyword', true);
-								$seo_title = get_post_meta($bid, 'rank_math_title', true);
-								$date = get_the_date('d/m/Y', $bid);
-								$gsc_inspect = 'https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain:uonix.com.br&page=*' . rawurlencode($blog_post->post_name);
-								?>
-								<tr>
-									<td class="uonix-title-col">
-										<strong><?php echo esc_html($blog_post->post_title); ?></strong>
-										<span class="uonix-slug-badge">/<?php echo esc_html($blog_post->post_name); ?>/</span>
-									</td>
-									<td><?php echo esc_html($date); ?></td>
-									<td><code><?php echo esc_html($kw ? $kw : '—'); ?></code></td>
-									<td class="uonix-desc-col">
-										<?php echo esc_html($seo_title ? $seo_title : $blog_post->post_title); ?>
-									</td>
-									<td class="uonix-page-views-col"><?php echo esc_html( null === $page_view_value ? '—' : number_format_i18n( $page_view_value ) ); ?></td>
-									<td style="text-align:right; white-space:nowrap;">
-										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
-											title="Ver no site">
-											<span class="dashicons dashicons-visibility"></span> Ver
-										</a>
-										<a href="<?php echo esc_url($edit_link); ?>" class="button button-small"
-											title="Editar artigo">
-											<span class="dashicons dashicons-edit"></span> Editar
-										</a>
-										<a href="<?php echo esc_url($gsc_inspect); ?>" target="_blank" rel="noopener"
-											class="button button-small button-secondary"
-											title="Ver buscas deste post no Search Console">
-											<span class="dashicons dashicons-search"></span> Google
-										</a>
-									</td>
-								</tr>
-							<?php endforeach; ?>
-						</tbody>
-					</table>
-				</div>
-			</div>
-
-			<!-- ABA 3: SERVIÇOS -->
-			<div id="tab-services" role="tabpanel" aria-labelledby="uonix-catalog-tab-services"<?php echo 'services' === $active_catalog_tab ? '' : ' hidden'; ?> class="uonix-tab-panel<?php echo 'services' === $active_catalog_tab ? ' active' : ''; ?>">
-				<div class="uonix-panel-header">
-					<h2>Serviços Técnicos e Consultoria de Engenharia (<?php echo esc_html($total_services); ?> Serviços)
-					</h2>
-					<p>Serviços com emissão de ART, ensaios de arrancamento estático e projetos de proteção contra quedas.
-					</p>
-				</div>
-				<div class="uonix-table-responsive">
-					<table class="uonix-table">
-						<thead>
-							<tr>
-								<th>Serviço</th>
-								<th>Palavra-Chave Principal</th>
-								<th>Dados Estruturados</th>
-								<th>Título SEO</th>
-								<th>Visualizações — <?php echo esc_html( $metrics_period_days ); ?> dias</th>
-								<th style="text-align:right;">Ações Rápidas</th>
-							</tr>
-						</thead>
-						<tbody>
-							<?php foreach ($services_query as $service_post):
-								$sid = $service_post->ID;
-								$permalink = get_permalink($sid);
-								$page_view_value = uonix_analytics_dashboard_page_view_value( $metrics_snapshot, $permalink );
-								$edit_link = get_edit_post_link($sid);
-								$kw = get_post_meta($sid, 'rank_math_focus_keyword', true);
-								$seo_title = get_post_meta($sid, 'rank_math_title', true);
-								$gsc_inspect = 'https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain:uonix.com.br&page=*' . rawurlencode($service_post->post_name);
-								?>
-								<tr>
-									<td class="uonix-title-col">
-										<strong><?php echo esc_html($service_post->post_title); ?></strong>
-										<span
-											class="uonix-slug-badge">/servicos/<?php echo esc_html($service_post->post_name); ?>/</span>
-									</td>
-									<td><code><?php echo esc_html($kw ? $kw : '—'); ?></code></td>
-									<td><span class="uonix-tag uonix-tag-schema">Verificação externa</span></td>
-									<td class="uonix-desc-col">
-										<?php echo esc_html($seo_title ? $seo_title : $service_post->post_title); ?>
-									</td>
-									<td class="uonix-page-views-col"><?php echo esc_html( null === $page_view_value ? '—' : number_format_i18n( $page_view_value ) ); ?></td>
-									<td style="text-align:right; white-space:nowrap;">
-										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
-											title="Ver no site">
-											<span class="dashicons dashicons-visibility"></span> Ver
-										</a>
-										<a href="<?php echo esc_url($edit_link); ?>" class="button button-small"
-											title="Editar serviço">
-											<span class="dashicons dashicons-edit"></span> Editar
-										</a>
-										<a href="<?php echo esc_url($gsc_inspect); ?>" target="_blank" rel="noopener"
-											class="button button-small button-secondary"
-											title="Ver buscas deste serviço no Search Console">
-											<span class="dashicons dashicons-search"></span> Google
-										</a>
-									</td>
-								</tr>
-							<?php endforeach; ?>
-						</tbody>
-					</table>
-				</div>
-			</div>
-
-		</div>
-			</div>
-		</section>
-
-		<!-- Destinos de marketing: fatos técnicos locais, sem métricas externas não consultadas. -->
-		<section id="uonix-panel-destinations" class="uonix-marketing-section" role="tabpanel" aria-labelledby="uonix-tab-destinations"<?php echo 'destinations' === $active_dashboard_tab ? '' : ' hidden'; ?>>
 			<div class="uonix-panel-header">
 				<h2 id="uonix-marketing-title">Destinos de marketing configurados</h2>
 				<p>Este painel confirma apenas a configuração local. Dados de audiência, campanhas e resultados devem ser conferidos na plataforma indicada.</p>
@@ -662,11 +269,13 @@ function uonix_render_analytics_dashboard_page()
 					<span class="uonix-status-label">Search Console:</span>
 					<strong><?php echo esc_html($gsc_status); ?></strong>
 				</div>
+				<?php if ( $com_adopt ) : ?>
 				<div class="uonix-status-item">
 					<span class="uonix-status-dot <?php echo esc_html($analytics_dot_class); ?>"></span>
 					<span class="uonix-status-label">LGPD AdOpt:</span>
 					<strong><?php echo esc_html($adopt_status); ?></strong>
 				</div>
+				<?php endif; ?>
 			</div>
 
 			<div class="uonix-marketing-grid">
@@ -687,12 +296,14 @@ function uonix_render_analytics_dashboard_page()
 					<ul class="uonix-card-links"><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Campanhas e grupos de anúncios</a></li><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Diagnóstico de mensuração</a></li><li><a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener">Públicos de remarketing</a></li></ul>
 					<a href="<?php echo esc_url($google_ads_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline uonix-btn-outline-ads">Abrir Google Ads</a>
 				</div>
+				<?php if ( $com_adopt ) : ?>
 				<div class="uonix-marketing-card">
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-shield uonix-sc-icon-adopt"></span><h3>AdOpt e Consent Mode</h3></div>
 					<dl><dt>Configuração local</dt><dd><?php echo esc_html($adopt_status); ?></dd><dt>Finalidade</dt><dd>Controlar categorias estatísticas e de marketing.</dd><dt>Validar em</dt><dd>Banner e preferências na produção.</dd></dl>
 					<ul class="uonix-card-links"><li><a href="<?php echo esc_url( $adopt_tags_url ); ?>" target="_blank" rel="noopener">Escanear tags</a></li><li><a href="<?php echo esc_url( $adopt_documents_url ); ?>" target="_blank" rel="noopener">Documentos</a></li><li><a href="<?php echo esc_url( $adopt_settings_url ); ?>" target="_blank" rel="noopener">Configurações</a></li></ul>
 					<a href="<?php echo esc_url( $adopt_url ); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir AdOpt</a>
 				</div>
+				<?php endif; ?>
 				<div class="uonix-marketing-card">
 					<div class="uonix-marketing-card-header"><span class="dashicons dashicons-facebook-alt uonix-sc-icon-meta"></span><h3>Meta Pixel</h3></div>
 					<dl><dt>Configuração local</dt><dd><?php echo esc_html($meta_status); ?></dd><dt>Finalidade</dt><dd>PageView sujeito ao consentimento de marketing.</dd><dt>Validar em</dt><dd>Abra a plataforma para verificar o recebimento, diagnósticos e qualidade do Pixel.</dd></dl>
@@ -712,10 +323,16 @@ function uonix_render_analytics_dashboard_page()
 					<a href="<?php echo esc_url($looker_url); ?>" target="_blank" rel="noopener" class="uonix-btn uonix-btn-outline">Abrir Looker Studio</a>
 				</div>
 			</div>
-		</section>
-	</div>
+	<?php
+}
 
-	<!-- Estilos CSS do Dashboard -->
+/**
+ * Imprime o CSS do Insights, que a Visão Geral do menu Marketing também usa.
+ *
+ * @return void
+ */
+function uonix_analytics_print_dashboard_css() {
+	?>
 	<style>
 		.uonix-analytics-wrap {
 			max-width: none;
@@ -1484,6 +1101,511 @@ function uonix_render_analytics_dashboard_page()
 			}
 		}
 	</style>
+	<?php
+}
+
+function uonix_render_analytics_dashboard_page()
+{
+	if (!current_user_can('edit_posts') || (function_exists('uonix_ksio_can_access_tool') && !uonix_ksio_can_access_tool('analytics'))) {
+		wp_die(esc_html__('Você não tem permissão para acessar esta página.', 'uonix'));
+	}
+
+	// Consulta de dados do catálogo
+	$products_query = get_posts(array(
+		'post_type' => 'product',
+		'post_status' => 'publish',
+		'posts_per_page' => -1,
+		'orderby' => 'title',
+		'order' => 'ASC',
+	));
+
+	$posts_query = get_posts(array(
+		'post_type' => 'post',
+		'post_status' => 'publish',
+		'posts_per_page' => -1,
+		'orderby' => 'date',
+		'order' => 'DESC',
+	));
+
+	$services_query = get_posts(array(
+		'post_type' => 'servicos',
+		'post_status' => 'publish',
+		'posts_per_page' => -1,
+		'orderby' => 'title',
+		'order' => 'ASC',
+	));
+
+	$total_products = count($products_query);
+	$total_posts = count($posts_query);
+	$total_services = count($services_query);
+
+	$requested_period = isset( $_GET['uonix_period'] ) ? wp_unslash( $_GET['uonix_period'] ) : 30;
+	$metrics_period_days = function_exists( 'uonix_analytics_metrics_sanitize_period_days' ) ? uonix_analytics_metrics_sanitize_period_days( $requested_period ) : 30;
+	$metrics_snapshot = function_exists( 'uonix_analytics_metrics_get_snapshot' ) ? uonix_analytics_metrics_get_snapshot( $metrics_period_days ) : false;
+	$metrics_status = is_array( $metrics_snapshot ) ? ( $metrics_snapshot['status'] ?? 'updated' ) : 'unavailable';
+	$metrics_is_fresh = function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ) && uonix_analytics_metrics_snapshot_is_fresh( $metrics_snapshot );
+	$metrics_refresh_attempted = isset( $_GET['uonix_metrics_refresh'] ) && is_string( $_GET['uonix_metrics_refresh'] ) && '1' === wp_unslash( $_GET['uonix_metrics_refresh'] );
+	$metrics_updated_at = is_array( $metrics_snapshot ) && isset( $metrics_snapshot['updated_at'] ) && is_string( $metrics_snapshot['updated_at'] ) ? $metrics_snapshot['updated_at'] : '';
+	$metrics_updated_timestamp = '' !== $metrics_updated_at ? strtotime( $metrics_updated_at ) : false;
+	$metrics_updated_datetime = false !== $metrics_updated_timestamp ? gmdate( 'c', $metrics_updated_timestamp ) : '';
+	$metrics_updated_label = false !== $metrics_updated_timestamp ? wp_date( 'd/m/Y H:i', $metrics_updated_timestamp ) : '';
+	$metrics_cache_class = $metrics_is_fresh ? 'uonix-cache-fresh' : ( is_array( $metrics_snapshot ) ? 'uonix-cache-stale' : 'uonix-cache-empty' );
+	$metrics_cache_label = $metrics_is_fresh ? 'Cache atualizado' : ( is_array( $metrics_snapshot ) ? 'Cache vencido' : 'Sem snapshot' );
+	$dashboard_state = function_exists( 'uonix_analytics_metrics_requested_dashboard_state' )
+		? uonix_analytics_metrics_requested_dashboard_state( $_GET )
+		: array( 'tab' => 'metrics', 'subtab' => 'aggregate', 'catalog_tab' => 'products' );
+	$active_dashboard_tab = $dashboard_state['tab'];
+	$active_metrics_subtab = $dashboard_state['subtab'];
+	$active_catalog_tab = $dashboard_state['catalog_tab'];
+	// Badge de anomalia no RÓTULO da aba, e não só dentro do painel: um aviso que só
+	// aparece depois de abrir a aba não vigia nada, porque quem não suspeita não
+	// clica. Lê o resultado persistido pela verificação diária — recomputar aqui
+	// custaria uma chamada à API da Search Console em cada carga desta tela.
+	$anomaly_summary = function_exists( 'uonix_intelligence_anomaly_get_summary' )
+		? uonix_intelligence_anomaly_get_summary()
+		: array( 'findings' => array(), 'anomalous' => 0, 'unavailable' => 0, 'checked_at' => '' );
+	$anomaly_badge = function_exists( 'uonix_intelligence_anomaly_badge' )
+		? uonix_intelligence_anomaly_badge( $anomaly_summary )
+		: array( 'state' => 'normal', 'label' => 'Sistema normal' );
+	// O auto-refresh só pode disparar na aba de métricas. O formulário e o script
+	// que o submetem vivem dentro do painel de métricas, que é renderizado em toda
+	// aba e apenas escondido; sem esta guarda, abrir outra aba dispara um sync de 8
+	// chamadas de API e um redirect que descarta os avisos daquela aba — o aviso de
+	// destinatários recusados, por exemplo, morria antes de ser lido.
+	$metrics_auto_refresh = current_user_can( 'manage_options' )
+		&& 'metrics' === $active_dashboard_tab
+		&& ! $metrics_is_fresh
+		&& ! $metrics_refresh_attempted;
+	$dashboard_tab_url = static function ( $tab, $subtab, $catalog_tab ) use ( $metrics_period_days ) {
+		$state = array(
+			'tab' => $tab,
+			'subtab' => $subtab,
+			'catalog_tab' => $catalog_tab,
+		);
+		if ( function_exists( 'uonix_analytics_metrics_dashboard_url' ) ) {
+			return uonix_analytics_metrics_dashboard_url( $metrics_period_days, $state );
+		}
+		return admin_url( 'admin.php?page=uonix-analytics&uonix_period=' . $metrics_period_days );
+	};
+	?>
+	<div class="wrap uonix-analytics-wrap">
+		<!-- Header Principal -->
+		<div class="uonix-analytics-header">
+			<div class="uonix-header-content">
+				<div class="uonix-header-badge">UÔNIX - ANCORAGEM PREDIAL</div>
+				<h1>Central de Desempenho, Catálogo & Analytics</h1>
+				<p>Consulte o catálogo e os artigos técnicos, e acesse as plataformas externas para verificar tráfego, tags
+					e indexação.</p>
+			</div>
+		</div>
+
+		<nav class="uonix-primary-tabs" role="tablist" aria-label="Seções do painel">
+			<a id="uonix-tab-metrics" role="tab" aria-selected="<?php echo 'metrics' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-metrics" tabindex="<?php echo 'metrics' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-metrics" data-uonix-query-key="tab" data-uonix-query-value="metrics">Métricas</a>
+			<a id="uonix-tab-destinations" role="tab" aria-selected="<?php echo 'destinations' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-destinations" tabindex="<?php echo 'destinations' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'destinations', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-destinations" data-uonix-query-key="tab" data-uonix-query-value="destinations">Destinos de marketing configurados</a>
+			<a id="uonix-tab-intelligence" role="tab" aria-selected="<?php echo 'intelligence' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-intelligence" tabindex="<?php echo 'intelligence' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'intelligence', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-intelligence" data-uonix-query-key="tab" data-uonix-query-value="intelligence">Oportunidades SEO</a>
+			<a id="uonix-tab-anomalies" role="tab" aria-selected="<?php echo 'anomalies' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-anomalies" tabindex="<?php echo 'anomalies' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'anomalies', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-anomalies" data-uonix-query-key="tab" data-uonix-query-value="anomalies">Anomalias<?php if ( 'normal' !== $anomaly_badge['state'] ) : ?> <span aria-hidden="true"><?php echo 'critical' === $anomaly_badge['state'] ? '&#x1F6A8;' : '&#x26A0;&#xFE0F;'; ?></span><span class="screen-reader-text"><?php echo esc_html( ' — ' . $anomaly_badge['label'] ); ?></span><?php endif; ?></a>
+			<a id="uonix-tab-settings" role="tab" aria-selected="<?php echo 'settings' === $active_dashboard_tab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-settings" tabindex="<?php echo 'settings' === $active_dashboard_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'settings', $active_metrics_subtab, $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-settings" data-uonix-query-key="tab" data-uonix-query-value="settings">Configurações</a>
+		</nav>
+
+		<section id="uonix-panel-metrics" role="tabpanel" aria-labelledby="uonix-tab-metrics"<?php echo 'metrics' === $active_dashboard_tab ? '' : ' hidden'; ?>>
+			<div class="uonix-panel-header uonix-metrics-panel-header">
+				<div class="uonix-metrics-copy">
+					<h2 id="uonix-metrics-title">Métricas agregadas dos últimos <?php echo esc_html( $metrics_period_days ); ?> dias</h2>
+					<p><?php echo esc_html( 'updated' === $metrics_status ? 'Fonte: GA4 Data API e Search Console API. Comparação com os ' . $metrics_period_days . ' dias anteriores.' : ( 'stale' === $metrics_status ? 'Último snapshot disponível; atualização pendente.' : 'Conexão não configurada ou sem snapshot. Nenhuma métrica é exibida.' ) ); ?></p>
+					<div class="uonix-metrics-cache-meta">
+						<span class="uonix-metrics-cache-status <?php echo esc_attr( $metrics_cache_class ); ?>"><?php echo esc_html( $metrics_cache_label ); ?></span>
+						<?php if ( '' !== $metrics_updated_label ) : ?>
+							<time datetime="<?php echo esc_attr( $metrics_updated_datetime ); ?>">Atualizado em <?php echo esc_html( $metrics_updated_label ); ?></time>
+						<?php endif; ?>
+					</div>
+				</div>
+				<div class="uonix-metrics-toolbar">
+				<form method="get" action="<?php echo esc_url( admin_url( 'admin.php' ) ); ?>" class="uonix-metrics-period-form">
+					<input type="hidden" name="page" value="uonix-analytics" />
+					<input type="hidden" name="tab" value="<?php echo esc_attr( $active_dashboard_tab ); ?>" />
+					<input type="hidden" name="subtab" value="<?php echo esc_attr( $active_metrics_subtab ); ?>" />
+					<input type="hidden" name="catalog_tab" value="<?php echo esc_attr( $active_catalog_tab ); ?>" />
+					<label for="uonix-metrics-period">Período</label>
+					<select id="uonix-metrics-period" name="uonix_period" onchange="this.form.requestSubmit()">
+						<?php foreach ( array( 7, 30, 90, 365 ) as $period_option ) : ?>
+							<option value="<?php echo esc_attr( $period_option ); ?>"<?php echo $period_option === $metrics_period_days ? ' selected="selected"' : ''; ?>>Últimos <?php echo esc_html( $period_option ); ?> dias</option>
+						<?php endforeach; ?>
+					</select>
+					<noscript><button type="submit" class="button">Aplicar período</button></noscript>
+				</form>
+				<?php if ( current_user_can( 'manage_options' ) ) : ?>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="uonix-metrics-refresh-form"<?php echo $metrics_auto_refresh ? ' data-uonix-auto-refresh="1"' : ''; ?>>
+						<input type="hidden" name="action" value="uonix_analytics_metrics_refresh" />
+						<input type="hidden" name="tab" value="<?php echo esc_attr( $active_dashboard_tab ); ?>" />
+						<input type="hidden" name="subtab" value="<?php echo esc_attr( $active_metrics_subtab ); ?>" />
+						<input type="hidden" name="catalog_tab" value="<?php echo esc_attr( $active_catalog_tab ); ?>" />
+						<input type="hidden" name="uonix_period" value="<?php echo esc_attr( $metrics_period_days ); ?>" />
+						<?php wp_nonce_field( 'uonix_analytics_metrics_refresh' ); ?>
+						<button type="submit" class="button button-secondary">Atualizar métricas agora</button>
+						<span>Consulta somente leitura.</span>
+					</form>
+					<?php if ( $metrics_auto_refresh ) : ?>
+						<script>
+							document.addEventListener('DOMContentLoaded', function () {
+								var form = document.querySelector('.uonix-metrics-refresh-form[data-uonix-auto-refresh="1"]');
+								if (!form) return;
+								var button = form.querySelector('button[type="submit"]');
+								if (button) {
+									button.disabled = true;
+									button.textContent = 'Atualizando métricas…';
+								}
+								if (typeof form.requestSubmit === 'function') form.requestSubmit();
+								else form.submit();
+							});
+						</script>
+					<?php endif; ?>
+				<?php endif; ?>
+				</div>
+			</div>
+
+			<nav class="uonix-secondary-tabs" role="tablist" aria-label="Seções de métricas">
+				<a id="uonix-tab-aggregate" role="tab" aria-selected="<?php echo 'aggregate' === $active_metrics_subtab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-aggregate" tabindex="<?php echo 'aggregate' === $active_metrics_subtab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'aggregate', $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-aggregate" data-uonix-query-key="subtab" data-uonix-query-value="aggregate">Métricas agregadas</a>
+				<a id="uonix-tab-catalog" role="tab" aria-selected="<?php echo 'catalog' === $active_metrics_subtab ? 'true' : 'false'; ?>" aria-controls="uonix-panel-catalog" tabindex="<?php echo 'catalog' === $active_metrics_subtab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', $active_catalog_tab ) ); ?>" data-uonix-panel="uonix-panel-catalog" data-uonix-query-key="subtab" data-uonix-query-value="catalog">Catálogo &amp; conteúdo</a>
+			</nav>
+
+			<div id="uonix-panel-aggregate" role="tabpanel" aria-labelledby="uonix-tab-aggregate"<?php echo 'aggregate' === $active_metrics_subtab ? '' : ' hidden'; ?>>
+		<section class="uonix-marketing-section" aria-labelledby="uonix-metrics-title">
+			<?php if ( is_array( $metrics_snapshot ) && isset( $metrics_snapshot['ga4'], $metrics_snapshot['search_console'] ) ) :
+				$ga4_summary = $metrics_snapshot['ga4']['summary'];
+				$gsc_summary = $metrics_snapshot['search_console']['summary'];
+				$metric_value = static function ( $metric, $percent = false ) { return $percent ? number_format_i18n( (float) $metric['current'] * 100, 1 ) . '%' : number_format_i18n( (float) $metric['current'] ); };
+				$active_users_comparison = uonix_analytics_dashboard_metric_comparison( $ga4_summary['active_users'] );
+				$sessions_comparison = uonix_analytics_dashboard_metric_comparison( $ga4_summary['sessions'] );
+				$clicks_comparison = uonix_analytics_dashboard_metric_comparison( $gsc_summary['clicks'] );
+				$impressions_comparison = uonix_analytics_dashboard_metric_comparison( $gsc_summary['impressions'] );
+				$landing_page_chart = uonix_analytics_dashboard_chart_rows( $metrics_snapshot['ga4']['landing_pages'] ?? array(), 'path', 'sessions' );
+				foreach ( $landing_page_chart as &$row ) {
+					$row['label'] = uonix_analytics_dashboard_page_label( $row['label'] );
+				}
+				unset( $row );
+				$query_chart = uonix_analytics_dashboard_chart_rows( $metrics_snapshot['search_console']['queries'] ?? array(), 'query', 'clicks' );
+			?>
+			<div class="uonix-kpi-grid">
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $ga4_summary['active_users'] ) ); ?></span><span class="uonix-kpi-title">Usuários ativos</span><span class="uonix-kpi-comparison <?php echo esc_attr( $active_users_comparison['class'] ); ?>"><?php echo esc_html( $active_users_comparison['label'] ); ?></span></div></div>
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $ga4_summary['sessions'] ) ); ?></span><span class="uonix-kpi-title">Sessões</span><span class="uonix-kpi-comparison <?php echo esc_attr( $sessions_comparison['class'] ); ?>"><?php echo esc_html( $sessions_comparison['label'] ); ?></span></div></div>
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['clicks'] ) ); ?></span><span class="uonix-kpi-title">Cliques orgânicos</span><span class="uonix-kpi-comparison <?php echo esc_attr( $clicks_comparison['class'] ); ?>"><?php echo esc_html( $clicks_comparison['label'] ); ?></span></div></div>
+				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['impressions'] ) ); ?></span><span class="uonix-kpi-title">Impressões orgânicas</span><span class="uonix-kpi-comparison <?php echo esc_attr( $impressions_comparison['class'] ); ?>"><?php echo esc_html( $impressions_comparison['label'] ); ?></span></div></div>
+			</div>
+			<div class="uonix-ranking-grid">
+				<section class="uonix-ranking-chart" aria-labelledby="uonix-landing-pages-chart-title">
+					<h3 id="uonix-landing-pages-chart-title">Principais páginas de entrada</h3>
+					<?php if ( ! empty( $landing_page_chart ) ) : ?>
+						<ol class="uonix-ranking-list">
+							<?php foreach ( $landing_page_chart as $row ) :
+								$formatted_value = number_format_i18n( $row['value'] );
+							?>
+								<li aria-label="<?php echo esc_attr( $row['label'] . ': ' . $formatted_value . ' sessões' ); ?>">
+									<div class="uonix-ranking-label"><code><?php echo esc_html( $row['label'] ); ?></code><strong><?php echo esc_html( $formatted_value ); ?> sessões</strong></div>
+									<div class="uonix-ranking-bar-track" aria-hidden="true"><span class="uonix-ranking-bar-fill" style="width:<?php echo esc_attr( number_format( $row['percent'], 1, '.', '' ) ); ?>%"></span></div>
+								</li>
+							<?php endforeach; ?>
+						</ol>
+					<?php else : ?>
+						<p class="uonix-ranking-empty">Nenhuma página de entrada no período.</p>
+					<?php endif; ?>
+				</section>
+				<section class="uonix-ranking-chart" aria-labelledby="uonix-queries-chart-title">
+					<h3 id="uonix-queries-chart-title">Principais consultas orgânicas</h3>
+					<?php if ( ! empty( $query_chart ) ) : ?>
+						<ol class="uonix-ranking-list">
+							<?php foreach ( $query_chart as $row ) :
+								$formatted_value = number_format_i18n( $row['value'] );
+							?>
+								<li aria-label="<?php echo esc_attr( $row['label'] . ': ' . $formatted_value . ' cliques' ); ?>">
+									<div class="uonix-ranking-label"><span><?php echo esc_html( $row['label'] ); ?></span><strong><?php echo esc_html( $formatted_value ); ?> cliques</strong></div>
+									<div class="uonix-ranking-bar-track" aria-hidden="true"><span class="uonix-ranking-bar-fill uonix-ranking-bar-fill-search" style="width:<?php echo esc_attr( number_format( $row['percent'], 1, '.', '' ) ); ?>%"></span></div>
+								</li>
+							<?php endforeach; ?>
+						</ol>
+						<p class="uonix-ranking-note">O Search Console pode omitir linhas de baixo volume.</p>
+					<?php else : ?>
+						<p class="uonix-ranking-empty">Nenhuma consulta orgânica disponível no período.</p>
+					<?php endif; ?>
+				</section>
+			</div>
+			<?php endif; ?>
+		</section>
+			</div>
+
+			<div id="uonix-panel-catalog" role="tabpanel" aria-labelledby="uonix-tab-catalog"<?php echo 'catalog' === $active_metrics_subtab ? '' : ' hidden'; ?>>
+		<!-- Cards de Métricas Rápidas -->
+		<div class="uonix-kpi-grid">
+			<div class="uonix-kpi-card">
+				<div class="uonix-kpi-icon uonix-icon-blue"><span class="dashicons dashicons-products"></span></div>
+				<div class="uonix-kpi-data">
+					<span class="uonix-kpi-value"><?php echo esc_html($total_products); ?></span>
+					<span class="uonix-kpi-title">Produtos Cadastrados</span>
+					<span class="uonix-kpi-sub">Dispositivos & Fixações</span>
+				</div>
+			</div>
+			<div class="uonix-kpi-card">
+				<div class="uonix-kpi-icon uonix-icon-green"><span class="dashicons dashicons-welcome-write-blog"></span>
+				</div>
+				<div class="uonix-kpi-data">
+					<span class="uonix-kpi-value"><?php echo esc_html($total_posts); ?></span>
+					<span class="uonix-kpi-title">Artigos no Blog</span>
+					<span class="uonix-kpi-sub">Guias NR-35 & NBR 16325</span>
+				</div>
+			</div>
+			<div class="uonix-kpi-card">
+				<div class="uonix-kpi-icon uonix-icon-purple"><span class="dashicons dashicons-hammer"></span></div>
+				<div class="uonix-kpi-data">
+					<span class="uonix-kpi-value"><?php echo esc_html($total_services); ?></span>
+					<span class="uonix-kpi-title">Serviços Técnicos</span>
+					<span class="uonix-kpi-sub">Instalações, Ensaios & ART</span>
+				</div>
+			</div>
+			<div class="uonix-kpi-card">
+				<div class="uonix-kpi-icon uonix-icon-orange"><span class="dashicons dashicons-awards"></span></div>
+				<div class="uonix-kpi-data">
+					<span class="uonix-kpi-value">Externa</span>
+					<span class="uonix-kpi-title">Validação externa de SEO</span>
+					<span class="uonix-kpi-sub">Search Console & testes de schema</span>
+				</div>
+			</div>
+		</div>
+
+		<!-- Abas de Navegação do catálogo -->
+		<div class="uonix-tabs-nav" role="tablist" aria-label="Seções do catálogo">
+			<a id="uonix-catalog-tab-products" class="uonix-tab-btn<?php echo 'products' === $active_catalog_tab ? ' active' : ''; ?>" role="tab" aria-selected="<?php echo 'products' === $active_catalog_tab ? 'true' : 'false'; ?>" aria-controls="tab-products" tabindex="<?php echo 'products' === $active_catalog_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', 'products' ) ); ?>" data-uonix-panel="tab-products" data-uonix-query-key="catalog_tab" data-uonix-query-value="products">
+				<span class="dashicons dashicons-products"></span> Produtos (<?php echo esc_html($total_products); ?>)
+			</a>
+			<a id="uonix-catalog-tab-blog" class="uonix-tab-btn<?php echo 'blog' === $active_catalog_tab ? ' active' : ''; ?>" role="tab" aria-selected="<?php echo 'blog' === $active_catalog_tab ? 'true' : 'false'; ?>" aria-controls="tab-blog" tabindex="<?php echo 'blog' === $active_catalog_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', 'blog' ) ); ?>" data-uonix-panel="tab-blog" data-uonix-query-key="catalog_tab" data-uonix-query-value="blog">
+				<span class="dashicons dashicons-welcome-write-blog"></span> Artigos de Blog
+				(<?php echo esc_html($total_posts); ?>)
+			</a>
+			<a id="uonix-catalog-tab-services" class="uonix-tab-btn<?php echo 'services' === $active_catalog_tab ? ' active' : ''; ?>" role="tab" aria-selected="<?php echo 'services' === $active_catalog_tab ? 'true' : 'false'; ?>" aria-controls="tab-services" tabindex="<?php echo 'services' === $active_catalog_tab ? '0' : '-1'; ?>" href="<?php echo esc_url( $dashboard_tab_url( 'metrics', 'catalog', 'services' ) ); ?>" data-uonix-panel="tab-services" data-uonix-query-key="catalog_tab" data-uonix-query-value="services">
+				<span class="dashicons dashicons-hammer"></span> Serviços
+				(<?php echo esc_html($total_services); ?>)
+			</a>
+		</div>
+
+		<!-- Conteúdo das Abas -->
+		<div class="uonix-tab-content-wrapper">
+
+			<!-- ABA 1: PRODUTOS -->
+			<div id="tab-products" role="tabpanel" aria-labelledby="uonix-catalog-tab-products"<?php echo 'products' === $active_catalog_tab ? '' : ' hidden'; ?> class="uonix-tab-panel<?php echo 'products' === $active_catalog_tab ? ' active' : ''; ?>">
+				<div class="uonix-panel-header">
+					<h2>Catálogo de Dispositivos e Fixações (<?php echo esc_html($total_products); ?> Produtos)</h2>
+					<p>Monitore os títulos comerciais, palavras-chave de foco e consulte o desempenho de busca no Google
+						para cada produto.</p>
+				</div>
+				<div class="uonix-table-responsive">
+					<table class="uonix-table">
+						<thead>
+							<tr>
+								<th>Produto</th>
+								<th>Categoria</th>
+								<th>Palavra-Chave Principal</th>
+								<th>Título SEO (Google)</th>
+								<th>Visualizações — <?php echo esc_html( $metrics_period_days ); ?> dias</th>
+								<th style="text-align:right;">Ações Rápidas</th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ($products_query as $product_post):
+								$pid = $product_post->ID;
+								$permalink = get_permalink($pid);
+								$page_view_value = uonix_analytics_dashboard_page_view_value( $metrics_snapshot, $permalink );
+								$edit_link = get_edit_post_link($pid);
+								$kw = get_post_meta($pid, 'rank_math_focus_keyword', true);
+								$seo_title = get_post_meta($pid, 'rank_math_title', true);
+								$terms = get_the_terms($pid, 'product_cat');
+								$cat_name = (!empty($terms) && !is_wp_error($terms)) ? $terms[0]->name : '—';
+								$gsc_inspect = 'https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain:uonix.com.br&page=*' . rawurlencode($product_post->post_name);
+								?>
+								<tr>
+									<td class="uonix-title-col">
+										<strong><?php echo esc_html($product_post->post_title); ?></strong>
+										<span
+											class="uonix-slug-badge">/produtos/<?php echo esc_html($product_post->post_name); ?>/</span>
+									</td>
+									<td><span class="uonix-tag"><?php echo esc_html($cat_name); ?></span></td>
+									<td><code><?php echo esc_html($kw ? $kw : '—'); ?></code></td>
+									<td class="uonix-desc-col">
+										<?php echo esc_html($seo_title ? $seo_title : $product_post->post_title); ?>
+									</td>
+									<td class="uonix-page-views-col"><?php echo esc_html( null === $page_view_value ? '—' : number_format_i18n( $page_view_value ) ); ?></td>
+									<td style="text-align:right; white-space:nowrap;">
+										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
+											title="Ver no site">
+											<span class="dashicons dashicons-visibility"></span> Ver
+										</a>
+										<a href="<?php echo esc_url($edit_link); ?>" class="button button-small"
+											title="Editar produto">
+											<span class="dashicons dashicons-edit"></span> Editar
+										</a>
+										<a href="<?php echo esc_url($gsc_inspect); ?>" target="_blank" rel="noopener"
+											class="button button-small button-secondary"
+											title="Ver buscas deste produto no Search Console">
+											<span class="dashicons dashicons-search"></span> Google
+										</a>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<!-- ABA 2: BLOG -->
+			<div id="tab-blog" role="tabpanel" aria-labelledby="uonix-catalog-tab-blog"<?php echo 'blog' === $active_catalog_tab ? '' : ' hidden'; ?> class="uonix-tab-panel<?php echo 'blog' === $active_catalog_tab ? ' active' : ''; ?>">
+				<div class="uonix-panel-header">
+					<h2>Artigos Técnicos e Guias Normativos (<?php echo esc_html($total_posts); ?> Artigos)</h2>
+					<p>Artigos que atraem tráfego orgânico qualificado para palavras-chave de engenharia e trabalho em
+						altura.</p>
+				</div>
+				<div class="uonix-table-responsive">
+					<table class="uonix-table">
+						<thead>
+							<tr>
+								<th>Artigo</th>
+								<th>Data</th>
+								<th>Palavra-Chave Principal</th>
+								<th>Título SEO</th>
+								<th>Visualizações — <?php echo esc_html( $metrics_period_days ); ?> dias</th>
+								<th style="text-align:right;">Ações Rápidas</th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ($posts_query as $blog_post):
+								$bid = $blog_post->ID;
+								$permalink = get_permalink($bid);
+								$page_view_value = uonix_analytics_dashboard_page_view_value( $metrics_snapshot, $permalink );
+								$edit_link = get_edit_post_link($bid);
+								$kw = get_post_meta($bid, 'rank_math_focus_keyword', true);
+								$seo_title = get_post_meta($bid, 'rank_math_title', true);
+								$date = get_the_date('d/m/Y', $bid);
+								$gsc_inspect = 'https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain:uonix.com.br&page=*' . rawurlencode($blog_post->post_name);
+								?>
+								<tr>
+									<td class="uonix-title-col">
+										<strong><?php echo esc_html($blog_post->post_title); ?></strong>
+										<span class="uonix-slug-badge">/<?php echo esc_html($blog_post->post_name); ?>/</span>
+									</td>
+									<td><?php echo esc_html($date); ?></td>
+									<td><code><?php echo esc_html($kw ? $kw : '—'); ?></code></td>
+									<td class="uonix-desc-col">
+										<?php echo esc_html($seo_title ? $seo_title : $blog_post->post_title); ?>
+									</td>
+									<td class="uonix-page-views-col"><?php echo esc_html( null === $page_view_value ? '—' : number_format_i18n( $page_view_value ) ); ?></td>
+									<td style="text-align:right; white-space:nowrap;">
+										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
+											title="Ver no site">
+											<span class="dashicons dashicons-visibility"></span> Ver
+										</a>
+										<a href="<?php echo esc_url($edit_link); ?>" class="button button-small"
+											title="Editar artigo">
+											<span class="dashicons dashicons-edit"></span> Editar
+										</a>
+										<a href="<?php echo esc_url($gsc_inspect); ?>" target="_blank" rel="noopener"
+											class="button button-small button-secondary"
+											title="Ver buscas deste post no Search Console">
+											<span class="dashicons dashicons-search"></span> Google
+										</a>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<!-- ABA 3: SERVIÇOS -->
+			<div id="tab-services" role="tabpanel" aria-labelledby="uonix-catalog-tab-services"<?php echo 'services' === $active_catalog_tab ? '' : ' hidden'; ?> class="uonix-tab-panel<?php echo 'services' === $active_catalog_tab ? ' active' : ''; ?>">
+				<div class="uonix-panel-header">
+					<h2>Serviços Técnicos e Consultoria de Engenharia (<?php echo esc_html($total_services); ?> Serviços)
+					</h2>
+					<p>Serviços com emissão de ART, ensaios de arrancamento estático e projetos de proteção contra quedas.
+					</p>
+				</div>
+				<div class="uonix-table-responsive">
+					<table class="uonix-table">
+						<thead>
+							<tr>
+								<th>Serviço</th>
+								<th>Palavra-Chave Principal</th>
+								<th>Dados Estruturados</th>
+								<th>Título SEO</th>
+								<th>Visualizações — <?php echo esc_html( $metrics_period_days ); ?> dias</th>
+								<th style="text-align:right;">Ações Rápidas</th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ($services_query as $service_post):
+								$sid = $service_post->ID;
+								$permalink = get_permalink($sid);
+								$page_view_value = uonix_analytics_dashboard_page_view_value( $metrics_snapshot, $permalink );
+								$edit_link = get_edit_post_link($sid);
+								$kw = get_post_meta($sid, 'rank_math_focus_keyword', true);
+								$seo_title = get_post_meta($sid, 'rank_math_title', true);
+								$gsc_inspect = 'https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain:uonix.com.br&page=*' . rawurlencode($service_post->post_name);
+								?>
+								<tr>
+									<td class="uonix-title-col">
+										<strong><?php echo esc_html($service_post->post_title); ?></strong>
+										<span
+											class="uonix-slug-badge">/servicos/<?php echo esc_html($service_post->post_name); ?>/</span>
+									</td>
+									<td><code><?php echo esc_html($kw ? $kw : '—'); ?></code></td>
+									<td><span class="uonix-tag uonix-tag-schema">Verificação externa</span></td>
+									<td class="uonix-desc-col">
+										<?php echo esc_html($seo_title ? $seo_title : $service_post->post_title); ?>
+									</td>
+									<td class="uonix-page-views-col"><?php echo esc_html( null === $page_view_value ? '—' : number_format_i18n( $page_view_value ) ); ?></td>
+									<td style="text-align:right; white-space:nowrap;">
+										<a href="<?php echo esc_url($permalink); ?>" target="_blank" class="button button-small"
+											title="Ver no site">
+											<span class="dashicons dashicons-visibility"></span> Ver
+										</a>
+										<a href="<?php echo esc_url($edit_link); ?>" class="button button-small"
+											title="Editar serviço">
+											<span class="dashicons dashicons-edit"></span> Editar
+										</a>
+										<a href="<?php echo esc_url($gsc_inspect); ?>" target="_blank" rel="noopener"
+											class="button button-small button-secondary"
+											title="Ver buscas deste serviço no Search Console">
+											<span class="dashicons dashicons-search"></span> Google
+										</a>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+		</div>
+			</div>
+		</section>
+
+		<!-- Destinos de marketing: fatos técnicos locais, sem métricas externas não consultadas. -->
+		<section id="uonix-panel-destinations" class="uonix-marketing-section" role="tabpanel" aria-labelledby="uonix-tab-destinations"<?php echo 'destinations' === $active_dashboard_tab ? '' : ' hidden'; ?>>
+			<?php uonix_analytics_render_destinations( uonix_analytics_destinations_context() ); ?>
+		</section>
+
+		<?php
+		// Painéis da Central de Inteligência. O markup vive em
+		// 56-admin-intelligence-dashboard.php para não crescer este arquivo.
+		if ( function_exists( 'uonix_intelligence_render_panel' ) ) {
+			uonix_intelligence_render_panel( $active_dashboard_tab );
+		}
+		if ( function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
+			uonix_intelligence_render_anomalies_panel( $active_dashboard_tab );
+		}
+		if ( function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
+			uonix_intelligence_render_settings_panel( $active_dashboard_tab );
+		}
+		?>
+	</div>
+
+	<!-- Estilos CSS do Dashboard -->
+	<?php uonix_analytics_print_dashboard_css(); ?>
 
 	<!-- Script JS para navegação acessível das abas -->
 	<script>

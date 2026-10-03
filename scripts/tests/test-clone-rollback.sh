@@ -15,10 +15,8 @@ fail() {
 
 export PRODUCTION_URL='https://uonix.com.br'
 export QA_URL='https://uonix.ksio.dev'
-export DEVELOPMENT_URL='https://test.uonix.ksio.dev'
 export LOCAWEB_ACCOUNT_ROOT='/synthetic/locaweb'
 export HOSTGATOR_QA_ROOT='/synthetic/qa'
-export HOSTGATOR_DEV_ROOT='/synthetic/dev'
 export UONIX_CLONE_LIBRARY_ONLY=1
 # shellcheck source=../clone-environment.sh
 source "$CLONE_SCRIPT"
@@ -350,8 +348,8 @@ post_import_log="$post_import_root/steps.log"
 mkdir -p "$post_import_root/runtime"
 : > "$post_import_log"
 
-SOURCE='qa'
-TARGET='dev'
+SOURCE='prod'
+TARGET='qa'
 CLONE_MODE='execute'
 REPLACE_USERS='0'
 INCLUDE_GIT_FILES='0'
@@ -418,7 +416,7 @@ if SIGNAL_LOG="$signal_log" SIGNAL_BACKUP="$signal_backup" CLONE_SCRIPT="$CLONE_
     # test-clone-database-transport.sh.
     # shellcheck disable=SC2329
     assert_distinct_databases() { :; }
-    TARGET="dev"
+    TARGET="qa"
     TARGET_BACKUP_DIR="$SIGNAL_BACKUP"
     MUTATION_STARTED="1"
     ROLLBACK_RUNNING="0"

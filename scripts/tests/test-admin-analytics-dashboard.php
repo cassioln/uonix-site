@@ -3,8 +3,9 @@
  * Teste do Módulo Uônix Insights (Painel Integrado de Analytics & Performance).
  *
  * Valida:
- *  - Registro do menu admin 'Uônix Insights' na action 'admin_menu';
- *  - Slug correto 'uonix-analytics' e capability 'edit_posts';
+ *  - Que o 52 NÃO registra mais o menu: a estrutura é decidida em
+ *    49-admin-ksio-governanca.php, testada em test-admin-ksio-governanca.php;
+ *  - Bloqueio quando a governança do ksio.dev oculta o Insights para o usuário;
  *  - Bloqueio de acesso para usuários sem permissão (current_user_can fail);
  *  - Renderização dos cards de KPIs, tabelas de produtos e atalhos do Google.
  */
@@ -312,6 +313,15 @@ function uonix_dashboard_element_end_offset( $html, $opening_offset, $tag_name )
 }
 
 // Carrega os módulos na mesma ordem do loader administrativo.
+// Governança do ksio.dev (49), substituída por um interruptor: o 49 tem teste próprio,
+// e aqui importa que o 52 e o handler do 53 CONSULTEM a regra, com a chave certa.
+$GLOBALS['uox_ksio_pode']   = true;
+$GLOBALS['uox_ksio_chaves'] = array();
+function uonix_ksio_can_access_tool( $chave ) {
+	$GLOBALS['uox_ksio_chaves'][] = $chave;
+	return (bool) $GLOBALS['uox_ksio_pode'];
+}
+
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/52-admin-analytics-dashboard.php';
 
@@ -358,26 +368,15 @@ if ( function_exists( 'uonix_analytics_dashboard_metric_comparison' ) ) {
 	uonix_dashboard_assert( array( 'label' => 'Comparação indisponível', 'class' => 'uonix-trend-empty' ) === $comparison_invalid, 'Variação inválida falha fechado' );
 }
 
-// Asserção 1: Registra action admin_menu
-uonix_dashboard_assert( ! empty( $GLOBALS['uonix_test_menu_actions'] ), 'Não registrou nenhuma action' );
-$admin_menu_registered = false;
+// Asserção 1: o 52 e o 53 não registram menu. Quem registra é o 49, e um segundo
+// registro aqui faria o Insights reaparecer como item próprio para quem não deve vê-lo.
 foreach ( $GLOBALS['uonix_test_menu_actions'] as $act ) {
 	if ( 'admin_menu' === $act['hook'] ) {
-		$admin_menu_registered = true;
 		call_user_func( $act['callback'] );
 	}
 }
-uonix_dashboard_assert( $admin_menu_registered, 'Action admin_menu não registrada' );
-echo "ok   Action admin_menu registrada corretamente\n";
-
-// Asserção 2: Verifica parâmetros do menu
-uonix_dashboard_assert( ! empty( $GLOBALS['uonix_test_menus'] ), 'Menu não foi adicionado via add_menu_page' );
-$menu = $GLOBALS['uonix_test_menus'][0];
-uonix_dashboard_assert( 'Uônix Insights' === $menu['menu_title'], 'Título do menu incorreto' );
-uonix_dashboard_assert( 'edit_posts' === $menu['capability'], 'Capability do menu incorreta' );
-uonix_dashboard_assert( 'uonix-analytics' === $menu['menu_slug'], 'Slug do menu incorreto' );
-uonix_dashboard_assert( 'dashicons-chart-area' === $menu['icon_url'], 'Ícone do menu incorreto' );
-echo "ok   Menu Uônix Insights registrado com slug, permissões e ícone corretos\n";
+uonix_dashboard_assert( array() === $GLOBALS['uonix_test_menus'], 'O 52 não pode registrar menu próprio: a estrutura é do 49' );
+echo "ok   O menu do Insights não é registrado pelo 52\n";
 
 // Asserção 3: Renderização do dashboard com permissão
 ob_start();
@@ -469,6 +468,8 @@ uonix_dashboard_assert( function_exists( 'uonix_analytics_metrics_requested_dash
 uonix_dashboard_assert( strpos( $output, 'role="tablist" aria-label="Seções do painel"' ) !== false, 'Abas principais expõem tablist com rótulo acessível' );
 uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-metrics")(?=[^>]*role="tab")(?=[^>]*aria-selected="true")(?=[^>]*aria-controls="uonix-panel-metrics")(?=[^>]*href="[^"]*tab=metrics[^"]*")[^>]*>#', $output ), 'Métricas é a aba principal padrão, selecionada e navegável sem JavaScript' );
 uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-destinations")(?=[^>]*role="tab")(?=[^>]*aria-selected="false")(?=[^>]*aria-controls="uonix-panel-destinations")(?=[^>]*href="[^"]*tab=destinations[^"]*")[^>]*>#', $output ), 'Destinos é a segunda aba principal disponível e navegável sem JavaScript' );
+uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-intelligence")(?=[^>]*role="tab")(?=[^>]*aria-selected="false")(?=[^>]*aria-controls="uonix-panel-intelligence")(?=[^>]*href="[^"]*tab=intelligence[^"]*")[^>]*>#', $output ), 'Oportunidades SEO é aba principal navegável sem JavaScript' );
+uonix_dashboard_assert( 1 === preg_match( '#<a(?=[^>]*id="uonix-tab-settings")(?=[^>]*role="tab")(?=[^>]*aria-selected="false")(?=[^>]*aria-controls="uonix-panel-settings")(?=[^>]*href="[^"]*tab=settings[^"]*")[^>]*>#', $output ), 'Configurações é aba principal navegável sem JavaScript' );
 uonix_dashboard_assert( strpos( $output, 'id="uonix-panel-metrics" role="tabpanel" aria-labelledby="uonix-tab-metrics"' ) !== false, 'Painel de métricas é relacionado semanticamente à sua aba' );
 uonix_dashboard_assert( 1 === preg_match( '#<section(?=[^>]*id="uonix-panel-destinations")(?=[^>]*role="tabpanel")(?=[^>]*aria-labelledby="uonix-tab-destinations")[^>]*\bhidden\b[^>]*>#', $output ), 'Painel de destinos começa oculto fora da aba ativa' );
 uonix_dashboard_assert( strpos( $output, 'role="tablist" aria-label="Seções de métricas"' ) !== false, 'Métricas contém subabas acessíveis' );
@@ -486,6 +487,8 @@ uonix_dashboard_assert(
 // Asserções da Issue #209: remoção de emojis e hierarquia do painel
 uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-metrics"[^>]*>\s*Métricas\s*</a>#u', $output ), 'Aba principal Métricas não possui emoji' );
 uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-destinations"[^>]*>\s*Destinos de marketing configurados\s*</a>#u', $output ), 'Aba principal Destinos não possui emoji' );
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-intelligence"[^>]*>\s*Oportunidades SEO\s*</a>#u', $output ), 'Aba Oportunidades SEO não possui emoji' );
+uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-settings"[^>]*>\s*Configurações\s*</a>#u', $output ), 'Aba Configurações não possui emoji' );
 uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-aggregate"[^>]*>\s*Métricas agregadas\s*</a>#u', $output ), 'Subaba Métricas agregadas não possui emoji' );
 uonix_dashboard_assert( 1 === preg_match( '#<a[^>]*id="uonix-tab-catalog"[^>]*>\s*Catálogo &amp; conteúdo\s*</a>#u', $output ) || 1 === preg_match( '#<a[^>]*id="uonix-tab-catalog"[^>]*>\s*Catálogo & conteúdo\s*</a>#u', $output ), 'Subaba Catálogo & conteúdo não possui emoji' );
 
@@ -644,6 +647,103 @@ try {
 }
 uonix_dashboard_assert( $blocked, 'Usuário sem permissão edit_posts deveria ser bloqueado' );
 echo "ok   Acesso sem permissão é bloqueado com segurança via wp_die\n";
+
+// Asserção 6: com edit_posts, mas com o Insights oculto pela governança do ksio.dev,
+// a URL direta também é recusada.
+$GLOBALS['uonix_test_can_edit'] = true;
+$GLOBALS['uox_ksio_pode']       = false;
+$GLOBALS['uox_ksio_chaves']     = array();
+$blocked = false;
+ob_start();
+try {
+	uonix_render_analytics_dashboard_page();
+} catch ( Throwable $e ) {
+	$blocked = ( $e instanceof RuntimeException && strpos( $e->getMessage(), 'WP_DIE' ) !== false );
+}
+ob_end_clean();
+uonix_dashboard_assert( $blocked, 'Insights oculto pela governança deve recusar a página mesmo com edit_posts' );
+uonix_dashboard_assert( array( 'analytics' ) === $GLOBALS['uox_ksio_chaves'], 'A página consulta a regra com a chave analytics' );
+
+// O refresh manual (admin_post do 53) também: esconder o menu não bloqueia um POST.
+$GLOBALS['uonix_test_can_manage'] = true;
+$GLOBALS['uox_ksio_chaves']       = array();
+$blocked = false;
+try {
+	uonix_analytics_metrics_manual_refresh();
+} catch ( Throwable $e ) {
+	// Sem a guarda o handler segue adiante e quebra noutro ponto; só `wp_die` conta.
+	$blocked = ( $e instanceof RuntimeException && strpos( $e->getMessage(), 'WP_DIE' ) !== false );
+}
+uonix_dashboard_assert( $blocked && array( 'analytics' ) === $GLOBALS['uox_ksio_chaves'], 'Refresh manual com o Insights oculto deve ser recusado, consultando a chave analytics' );
+$GLOBALS['uox_ksio_pode'] = true;
+echo "ok   Insights oculto recusa a página e o refresh manual\n";
+
+// O auto-refresh de métricas vive dentro do painel de métricas, que é renderizado
+// em toda aba e apenas escondido. Sem guarda de aba, abrir outra aba dispara um
+// sync de 8 chamadas de API e um redirect que descarta os avisos daquela aba.
+$GLOBALS['uonix_test_can_edit'] = true;
+$GLOBALS['uonix_test_can_manage'] = true;
+// Snapshot vencido é a precondição do auto-refresh; com cache fresco ele nunca
+// dispararia e o teste passaria por motivo errado.
+$GLOBALS['uonix_test_snapshot_fresh'] = false;
+
+$_GET = array();
+ob_start();
+uonix_render_analytics_dashboard_page();
+$auto_metrics = (string) ob_get_clean();
+uonix_dashboard_assert( false !== strpos( $auto_metrics, 'data-uonix-auto-refresh="1"' ), 'Snapshot vencido na aba de métricas mantém o auto-refresh' );
+
+foreach ( array( 'destinations', 'intelligence', 'settings' ) as $outra_aba ) {
+	$_GET = array( 'tab' => $outra_aba );
+	ob_start();
+	uonix_render_analytics_dashboard_page();
+	$auto_outra = (string) ob_get_clean();
+	uonix_dashboard_assert( false === strpos( $auto_outra, 'data-uonix-auto-refresh="1"' ), 'Auto-refresh de métricas não dispara na aba ' . $outra_aba );
+}
+// O marcador de sincronização já tentada segura o auto-refresh. Em array
+// (`?uonix_metrics_refresh[]=1`) não vale como tentativa e não emite Warning (#321).
+$_GET = array( 'uonix_metrics_refresh' => '1' );
+ob_start();
+uonix_render_analytics_dashboard_page();
+uonix_dashboard_assert( false === strpos( (string) ob_get_clean(), 'data-uonix-auto-refresh="1"' ), 'Sincronização já tentada não dispara o auto-refresh de novo' );
+$uonix_erros_php = array();
+set_error_handler(
+	static function ( $errno, $errstr ) use ( &$uonix_erros_php ) {
+		$uonix_erros_php[] = $errstr;
+		return true;
+	}
+);
+$_GET = array( 'uonix_metrics_refresh' => array( '1' ) );
+ob_start();
+uonix_render_analytics_dashboard_page();
+$auto_array = (string) ob_get_clean();
+restore_error_handler();
+uonix_dashboard_assert( array() === $uonix_erros_php, 'Marcador de sincronização em array não emite aviso do PHP: ' . implode( ' | ', $uonix_erros_php ) );
+uonix_dashboard_assert( false !== strpos( $auto_array, 'data-uonix-auto-refresh="1"' ), 'Marcador de sincronização em array não conta como tentativa' );
+$_GET = array();
+echo "ok   Auto-refresh de métricas restrito à própria aba\n";
+
+// Tela de destinos compartilhada com a Visão Geral do menu Marketing (68).
+$destinos = uonix_analytics_destinations_context();
+ob_start();
+uonix_analytics_render_destinations( $destinos );
+$com_adopt = (string) ob_get_clean();
+ob_start();
+uonix_analytics_render_destinations( $destinos, false );
+$sem_adopt = (string) ob_get_clean();
+uonix_dashboard_assert( 7 === substr_count( $com_adopt, 'class="uonix-marketing-card"' ) && false !== strpos( $com_adopt, 'LGPD AdOpt:' ) && false !== strpos( $com_adopt, 'uonix-sc-icon-adopt' ), 'Destinos do Insights mantêm os 7 cards e o status do AdOpt' );
+uonix_dashboard_assert( 6 === substr_count( $sem_adopt, 'class="uonix-marketing-card"' ), 'Destinos sem AdOpt mostram 6 cards' );
+uonix_dashboard_assert( false === stripos( $sem_adopt, 'adopt' ), 'Destinos sem AdOpt não citam o AdOpt' );
+foreach ( array( 'Google Tag Manager', 'Google Analytics 4', 'Google Ads via GTM', 'Meta Pixel', 'Google Search Console', 'Google Looker Studio' ) as $card ) {
+	uonix_dashboard_assert( false !== strpos( $sem_adopt, '<h3>' . $card . '</h3>' ), "Destinos sem AdOpt mantêm o card {$card}" );
+}
+uonix_dashboard_assert( 6 === substr_count( $com_adopt, 'class="uonix-status-item"' ), 'Destinos do Insights mostram 6 status' );
+uonix_dashboard_assert( 5 === substr_count( $sem_adopt, 'class="uonix-status-item"' ), 'Destinos sem AdOpt mostram 5 status (GTM, GA4, Ads, Meta, Search Console)' );
+ob_start();
+uonix_analytics_print_dashboard_css();
+$css = (string) ob_get_clean();
+uonix_dashboard_assert( false !== strpos( $css, '.uonix-marketing-card {' ) && false !== strpos( $css, '.uonix-status-strip {' ), 'CSS compartilhado traz as regras dos destinos' );
+echo "ok   Tela de destinos compartilhada com e sem AdOpt\n";
 
 if ( 0 !== $failures ) {
 	exit( 1 );

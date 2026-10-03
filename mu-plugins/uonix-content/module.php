@@ -23,6 +23,7 @@ uonix_mu_require_files(
 		'47-seo-organization-schema.php',
 		'48-seo-master-schema-graph.php',
 		'49-seo-product-schema-enhancement.php',
+		'50-seo-regras-reescrita-rank-math.php',
 	),
 	'uonix-content'
 );

@@ -131,6 +131,98 @@ if ( ! function_exists( 'uonix_analytics_metrics_sanitize_query' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_analytics_metrics_query_text_retention' ) ) {
+	/**
+	 * Faixa em que o TEXTO da consulta é persistido no universo de mineração.
+	 *
+	 * Minimização de dados (issue #253). Medido em produção em 2026-09-22: o
+	 * universo real é de 111 consultas em 30 dias, e a regra de oportunidade
+	 * devolve 5. As outras ~106 tinham o texto persistido em `wp_options`, no
+	 * backup e no clone sem que ninguém o lesse — e é na cauda longa que a
+	 * consulta identificável mora. Só o texto sai; a MÉTRICA de toda linha fica,
+	 * porque o contrato exige recalibrar o piso contra a distribuição medida
+	 * (docs/uonix-insights-inteligencia.md), e distribuição é impressão e
+	 * posição, não texto.
+	 *
+	 * Esta faixa é DELIBERADAMENTE mais permissiva que
+	 * `uonix_intelligence_seo_rules()` no arquivo 55, e a margem é o desenho:
+	 *
+	 * - 53 carrega ANTES de 55 e não pode chamá-lo. Inverter a dependência para
+	 *   ler os limiares da regra seria pior que o problema que resolve.
+	 * - Por isso a relação entre as duas faixas é verificada por teste, não
+	 *   presumida: `scripts/tests/test-query-text-retention-superset.php` reprova
+	 *   o build se esta faixa deixar de CONTER a faixa de seleção de 55. Sem esse
+	 *   teste, alargar a regra de 55 faria a oportunidade aparecer sem texto — ou
+	 *   desaparecer em silêncio, que é pior.
+	 * - A margem existe para que um ajuste pequeno em 55 não exija ajuste aqui.
+	 *   Um ajuste grande exige, e o teste diz exatamente isso.
+	 *
+	 * `min_impressions` é piso INCLUSIVO aqui, enquanto o piso de 55 é exclusivo
+	 * (`$impressions <= $rules['min_impressions']` descarta). A diferença anda no
+	 * sentido seguro: retenção mais frouxa que seleção.
+	 */
+	function uonix_analytics_metrics_query_text_retention() {
+		return array(
+			'min_position'    => 3.0,
+			'max_position'    => 15.0,
+			'min_impressions' => 3,
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_query_text_is_retained' ) ) {
+	/**
+	 * Decide se o texto de uma consulta pode ser persistido no universo.
+	 *
+	 * Falha fechada: métrica não finita devolve `false` (texto sai). Uma linha
+	 * cuja posição ou impressão não é número nunca poderia ser selecionada pela
+	 * regra de 55 — ela faz cast para float, e `(float) 'x'` é 0.0, fora da faixa
+	 * de posição —, então descartar o texto aqui não perde oportunidade nenhuma.
+	 */
+	function uonix_analytics_metrics_query_text_is_retained( $position, $impressions ) {
+		$retention   = uonix_analytics_metrics_query_text_retention();
+		$position    = uonix_analytics_metrics_finite_number( $position );
+		$impressions = uonix_analytics_metrics_finite_number( $impressions );
+		if ( null === $position || null === $impressions ) {
+			return false;
+		}
+		return $position >= $retention['min_position']
+			&& $position <= $retention['max_position']
+			&& $impressions >= $retention['min_impressions'];
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_minimize_query_row' ) ) {
+	/**
+	 * Remove o texto de uma linha do universo quando ela não pode qualificar.
+	 *
+	 * A chave `query` é OMITIDA, não gravada vazia. Os dois consumidores do
+	 * universo foram verificados antes da escolha:
+	 *
+	 * - `uonix_intelligence_seo_opportunities()` (55) já abre com
+	 *   `isset( $row['query'], … )` e segue para a linha seguinte quando falha —
+	 *   é o mesmo guard que trata linha de snapshot v2, então a ausência entra
+	 *   por um caminho que já existe e já tem teste;
+	 * - `scripts/maintenance/smoke-intelligence-seo.php` apenas conta as linhas.
+	 *
+	 * Omitir também é o que reduz bytes no `wp_options`, que é o objetivo, e é o
+	 * que faz `array_column( …, 'query' )` pular a linha em vez de devolver um
+	 * termo vazio. Gravar string vazia manteria `isset()` verdadeiro: um consumidor
+	 * futuro que checasse só `isset` renderizaria linha fantasma em silêncio, ao
+	 * passo que a chave ausente falha alto.
+	 */
+	function uonix_analytics_metrics_minimize_query_row( $row ) {
+		if ( ! is_array( $row ) ) {
+			return $row;
+		}
+		if ( uonix_analytics_metrics_query_text_is_retained( $row['position'] ?? null, $row['impressions'] ?? null ) ) {
+			return $row;
+		}
+		unset( $row['query'] );
+		return $row;
+	}
+}
+
 if ( ! function_exists( 'uonix_analytics_metrics_number' ) ) {
 	function uonix_analytics_metrics_number( $value ) {
 		return is_numeric( $value ) ? (float) $value : null;
@@ -191,6 +283,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 		$current  = isset( $data['summary_current'] ) && is_array( $data['summary_current'] ) ? $data['summary_current'] : array();
 		$previous = isset( $data['summary_previous'] ) && is_array( $data['summary_previous'] ) ? $data['summary_previous'] : array();
 		$queries  = array();
+		$queries_extended = array();
 		$pages    = array();
 
 		foreach ( isset( $data['queries'] ) && is_array( $data['queries'] ) ? $data['queries'] : array() as $row ) {
@@ -202,8 +295,17 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 			if ( '' === $query || null === $clicks || null === $impressions || null === $ctr || null === $position ) {
 				continue;
 			}
-			$queries[] = array( 'query' => $query, 'clicks' => $clicks, 'impressions' => $impressions, 'ctr' => $ctr, 'position' => $position );
-			if ( 10 === count( $queries ) ) break;
+			$entry = array( 'query' => $query, 'clicks' => $clicks, 'impressions' => $impressions, 'ctr' => $ctr, 'position' => $position );
+			// `queries` segue sendo a lista curta de exibição, para não alterar o que o
+			// painel já renderiza hoje. `queries_extended` é o universo de mineração, e
+			// nele o texto é minimizado: toda linha mantém a MÉTRICA, e só as linhas que
+			// podem qualificar como oportunidade mantêm o TEXTO. Ver
+			// uonix_analytics_metrics_query_text_retention().
+			if ( count( $queries ) < 10 ) {
+				$queries[] = $entry;
+			}
+			$queries_extended[] = uonix_analytics_metrics_minimize_query_row( $entry );
+			if ( count( $queries_extended ) >= uonix_analytics_metrics_extended_query_limit() ) break;
 		}
 		foreach ( isset( $data['pages'] ) && is_array( $data['pages'] ) ? $data['pages'] : array() as $row ) {
 			$page = uonix_analytics_metrics_normalize_path( isset( $row['page'] ) ? $row['page'] : '' );
@@ -216,6 +318,28 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 			}
 			$pages[] = array( 'page' => $page, 'clicks' => $clicks, 'impressions' => $impressions, 'ctr' => $ctr, 'position' => $position );
 			if ( 10 === count( $pages ) ) break;
+		}
+
+		// Página líder de cada consulta: a de mais impressões, empate pelo caminho, para
+		// a escolha ser estável entre sincronizações. Só para consulta cujo TEXTO o
+		// universo já retém (#253): a lista não pode reter texto que `queries_extended`
+		// descartou. Fora do domínio e PII caem pelos mesmos filtros das outras listas.
+		$query_pages = null;
+		if ( isset( $data['query_pages'] ) && is_array( $data['query_pages'] ) ) {
+			$retidas = array_flip( array_column( $queries_extended, 'query' ) );
+			$melhor  = array();
+			foreach ( $data['query_pages'] as $row ) {
+				$query       = uonix_analytics_metrics_sanitize_query( isset( $row['query'] ) ? $row['query'] : '' );
+				$page        = uonix_analytics_metrics_normalize_path( isset( $row['page'] ) ? $row['page'] : '' );
+				$impressions = uonix_analytics_metrics_number( $row['impressions'] ?? null );
+				if ( '' === $query || '' === $page || null === $impressions || ! isset( $retidas[ $query ] ) ) {
+					continue;
+				}
+				if ( ! isset( $melhor[ $query ] ) || $impressions > $melhor[ $query ]['impressions'] || ( $impressions === $melhor[ $query ]['impressions'] && strcmp( $page, $melhor[ $query ]['page'] ) < 0 ) ) {
+					$melhor[ $query ] = array( 'page' => $page, 'impressions' => $impressions );
+				}
+			}
+			$query_pages = array_map( static function ( $m ) { return $m['page']; }, $melhor );
 		}
 
 		foreach ( array( 'clicks', 'impressions', 'ctr', 'position' ) as $metric ) {
@@ -231,13 +355,31 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 		);
 		foreach ( $summary as $comparison ) if ( is_wp_error( $comparison ) ) return $comparison;
 
-		return array( 'summary' => $summary, 'queries' => $queries, 'pages' => $pages );
+		$saida = array( 'summary' => $summary, 'queries' => $queries, 'queries_extended' => $queries_extended, 'pages' => $pages );
+		if ( null !== $query_pages ) {
+			$saida['query_pages'] = $query_pages;
+		}
+		return $saida;
 	}
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_allowed_period_days' ) ) {
 	function uonix_analytics_metrics_allowed_period_days() {
 		return array( 7, 30, 90, 365 );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_extended_query_limit' ) ) {
+	/**
+	 * Universo de consultas do Search Console persistido para mineração.
+	 *
+	 * O painel exibe apenas as 10 primeiras, mas detectar oportunidades em posição
+	 * 4 a 12 exige um universo muito maior — num universo de 10 a regra não tem o
+	 * que peneirar. Cada linha passa pela mesma sanitização de PII aplicada hoje,
+	 * então ampliar o volume não afrouxa nenhum filtro.
+	 */
+	function uonix_analytics_metrics_extended_query_limit() {
+		return 1000;
 	}
 }
 
@@ -271,18 +413,109 @@ if ( ! function_exists( 'uonix_analytics_metrics_periods' ) ) {
 
 if ( ! function_exists( 'uonix_analytics_metrics_snapshot_option' ) ) {
 	function uonix_analytics_metrics_snapshot_option( $days = 30 ) {
-		return 'uonix_analytics_metrics_snapshot_v2_' . uonix_analytics_metrics_sanitize_period_days( $days );
+		return 'uonix_analytics_metrics_snapshot_v3_' . uonix_analytics_metrics_sanitize_period_days( $days );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_snapshot_option_cascade' ) ) {
+	/**
+	 * Cascata de leitura do snapshot, da geração corrente para a mais antiga.
+	 *
+	 * Fonte única de verdade para DUAS coisas que antes divergiriam sem nada
+	 * reprovar: a ordem em que `uonix_analytics_metrics_get_snapshot()` procura, e
+	 * o que `uonix_analytics_metrics_collect_legacy_snapshots()` pode apagar. Um
+	 * coletor que repetisse a cascata à mão apagaria a geração errada no dia em que
+	 * a corrente virasse v4 — e o erro só apareceria como "painel sem dado".
+	 *
+	 * O v1 entra só em 30 dias porque foi a única janela que ele conheceu.
+	 *
+	 * @return array<int, string> Nomes de option, do mais novo para o mais antigo.
+	 */
+	function uonix_analytics_metrics_snapshot_option_cascade( $days = 30 ) {
+		$days = uonix_analytics_metrics_sanitize_period_days( $days );
+		$cascade = array(
+			uonix_analytics_metrics_snapshot_option( $days ),
+			'uonix_analytics_metrics_snapshot_v2_' . $days,
+		);
+		if ( 30 === $days ) {
+			$cascade[] = 'uonix_analytics_metrics_snapshot_v1';
+		}
+		return $cascade;
 	}
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_get_snapshot' ) ) {
+	/**
+	 * Lê o snapshot da versão corrente e, na ausência dela, cai para as versões
+	 * anteriores em ordem decrescente. O snapshot v2 não possui
+	 * `search_console.queries_extended`; quem consome esse campo precisa tratar a
+	 * ausência como "dado insuficiente", nunca como zero.
+	 */
 	function uonix_analytics_metrics_get_snapshot( $days = 30 ) {
 		$days = uonix_analytics_metrics_sanitize_period_days( $days );
-		$snapshot = function_exists( 'get_option' ) ? get_option( uonix_analytics_metrics_snapshot_option( $days ), false ) : false;
-		if ( ! is_array( $snapshot ) && 30 === $days && function_exists( 'get_option' ) ) {
-			$snapshot = get_option( 'uonix_analytics_metrics_snapshot_v1', false );
+		if ( ! function_exists( 'get_option' ) ) {
+			return false;
 		}
-		return is_array( $snapshot ) ? $snapshot : false;
+		foreach ( uonix_analytics_metrics_snapshot_option_cascade( $days ) as $option ) {
+			$snapshot = get_option( $option, false );
+			if ( is_array( $snapshot ) ) {
+				return $snapshot;
+			}
+		}
+		return false;
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_collect_legacy_snapshots' ) ) {
+	/**
+	 * Apaga as gerações de snapshot que a cascata desta janela não alcança mais.
+	 *
+	 * Minimização de dados (issue #253): gerações antigas foram produzidas ANTES da
+	 * minimização de texto e guardam o universo de consultas inteiro, com o texto
+	 * cru de cada linha. Elas nunca foram apagadas — medido em produção em
+	 * 2026-09-22, quatro gerações conviviam em `wp_options` — e viajam para o
+	 * backup do deploy e (não fosse `protected_options_where()`) para o clone.
+	 *
+	 * O CRITÉRIO é derivado da própria cascata, não de um padrão de nome: apaga
+	 * exatamente o que vem DEPOIS da primeira entrada presente. Como
+	 * `uonix_analytics_metrics_get_snapshot()` devolve a primeira entrada presente e
+	 * para ali, tudo que vem depois é inalcançável, e apagar é no-op de leitura por
+	 * construção — não por coincidência de estado. Consequências deliberadas:
+	 *
+	 * - o snapshot CORRENTE nunca é apagado. Não há TTL aqui, e não deve haver: o
+	 *   módulo exibe dado velho com aviso de "desatualizado", e
+	 *   `snapshot_is_fresh()` decide EXIBIÇÃO, não validade. Trocar isso por
+	 *   "indisponível" seria regressão;
+	 * - se a geração corrente desta janela ainda não existe, o legado que a
+	 *   substitui é o caminho de leitura VÁLIDO de hoje e fica onde está. Em
+	 *   produção é o caso de `…_v2_7`: enquanto ninguém sincronizar a janela de 7
+	 *   dias, é ele que o painel mostra. Apagá-lo trocaria "dado velho com aviso"
+	 *   por "sem dado" — a mesma regressão, por outra porta;
+	 * - a coleta roda por janela, no sucesso da sincronização daquela janela, que é
+	 *   justamente o evento que torna o legado dela inalcançável.
+	 *
+	 * @return array<int, string> Options efetivamente apagadas.
+	 */
+	function uonix_analytics_metrics_collect_legacy_snapshots( $days = 30 ) {
+		$days = uonix_analytics_metrics_sanitize_period_days( $days );
+		if ( ! function_exists( 'get_option' ) || ! function_exists( 'delete_option' ) ) {
+			return array();
+		}
+		$cascade = uonix_analytics_metrics_snapshot_option_cascade( $days );
+		$reached = false;
+		$collected = array();
+		foreach ( $cascade as $option ) {
+			if ( ! $reached ) {
+				$reached = is_array( get_option( $option, false ) );
+				continue;
+			}
+			if ( false === get_option( $option, false ) ) {
+				continue;
+			}
+			delete_option( $option );
+			$collected[] = $option;
+		}
+		return $collected;
 	}
 }
 
@@ -552,15 +785,17 @@ if ( ! function_exists( 'uonix_analytics_metrics_ga4_rows' ) ) {
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
-	function uonix_analytics_metrics_search_console_rows( $access_token, $site_url, $period, $dimension = null ) {
-		$body = array( 'startDate' => $period['start'], 'endDate' => $period['end'], 'rowLimit' => null === $dimension ? 1 : 10 );
-		if ( null !== $dimension ) $body['dimensions'] = array( $dimension );
+	function uonix_analytics_metrics_search_console_rows( $access_token, $site_url, $period, $dimension = null, $row_limit = 10 ) {
+		// A Search Console API aceita no máximo 25000 linhas por requisição.
+		$row_limit = is_int( $row_limit ) && $row_limit > 0 ? min( $row_limit, 25000 ) : 10;
+		$body = array( 'startDate' => $period['start'], 'endDate' => $period['end'], 'rowLimit' => null === $dimension ? 1 : $row_limit );
+		if ( null !== $dimension ) $body['dimensions'] = is_array( $dimension ) ? array_values( $dimension ) : array( $dimension );
 		return uonix_analytics_metrics_google_json( 'https://www.googleapis.com/webmasters/v3/sites/' . rawurlencode( $site_url ) . '/searchAnalytics/query', $access_token, $body );
 	}
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
-	function uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views = null ) {
+	function uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views = null, $gsc_query_pages = null ) {
 		$ga_current = uonix_analytics_metrics_decode_ga4_report( $ga_current );
 		$ga_previous = uonix_analytics_metrics_decode_ga4_report( $ga_previous );
 		$ga_pages = uonix_analytics_metrics_decode_ga4_report( $ga_pages, true );
@@ -569,13 +804,33 @@ if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
 		$gsc_queries = uonix_analytics_metrics_decode_search_console_report( $gsc_queries, true );
 		$gsc_pages = uonix_analytics_metrics_decode_search_console_report( $gsc_pages, true );
 		foreach ( array( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views ) as $report ) if ( is_wp_error( $report ) ) return $report;
+		// Página líder por consulta (sugestão por IA): dado ACESSÓRIO. Falha aqui não
+		// derruba a sincronização; o snapshot sai sem `query_pages`, e quem lê trata a
+		// ausência como "aguardando a próxima sincronização".
+		$query_pages = null;
+		if ( null !== $gsc_query_pages && ! is_wp_error( $gsc_query_pages ) ) {
+			$decoded_query_pages = uonix_analytics_metrics_decode_search_console_report( $gsc_query_pages, true );
+			if ( ! is_wp_error( $decoded_query_pages ) ) {
+				$query_pages = array();
+				foreach ( $decoded_query_pages['rows'] as $row ) {
+					if ( ! isset( $row['keys'][1] ) || ! is_string( $row['keys'][1] ) ) {
+						continue;
+					}
+					$query_pages[] = array( 'query' => $row['keys'][0], 'page' => $row['keys'][1], 'impressions' => $row['impressions'] );
+				}
+			}
+		}
 		if ( null === $ga_page_views ) $ga_page_views = array( 'rows' => array(), 'complete' => false );
 		if ( ! is_array( $ga_page_views ) || ! isset( $ga_page_views['rows'], $ga_page_views['complete'] ) || ! is_array( $ga_page_views['rows'] ) || ! is_bool( $ga_page_views['complete'] ) ) return uonix_analytics_metrics_error( 'ga4_page_views_bundle_invalid' );
 		$ga_current_rows = uonix_analytics_metrics_ga4_rows( $ga_current );
 		$ga_previous_rows = uonix_analytics_metrics_ga4_rows( $ga_previous );
+		$search_console = array( 'summary_current' => isset( $gsc_current['rows'][0] ) ? $gsc_current['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'summary_previous' => isset( $gsc_previous['rows'][0] ) ? $gsc_previous['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'queries' => array_map( function( $row ) { $row['query'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_queries['rows'] ), 'pages' => array_map( function( $row ) { $row['page'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_pages['rows'] ) );
+		if ( null !== $query_pages ) {
+			$search_console['query_pages'] = $query_pages;
+		}
 		return array(
 			'ga4' => array( 'summary_current' => isset( $ga_current_rows[0] ) ? $ga_current_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'summary_previous' => isset( $ga_previous_rows[0] ) ? $ga_previous_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'landing_pages' => array_map( function( $row ) { return array( 'path' => $row['path'], 'sessions' => $row['sessions'] ); }, uonix_analytics_metrics_ga4_rows( $ga_pages, 'path' ) ), 'page_views' => $ga_page_views['rows'], 'page_views_complete' => $ga_page_views['complete'] ),
-			'search_console' => array( 'summary_current' => isset( $gsc_current['rows'][0] ) ? $gsc_current['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'summary_previous' => isset( $gsc_previous['rows'][0] ) ? $gsc_previous['rows'][0] : uonix_analytics_metrics_empty_summary( array( 'clicks', 'impressions', 'ctr', 'position' ) ), 'queries' => array_map( function( $row ) { $row['query'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_queries['rows'] ), 'pages' => array_map( function( $row ) { $row['page'] = $row['keys'][0]; unset( $row['keys'] ); return $row; }, $gsc_pages['rows'] ) ),
+			'search_console' => $search_console,
 		);
 	}
 }
@@ -590,9 +845,10 @@ if ( ! function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
 		$ga_page_views = uonix_analytics_metrics_fetch_ga4_page_views( $config['ga4_property_id'], $token, $periods['current'] );
 		$gsc_current = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'] );
 		$gsc_previous = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['previous'] );
-		$gsc_queries = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'query' );
+		$gsc_queries = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'query', uonix_analytics_metrics_extended_query_limit() );
 		$gsc_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'page' );
-		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views );
+		$gsc_query_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], array( 'query', 'page' ), uonix_analytics_metrics_extended_query_limit() );
+		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views, $gsc_query_pages );
 	}
 }
 
@@ -637,10 +893,27 @@ if ( ! function_exists( 'uonix_analytics_metrics_sync' ) ) {
 			if ( is_wp_error( $ga4 ) ) throw new RuntimeException( $ga4->get_error_code() );
 			if ( is_wp_error( $search_console ) ) throw new RuntimeException( $search_console->get_error_code() );
 			$snapshot = array(
-				'version' => 2, 'period_days' => $days, 'status' => 'updated', 'updated_at' => gmdate( 'c' ), 'periods' => $periods,
+				'version' => 3, 'period_days' => $days, 'status' => 'updated', 'updated_at' => gmdate( 'c' ), 'periods' => $periods,
 				'ga4' => $ga4, 'search_console' => $search_console,
 			);
 			if ( function_exists( 'update_option' ) ) update_option( uonix_analytics_metrics_snapshot_option( $days ), $snapshot, false );
+			// A escrita acima acabou de tornar inalcançável o legado desta janela, e é
+			// esse fato — não a passagem do tempo — que autoriza a coleta. Rodar aqui, e
+			// não em `mark_stale()`, é deliberado: uma sincronização que falhou não é o
+			// momento de apagar dado.
+			//
+			// O `try/catch` próprio existe porque a coleta é **acessória**: o snapshot
+			// fresco já está gravado nesta altura. Sem ele, um hook de terceiro em
+			// `delete_option` que lance faria o `catch` externo rotular uma sincronização
+			// bem-sucedida como `stale` e o refresh manual reportar erro — trocando um
+			// resultado correto por uma falha inventada.
+			try {
+				uonix_analytics_metrics_collect_legacy_snapshots( $days );
+			} catch ( Throwable $falha_na_coleta ) {
+				if ( function_exists( 'error_log' ) ) {
+					error_log( 'uonix: coleta de snapshot legado falhou: ' . $falha_na_coleta->getMessage() );
+				}
+			}
 			return $snapshot;
 		} catch ( Throwable $error ) {
 			$previous = uonix_analytics_metrics_mark_stale( $days );
@@ -689,7 +962,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_requested_dashboard_state' ) ) 
 		$subtab = is_scalar( $raw_subtab ) ? sanitize_key( (string) $raw_subtab ) : 'aggregate';
 		$catalog_tab = is_scalar( $raw_catalog_tab ) ? sanitize_key( (string) $raw_catalog_tab ) : 'products';
 
-		if ( ! in_array( $tab, array( 'metrics', 'destinations' ), true ) ) {
+		if ( ! in_array( $tab, array( 'metrics', 'destinations', 'intelligence', 'anomalies', 'settings' ), true ) ) {
 			$tab = 'metrics';
 		}
 		if ( ! in_array( $subtab, array( 'aggregate', 'catalog' ), true ) ) {
@@ -735,6 +1008,11 @@ if ( ! function_exists( 'uonix_analytics_metrics_refresh_redirect_url' ) ) {
 
 if ( ! function_exists( 'uonix_analytics_metrics_manual_refresh' ) ) {
 	function uonix_analytics_metrics_manual_refresh() {
+		// O Uônix Insights oculto para este usuário bloqueia também o POST direto
+		// (governança em 49-admin-ksio-governanca.php).
+		if ( function_exists( 'uonix_ksio_can_access_tool' ) && ! uonix_ksio_can_access_tool( 'analytics' ) ) {
+			wp_die( esc_html__( 'Você não tem permissão para atualizar métricas.', 'uonix' ), '', array( 'response' => 403 ) );
+		}
 		if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'uonix_analytics_metrics_refresh' ) ) {
 			wp_die( esc_html__( 'Você não tem permissão para atualizar métricas.', 'uonix' ) );
 		}

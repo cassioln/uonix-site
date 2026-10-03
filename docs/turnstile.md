@@ -7,7 +7,6 @@ Essa proteção é do próprio site e não depende de plugin de terceiro.
 
 - `local`: Turnstile fica desativado automaticamente.
 - QA (`WP_ENVIRONMENT_TYPE=staging`, `https://uonix.ksio.dev/`): usa somente chaves de teste configuradas fora do Git.
-- DEV (`WP_ENVIRONMENT_TYPE=development`, `https://test.uonix.ksio.dev/`): usa somente chaves de teste configuradas fora do Git.
 - Produção (`WP_ENVIRONMENT_TYPE=production`, `https://uonix.com.br/`): pode usar chaves próprias configuradas fora do Git. A allowlist do Turnstile cobre `uonix.com.br`.
 
 ## Chaves
@@ -26,7 +25,7 @@ define( 'UONIX_TURNSTILE_SITE_KEY', 'sua-site-key' );
 define( 'UONIX_TURNSTILE_SECRET_KEY', 'sua-secret-key' );
 ```
 
-Não versione a secret key no repositório. Em QA, DEV e produção provisória, mantenha as chaves no painel do Fluent Forms ou em constantes privadas do `wp-config.php` de cada ambiente. O contrato de URL e política por ambiente está em [ambientes.md](ambientes.md).
+Não versione a secret key no repositório. Em QA e produção provisória, mantenha as chaves no painel do Fluent Forms ou em constantes privadas do `wp-config.php` de cada ambiente. O contrato de URL e política por ambiente está em [ambientes.md](ambientes.md).
 
 ## Formulários protegidos
 

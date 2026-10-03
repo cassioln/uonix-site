@@ -131,7 +131,7 @@ function uonix_login_reset_runtime() {
  * quando recebe um WP_User. Recebendo um WP_Error, ele CONTINUA e devolve o
  * próprio resultado — sobrescrevendo o erro anterior.
  *
- * Medido em DEV com instrumentação, contra o site real:
+ * Medido com instrumentação num ambiente remoto não produtivo, contra o site real:
  *     prio 6      code=uonix_login_turnstile   (nosso bloqueio existia)
  *     prio 10002  code=invalid_email           (foi descartado)
  *
@@ -166,7 +166,7 @@ function uonix_login_apply_authenticate_chain( $username, $password, $resolved_u
 	 *
 	 * A revisão independente do PR #48 apontou que modelar só a prioridade 20
 	 * prova fidelidade parcial: o teste não demonstrava sobrevivência até o
-	 * último filtro. Ambos foram conferidos no core e no site real de DEV, onde a
+	 * último filtro. Ambos foram conferidos no core e num site real não produtivo, onde a
 	 * instrumentação mostrou um plugin de terceiro ocupando 10001/10002.
 	 */
 	$chain[] = array(

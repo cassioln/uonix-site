@@ -11,7 +11,6 @@ fail() {
 
 export PRODUCTION_URL='https://uonix.com.br'
 export QA_URL='https://uonix.ksio.dev'
-export DEVELOPMENT_URL='https://test.uonix.ksio.dev'
 export LOCAWEB_SSH_HOST='ftp.uonix.com.br'
 export LOCAWEB_SSH_PORT='22'
 export LOCAWEB_SSH_USER='siteuonix1'
@@ -23,7 +22,6 @@ export HOSTGATOR_SSH_HOST='108.179.252.137'
 export HOSTGATOR_SSH_PORT='22'
 export HOSTGATOR_SSH_USER='uonix'
 export HOSTGATOR_QA_ROOT='/home2/uonix/public_html'
-export HOSTGATOR_DEV_ROOT='/home2/uonix/dev_uonix'
 export UONIX_CLONE_LIBRARY_ONLY=1
 
 # shellcheck source=scripts/clone-environment.sh

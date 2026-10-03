@@ -538,7 +538,7 @@ require(clone, r'environment:\s*\$\{\{\s*needs\.validate-request\.outputs\.envir
 require(clone, r'ENABLE_CLONE_PRODUCTION', 'clone em produção precisa de guard persistente separado')
 require(clone, r'CLONAR .* PARA PROD @ \$\{UONIX_REQUEST_SHA\}', 'confirmação de clone prod não está vinculada ao SHA')
 require(clone, r'ref:\s*\$\{\{\s*github\.sha\s*\}\}', 'checkout do clone precisa fixar o SHA aprovado')
-require(hostgator, r"group:\s*uonix-environment-\$\{\{\s*inputs\.environment_name\s*==\s*'qa-hostgator'\s*&&\s*'qa'\s*\|\|\s*inputs\.environment_name\s*==\s*'development-hostgator'\s*&&\s*'dev'\s*\|\|\s*'invalid'\s*\}\}", 'deploy HostGator precisa compartilhar o lock lógico qa/dev com clones')
+require(hostgator, r"group:\s*uonix-environment-\$\{\{\s*inputs\.environment_name\s*==\s*'qa-hostgator'\s*&&\s*'qa'\s*\|\|\s*'invalid'\s*\}\}", 'deploy HostGator precisa compartilhar o lock lógico de QA com clones')
 
 require(clone, r'UONIX_CLONE_RUN_ID:\s*\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}', 'clone não encaminha um owner único para o script canônico')
 require(clone, r'scripts/clone-environment\.sh\s+\\', 'workflow de clone não invoca o script canônico')
@@ -634,7 +634,7 @@ with tempfile.TemporaryDirectory(prefix='uonix-production-auth-') as tmp:
 # fora da allowlist é preservado, e o delta a remover é inventariado e copiado para o
 # backup ANTES de qualquer remoção.
 #
-# Caso concreto que motivou a decisão: DEV serve mu-plugins/uonix-local (Mailpit),
+# Caso concreto que motivou a decisão: um ambiente não produtivo serve mu-plugins/uonix-local (Mailpit),
 # carregado por uonix-core.php, mas os workflows passam include_local_module=false.
 # A remoção de órfãos apagaria esse módulo silenciosamente.
 require(

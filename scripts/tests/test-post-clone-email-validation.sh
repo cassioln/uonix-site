@@ -19,7 +19,6 @@ fail() {
 
 export PRODUCTION_URL='https://uonix.com.br'
 export QA_URL='https://uonix.ksio.dev'
-export DEVELOPMENT_URL='https://test.uonix.ksio.dev'
 export LOCAWEB_SSH_HOST='ftp.uonix.com.br'
 export LOCAWEB_SSH_PORT='22'
 export LOCAWEB_SSH_USER='siteuonix1'
@@ -31,7 +30,6 @@ export HOSTGATOR_SSH_HOST='108.179.252.137'
 export HOSTGATOR_SSH_PORT='22'
 export HOSTGATOR_SSH_USER='uonix'
 export HOSTGATOR_QA_ROOT='/home2/uonix/public_html'
-export HOSTGATOR_DEV_ROOT='/home2/uonix/dev_uonix'
 export UONIX_CLONE_LIBRARY_ONLY=1
 
 # shellcheck source=scripts/clone-environment.sh
@@ -171,7 +169,7 @@ mock_nonprod_email_policy_contract() {
   local php_code="$2"
   local required_fragment
 
-  [ "$environment" = qa ] || [ "$environment" = dev ] || \
+  [ "$environment" = qa ] || \
     fail "contrato de roteamento não produtivo consultado em ambiente inesperado: $environment"
   printf '%s\n' "$environment" >> "$EMAIL_EVAL_LOG"
 
@@ -314,19 +312,17 @@ curl() {
   printf '200'
 }
 
+# QA é o único ambiente remoto não produtivo restante na topologia, então estes
+# blocos deixaram de ser laços — antes iteravam sobre QA e o ambiente retirado.
 TEST_EMAIL_STATE='missing'
-for environment in qa dev; do
-  if validate_target_after_clone "$environment" >/dev/null 2>&1; then
-    fail "${environment} sem caixa segura foi aceito após clone"
-  fi
-done
+if validate_target_after_clone qa >/dev/null 2>&1; then
+  fail 'qa sem caixa segura foi aceito após clone'
+fi
 
 TEST_EMAIL_STATE='invalid'
-for environment in qa dev; do
-  if validate_target_after_clone "$environment" >/dev/null 2>&1; then
-    fail "${environment} com caixa segura inválida foi aceito após clone"
-  fi
-done
+if validate_target_after_clone qa >/dev/null 2>&1; then
+  fail 'qa com caixa segura inválida foi aceito após clone'
+fi
 
 TEST_EMAIL_STATE='valid'
 for TEST_NONPROD_POLICY_STATE in \
@@ -335,15 +331,13 @@ for TEST_NONPROD_POLICY_STATE in \
   ineffective \
   copy-headers \
   reply-to-removed; do
-  for environment in qa dev; do
-    : > "$EMAIL_EVAL_LOG"
-    if validate_target_after_clone "$environment" >/dev/null 2>&1; then
-      record_red_failure \
-        "${environment} aceitou política de roteamento ineficaz: ${TEST_NONPROD_POLICY_STATE}"
-    fi
-    grep -qx "$environment" "$EMAIL_EVAL_LOG" || record_red_failure \
-      "${environment} não executou prova in-processo: ${TEST_NONPROD_POLICY_STATE}"
-  done
+  : > "$EMAIL_EVAL_LOG"
+  if validate_target_after_clone qa >/dev/null 2>&1; then
+    record_red_failure \
+      "qa aceitou política de roteamento ineficaz: ${TEST_NONPROD_POLICY_STATE}"
+  fi
+  grep -qx qa "$EMAIL_EVAL_LOG" || record_red_failure \
+    "qa não executou prova in-processo: ${TEST_NONPROD_POLICY_STATE}"
 done
 
 TEST_NONPROD_POLICY_STATE='operational-failure'
@@ -409,7 +403,7 @@ TEST_MAILPIT_STATE='service-unavailable'
 TEST_EMAIL_STATE='valid'
 TEST_FLUENT_ACTIVE_CHECK_STATUS='0'
 : > "$MAILPIT_EVAL_LOG"
-for environment in prod qa dev; do
+for environment in prod qa; do
   validate_target_after_clone "$environment" >/dev/null 2>&1 || \
     record_red_failure "${environment} passou a exigir serviço Mailpit local"
 done
@@ -530,7 +524,7 @@ fi
 TEST_FLUENT_DEACTIVATE_STATUS='0'
 
 TEST_FLUENT_INSTALL_CHECK_STATUS='1'
-for environment in prod qa dev; do
+for environment in prod qa; do
   if enforce_smtp_plugin_policy "$environment" >/dev/null 2>&1; then
     fail "${environment} sem Fluent SMTP instalado foi aceito pela política SMTP"
   fi
@@ -546,13 +540,13 @@ fi
 TEST_FLUENT_ACTIVATE_STATUS='0'
 TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
 : > "$PLUGIN_MUTATION_LOG"
-for environment in prod qa dev; do
+for environment in prod qa; do
   enforce_smtp_plugin_policy "$environment" >/dev/null 2>&1 || fail "política SMTP rejeitou Fluent SMTP instalável em ${environment}"
   grep -qx "${environment}:activate:fluent-smtp" "$PLUGIN_MUTATION_LOG" || fail "Fluent SMTP não foi ativado em ${environment}"
 done
 
 TEST_EMAIL_STATE='valid'
-for environment in prod qa dev; do
+for environment in prod qa; do
   TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
   if validate_target_after_clone "$environment" >/dev/null 2>&1; then
     fail "${environment} aceitou Fluent SMTP inativo após clone"
@@ -565,14 +559,11 @@ validate_target_after_clone prod >/dev/null 2>&1 || fail 'produção saudável f
 [ ! -s "$EMAIL_EVAL_LOG" ] || fail 'produção consultou UONIX_NONPROD_EMAIL_TO'
 
 : > "$EMAIL_EVAL_LOG"
-for environment in qa dev; do
-  validate_target_after_clone "$environment" >/dev/null 2>&1 || fail "${environment} saudável foi rejeitado pela política de e-mail/SMTP"
-done
+validate_target_after_clone qa >/dev/null 2>&1 || fail 'qa saudável foi rejeitado pela política de e-mail/SMTP'
 grep -qx 'qa' "$EMAIL_EVAL_LOG" || fail 'QA não validou a caixa segura'
-grep -qx 'dev' "$EMAIL_EVAL_LOG" || fail 'DEV não validou a caixa segura'
 
 grep -Fq \
-  'Política SMTP pós-clone: ativar fluent-smtp em produção/QA/DEV e manter desativado no local (Mailpit).' \
+  'Política SMTP pós-clone: ativar fluent-smtp em produção/QA e manter desativado no local (Mailpit).' \
   "$CLONE_SCRIPT" || fail 'resumo do dry-run contradiz a política SMTP por ambiente'
 
 rollback_log="$TMP_DIR/smtp-rollback.log"
@@ -595,8 +586,8 @@ rollback_target() { printf 'rollback\n' >> "$rollback_log"; }
 TEST_FLUENT_INSTALL_CHECK_STATUS='0'
 TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
 TEST_FLUENT_ACTIVATE_STATUS='37'
-SOURCE='qa'
-TARGET='dev'
+SOURCE='prod'
+TARGET='qa'
 CLONE_TMP_DIR="$TMP_DIR/smtp-boundary"
 mkdir -p "$CLONE_TMP_DIR"
 TARGET_BACKUP_DIR=''
@@ -618,7 +609,7 @@ fi
 TEST_FLUENT_INSTALL_CHECK_STATUS='1'
 TEST_FLUENT_INSTALL_QUERY_STATUS='1'
 TEST_FLUENT_ACTIVE_CHECK_STATUS='1'
-SOURCE='dev'
+SOURCE='qa'
 TARGET='local'
 CLONE_TMP_DIR="$TMP_DIR/plugin-query-boundary"
 mkdir -p "$CLONE_TMP_DIR"

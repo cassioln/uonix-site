@@ -1,6 +1,6 @@
 # Contrato de ambientes Uonix
 
-Este documento é o contrato canônico da topologia Uonix para produção, QA, DEV e local. Em caso de conflito com documentação operacional anterior, este contrato prevalece até a atualização coordenada dos documentos relacionados.
+Este documento é o contrato canônico da topologia Uonix para produção, QA e local. Em caso de conflito com documentação operacional anterior, este contrato prevalece até a atualização coordenada dos documentos relacionados.
 
 Não versionar neste documento `wp-config.php`, senhas, chaves, tokens, salts, valores de Secrets, destinatários de caixa segura, IDs de analytics ou licenças.
 
@@ -8,16 +8,18 @@ Não versionar neste documento `wp-config.php`, senhas, chaves, tokens, salts, v
 
 | Branch | Ambiente | Host | URL | Document root | `WP_ENVIRONMENT_TYPE` | Indexação | Analytics | E-mail | Turnstile | CompressX | Deploy/guard | Clone permitido |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `master` | Produção | Locaweb | `https://uonix.com.br` | `/home/storage/f/34/12/siteuonix1/public_html` | `production` | **Indexação liberada** (`index, follow`; sem `X-Robots-Tag`) | Habilitado somente aqui; IDs e configuração ficam fora do Git | SMTP real conforme configuração exclusiva do ambiente | Chave própria, fora do Git | Runtime e opções próprios do destino; não presumir licença, ativação ou geração de mídia | Workflow de produção em `master`, mas fail-closed: `ENABLE_DEPLOY_PRODUCTION=false`; não há deploy automático | Pode ser origem ou destino somente em operação explicitamente aprovada; destino requer confirmação dinâmica, backup fresco e preflight/dry-run no mesmo processo |
-| `qa` | QA | HostGator | `https://uonix.ksio.dev` | `/home2/uonix/public_html` | `staging` | `noindex` | Desabilitado; não configurar IDs GTM/GA4/AdOpt | Apenas caixa segura configurada fora do Git, com identificação `[QA]` | Chave de teste configurada fora do Git | Runtime e opções próprios do destino; não copiar a licença/estado de outro ambiente | Workflow de QA, mantido bloqueado até validação: `ENABLE_DEPLOY_QA=false` | Pode ser origem ou destino, exceto identidade; execução depende dos gates de clone |
-| `dev` | DEV | HostGator | `https://test.uonix.ksio.dev` | `/home2/uonix/dev_uonix` | `development` | `noindex` | Desabilitado; não configurar IDs GTM/GA4/AdOpt | Apenas caixa segura configurada fora do Git, com identificação `[DEV]` | Chave de teste configurada fora do Git | Runtime e opções próprios do destino; não copiar a licença/estado de outro ambiente | Workflow de DEV, mantido bloqueado até validação: `ENABLE_DEPLOY_DEVELOPMENT=false` | Pode ser origem ou destino, exceto identidade; execução depende dos gates de clone |
+| `master` | Produção | Locaweb | `https://uonix.com.br` | `/home/storage/f/34/12/siteuonix1/public_html` | `production` | **Indexação liberada** (`index, follow`; sem `X-Robots-Tag`) | Habilitado somente aqui; IDs e configuração ficam fora do Git | SMTP real conforme configuração exclusiva do ambiente | Chave própria, fora do Git | Runtime e opções próprios do destino; não presumir licença, ativação ou geração de mídia | `ENABLE_DEPLOY_PRODUCTION=true` (decisão do responsável, para agilizar publicação; estado confirmado em 2026-09-22). **Mesmo assim não há deploy automático**: `deploy-production.yml` só aceita `workflow_dispatch`, exige a frase `PUBLICAR <SHA>` e valida o host de destino. A proteção está no gatilho e na confirmação, não na guarda | Pode ser origem ou destino somente em operação explicitamente aprovada; destino requer confirmação dinâmica, backup fresco e preflight/dry-run no mesmo processo |
+| `qa` | QA | HostGator | `https://uonix.ksio.dev` | `/home2/uonix/public_html` | `staging` | `noindex` | Desabilitado; não configurar IDs GTM/GA4/AdOpt | Apenas caixa segura configurada fora do Git, com identificação `[QA]` | Chave de teste configurada fora do Git | Runtime e opções próprios do destino; não copiar a licença/estado de outro ambiente | `ENABLE_DEPLOY_QA=true` (estado confirmado em 2026-09-22): **push na branch `qa` publica automaticamente**. Não existe automação que promova `master → qa`, **por decisão registrada** — alinhamento sob demanda, com force-push aceitável; ver *Promoção de código e isolamento* | Pode ser origem ou destino, exceto identidade; execução depende dos gates de clone |
 | `local` | Local | Podman no Mac | `http://localhost:8080` | Container WordPress (`/var/www/html`) | `local` | Privado; não expor a mecanismos de busca | Desabilitado; não configurar IDs GTM/GA4/AdOpt | Mailpit | Desabilitado | Runtime local independente; não copiar licença/estado de outro ambiente | Sem deploy remoto | Pode ser origem ou destino, exceto identidade; é executado no Mac e depende dos gates de clone |
 
 ## Promoção de código e isolamento
 
 - A branch de produção permanece `master`; ela não será renomeada para `main`.
-- O fluxo normal de promoção é `dev → qa → master` por revisão.
-- A branch `local` recebe alterações de `dev`, mas não faz merge automático de volta para `dev`.
+- A promoção de código é feita por pull request direto para `master`, sob revisão. A branch `qa` recebe código já mergeado, para validação com dado real, e não é etapa de promoção.
+- **A promoção `master → qa` é feita sob demanda, por alinhamento direto da branch, e não tem automação.** Decisão do responsável em 2026-09-23. Quando houver necessidade de validar algo em QA, `qa` é alinhada a `master` na hora, e **force-push é aceitável**: o histórico próprio de `qa` é ruído de promoção seletiva, não trabalho. Medido em 2026-09-22 — `origin/qa` estava 37 commits atrás de `master`, com 4 commits próprios, três dos quais já tinham equivalente em `master` e o quarto adicionava um arquivo vazio criado pelo editor web do GitHub.
+  - Por que não automatizar: a validação de números acontece em **produção**, porque o Search Console é do domínio de produção. QA consultaria o mesmo dado por um runtime de staging, então ganharia isolamento de raio de dano, não fidelidade. Espelhar `master` continuamente produziria deploys frequentes num ambiente que ninguém está observando.
+  - QA continua útil para **testar mudança de comportamento arriscada**, não para conferir número. É por isso que a alternativa de aposentá-lo foi recusada.
+- A branch `local` recebe alterações de `master`, mas não faz merge automático de volta.
 - O código versionado é separado do runtime WordPress. Não transportar `wp-config.php`, credenciais, caches, logs, backups, uploads de teste ou configurações específicas de host como se fossem código promovível.
 - Produção atende em `uonix.com.br` desde o cutover de 2026-08-15. O domínio de trânsito `site.uonix.com.br` foi removido do painel e não resolve mais. A indexação está liberada (`UONIX_ALLOW_INDEXING=true`, `blog_public=1`).
 
@@ -29,33 +31,89 @@ As constantes devem ser definidas na configuração privada de cada ambiente, nu
 |---|---|
 | Produção | `WP_ENVIRONMENT_TYPE=production`; `WP_HOME` e `WP_SITEURL` apontam para `https://uonix.com.br`; `UONIX_ALLOW_INDEXING=true`; `UONIX_ANALYTICS_ENABLED=true`. Somente este ambiente pode receber IDs de analytics e AdOpt (`UONIX_ADOPT_WEBSITE_ID` e `UONIX_ADOPT_CONSENT_TAG_IDS`). **`WP_HOME`/`WP_SITEURL` são constantes**: `wp option update home` NÃO tem efeito enquanto elas existirem — o valor da constante sempre vence sobre o banco. Em troca de domínio, editar `wp-config.php` primeiro e depois corrigir o banco com `UPDATE` SQL direto. |
 | QA | `WP_ENVIRONMENT_TYPE=staging`; URL canônica `https://uonix.ksio.dev`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; caixa segura não produtiva e Turnstile de teste definidos fora do repositório. |
-| DEV | `WP_ENVIRONMENT_TYPE=development`; URL canônica `https://test.uonix.ksio.dev`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; caixa segura não produtiva e Turnstile de teste definidos fora do repositório. |
 | Local | `WP_ENVIRONMENT_TYPE=local`; URL canônica `http://localhost:8080`; `UONIX_ALLOW_INDEXING=false`; `UONIX_ANALYTICS_ENABLED=false`; Mailpit ativo e Turnstile desligado. |
 
-Não declarar IDs GTM, GA4 ou AdOpt em QA, DEV ou local. Os identificadores de analytics, a configuração SMTP e as chaves Turnstile são dados por ambiente e não pertencem a arquivos versionados.
+Não declarar IDs GTM, GA4 ou `UONIX_ADOPT_WEBSITE_ID` em QA ou local. Os identificadores de analytics, a configuração SMTP e as chaves Turnstile são dados por ambiente e não pertencem a arquivos versionados.
 
-### Provisionamento e Rotação: Tags AdOpt (`UONIX_ADOPT_CONSENT_TAG_IDS`)
+Exceção deliberada: `UONIX_ADOPT_CONSENT_TAG_IDS` tem um **padrão versionado no código** desde 2026-09-23, por não ser segredo e por existir uma única conta AdOpt — ver a seção abaixo. A constante de ambiente segue existindo, apenas como override opcional. Sem `UONIX_ADOPT_WEBSITE_ID`, a AdOpt não é carregada fora de produção, então o padrão não tem efeito em QA nem local.
 
-- **Localização:** Declarado exclusivamente no `wp-config.php` fora do Git (em Produção).
-- **Formato:** String separada por vírgula de UUIDs reais das tags da AdOpt responsáveis por persistência/cookies de funcionalidade (ex: `define( 'UONIX_ADOPT_CONSENT_TAG_IDS', '6332f834-41df-4cc5-a3bf-dffe359112c5' );`).
-- **Política Fail-Closed:** Se a constante não estiver declarada ou nenhum UUID for válido, o sistema opera estritamente sem persistência de dados no navegador.
-- **Procedimento de Rotação:**
-  1. No painel AdOpt (`app.goadopt.io`), identificar o novo UUID da tag.
-  2. No `wp-config.php`, incluir o novo UUID concatenado com o anterior: `define( 'UONIX_ADOPT_CONSENT_TAG_IDS', 'novo-uuid,antigo-uuid' );`.
-  3. Executar `wp cache flush` para aplicar.
-  4. Após o período de transição, remover o UUID antigo mantendo apenas o novo.
-- **Verificação Segura no Runtime (sem expor segredos):**
+### WP-Cron pelo crontab do sistema (produção)
+
+Desde 2026-10-01 (#348), o WP-Cron de produção **não** roda por visita. Ele roda pelo `crontab` do usuário da hospedagem, pelo PHP CLI:
+
+- **`define( 'DISABLE_WP_CRON', true );`** no `wp-config.php` de produção.
+- **No `crontab`, uma linha** a cada 5 minutos:
+  - `cd <document-root> && flock -n <conta>/.uonix-cron.lock timeout 290 <php> -d disable_functions= <wp-cli> --path=<document-root> cron event run --due-now > <conta>/.uonix-cron-ultimo.log 2>&1`;
+  - o `flock` impede duas execuções ao mesmo tempo, e o `timeout` corta uma execução travada.
+- **Por que 5 minutos:** a fila do WooCommerce (`action_scheduler_run_queue`) roda a cada 1 minuto, e a do Fluent Forms a cada 5.
+- **Por que pelo CLI:** pela web, todos os eventos vencidos rodam numa mesma requisição, sujeita ao limite de relógio do servidor, que nunca foi medido. O WordPress reagenda cada evento **antes** de rodá-lo, então um evento cortado no meio se perde até o próximo ciclo. Medido em 2026-10-01:
+  - a montagem do relatório semanal levava 29,5 s (`uonix_intelligence_report_context()` inteiro; a parte de `uonix_intelligence_executive_collect()` sozinha, 27,8 s);
+  - a sincronização de métricas leva cerca de 14 s;
+  - uma chamada ao Gemini, 6,9 s.
+- **Como diagnosticar:** `<conta>/.uonix-cron-ultimo.log` traz a última execução, e `wp cron event list` mostra a agenda.
+- **QA e local continuam com o WP-Cron por visita.** O clone não copia o `wp-config.php`, e o `crontab` não está no banco.
+- **Para voltar ao WP-Cron por visita,** remova a linha do `crontab` e o `DISABLE_WP_CRON` juntos. Remover só a linha do `crontab` e manter o `DISABLE_WP_CRON` deixa o site sem cron nenhum.
+
+### Chave do Gemini (`UONIX_GEMINI_API_KEY`)
+
+A sugestão de Title/Description da Central de Inteligência (`54-admin-intelligence-ai.php`) lê duas constantes:
+
+- **`define( 'UONIX_GEMINI_API_KEY', '…' );`** é a chave da Generative Language API. **É segredo:** fica só no `wp-config.php` e nunca no repositório. Sem ela, nada chama o Gemini, e o painel diz "IA não configurada", que é o estado esperado em QA e local. Recomendado: uma chave por ambiente, restrita à Generative Language API, para revogar uma sem quebrar as outras.
+- **`define( 'UONIX_GEMINI_MODEL', 'gemini-3.8-flash' );`** é opcional. O padrão já é esse modelo fixo. Não use apelido `-latest`, porque ele muda de comportamento sem aviso.
+
+### Tags AdOpt de consentimento (`UONIX_ADOPT_CONSENT_TAG_IDS`)
+
+Corrigido em 2026-09-23 (issue #264). A versão anterior desta seção descrevia um formato
+de UUID que a AdOpt não usa, e um painel em `app.goadopt.io` que não é o desta conta.
+O procedimento descrito rotacionava algo que nunca havia sido provisionado.
+
+- **Valor padrão:** embutido em `mu-plugins/uonix-forms/49-forms-global-autofill.php`, na
+  constante `UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO` (hoje `9BxuTvI1_q`, a tag `uonix.com.br`).
+  **Não** requer provisionamento por SSH.
+- **Por que não fica no `wp-config.php`:** o ID não é segredo — a AdOpt o entrega na
+  configuração pública que todo visitante baixa — e existe uma única conta AdOpt, usada
+  somente em produção. A ausência silenciosa da constante manteve o módulo inativo por
+  meses sem emitir sinal algum; embutir o padrão remove essa classe de falha.
+- **Formato:** string separada por vírgula com o `id` de cada tag da AdOpt. São
+  identificadores de **exatamente 10 caracteres** no alfabeto `[A-Za-z0-9_-]` — por exemplo
+  `9BxuTvI1_q`. **Não são UUIDs.** O comprimento foi medido nas cinco tags da conta.
+- **Colar um rótulo do painel não funciona**, e a proteção tem duas barreiras: uma lista dos
+  rótulos conhecidos nos dois idiomas, comparada **em minúsculas** porque o painel os exibe
+  capitalizados (`Statistics`, `Desempenho`); e o comprimento exato de 10, que elimina sem
+  enumerar toda a família mais longa (`uonix_funcional`, `preferences_v2`, `Estatisticas`).
+- **O que a validação não garante:** ela não separa palavra arbitrária de token. `Habilitado`
+  tem o mesmo formato de `Lc-8ztRDYp` — 10 caracteres com maiúscula. É aceitável porque a AdOpt
+  só entrega `id` de tag no callback, nunca nome de categoria: um valor indevido jamais casa e o
+  módulo simplesmente não arma. A validação é detector de engano plausível, não fronteira de
+  segurança, e o engano plausível é colar um rótulo — que é o que as duas barreiras cobrem.
+- **Categoria importa, e é pré-requisito:** a tag precisa estar em uma categoria
+  **recusável** no painel. A categoria `Necessárias` (id 1) é aceita incondicionalmente
+  pela AdOpt mesmo quando o visitante clica em "Rejeitar tudo", então uma tag ali
+  autorizaria a persistência contra uma recusa explícita. A tag `uonix.com.br` foi movida
+  para `Funcional` em 2026-09-23 exatamente por isso.
+- **Política Fail-Closed:** se nenhum ID válido restar, o sistema opera estritamente sem
+  persistência de dados no navegador.
+- **Rotação (override de emergência, sem deploy):** declarar
+  `define( 'UONIX_ADOPT_CONSENT_TAG_IDS', 'novo-id,antigo-id' );` no `wp-config.php` de
+  produção — a constante tem precedência sobre o padrão embutido. Depois do período de
+  transição, remover o ID antigo, ou remover a constante para voltar ao padrão do código.
+  O caminho normal de mudança é um PR alterando `UONIX_ADOPT_CONSENT_TAG_IDS_PADRAO`.
+- **Onde ver os IDs no painel:** card AdOpt do painel do WordPress → **Escanear tags**
+  (`dash.goadopt.io/org/uonix/disclaimer/cookies-uonix/tags`). Cada tag mostra seu ID e um
+  seletor de **Classificação**.
+- **Verificação no runtime:**
   ```bash
-  wp eval 'echo defined("UONIX_ADOPT_CONSENT_TAG_IDS") ? "PRESENTE: tags=" . count(uonix_adopt_get_consent_tag_ids()) . " hash=" . substr(hash("sha256", UONIX_ADOPT_CONSENT_TAG_IDS), 0, 8) : "0";'
+  wp eval 'printf("tags=%d ids=%s\n", count(uonix_adopt_get_consent_tag_ids()), implode(",", uonix_adopt_get_consent_tag_ids()));'
   ```
+  Esperado em produção: `tags=1` ou mais. `tags=0` significa autopreenchimento inativo.
 
 ## Contrato de clone
 
-A ferramenta aceita os quatro nomes canônicos `prod`, `qa`, `dev` e `local`. Os quatro pares de identidade (`prod → prod`, `qa → qa`, `dev → dev` e `local → local`) são proibidos. Os 12 pares direcionais entre ambientes distintos são permitidos apenas como capacidade técnica, nunca como autorização operacional.
+A ferramenta aceita os três nomes canônicos `prod`, `qa` e `local`. Os três pares de identidade (`prod → prod`, `qa → qa` e `local → local`) são proibidos. Os 6 pares direcionais entre ambientes distintos são permitidos apenas como capacidade técnica, nunca como autorização operacional.
 
 | Categoria do par | Executor previsto | Requisitos antes de qualquer mutação |
 |---|---|---|
-| Remoto ↔ remoto (`prod`, `qa`, `dev`) | GitHub Actions a partir da referência canônica | Dry-run/preflight no mesmo processo, backup validado do destino, manifesto verificado e confirmação dinâmica. Para destino `prod`, exigir aprovação just-in-time além desses gates. |
+| Remoto ↔ remoto (`prod`, `qa`) | GitHub Actions a partir da referência canônica | Dry-run/preflight no mesmo processo, backup validado do destino, manifesto verificado e confirmação dinâmica. Para destino `prod`, exigir aprovação just-in-time além desses gates. |
 | Qualquer par com `local` | Mac como ponte privada | Dry-run/preflight no mesmo processo, backup validado do destino e confirmação dinâmica; não executar automaticamente por workflow remoto. |
 
 Por padrão, o clone preserva usuários, URL, título, configuração SMTP, analytics, Turnstile, licenças e configuração do host no destino. Substituir usuários exige opção explícita. Um clone não copia `wp-config.php`.
@@ -67,7 +125,10 @@ O CompressX é gerenciado por ambiente. Seus diretórios de runtime (`wp-content
 ## Deploy e guarda
 
 - Produção usa SSH/rsync quando a janela técnica da Locaweb estiver aberta; SFTP é somente fallback manual. Não há fallback automático para FTP.
-- Todos os guards de deploy iniciam bloqueados. Em especial, `ENABLE_DEPLOY_PRODUCTION=false` é obrigatório até autorização posterior; permanecer fail-closed é a decisão vigente.
+- **Os guards de deploy estão habilitados.** `ENABLE_DEPLOY_QA=true` e `ENABLE_DEPLOY_PRODUCTION=true`, por decisão do responsável para agilizar publicação. Estado confirmado em 2026-09-22 diretamente nas *repository variables*.
+- O que protege produção hoje **não é a guarda**, e sim: gatilho exclusivamente `workflow_dispatch`, frase de confirmação `PUBLICAR <SHA>`, e validação do host de destino no próprio workflow. Continua valendo exigir preflight, backup validado, smoke test e rollback disponível antes de publicar.
+- Podem restar *repository variables* do ambiente retirado da topologia, algumas já sem nenhum consumidor no repositório. Elas não são nomeadas aqui de propósito — `scripts/tests/test-no-retired-environment-references.sh` reprova a reintrodução desses nomes, e a guarda está certa. O inventário e a ordem de remoção ficam na issue correspondente.
+- O valor de uma *repository variable* vive no GitHub, não neste documento. Este arquivo descreve o estado, mas não o controla: para conferir, use `gh variable list`. Tratar esta seção como fonte de verdade sobre esses valores já produziu conclusão errada.
 - A guarda de deploy não substitui preflight, backup, smoke test, rollback nem aprovação humana nas operações de alto impacto.
 - Nenhum ambiente deve receber produção automática, migração, importação de banco, promoção de document root ou mudança de domínio com base apenas neste documento.
 

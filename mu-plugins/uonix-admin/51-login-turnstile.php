@@ -146,7 +146,7 @@ add_action( 'login_form', 'uonix_login_turnstile_render' );
  *
  * O core não faz curto-circuito com WP_Error — ele só devolve cedo quando recebe
  * um WP_User. Validando antes (prioridade 5), o nosso WP_Error era descartado e,
- * com credencial correta, o login entrava SEM desafio. Comprovado em DEV com
+ * com credencial correta, o login entrava SEM desafio. Comprovado com
  * instrumentação: prio 6 tinha uonix_login_turnstile, prio 10002 já tinha
  * invalid_email.
  *

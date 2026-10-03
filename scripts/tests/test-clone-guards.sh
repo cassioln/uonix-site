@@ -13,7 +13,6 @@ fail() {
 
 export PRODUCTION_URL='https://uonix.com.br'
 export QA_URL='https://uonix.ksio.dev'
-export DEVELOPMENT_URL='https://test.uonix.ksio.dev'
 export LOCAWEB_SSH_HOST='ftp.uonix.com.br'
 export LOCAWEB_SSH_PORT='22'
 export LOCAWEB_SSH_USER='siteuonix1'
@@ -25,7 +24,6 @@ export HOSTGATOR_SSH_HOST='108.179.252.137'
 export HOSTGATOR_SSH_PORT='22'
 export HOSTGATOR_SSH_USER='uonix'
 export HOSTGATOR_QA_ROOT='/home2/uonix/public_html'
-export HOSTGATOR_DEV_ROOT='/home2/uonix/dev_uonix'
 export UONIX_CLONE_LIBRARY_ONLY=1
 
 # shellcheck source=scripts/clone-environment.sh
@@ -43,7 +41,7 @@ for required_function in \
   type "$required_function" >/dev/null 2>&1 || fail "função obrigatória ausente: $required_function"
 done
 
-all_environments='prod qa dev local'
+all_environments='prod qa local'
 for source_environment in $all_environments; do
   for target_environment in $all_environments; do
     if [ "$source_environment" = "$target_environment" ]; then
@@ -57,14 +55,18 @@ for source_environment in $all_environments; do
 done
 
 [ "$(clone_execution_mode prod qa)" = github-runner ] || fail 'par remoto não usa GitHub runner'
-[ "$(clone_execution_mode qa dev)" = github-runner ] || fail 'par HostGator remoto não usa GitHub runner'
+# A asserção do par HostGator<->HostGator saiu com o ambiente remoto de
+# desenvolvimento: sobrando produção, QA e local, não existe mais par
+# remoto->remoto hospedado no MESMO provedor. Não há como recriá-la sem
+# reintroduzir o ambiente, e fingi-la com prod->qa testaria outra coisa
+# (provedores distintos, com as travas de produção no caminho).
 [ "$(clone_execution_mode local qa)" = mac ] || fail 'par com local não usa Mac'
 [ "$(clone_execution_mode prod local)" = mac ] || fail 'par com local não usa Mac'
 [ "$(clone_required_confirmation qa prod)" = 'CLONAR QA PARA PROD' ] || fail 'frase de produção incorreta'
 
-clone_parse_arguments --source=qa --target=dev --dry-run
-[ "$SOURCE" = qa ] || fail 'source não parseado'
-[ "$TARGET" = dev ] || fail 'target não parseado'
+clone_parse_arguments --source=prod --target=qa --dry-run
+[ "$SOURCE" = prod ] || fail 'source não parseado'
+[ "$TARGET" = qa ] || fail 'target não parseado'
 [ "$CLONE_MODE" = dry-run ] || fail 'modo dry-run não parseado'
 [ "$REPLACE_USERS" = 0 ] || fail 'usuários não são preservados por padrão'
 clone_validate_request
@@ -91,8 +93,8 @@ execute_clone_mutation() { printf 'mutation\n' >> "$sequence_file"; }
 # verifica somente a ordem dry-run -> mutação sem iniciar transporte remoto.
 acquire_clone_lock() { :; }
 release_clone_lock() { :; }
-SOURCE=qa
-TARGET=dev
+SOURCE=prod
+TARGET=qa
 CLONE_MODE=execute
 CONFIRMATION=''
 REPLACE_USERS=0
@@ -139,10 +141,10 @@ fi
 : > "$sequence_file"
 rollback_target() { printf 'rollback:%s:%s\n' "$1" "$2" >> "$sequence_file"; }
 MUTATION_STARTED=1
-TARGET=dev
+TARGET=qa
 TARGET_BACKUP_DIR='/safe/backup'
 clone_handle_failure 27
-[ "$(cat "$sequence_file")" = 'rollback:dev:/safe/backup' ] || fail 'falha pós-mutação não acionou rollback'
+[ "$(cat "$sequence_file")" = 'rollback:qa:/safe/backup' ] || fail 'falha pós-mutação não acionou rollback'
 
 runtime_list="$(clone_runtime_directories)"
 for directory in uploads plugins languages; do
@@ -160,7 +162,7 @@ done
 if grep -q 'StrictHostKeyChecking=accept-new' "$CLONE_SCRIPT"; then
   fail 'clone ainda aceita host key nova'
 fi
-if grep -Eq 'https://(test\.)?uonix\.ksio\.dev|/home2/uonix/(public_html|qa_uonix|dev_uonix)' "$CLONE_SCRIPT"; then
+if grep -Eq 'https://uonix\.ksio\.dev|/home2/uonix/(public_html|qa_uonix)' "$CLONE_SCRIPT"; then
   fail 'clone contém topologia hardcoded fora do mapa'
 fi
 for summary_key in runtime_file_count runtime_directory_count backup_id; do

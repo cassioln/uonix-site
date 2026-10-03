@@ -10,7 +10,6 @@ on:
         options:
           - prod
           - qa
-          - dev
       target:
         description: Ambiente de destino
         required: true
@@ -18,7 +17,6 @@ on:
         options:
           - prod
           - qa
-          - dev
       mode:
         description: Validar ou executar após um novo dry-run obrigatório
         required: true
@@ -53,7 +51,6 @@ jobs:
       script_confirmation: ${{ steps.request.outputs.script_confirmation }}
       production_url: ${{ steps.request.outputs.production_url }}
       qa_url: ${{ steps.request.outputs.qa_url }}
-      development_url: ${{ steps.request.outputs.development_url }}
       locaweb_ssh_host: ${{ steps.request.outputs.locaweb_ssh_host }}
       locaweb_ssh_port: ${{ steps.request.outputs.locaweb_ssh_port }}
       locaweb_ssh_user: ${{ steps.request.outputs.locaweb_ssh_user }}
@@ -65,12 +62,10 @@ jobs:
       hostgator_ssh_port: ${{ steps.request.outputs.hostgator_ssh_port }}
       hostgator_ssh_user: ${{ steps.request.outputs.hostgator_ssh_user }}
       hostgator_qa_root: ${{ steps.request.outputs.hostgator_qa_root }}
-      hostgator_dev_root: ${{ steps.request.outputs.hostgator_dev_root }}
       hostgator_clone_backup_root: ${{ steps.request.outputs.hostgator_clone_backup_root }}
     env:
       PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
       QA_URL: ${{ vars.QA_URL }}
-      DEVELOPMENT_URL: ${{ vars.DEVELOPMENT_URL }}
       LOCAWEB_SSH_HOST: ${{ vars.LOCAWEB_SSH_HOST }}
       LOCAWEB_SSH_PORT: ${{ vars.LOCAWEB_SSH_PORT }}
       LOCAWEB_SSH_USER: ${{ vars.LOCAWEB_SSH_USER }}
@@ -82,7 +77,6 @@ jobs:
       HOSTGATOR_SSH_PORT: ${{ vars.HOSTGATOR_SSH_PORT }}
       HOSTGATOR_SSH_USER: ${{ vars.HOSTGATOR_SSH_USER }}
       HOSTGATOR_QA_ROOT: ${{ vars.HOSTGATOR_QA_ROOT }}
-      HOSTGATOR_DEV_ROOT: ${{ vars.HOSTGATOR_DEV_ROOT }}
       HOSTGATOR_CLONE_BACKUP_ROOT: ${{ vars.HOSTGATOR_CLONE_BACKUP_ROOT || '/home2/uonix/_uonix-clone-backups' }}
       UONIX_CLONE_REQUEST_SOURCE: ${{ inputs.source }}
       UONIX_CLONE_REQUEST_TARGET: ${{ inputs.target }}
@@ -102,7 +96,7 @@ jobs:
           [ "${#UONIX_REQUEST_SHA}" -eq 40 ]
           [ "$UONIX_CLONE_REQUEST_SOURCE" != "$UONIX_CLONE_REQUEST_TARGET" ]
           case "${UONIX_CLONE_REQUEST_SOURCE}:${UONIX_CLONE_REQUEST_TARGET}" in
-            prod:qa|prod:dev|qa:prod|qa:dev|dev:prod|dev:qa) ;;
+            prod:qa|qa:prod) ;;
             *) echo 'Par remoto inválido.' >&2; exit 1 ;;
           esac
           case "$UONIX_CLONE_REQUEST_MODE" in dry-run|execute) ;; *) exit 1 ;; esac
@@ -123,7 +117,6 @@ jobs:
 
           [ "$PRODUCTION_URL" = 'https://uonix.com.br' ]
           [ "$QA_URL" = 'https://uonix.ksio.dev' ]
-          [ "$DEVELOPMENT_URL" = 'https://test.uonix.ksio.dev' ]
           [ "$LOCAWEB_SSH_HOST" = 'ftp.uonix.com.br' ]
           [ "$LOCAWEB_SSH_PORT" = '22' ]
           [ "$LOCAWEB_SSH_USER" = 'siteuonix1' ]
@@ -135,7 +128,6 @@ jobs:
           [ "$HOSTGATOR_SSH_PORT" = '22' ]
           [ "$HOSTGATOR_SSH_USER" = 'uonix' ]
           [ "$HOSTGATOR_QA_ROOT" = '/home2/uonix/public_html' ]
-          [ "$HOSTGATOR_DEV_ROOT" = '/home2/uonix/dev_uonix' ]
           [ "$HOSTGATOR_CLONE_BACKUP_ROOT" = '/home2/uonix/_uonix-clone-backups' ]
 
           {
@@ -143,7 +135,6 @@ jobs:
             printf 'script_confirmation=%s\n' "$script_confirmation"
             printf 'production_url=%s\n' "$PRODUCTION_URL"
             printf 'qa_url=%s\n' "$QA_URL"
-            printf 'development_url=%s\n' "$DEVELOPMENT_URL"
             printf 'locaweb_ssh_host=%s\n' "$LOCAWEB_SSH_HOST"
             printf 'locaweb_ssh_port=%s\n' "$LOCAWEB_SSH_PORT"
             printf 'locaweb_ssh_user=%s\n' "$LOCAWEB_SSH_USER"
@@ -155,7 +146,6 @@ jobs:
             printf 'hostgator_ssh_port=%s\n' "$HOSTGATOR_SSH_PORT"
             printf 'hostgator_ssh_user=%s\n' "$HOSTGATOR_SSH_USER"
             printf 'hostgator_qa_root=%s\n' "$HOSTGATOR_QA_ROOT"
-            printf 'hostgator_dev_root=%s\n' "$HOSTGATOR_DEV_ROOT"
             printf 'hostgator_clone_backup_root=%s\n' "$HOSTGATOR_CLONE_BACKUP_ROOT"
           } >> "$GITHUB_OUTPUT"
 
@@ -167,7 +157,6 @@ jobs:
     env:
       PRODUCTION_URL: ${{ needs.validate-request.outputs.production_url }}
       QA_URL: ${{ needs.validate-request.outputs.qa_url }}
-      DEVELOPMENT_URL: ${{ needs.validate-request.outputs.development_url }}
       LOCAWEB_SSH_HOST: ${{ needs.validate-request.outputs.locaweb_ssh_host }}
       LOCAWEB_SSH_PORT: ${{ needs.validate-request.outputs.locaweb_ssh_port }}
       LOCAWEB_SSH_USER: ${{ needs.validate-request.outputs.locaweb_ssh_user }}
@@ -179,7 +168,6 @@ jobs:
       HOSTGATOR_SSH_PORT: ${{ needs.validate-request.outputs.hostgator_ssh_port }}
       HOSTGATOR_SSH_USER: ${{ needs.validate-request.outputs.hostgator_ssh_user }}
       HOSTGATOR_QA_ROOT: ${{ needs.validate-request.outputs.hostgator_qa_root }}
-      HOSTGATOR_DEV_ROOT: ${{ needs.validate-request.outputs.hostgator_dev_root }}
       HOSTGATOR_CLONE_BACKUP_ROOT: ${{ needs.validate-request.outputs.hostgator_clone_backup_root }}
       UONIX_CLONE_REQUEST_SOURCE: ${{ inputs.source }}
       UONIX_CLONE_REQUEST_TARGET: ${{ inputs.target }}
@@ -205,7 +193,7 @@ jobs:
           set -euo pipefail
           test "${UONIX_CLONE_REQUEST_SOURCE}" != "${UONIX_CLONE_REQUEST_TARGET}"
           case "${UONIX_CLONE_REQUEST_SOURCE}:${UONIX_CLONE_REQUEST_TARGET}" in
-            prod:qa|prod:dev|qa:prod|qa:dev|dev:prod|dev:qa) ;;
+            prod:qa|qa:prod) ;;
             *) echo 'Par remoto inválido.' >&2; exit 1 ;;
           esac
           case "${UONIX_CLONE_REQUEST_MODE}" in dry-run|execute) ;; *) exit 1 ;; esac

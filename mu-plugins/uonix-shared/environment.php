@@ -31,10 +31,6 @@ if ( ! function_exists( 'uonix_resolve_environment' ) ) {
 			return 'local';
 		}
 
-		if ( 'test.uonix.ksio.dev' === $host ) {
-			return 'development';
-		}
-
 		if ( 'uonix.ksio.dev' === $host ) {
 			return 'staging';
 		}

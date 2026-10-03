@@ -7,7 +7,6 @@ import path from 'node:path';
 const DEFAULT_URLS = [
   'https://uonix.com.br/',
   'https://uonix.ksio.dev/',
-  'https://test.uonix.ksio.dev/',
 ];
 
 const DEFAULT_AUDITS = [
@@ -90,8 +89,8 @@ function printHelp() {
   node scripts/pagespeed-check.mjs [opcoes]
 
 Opcoes:
-  --url URL            URL a medir. Pode repetir. Padrao: producao, QA e DEV.
-                       https://uonix.com.br/, https://uonix.ksio.dev/ e https://test.uonix.ksio.dev/.
+  --url URL            URL a medir. Pode repetir. Padrao: producao e QA.
+                       https://uonix.com.br/ e https://uonix.ksio.dev/.
   --strategy mobile    Estrategia Lighthouse: mobile ou desktop. Pode repetir.
   --category perf      Categoria PageSpeed. Padrao: performance.
   --env .env           Arquivo com PAGESPEED_API_KEY=... ou a chave crua.

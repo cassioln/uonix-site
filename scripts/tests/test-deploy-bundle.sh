@@ -86,7 +86,7 @@ cp "$OUTPUT/manifest.sha256" "${TMP_DIR}/manifest.first"
 bash "$SCRIPT" --environment=production --output="$OUTPUT"
 cmp -s "${TMP_DIR}/manifest.first" "$OUTPUT/manifest.sha256" || fail 'manifest não é determinístico/idempotente'
 
-for environment in qa development; do
+for environment in qa staging; do
   other_output="${TMP_DIR}/bundle-${environment}"
   bash "$SCRIPT" --environment="$environment" --output="$other_output"
   [ ! -e "$other_output/mu-plugins/uonix-local" ] || fail "uonix-local entrou no bundle ${environment}"
@@ -100,7 +100,7 @@ done
 # nome canônico curto: qa-hostgator resolve para 'staging'. Todos os aliases do mapa
 # declarativo em scripts/lib/environment-map.sh devem ser aceitos, e o bundle não pode
 # variar com o alias — o conteúdo publicado é idêntico em todos os ambientes remotos.
-for environment in prod production qa staging dev development; do
+for environment in prod production qa staging; do
   alias_output="${TMP_DIR}/bundle-alias-${environment}"
   bash "$SCRIPT" --environment="$environment" --output="$alias_output" \
     || fail "alias de ambiente rejeitado: ${environment}"
@@ -117,5 +117,15 @@ if bash "$SCRIPT" --environment=nao-existe --output="${TMP_DIR}/bundle-invalid" 
   fail 'ambiente inválido foi aceito'
 fi
 [ ! -e "${TMP_DIR}/bundle-invalid" ] || fail 'ambiente inválido produziu bundle'
+
+# O ambiente remoto de desenvolvimento saiu da topologia e o mapa declarativo já o
+# rejeita. Este script precisa espelhar o mapa: aceitá-lo aqui produziria bundle para
+# um destino cujo docroot e URL não são mais declarados.
+for retirado in dev development; do
+  if bash "$SCRIPT" --environment="$retirado" --output="${TMP_DIR}/bundle-${retirado}" >/dev/null 2>&1; then
+    fail "ambiente retirado <${retirado}> voltou a ser aceito"
+  fi
+  [ ! -e "${TMP_DIR}/bundle-${retirado}" ] || fail "ambiente retirado <${retirado}> produziu bundle"
+done
 
 printf 'PASS: bundle determinístico contém somente tema e MU-plugins gerenciados.\n'

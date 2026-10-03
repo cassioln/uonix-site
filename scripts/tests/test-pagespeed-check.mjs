@@ -49,12 +49,11 @@ test('uses the canonical remote environments when no PageSpeed URL is supplied',
     [
       'https://uonix.com.br/',
       'https://uonix.ksio.dev/',
-      'https://test.uonix.ksio.dev/',
     ]
   );
 });
 
-test('help identifies the canonical QA, DEV and provisional production targets', () => {
+test('help identifies the canonical QA and provisional production targets', () => {
   const help = execFileSync(process.execPath, [scriptPath, '--help'], {
     cwd: repositoryRoot,
     encoding: 'utf8',
@@ -62,6 +61,8 @@ test('help identifies the canonical QA, DEV and provisional production targets',
 
   assert.match(help, /\buonix\.com\.br/);
   assert.match(help, /uonix\.ksio\.dev/);
-  assert.match(help, /test\.uonix\.ksio\.dev/);
   assert.doesNotMatch(help, /qa\.uonix\.ksio\.dev/);
+  // O ambiente remoto de desenvolvimento saiu da topologia: a ajuda não deve
+  // oferecer um alvo que já não existe.
+  assert.doesNotMatch(help, /test\.uonix\.ksio\.dev/);
 });

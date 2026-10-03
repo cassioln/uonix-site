@@ -1024,6 +1024,33 @@ def test_expected_manifest_verification(script: pathlib.Path, temp: pathlib.Path
 
 
 def test_rollback(rollback_script: pathlib.Path, cleanup_script: pathlib.Path, temp: pathlib.Path) -> None:
+    # Preparação sem mutação: lock adquirido e backup feito, nenhum marcador.
+    #
+    # Este é o estado CORRETO de uma falha anterior à publicação, e o bloco tem de
+    # comunicá-lo ao runner com um código próprio — 32, ROLLBACK_NOT_NEEDED. Sair 0
+    # daqui só encerrava o script remoto: o runner seguia para a sondagem HTTP e
+    # para o heredoc de limpeza, que exige marcador desta execução, não achava
+    # nenhum e saía 1. O run 35784786643 mostrou dois jobs vermelhos com produção
+    # intocada por causa disso.
+    #
+    # O código 0 fica reservado a "rollback concluído, siga para a prova externa".
+    no_mutation = RollbackFixture(temp / "no-mutation", db_owner=None, code_owner=None)
+    result = no_mutation.run(rollback_script)
+    if result.returncode != 32:
+        fail(
+            'lock preparado e ZERO marcadores deveria sair 32 (ROLLBACK_NOT_NEEDED), '
+            f"saiu {result.returncode}: {result.stderr[-300:]}"
+        )
+    if "nenhuma mutação foi iniciada" not in result.stdout:
+        fail("desfecho sem mutação não foi explicado na saída do bloco remoto")
+    if not no_mutation.code_is_new() or no_mutation.code_is_old():
+        fail("caminho sem mutação mexeu no código gerenciado")
+    if not (no_mutation.operation_lock / "owner").is_file():
+        fail("caminho sem mutação liberou o lock da operação")
+    if no_mutation.php_log.exists():
+        fail("caminho sem mutação chamou WP-CLI")
+    assert_no_mysql(no_mutation, "no-mutation")
+
     success = RollbackFixture(temp / "success", db_owner=RUN_ID, code_owner=RUN_ID)
     result = success.run(rollback_script)
     if result.returncode != 0:

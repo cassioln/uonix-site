@@ -392,7 +392,6 @@ if ( $UONIX_VERIFY_PUBLIC ) {
 			if ( curl_errno( $ch ) ) {
 				$error_detail = curl_error( $ch );
 			}
-			curl_close( $ch );
 		}
 
 		$resolved_checks = uonix_resolve_public_policy_terms( $config['checks_public'] );

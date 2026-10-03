@@ -7,40 +7,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-add_action( 'admin_menu', 'uox_content_register_ksio_tools_menu' );
-
-function uox_content_register_ksio_tools_menu() {
-	add_menu_page(
-		'ksio.dev',
-		'ksio.dev',
-		'manage_options',
-		'ksio-dev',
-		'uox_content_render_ksio_tools_home',
-		'dashicons-admin-tools',
-		58
-	);
-
-	add_submenu_page(
-		'ksio-dev',
-		'Ferramentas ksio.dev',
-		'Visão Geral',
-		'manage_options',
-		'ksio-dev',
-		'uox_content_render_ksio_tools_home'
-	);
-
-	add_submenu_page(
-		'ksio-dev',
-		'Limpeza de Conteúdo',
-		'Limpeza de Conteúdo',
-		'manage_options',
-		'ksio-dev-limpeza-conteudo',
-		'uox_content_render_cleanup_page'
-	);
-}
+// O menu ksio.dev e o desta ferramenta são registrados em 49-admin-ksio-governanca.php.
 
 function uox_content_render_ksio_tools_home() {
-	if ( ! current_user_can( 'manage_options' ) ) {
+	if ( ! current_user_can( 'manage_options' ) || ! function_exists( 'uonix_ksio_is_owner' ) || ! uonix_ksio_is_owner() ) {
 		wp_die( 'Você não tem permissão para acessar esta página.' );
 	}
 
@@ -66,6 +36,45 @@ function uox_content_render_ksio_tools_home() {
 				<p>
 					<a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=ksio-dev-clone-ambientes' ) ); ?>">
 						Abrir ferramenta
+					</a>
+				</p>
+			</div>
+
+			<div class="card" style="max-width:none;">
+				<h2>Uônix Insights</h2>
+				<p>Painel de desempenho, Central de Inteligência e o relatório executivo semanal.</p>
+				<p>
+					<a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=uonix-analytics' ) ); ?>">
+						Abrir ferramenta
+					</a>
+				</p>
+			</div>
+
+			<div class="card" style="max-width:none;">
+				<h2>Visibilidade para usuários</h2>
+				<p>Escolhe quais destas ferramentas os demais usuários veem no menu. O menu ksio.dev continua só seu.</p>
+				<p>
+					<a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=ksio-dev-visibilidade' ) ); ?>">
+						Abrir configuração
+					</a>
+				</p>
+			</div>
+
+			<div class="card uonix-license-card" style="max-width:none;">
+				<h2>Licença da Central de Inteligência</h2>
+				<p>
+					<?php
+					echo esc_html(
+						function_exists( 'uonix_intelligence_license_summary' ) && function_exists( 'uonix_intelligence_license_state' )
+							? uonix_intelligence_license_summary( uonix_intelligence_license_state() )
+							: 'O controle de licença não carregou, e o envio automático do relatório e dos alertas está pausado.'
+					);
+					?>
+				</p>
+				<p class="description">Duas camadas, e vale a mais restritiva: as constantes KSIODEV_INTELLIGENCE_STATUS e KSIODEV_INTELLIGENCE_VALID_UNTIL do wp-config.php, e a licença do painel, que só restringe.</p>
+				<p>
+					<a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=uonix-analytics&tab=settings#uonix-license-settings' ) ); ?>">
+						Alterar no painel
 					</a>
 				</p>
 			</div>
@@ -442,7 +451,9 @@ function uox_content_render_result_notice( array $result ) {
 }
 
 function uox_content_render_cleanup_page() {
-	if ( ! current_user_can( 'manage_options' ) ) {
+	// Além da capacidade, a ferramenta precisa estar liberada para quem não é o dono.
+	// A página processa o POST aqui dentro, então esta guarda também cobre o envio.
+	if ( ! current_user_can( 'manage_options' ) || ( function_exists( 'uonix_ksio_can_access_tool' ) && ! uonix_ksio_can_access_tool( 'limpeza' ) ) ) {
 		wp_die( 'Você não tem permissão para acessar esta página.' );
 	}
 

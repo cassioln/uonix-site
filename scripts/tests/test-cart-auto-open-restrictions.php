@@ -85,7 +85,6 @@ curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_TIMEOUT, 3);
 $catalogo_html = curl_exec($ch);
 $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
 
 if ($http_code === 200 && is_string($catalogo_html)) {
     // No catálogo, o script uonix-auto-open-smart NÃO pode estar presente
@@ -101,7 +100,6 @@ if ($http_code === 200 && is_string($catalogo_html)) {
     curl_setopt($ch_prod, CURLOPT_TIMEOUT, 3);
     $prod_html = curl_exec($ch_prod);
     $prod_http_code = curl_getinfo($ch_prod, CURLINFO_HTTP_CODE);
-    curl_close($ch_prod);
 
     if ($prod_http_code === 200 && is_string($prod_html)) {
         test_assert(
