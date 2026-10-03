@@ -250,6 +250,9 @@ jobs:
       - name: Test editor side menu organization
         run: php scripts/tests/test-admin-editor-menus.php
 
+      - name: Test editor marketing menu
+        run: php scripts/tests/test-admin-editor-marketing.php
+
   shell-and-config:
     name: Shell, workflows, Node and Compose
     runs-on: ubuntu-latest
