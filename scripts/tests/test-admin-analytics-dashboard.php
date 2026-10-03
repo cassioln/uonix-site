@@ -614,6 +614,8 @@ foreach ( $unsupported_claim_patterns as $pattern ) {
 echo "ok   Dashboard renderiza cards de KPI, tabelas, atalhos Google e Meta Pixel\n";
 
 // Asserção 4: configuração ausente deve ser exibida de forma fail-closed.
+// A configuração auditada volta ao fim do bloco do container divergente.
+$configuracao_auditada = $GLOBALS['uonix_test_analytics_configuration'];
 $GLOBALS['uonix_test_analytics_configuration'] = false;
 ob_start();
 uonix_render_analytics_dashboard_page();
@@ -634,6 +636,7 @@ $output_with_foreign_gtm = ob_get_clean();
 uonix_dashboard_assert( strpos( $output_with_foreign_gtm, 'AW-6012006717' ) === false, 'Dashboard não atribui conta Ads auditada a container GTM diferente' );
 uonix_dashboard_assert( strpos( $output_with_foreign_gtm, 'Requer validação do GTM' ) !== false, 'Dashboard falha fechado para Ads quando o container GTM não é o auditado' );
 echo "ok   Google Ads falha fechado quando o container GTM diverge do auditado\n";
+$GLOBALS['uonix_test_analytics_configuration'] = $configuracao_auditada;
 
 // Asserção 5: Usuário sem permissão é barrado com wp_die
 $GLOBALS['uonix_test_can_edit'] = false;
@@ -737,6 +740,10 @@ uonix_dashboard_assert( false === stripos( $sem_adopt, 'adopt' ), 'Destinos sem 
 foreach ( array( 'Google Tag Manager', 'Google Analytics 4', 'Google Ads via GTM', 'Meta Pixel', 'Google Search Console', 'Google Looker Studio' ) as $card ) {
 	uonix_dashboard_assert( false !== strpos( $sem_adopt, '<h3>' . $card . '</h3>' ), "Destinos sem AdOpt mantêm o card {$card}" );
 }
+uonix_dashboard_assert( false !== strpos( $com_adopt, 'GTM-P8TR5CCH [Configurado]' ), 'Destinos rodam com o container auditado (configuração restaurada)' );
+foreach ( array( 'com AdOpt' => $com_adopt, 'sem AdOpt' => $sem_adopt ) as $variante => $html ) {
+	uonix_dashboard_assert( false !== strpos( $html, 'AW-6012006717 — Google Tag, vinculador de conversões e remarketing' ), "Destinos {$variante}: card do Ads no estado auditado" );
+}
 uonix_dashboard_assert( 6 === substr_count( $com_adopt, 'class="uonix-status-item"' ), 'Destinos do Insights mostram 6 status' );
 uonix_dashboard_assert( 5 === substr_count( $sem_adopt, 'class="uonix-status-item"' ), 'Destinos sem AdOpt mostram 5 status (GTM, GA4, Ads, Meta, Search Console)' );
 ob_start();
@@ -744,6 +751,33 @@ uonix_analytics_print_dashboard_css();
 $css = (string) ob_get_clean();
 uonix_dashboard_assert( false !== strpos( $css, '.uonix-marketing-card {' ) && false !== strpos( $css, '.uonix-status-strip {' ), 'CSS compartilhado traz as regras dos destinos' );
 echo "ok   Tela de destinos compartilhada com e sem AdOpt\n";
+
+// Escape (issue #395): o ID do GTM é o único valor da tela de destinos que vem
+// da configuração. Com caracteres especiais, ele só pode sair escapado — na
+// página inteira, na tela de destinos do Insights e na da Visão Geral (68).
+$configuracao_original = $GLOBALS['uonix_test_analytics_configuration'];
+$GLOBALS['uonix_test_analytics_configuration'] = array(
+	'gtm_container_id' => 'GTM-<b>"&\'x',
+	'adopt_website_id' => 'adopt-test-id',
+);
+$escapado = 'GTM-&lt;b&gt;&quot;&amp;&#039;x [Configurado]';
+ob_start();
+uonix_render_analytics_dashboard_page();
+$pagina_hostil = (string) ob_get_clean();
+$destinos_hostis = uonix_analytics_destinations_context();
+ob_start();
+uonix_analytics_render_destinations( $destinos_hostis );
+$tela_com_adopt = (string) ob_get_clean();
+ob_start();
+uonix_analytics_render_destinations( $destinos_hostis, false );
+$tela_sem_adopt = (string) ob_get_clean();
+foreach ( array( 'página do Insights' => $pagina_hostil, 'destinos do Insights' => $tela_com_adopt, 'destinos sem AdOpt' => $tela_sem_adopt ) as $onde => $html ) {
+	uonix_dashboard_assert( false === strpos( $html, 'GTM-<b>' ), "{$onde}: ID do GTM sai cru (sem escape)" );
+	// Faixa de status e card do GTM: duas aparições, ambas escapadas.
+	uonix_dashboard_assert( 2 === substr_count( $html, $escapado ), "{$onde}: ID do GTM escapado na faixa de status e no card" );
+}
+$GLOBALS['uonix_test_analytics_configuration'] = $configuracao_original;
+echo "ok   Valor da configuração sai escapado na tela de destinos\n";
 
 if ( 0 !== $failures ) {
 	exit( 1 );
