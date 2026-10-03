@@ -614,6 +614,8 @@ foreach ( $unsupported_claim_patterns as $pattern ) {
 echo "ok   Dashboard renderiza cards de KPI, tabelas, atalhos Google e Meta Pixel\n";
 
 // Asserção 4: configuração ausente deve ser exibida de forma fail-closed.
+// A configuração auditada volta ao fim do bloco do container divergente.
+$configuracao_auditada = $GLOBALS['uonix_test_analytics_configuration'];
 $GLOBALS['uonix_test_analytics_configuration'] = false;
 ob_start();
 uonix_render_analytics_dashboard_page();
@@ -634,6 +636,7 @@ $output_with_foreign_gtm = ob_get_clean();
 uonix_dashboard_assert( strpos( $output_with_foreign_gtm, 'AW-6012006717' ) === false, 'Dashboard não atribui conta Ads auditada a container GTM diferente' );
 uonix_dashboard_assert( strpos( $output_with_foreign_gtm, 'Requer validação do GTM' ) !== false, 'Dashboard falha fechado para Ads quando o container GTM não é o auditado' );
 echo "ok   Google Ads falha fechado quando o container GTM diverge do auditado\n";
+$GLOBALS['uonix_test_analytics_configuration'] = $configuracao_auditada;
 
 // Asserção 5: Usuário sem permissão é barrado com wp_die
 $GLOBALS['uonix_test_can_edit'] = false;
@@ -736,6 +739,10 @@ uonix_dashboard_assert( 6 === substr_count( $sem_adopt, 'class="uonix-marketing-
 uonix_dashboard_assert( false === stripos( $sem_adopt, 'adopt' ), 'Destinos sem AdOpt não citam o AdOpt' );
 foreach ( array( 'Google Tag Manager', 'Google Analytics 4', 'Google Ads via GTM', 'Meta Pixel', 'Google Search Console', 'Google Looker Studio' ) as $card ) {
 	uonix_dashboard_assert( false !== strpos( $sem_adopt, '<h3>' . $card . '</h3>' ), "Destinos sem AdOpt mantêm o card {$card}" );
+}
+uonix_dashboard_assert( false !== strpos( $com_adopt, 'GTM-P8TR5CCH [Configurado]' ), 'Destinos rodam com o container auditado (configuração restaurada)' );
+foreach ( array( 'com AdOpt' => $com_adopt, 'sem AdOpt' => $sem_adopt ) as $variante => $html ) {
+	uonix_dashboard_assert( false !== strpos( $html, 'AW-6012006717 — Google Tag, vinculador de conversões e remarketing' ), "Destinos {$variante}: card do Ads no estado auditado" );
 }
 uonix_dashboard_assert( 6 === substr_count( $com_adopt, 'class="uonix-status-item"' ), 'Destinos do Insights mostram 6 status' );
 uonix_dashboard_assert( 5 === substr_count( $sem_adopt, 'class="uonix-status-item"' ), 'Destinos sem AdOpt mostram 5 status (GTM, GA4, Ads, Meta, Search Console)' );
