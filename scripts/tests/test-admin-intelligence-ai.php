@@ -542,7 +542,7 @@ uox_ai_assert( 0 === strpos( $t_cota, 'Cota diária do Gemini esgotada.' ) && fa
 uox_ai_assert( false === strpos( $textos['quota_exhausted'], 'renova' ) && false === strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', array( 'retry_at' => 'não é data' ) ), 'renova' ), '#384: sem hora válida, a mensagem não inventa uma' );
 $t_adiada_cota = uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'quota_exhausted', 'retry_at' => '2026-10-04T00:00:15+00:00' ) );
 $t_adiada_falh = uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'failures' ) );
-uox_ai_assert( false !== strpos( $t_adiada_cota, 'cota diária do Gemini acabou' ) && false !== strpos( $t_adiada_cota, '04/10 00:00 (UTC)' ) && false !== strpos( $t_adiada_falh, 'duas vezes seguidas' ) && $t_adiada_falh !== $textos['deferred'] && $t_adiada_cota !== $textos['deferred'], '#384: a adiada diz por que parou: cota ou falhas seguidas; obteve ' . $t_adiada_cota . ' / ' . $t_adiada_falh );
+uox_ai_assert( false !== strpos( $t_adiada_cota, 'cota diária do Gemini acabou' ) && false !== strpos( $t_adiada_cota, '04/10 00:00 (UTC)' ) && false !== strpos( $t_adiada_falh, 'falhas seguidas do Gemini' ) && $t_adiada_falh !== $textos['deferred'] && $t_adiada_cota !== $textos['deferred'], '#384: a adiada diz por que parou: cota ou falhas seguidas; obteve ' . $t_adiada_cota . ' / ' . $t_adiada_falh );
 uox_ai_assert( uonix_intelligence_ai_state_message( 'unavailable', array( 'retry_at' => '2026-10-04T00:00:15+00:00' ) ) === $textos['unavailable'], '#384: a hora da renovação só aparece na cota' );
 
 // ---------------------------------------------------------------------------

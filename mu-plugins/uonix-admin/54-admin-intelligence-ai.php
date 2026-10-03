@@ -40,7 +40,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_limits' ) ) {
 		// `head_max`: HEADs por execução do cron. 10 × `head_timeout` (8 s) = 80 s no pior caso,
 		// dentro do `timeout 290` do `crontab` de produção (BAIXO 1 da revisão do PR #373).
 		// `quota_wait`: `retryDelay` de 429, em segundos, acima do qual a cota não volta nesta
-		// execução. Uma janela por minuto nunca pede mais de 60 s (#384).
+		// execução. 60 s é o tamanho de uma janela por minuto; a cota por minuto não foi medida (#384).
 		// `failure_streak`: falhas seguidas que param o cron (#384).
 		return array( 'title' => 60, 'description' => 155, 'per_run' => 5, 'timeout' => 15, 'max_output_tokens' => 1024, 'max_hops' => 3, 'head_max' => 10, 'quota_wait' => 60, 'failure_streak' => 2 );
 	}
@@ -590,8 +590,8 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 	 *
 	 * Depois de um `quota_exhausted`, ou de `failure_streak` falhas seguidas (`unavailable` ou
 	 * `model_missing`), nenhuma chamada começa: as entradas que precisariam de uma ficam
-	 * `deferred`, com o motivo em `reason` (#384). Medido em 2026-10-03: uma rodada com falhas
-	 * gastou a cota do dia. Cada chamada grava o `http` e os `attempts`.
+	 * `deferred`, com o motivo em `reason` (#384). Medido em 2026-10-03 no Radar (63): 1 ok e
+	 * 8 falhas, e a cota do dia acabou na mesma rodada. Cada chamada grava o `http` e os `attempts`.
 	 *
 	 * @param array|null $analysis Resultado de uonix_intelligence_seo_opportunities(), ou null para ler.
 	 * @return array{called: int, skipped: string}
@@ -768,7 +768,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_state_message' ) ) {
 		if ( 'deferred' === $status && 'quota_exhausted' === $motivo ) {
 			$mapa['deferred'] = 'Não pedida: a cota diária do Gemini acabou nesta geração. Nova tentativa na próxima geração diária.';
 		} elseif ( 'deferred' === $status && 'failures' === $motivo ) {
-			$mapa['deferred'] = 'Não pedida: o Gemini falhou duas vezes seguidas nesta geração. Nova tentativa na próxima geração diária.';
+			$mapa['deferred'] = 'Não pedida: falhas seguidas do Gemini nesta geração. Nova tentativa na próxima geração diária.';
 		}
 		$texto = isset( $mapa[ $status ] ) ? $mapa[ $status ] : $mapa['pending'];
 		$volta = isset( $detalhe['retry_at'] ) && is_string( $detalhe['retry_at'] ) ? strtotime( $detalhe['retry_at'] ) : false;

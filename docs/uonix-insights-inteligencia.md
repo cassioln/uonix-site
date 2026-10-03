@@ -398,7 +398,7 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 | `no_page` | Sem página publicada para esta consulta: removida ou redirecionada. |
 | `model_missing` | Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php. |
 | `quota_exhausted` | Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária. Com o `retryDelay` do Gemini, acrescenta "A cota renova por volta de DD/MM HH:MM (UTC)." |
-| `deferred` | Não pedida: a cota diária do Gemini acabou nesta geração (ou: o Gemini falhou duas vezes seguidas nesta geração). Nova tentativa na próxima geração diária. |
+| `deferred` | Não pedida: a cota diária do Gemini acabou nesta geração (ou: falhas seguidas do Gemini nesta geração). Nova tentativa na próxima geração diária. |
 
 No e-mail, todo estado diferente de `ok` só omite a linha.
 
@@ -409,7 +409,7 @@ No e-mail, todo estado diferente de `ok` só omite a linha.
 **Medido em 2026-10-02 e 2026-10-03 (#384):**
 - A chave é do plano gratuito: 429 com `QuotaFailure`, `quotaId` `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limite 20 por dia, somando o Módulo 3 e o Radar, e `RetryInfo.retryDelay` de horas.
 - Às 00:08 UTC, logo depois da renovação, o Radar teve 1 pauta ok e 8 falhas, e às 00:14 a cota do dia já tinha acabado.
-- Por isso o 429 de cota que não volta nesta execução **não é repetido** e vira `quota_exhausted`. Ele é reconhecido por um `quotaId` com `PerDay`, ou por um `retryDelay` acima de 60 s, que é o máximo de uma janela por minuto. O 429 por minuto e o 503 continuam com a nova tentativa.
+- Por isso o 429 de cota que não volta nesta execução **não é repetido** e vira `quota_exhausted`. Ele é reconhecido por um `quotaId` com `PerDay`, ou por um `retryDelay` acima de 60 s, o tamanho de uma janela por minuto. Essa segunda regra é inferência: nenhum 429 por minuto foi medido. O 429 por minuto e o 503 continuam com a nova tentativa.
 - `gemini-2.5-flash` deu 404 para chave nova. Por isso existe o estado `model_missing`.
 
 **O que não entrega:**

@@ -601,7 +601,7 @@ $html_cota = uox_render_radar( $estado_radar( array(
 ) ) );
 uox_assert( 2 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã.' ) && 1 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã. A cota renova por volta de 04/10 00:00 (UTC).' ), '#384 Radar: a cota esgotada diz o motivo, e a hora só quando ela é válida' );
 uox_assert( false !== strpos( $html_cota, 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã. A cota renova por volta de 04/10 00:00 (UTC).' ), '#384 Radar: a adiada pela cota diz o motivo e a hora' );
-uox_assert( false !== strpos( $html_cota, 'Não pedida: o Gemini falhou duas vezes seguidas nesta execução. O Radar tenta de novo amanhã.' ), '#384 Radar: a adiada pelas falhas diz o motivo' );
+uox_assert( false !== strpos( $html_cota, 'Não pedida: falhas seguidas do Gemini nesta execução. O Radar tenta de novo amanhã.' ), '#384 Radar: a adiada pelas falhas diz o motivo' );
 uox_assert( false === strpos( $html_cota, 'Pauta não gerada.' ), '#384 Radar: nenhum dos quatro cai no texto genérico' );
 uox_assert( 2 === substr_count( $html_cota, 'A cota renova por volta de' ), '#384 Radar: hora inválida no cache não vira hora no painel' );
 uox_assert( false !== strpos( $html_r, 'Endereço antigo /teste-de-arrancamento redireciona para cá.' ) && false !== strpos( $html_r, 'post.php?post=15&action=edit' ), 'Radar: 301 mostra o destino e leva ao editor dele' );

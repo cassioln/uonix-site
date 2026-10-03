@@ -389,7 +389,7 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_pauta_cell' ) ) {
 			} elseif ( $cota ) {
 				$texto = 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã.';
 			} elseif ( 'deferred' === $status && 'failures' === $motivo ) {
-				$texto = 'Não pedida: o Gemini falhou duas vezes seguidas nesta execução. O Radar tenta de novo amanhã.';
+				$texto = 'Não pedida: falhas seguidas do Gemini nesta execução. O Radar tenta de novo amanhã.';
 			} else {
 				$texto = 'Pauta não gerada. O Radar tenta de novo amanhã.';
 			}
