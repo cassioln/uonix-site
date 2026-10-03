@@ -113,7 +113,7 @@ function uonix_ksio_can_configure_insights() {
 // importa que o painel exiba cada estado e escape o texto.
 $GLOBALS['uox_ia'] = array();
 function uonix_intelligence_ai_suggestion_for( $row ) { return $GLOBALS['uox_ia'][ $row['query'] ?? '' ] ?? array( 'status' => 'pending' ); }
-function uonix_intelligence_ai_state_message( $status ) { return 'ESTADO-IA:' . $status; }
+function uonix_intelligence_ai_state_message( $status, $detalhe = array() ) { return 'ESTADO-IA:' . $status . ( isset( $detalhe['retry_at'] ) ? '@' . $detalhe['retry_at'] : '' ); }
 function uonix_intelligence_ai_page_post_id( $path ) { return '/produtos/olhal/' === $path ? 10 : 0; }
 function home_url( $p = '' ) { return 'https://uonix.com.br' . $p; }
 function get_edit_post_link( $id ) { return 'https://uonix.com.br/wp-admin/post.php?post=' . (int) $id . '&action=edit'; }
@@ -198,6 +198,7 @@ $snap_ia['search_console']['query_pages'] = array( 'olhal inox' => '/produtos/ol
 $GLOBALS['uox_ia'] = array(
 	'olhal inox' => array( 'status' => 'ok', 'title' => 'Olhal <script>x</script>', 'description' => 'Descrição sugerida', 'current_title' => 'Título atual', 'current_description' => '', 'generated_at' => '2026-10-01T09:00:00+00:00', 'post_id' => 10 ),
 	'sem pagina' => array( 'status' => 'no_page' ),
+	'categoria olhal' => array( 'status' => 'quota_exhausted', 'retry_at' => '2026-10-04T00:00:15+00:00' ),
 	'andaime antigo' => array( 'status' => 'pending', 'object' => array( 'type' => 'post', 'id' => 16 ), 'redirected_to' => '/servico/projeto-andaime-fachadeiro/' ),
 	'teste predial' => array( 'status' => 'ok', 'title' => 'Ensaio de Arrancamento | Uônix', 'description' => 'd', 'current_title' => 'Ensaio de Arrancamento com Laudo | Uônix', 'current_description' => '', 'generated_at' => '', 'post_id' => 15, 'object' => array( 'type' => 'post', 'id' => 15 ), 'redirected_to' => '/servico/ensaios-de-arrancamento/' ),
 );
@@ -208,6 +209,7 @@ uox_assert( false !== strpos( $html_ia, 'href="https://uonix.com.br/produtos/olh
 uox_assert( false !== strpos( $html_ia, 'Título atual' ) && false !== strpos( $html_ia, 'Descrição sugerida' ) && false !== strpos( $html_ia, 'revise antes de publicar' ), 'Sugestão mostra atual e sugerido, com o aviso de revisão' );
 uox_assert( false === strpos( $html_ia, '<script>x' ) && false !== strpos( $html_ia, '&lt;script&gt;' ), 'Texto vindo da IA sai escapado' );
 uox_assert( false !== strpos( $html_ia, 'ESTADO-IA:no_page' ) && false !== strpos( $html_ia, 'Não identificada' ), 'Sem página: estado da IA e Página Alvo não identificada' );
+uox_assert( false !== strpos( $html_ia, 'ESTADO-IA:quota_exhausted@2026-10-04T00:00:15+00:00' ), '#384: o painel passa ao texto do estado o que o leitor devolveu, com a hora da renovação' );
 uox_assert( false !== strpos( $html_ia, 'term.php?taxonomy=product_cat&tag_ID=34' ) && false !== strpos( $html_ia, '>Editar categoria de produtos<' ), '#344: página de categoria leva ao editor do termo' );
 uox_assert( in_array( array( 'edit_term', 34 ), $GLOBALS['uox_caps'], true ), '#344: o link do editor do termo confere edit_term sobre o termo 34 (BAIXO 3 da revisão do PR #372)' );
 uox_assert( false !== strpos( $html_ia, '→ <a href="https://uonix.com.br/servico/projeto-andaime-fachadeiro/">' ) && false !== strpos( $html_ia, 'post.php?post=16&action=edit' ), '#343: fora do estado ok (pending), o painel também mostra o destino e o link de edição (BAIXO 3 da revisão do PR #373)' );
@@ -590,6 +592,18 @@ uox_assert( false !== strpos( $html_r, 'Post novo' ) && false !== strpos( $html_
 uox_assert( false !== strpos( $html_r, 'Reforçar esta página' ) && false !== strpos( $html_r, 'Teste de arrancamento &lt;script&gt;' ) && false === strpos( $html_r, '<script>' ) && false !== strpos( $html_r, 'Aprofundar o laudo &amp; a norma.' ), 'Radar: reforço com o texto escapado' );
 uox_assert( false !== strpos( $html_r, 'barra &lt;b&gt;roscada&lt;/b&gt;' ) && false === strpos( $html_r, 'barra <b>roscada</b>' ), 'Radar: consulta escapada em todo lugar, inclusive no rótulo da caixa' );
 uox_assert( false !== strpos( $html_r, 'Sem a chave do Gemini: a candidata aparece sem pauta.' ) && false !== strpos( $html_r, 'Pauta não gerada. O Radar tenta de novo amanhã.' ), 'Radar: mensagem de cada estado da pauta' );
+// #384: a cota esgotada tem texto próprio, com a hora da renovação; a adiada diz por que parou.
+$html_cota = uox_render_radar( $estado_radar( array(
+	uox_dash_radar_cand( 'cota um', array( 'status' => 'quota_exhausted', 'http' => 429, 'retry_at' => '2026-10-04T00:00:15+00:00' ) ),
+	uox_dash_radar_cand( 'cota dois', array( 'status' => 'deferred', 'reason' => 'quota_exhausted', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ),
+	uox_dash_radar_cand( 'falhas', array( 'status' => 'deferred', 'reason' => 'failures' ) ),
+	uox_dash_radar_cand( 'cota sem hora', array( 'status' => 'quota_exhausted', 'retry_at' => 'não é data' ) ),
+) ) );
+uox_assert( 2 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã.' ) && 1 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã. A cota renova por volta de 04/10 00:00 (UTC).' ), '#384 Radar: a cota esgotada diz o motivo, e a hora só quando ela é válida' );
+uox_assert( false !== strpos( $html_cota, 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã. A cota renova por volta de 04/10 00:00 (UTC).' ), '#384 Radar: a adiada pela cota diz o motivo e a hora' );
+uox_assert( false !== strpos( $html_cota, 'Não pedida: falhas seguidas do Gemini nesta execução. O Radar tenta de novo amanhã.' ), '#384 Radar: a adiada pelas falhas diz o motivo' );
+uox_assert( false === strpos( $html_cota, 'Pauta não gerada.' ), '#384 Radar: nenhum dos quatro cai no texto genérico' );
+uox_assert( 2 === substr_count( $html_cota, 'A cota renova por volta de' ), '#384 Radar: hora inválida no cache não vira hora no painel' );
 uox_assert( false !== strpos( $html_r, 'Endereço antigo /teste-de-arrancamento redireciona para cá.' ) && false !== strpos( $html_r, 'post.php?post=15&action=edit' ), 'Radar: 301 mostra o destino e leva ao editor dele' );
 uox_assert( false !== strpos( $html_r, 'Sem página do site para esta consulta.' ), 'Radar: sem página líder' );
 uox_assert( 1 === substr_count( $html_r, 'value="uonix_intelligence_radar_dismiss"' ) && 4 === substr_count( $html_r, 'name="uonix_radar_keys[]"' ) && 4 === substr_count( $html_r, 'name="uonix_radar_key"' ) && false !== strpos( $html_r, 'Descartar selecionadas' ) && false !== strpos( $html_r, 'id="uonix-radar-select-all"' ) && in_array( 'uonix_intelligence_radar_dismiss', $GLOBALS['uox_nonce_actions'], true ), 'Radar: um formulário, uma caixa por linha, selecionar todas, Descartar selecionadas e o Descartar de cada linha' );

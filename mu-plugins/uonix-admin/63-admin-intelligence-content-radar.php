@@ -583,6 +583,10 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 	 *   chamada ao Gemini começa: as restantes ficam `deferred` (lição da #335).
 	 * - Página que o resolvedor não sabe dizer (null) reaproveita a de ontem; sem ela, a pauta
 	 *   fica `deferred`, sem chamada.
+	 * - Depois de um `quota_exhausted`, ou de `failure_streak` falhas seguidas (`unavailable` ou
+	 *   `model_missing`), nenhuma chamada começa: as restantes ficam `deferred`, com o motivo em
+	 *   `reason`. Medido em 2026-10-03, às 00:08 UTC: 1 pauta ok e 8 falhas, e a cota do dia
+	 *   acabou na mesma rodada (#384). Cada chamada grava o `http` e os `attempts`.
 	 *
 	 * Tudo é injetável por `$args`, como em `uonix_intelligence_executive_collect()`:
 	 * `today` (Y-m-d), `now` (ISO 8601), `config`, `query` (buscador do Search Console),
@@ -653,6 +657,10 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 		$heads     = (int) $regras['head_max'];
 		$chamadas  = 0;
 		$gravadas  = array();
+		$limites   = function_exists( 'uonix_intelligence_ai_limits' ) ? uonix_intelligence_ai_limits() : array();
+		$teto      = isset( $limites['failure_streak'] ) ? max( 1, (int) $limites['failure_streak'] ) : 2;
+		$parada    = array();
+		$seguidas  = 0;
 		// Um endereço é resolvido uma vez por execução, e o "não sei" também é lembrado. Medido
 		// em 2026-10-02: duas candidatas com a mesma página líder gastavam o orçamento de HEAD
 		// em dobro, e as últimas da lista nunca eram conferidas.
@@ -690,6 +698,8 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 				$c['ai'] = array( 'status' => 'not_configured' );
 			} elseif ( $adiar || (float) call_user_func( $relogio ) - $inicio > (float) $regras['ai_budget'] ) {
 				$c['ai'] = array( 'status' => 'deferred', 'input_hash' => $hash, 'attempted_at' => $agora );
+			} elseif ( array() !== $parada ) {
+				$c['ai'] = array( 'status' => 'deferred' ) + $parada + array( 'input_hash' => $hash, 'attempted_at' => $agora );
 			} else {
 				if ( $chamadas > 0 && $pausa > 0 ) {
 					sleep( $pausa );
@@ -702,6 +712,26 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 					'attempted_at' => $agora,
 					'model'        => $modelo,
 				);
+				foreach ( array( 'http', 'attempts' ) as $campo ) {
+					if ( is_array( $resposta ) && isset( $resposta[ $campo ] ) && is_int( $resposta[ $campo ] ) ) {
+						$ai[ $campo ] = $resposta[ $campo ];
+					}
+				}
+				if ( 'quota_exhausted' === $ai['status'] ) {
+					$parada = array( 'reason' => 'quota_exhausted' );
+					$espera = is_array( $resposta ) && isset( $resposta['retry_after'] ) && is_int( $resposta['retry_after'] ) ? $resposta['retry_after'] : 0;
+					if ( $espera > 0 && false !== strtotime( $agora ) ) {
+						$ai['retry_at']     = gmdate( 'c', strtotime( $agora ) + $espera );
+						$parada['retry_at'] = $ai['retry_at'];
+					}
+				} elseif ( in_array( $ai['status'], array( 'unavailable', 'model_missing' ), true ) ) {
+					++$seguidas;
+					if ( $seguidas >= $teto ) {
+						$parada = array( 'reason' => 'failures' );
+					}
+				} else {
+					$seguidas = 0;
+				}
 				if ( 'ok' === $ai['status'] ) {
 					$pauta = uonix_intelligence_radar_validate( $resposta['text'] ?? null, '' !== $c['page']['title'] );
 					if ( null === $pauta ) {

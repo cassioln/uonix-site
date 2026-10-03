@@ -402,6 +402,65 @@ $g = get_option( $opt );
 uox_rd_assert( 'unavailable' === $g['candidates'][0]['ai']['status'] && ! isset( $g['candidates'][0]['ai']['suggestion'] ), 'Gemini fora: status unavailable, sem pauta' );
 uox_rd_assert( 6 === uonix_intelligence_radar_run( $base )['called'], 'No dia seguinte, quem falhou é tentado de novo' );
 
+// #384: cota diária esgotada e falhas seguidas param as chamadas da execução.
+$roteiro    = array();
+$roteirizado = static function ( $corpo, $modelo, $pausa ) use ( &$roteiro, &$pedidos_ia, $gerador ) {
+	$passo = array_shift( $roteiro );
+	if ( 'ok' === $passo ) {
+		$r = $gerador( $corpo, $modelo, $pausa );
+		return $r + array( 'http' => 200, 'attempts' => 1 );
+	}
+	$t            = $corpo['contents'][0]['parts'][0]['text'];
+	$pedidos_ia[] = json_decode( substr( $t, (int) strrpos( $t, "\n" ) + 1 ), true )['consulta'];
+	return $passo;
+};
+$cota_dia = array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1, 'retry_after' => 27223 );
+$fora     = array( 'status' => 'unavailable', 'http' => 503, 'attempts' => 2 );
+$GLOBALS['uox_options'] = array();
+$pedidos_ia             = array();
+$roteiro                = array( 'ok', $cota_dia, 'ok', 'ok', 'ok', 'ok' );
+$rq                     = uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$aq                     = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( 2 === $rq['called'] && 2 === count( $pedidos_ia ) && array( 'ok', 'quota_exhausted', 'deferred', 'deferred', 'deferred', 'deferred' ) === array_column( $aq, 'status' ), '#384: depois da cota diária, nenhuma chamada: as restantes ficam deferred; obteve ' . var_export( array_column( $aq, 'status' ), true ) );
+uox_rd_assert( 200 === ( $aq[0]['http'] ?? null ) && 1 === ( $aq[0]['attempts'] ?? null ) && 429 === ( $aq[1]['http'] ?? null ) && '2026-10-02T10:33:43+00:00' === ( $aq[1]['retry_at'] ?? null ), '#384: o HTTP de cada chamada e a hora da renovação (agora + retryDelay) ficam gravados; obteve ' . var_export( array_slice( $aq, 0, 2 ), true ) );
+$adiadas_ok = true;
+foreach ( array_slice( $aq, 2 ) as $a ) {
+	$adiadas_ok = $adiadas_ok && 'quota_exhausted' === ( $a['reason'] ?? '' ) && '2026-10-02T10:33:43+00:00' === ( $a['retry_at'] ?? null ) && ! isset( $a['http'] ) && 64 === strlen( $a['input_hash'] ?? '' );
+}
+uox_rd_assert( $adiadas_ok, '#384: as adiadas pela cota dizem o motivo e a hora, sem HTTP; obteve ' . var_export( array_slice( $aq, 2 ), true ) );
+uox_rd_assert( 5 === uonix_intelligence_radar_run( $base )['called'], '#384: no dia seguinte, a da cota e as adiadas são chamadas; a ok fica' );
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1 ) );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$sem_hora = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( 'quota_exhausted' === $sem_hora[0]['status'] && ! isset( $sem_hora[0]['retry_at'] ) && ! isset( $sem_hora[1]['retry_at'] ) && 'deferred' === $sem_hora[1]['status'], '#384: sem retryDelay, nenhuma hora inventada' );
+
+$cenarios_rd = array(
+	'503 em todas'               => array( array( $fora, $fora, $fora, $fora, $fora, $fora ), 2, array( 'unavailable', 'unavailable', 'deferred', 'deferred', 'deferred', 'deferred' ) ),
+	'falha, ok, falha, ok…'      => array( array( $fora, 'ok', $fora, 'ok', 'ok', 'ok' ), 6, array( 'unavailable', 'ok', 'unavailable', 'ok', 'ok', 'ok' ) ),
+	'a recusa interrompe a sequência' => array( array( $fora, array( 'status' => 'ok', 'http' => 200, 'text' => '{"caminho":"x"}' ), $fora, 'ok', 'ok', 'ok' ), 6, array( 'unavailable', 'rejected', 'unavailable', 'ok', 'ok', 'ok' ) ),
+	'resposta sem status conta como falha' => array( array( null, 'lixo', 'ok', 'ok', 'ok', 'ok' ), 2, array( 'unavailable', 'unavailable', 'deferred', 'deferred', 'deferred', 'deferred' ) ),
+	'404 do modelo em todas'     => array( array( array( 'status' => 'model_missing', 'http' => 404, 'attempts' => 1 ), array( 'status' => 'model_missing', 'http' => 404, 'attempts' => 1 ), 'ok', 'ok', 'ok', 'ok' ), 2, array( 'model_missing', 'model_missing', 'deferred', 'deferred', 'deferred', 'deferred' ) ),
+);
+foreach ( $cenarios_rd as $caso => $c ) {
+	$GLOBALS['uox_options'] = array();
+	$pedidos_ia             = array();
+	$roteiro                = $c[0];
+	$rf                     = uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+	$st                     = array_column( array_column( get_option( $opt )['candidates'], 'ai' ), 'status' );
+	uox_rd_assert( $c[1] === $rf['called'] && $c[2] === $st, "#384 {$caso}: {$c[1]} chamada(s), estados " . implode( ',', $c[2] ) . '; obteve ' . $rf['called'] . ', ' . implode( ',', $st ) );
+}
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( $fora, $fora );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$af = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( 503 === ( $af[0]['http'] ?? null ) && 2 === ( $af[0]['attempts'] ?? null ) && 'failures' === ( $af[2]['reason'] ?? '' ) && ! isset( $af[2]['retry_at'] ), '#384: a falha grava o HTTP 503 e os pedidos; a adiada diz o motivo, sem hora' );
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( array( 'status' => 'unavailable', 'http' => '503', 'attempts' => array( 2 ) ) );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$am = get_option( $opt )['candidates'][0]['ai'];
+uox_rd_assert( ! isset( $am['http'] ) && ! isset( $am['attempts'] ), '#384: HTTP e pedidos que não são inteiros não são gravados' );
+
 $GLOBALS['uox_options'] = array();
 uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => static function () { return array( 'status' => 'ok', 'text' => '{"caminho":"x"}' ); } ) ) );
 uox_rd_assert( 'rejected' === get_option( $opt )['candidates'][0]['ai']['status'], 'Resposta fora do formato vira rejected' );
