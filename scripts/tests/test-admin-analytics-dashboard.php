@@ -745,6 +745,33 @@ $css = (string) ob_get_clean();
 uonix_dashboard_assert( false !== strpos( $css, '.uonix-marketing-card {' ) && false !== strpos( $css, '.uonix-status-strip {' ), 'CSS compartilhado traz as regras dos destinos' );
 echo "ok   Tela de destinos compartilhada com e sem AdOpt\n";
 
+// Escape (issue #395): o ID do GTM é o único valor da tela de destinos que vem
+// da configuração. Com caracteres especiais, ele só pode sair escapado — na
+// página inteira, na tela de destinos do Insights e na da Visão Geral (68).
+$configuracao_original = $GLOBALS['uonix_test_analytics_configuration'];
+$GLOBALS['uonix_test_analytics_configuration'] = array(
+	'gtm_container_id' => 'GTM-<b>"&\'x',
+	'adopt_website_id' => 'adopt-test-id',
+);
+$escapado = 'GTM-&lt;b&gt;&quot;&amp;&#039;x [Configurado]';
+ob_start();
+uonix_render_analytics_dashboard_page();
+$pagina_hostil = (string) ob_get_clean();
+$destinos_hostis = uonix_analytics_destinations_context();
+ob_start();
+uonix_analytics_render_destinations( $destinos_hostis );
+$tela_com_adopt = (string) ob_get_clean();
+ob_start();
+uonix_analytics_render_destinations( $destinos_hostis, false );
+$tela_sem_adopt = (string) ob_get_clean();
+foreach ( array( 'página do Insights' => $pagina_hostil, 'destinos do Insights' => $tela_com_adopt, 'destinos sem AdOpt' => $tela_sem_adopt ) as $onde => $html ) {
+	uonix_dashboard_assert( false === strpos( $html, 'GTM-<b>' ), "{$onde}: ID do GTM sai cru (sem escape)" );
+	// Faixa de status e card do GTM: duas aparições, ambas escapadas.
+	uonix_dashboard_assert( 2 === substr_count( $html, $escapado ), "{$onde}: ID do GTM escapado na faixa de status e no card" );
+}
+$GLOBALS['uonix_test_analytics_configuration'] = $configuracao_original;
+echo "ok   Valor da configuração sai escapado na tela de destinos\n";
+
 if ( 0 !== $failures ) {
 	exit( 1 );
 }
