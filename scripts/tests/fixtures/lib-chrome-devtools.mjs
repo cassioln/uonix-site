@@ -68,10 +68,16 @@ class DevTools {
 /**
  * Abre o Chrome e devolve a página controlada.
  *
+ * `aoIniciar` recebe, logo depois do spawn, um encerramento SÍNCRONO (mata o
+ * grupo de processos e apaga o diretório temporário). O tempo-limite de quem
+ * chama deve usá-lo: se algo travar ainda dentro desta função, o `fechar`
+ * devolvido nunca chega, e o Chrome (detached) ficaria órfão.
+ *
  * @param {string} prefixo Prefixo do diretório temporário (perfil e arquivos).
+ * @param {(encerrar: () => void) => void} [aoIniciar]
  * @returns {Promise<{dt: DevTools, tmp: string, versao: string, fechar: () => Promise<void>}>}
  */
-export async function abrirChrome(prefixo) {
+export async function abrirChrome(prefixo, aoIniciar = () => {}) {
   const chromeBin = acharChrome();
   if (!chromeBin) {
     throw new Error('Chrome não encontrado — defina CHROME_BIN (o teste não pula sem navegador)');
@@ -116,6 +122,11 @@ export async function abrirChrome(prefixo) {
     }
   };
 
+  aoIniciar(() => {
+    matar();
+    limparTmp();
+  });
+
   let ws;
   let enderecoNavegador;
   const fechar = async () => {
@@ -128,9 +139,11 @@ export async function abrirChrome(prefixo) {
       if (enderecoNavegador) {
         try {
           const navegador = new WebSocket(enderecoNavegador);
+          // Com prazo: um Chrome travado não pode segurar o fechamento.
           await new Promise((resolver, rejeitar) => {
             navegador.addEventListener('open', resolver, { once: true });
             navegador.addEventListener('error', rejeitar, { once: true });
+            setTimeout(() => rejeitar(new Error('DevTools não abriu em 3s')), 3000);
           });
           navegador.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
         } catch {

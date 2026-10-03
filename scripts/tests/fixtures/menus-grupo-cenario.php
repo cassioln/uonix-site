@@ -3,7 +3,12 @@
  * Gera o menu lateral do editor para o teste de navegador do clique dos menus
  * de grupo (scripts/tests/test-admin-editor-menus-navegador.mjs).
  *
- * Uso: php menus-grupo-cenario.php <normal|folded>
+ * Uso: php menus-grupo-cenario.php <normal|folded|unfold|atual>
+ *
+ * normal: corpo com auto-fold, como o núcleo põe por padrão; folded: menu
+ * recolhido; unfold: usuário com o menu fixado aberto (sem auto-fold,
+ * wp-admin/admin-header.php); atual: "Seções do Site" é o pai da tela atual e
+ * já começa aberto, com as classes que o núcleo dá ao menu atual.
  *
  * As classes dos itens vêm do código real (uonix_admin_editor_menus_marca_grupos),
  * montadas como o núcleo faz em wp-admin/menu-header.php: a mesma string de
@@ -40,7 +45,7 @@ function uonix_admin_editor_politicas_slug_pai() {
 require_once dirname( __DIR__, 3 ) . '/mu-plugins/uonix-admin/67-admin-editor-menus.php';
 
 $cenario = $argv[1] ?? '';
-if ( ! in_array( $cenario, array( 'normal', 'folded' ), true ) ) {
+if ( ! in_array( $cenario, array( 'normal', 'folded', 'unfold', 'atual' ), true ) ) {
 	fwrite( STDERR, "cenário desconhecido: {$cenario}\n" );
 	exit( 1 );
 }
@@ -59,7 +64,13 @@ $submenus = array(
 	57 => array( 'Política de Privacidade', 'Política de Cookies', 'Termos de Uso', 'Adopt' ),
 );
 
-$corpo = 'wp-admin wp-core-ui js auto-fold' . ( 'folded' === $cenario ? ' folded' : '' );
+$corpo = 'wp-admin wp-core-ui js' . ( 'unfold' === $cenario ? '' : ' auto-fold' ) . ( 'folded' === $cenario ? ' folded' : '' );
+
+// Classes do menu pai como em _wp_menu_output (menu-header.php): o atual ganha
+// wp-has-current-submenu wp-menu-open; os demais, wp-not-current-submenu.
+function uox_cenario_classes( $item, $atual ) {
+	return 'wp-has-submenu ' . ( $atual ? 'wp-has-current-submenu wp-menu-open' : 'wp-not-current-submenu' ) . ' ' . $item[4];
+}
 ?>
 <!doctype html>
 <html lang="pt-BR">
@@ -132,12 +143,13 @@ $corpo = 'wp-admin wp-core-ui js auto-fold' . ( 'folded' === $cenario ? ' folded
 <body class="<?php echo $corpo; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>">
 <ul id="adminmenu">
 <?php foreach ( $GLOBALS['menu'] as $posicao => $item ) : ?>
-	<?php $classes = 'wp-has-submenu wp-not-current-submenu ' . $item[4]; ?>
+	<?php $classes = uox_cenario_classes( $item, 'atual' === $cenario && 56 === $posicao ); ?>
 	<li class="<?php echo $classes; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>" id="<?php echo $item[5]; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>">
-		<a href="destino.html" class="<?php echo $classes; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>" aria-haspopup="true"><div class="wp-menu-name"><?php echo $item[0]; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></div></a>
+		<a href="destino.html" class="<?php echo $classes; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>" data-ariahaspopup><div class="wp-menu-image dashicons-before <?php echo $item[6]; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>"><br></div><div class="wp-menu-name"><?php echo $item[0]; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></div></a>
 		<ul class="wp-submenu wp-submenu-wrap">
-		<?php foreach ( $submenus[ $posicao ] as $titulo ) : ?>
-			<li><a href="destino.html"><?php echo $titulo; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></a></li>
+			<li class="wp-submenu-head" aria-hidden="true"><?php echo $item[0]; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></li>
+		<?php foreach ( $submenus[ $posicao ] as $indice => $titulo ) : ?>
+			<li<?php echo 0 === $indice ? ' class="wp-first-item"' : ''; ?>><a href="destino.html"<?php echo 0 === $indice ? ' class="wp-first-item"' : ''; ?>><?php echo $titulo; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></a></li>
 		<?php endforeach; ?>
 		</ul>
 	</li>
