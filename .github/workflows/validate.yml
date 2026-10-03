@@ -343,6 +343,9 @@ jobs:
       - name: Test clone dump content
         run: bash scripts/tests/test-clone-dump-content.sh
 
+      - name: Test clone mirror perishable metadata
+        run: bash scripts/tests/test-clone-mirror-perishable-metadata.sh
+
       - name: Test clone URL replacement
         run: bash scripts/tests/test-clone-url-replacement.sh
 
