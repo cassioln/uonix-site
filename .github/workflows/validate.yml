@@ -511,3 +511,8 @@ jobs:
         # O PHP gera o HTML real dos cenários; o Node 22 fala o protocolo DevTools
         # pelo WebSocket nativo, sem dependências de npm.
         run: node scripts/tests/test-admin-atualizacoes-sistemicas-navegador.mjs
+
+      - name: Test editor group menus click in a real browser
+        # Mesmo modelo: HTML real do PHP (classes e script do 67), clique de mouse
+        # do Chrome e posição do submenu medida no layout (issue #392).
+        run: node scripts/tests/test-admin-editor-menus-navegador.mjs
