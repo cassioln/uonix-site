@@ -179,6 +179,9 @@ jobs:
       - name: Test fixed product short description without block editor API
         run: php scripts/tests/test-product-short-description-no-block-api.php
 
+      - name: Test fixed blog post excerpt layout
+        run: php scripts/tests/test-blog-resumo-fixo-layout.php
+
       - name: Test variation technical sheet
         run: php scripts/tests/test-variation-technical-sheet.php
 
