@@ -63,7 +63,9 @@ As branches de deploy continuam sendo `master` para `prod`, `qa` para QA e
 para usar a implementação canônica da ferramenta, mas não publica `master` no
 destino nem troca sua branch de deploy.
 
-O Compose local usa MariaDB 10.11, WordPress/PHP 8.2 e Mailpit. O site responde na
+O Compose local usa MariaDB 10.11, WordPress/PHP 8.5 e Mailpit. A versão menor do
+PHP acompanha a de produção, medida em 2026-10-05 como 8.5.7 tanto no CLI quanto na
+web (cabeçalho `x-powered-by`), para que um ensaio local prove compatibilidade. O site responde na
 porta `8080`; SMTP e interface do Mailpit usam `1025` e `8025`. O procedimento de
 recriação do ambiente está em [local/README.md](../local/README.md).
 
