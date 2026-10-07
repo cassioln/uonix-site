@@ -102,11 +102,16 @@ O comando faz, nesta ordem:
 4. **Job remoto** (`remoto-aplicar.sh`). Ele é enviado ao servidor e roda **desacoplado da conexão** (`nohup`, com log e status em `_uonix-deploy-backups/plugins-<data>/`):
    - **preflight:** produção precisa estar nas versões "de" do lock; se divergir, sai 30 sem alterar nada;
    - backup das pastas dos plugins;
-   - modo de manutenção e atualização na ordem do lock, com a versão instalada conferida;
-   - smoke depois de cada crítico;
-   - limpeza de cache.
+   - modo de manutenção e atualização em **etapas**: os plugins fora da camada crítica formam um lote, e cada crítico é uma etapa sozinho; a versão instalada é conferida, e o `wp wc update` também;
+   - smoke depois de cada etapa e depois da limpeza de cache.
 
-   Se uma etapa falhar, **a pasta daquele plugin é restaurada sem apagar nada**: a quebrada vai para `descartado-<slug>` no backup.
+   **Se uma etapa falhar:**
+   1. os plugins **dela** são restaurados, sem apagar nada; a pasta quebrada vai para `descartado-<slug>` no backup;
+   2. se o site seguir vermelho, **tudo o que foi aplicado nesta execução** é restaurado, em ordem reversa.
+
+   Os plugins de etapas anteriores que passaram no smoke ficam aplicados.
+
+   **A restauração devolve as pastas, não o banco.** Migrações de banco (`wp wc update`, upgrades de plugin) não são desfeitas. Se for preciso voltar o banco, o dump está em `_uonix-deploy-backups/plugins-<data>/db-prod-<data>.sql.gz`. Restaurar esse dump desfaz também o que foi gravado depois dele, como solicitações de orçamento, e por isso é uma decisão manual.
 5. **Smoke de produção** do Mac (`smoke_producao.py`), só leitura, com os mesmos marcadores do ensaio e as páginas extras do ensaio (produto, post, serviço).
 6. **Registro** em `aplicacao-<backup>.json`, ao lado do lock.
 
@@ -114,10 +119,15 @@ Aplicar o mesmo lock duas vezes é seguro: na segunda vez, produção já está 
 
 | Saída | Significado |
 |---|---|
-| `0` | Aplicado, com o smoke de produção verde. |
-| `20` | Parou numa etapa e restaurou a pasta do plugin que falhou, ou aplicou mas o smoke de produção ficou vermelho. O backup é indicado. |
+| `0` | Aplicado, com o smoke do job e o smoke de produção do Mac verdes. |
+| `20` | Parou numa etapa, restaurou, e o site ficou **verde** de novo, nos dois smokes. |
 | `30` | Recusado sem alterar nada: lock, confirmação, janela, backup, drift ou site já falhando antes. |
-| `40` | A conexão caiu com o job em andamento. **Não reexecute:** rode `estado-producao`. |
+| `40` | O job não terminou normalmente: a conexão caiu ou ele foi interrompido por sinal. **Não reexecute:** rode `estado-producao`. |
+| `50` | **Intervenção necessária:** uma restauração falhou, o site seguiu vermelho depois de restaurar tudo, ou o smoke do Mac ficou vermelho depois de o job dizer que estava verde. Os caminhos do backup são impressos. |
+
+O smoke de produção do Mac roda depois de **toda** execução que mudou produção (0, 20 e 50). Ele é a segunda opinião e não depende de o job ter avaliado certo.
+
+Se o job receber TERM, INT ou HUP, ele desliga a manutenção e grava o status 143, que o Mac reporta como 40. **SIGKILL não pode ser tratado**, e o matador de processos da hospedagem compartilhada usa SIGKILL. Nesse caso o status fica ausente e o `.maintenance` pode ficar no lugar; o WordPress o ignora depois de 10 minutos. `estado-producao` mostra as duas coisas.
 
 ### Depois de uma queda: `estado-producao`
 

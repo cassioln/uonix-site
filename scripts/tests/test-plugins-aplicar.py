@@ -60,6 +60,11 @@ invalido(lock(itens=[{"slug": "../wp-content", "tipo": "plugin", "de": "1", "par
 invalido(lock(itens=[{"slug": "", "tipo": "plugin", "de": "1", "para": "2", "camada": "comum", "aplicacao": "lote"}]), "slug inválido")
 invalido(lock(itens=[{"slug": "kadence", "tipo": "tema", "de": "1", "para": "2", "camada": "critica", "aplicacao": "um_por_vez"}]), "só plugins")
 invalido(lock(itens=[{"slug": "x", "tipo": "plugin", "de": "", "para": "2", "camada": "comum", "aplicacao": "lote"}]), "ausente")
+invalido(lock(itens=[{"slug": "x", "tipo": "plugin", "de": "1.0", "para": "2.0 critica", "camada": "comum", "aplicacao": "lote"}]), "inválida")
+invalido(lock(itens=[{"slug": "x", "tipo": "plugin", "de": "1.0", "para": "2.0\nwoocommerce 1 2 comum", "camada": "comum", "aplicacao": "lote"}]), "inválida")
+invalido(lock(itens=[{"slug": "x", "tipo": "plugin", "de": "1.0", "para": "2.0", "camada": "comum", "aplicacao": "tudo"}]), "desconhecida")
+invalido(lock(gerado="2026-10-09T10:00:00"), "no futuro")
+invalido(lock(gerado="2026-10-07T18:55:00+00:00"), "fuso")
 
 
 # 2. smoke_producao.py com HTTP falso
@@ -109,6 +114,18 @@ with tempfile.TemporaryDirectory() as tmp:
     r = subprocess.run(["bash", script, "aplicar-producao", f"--lock={arq}", "--confirmacao=x"],
                        capture_output=True, text=True, env=env)
     checar(r.returncode == 30 and "sha256 não confere" in r.stderr, f"lock adulterado deveria sair 30 (rc={r.returncode})")
+
+# 4. saida_final(): o smoke do Mac é a segunda opinião
+def saida_final(status, smoke):
+    r = subprocess.run(["bash", "-c", f'UONIX_ATUALIZAR_BIBLIOTECA=1 source "$0"; saida_final {status} {smoke}',
+                        str(RAIZ / "scripts/plugins/atualizar.sh")], capture_output=True, text=True)
+    return r.stdout.strip()
+
+
+for status, smoke, esperado in (("0", "0", "0"), ("0", "20", "50"), ("20", "0", "20"), ("20", "20", "50"),
+                                ("50", "0", "50"), ("30", "", "30"), ("143", "", "40"), ("", "", "40"), ("ausente", "", "40")):
+    obtido = saida_final(status or "''", smoke or "''")
+    checar(obtido == esperado, f"saida_final({status!r}, {smoke!r}) = {obtido!r}, esperado {esperado!r}")
 
 if falhas:
     print("FAIL:")

@@ -9,7 +9,9 @@ Recusa o lock quando:
   é sinal de que o ensaio deve ser refeito;
 - algum item tem código que não carrega no local (EXCECOES_ATIVACAO do ensaio):
   ele nunca foi exercitado e não pode ir para produção por esta via;
-- algum slug é inválido (vazio, com "/", "." ou "..").
+- algum slug é inválido (vazio, com "/", "." ou "..");
+- alguma versão tem espaço ou formato inválido, ou `aplicacao` é desconhecida;
+- `gerado_em` está no futuro ou traz fuso horário.
 
 Saída padrão, quando válido: a 1ª linha é o sha256 curto (12 caracteres, usado
 na frase de confirmação); as seguintes são "slug de para camada", na ordem do
@@ -32,6 +34,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from ensaio import EXCECOES_ATIVACAO  # noqa: E402
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+# Versão sem espaço nem quebra de linha: a lista do job é "slug de para camada"
+# separada por espaço, e um espaço em `para` deslocaria a camada.
+VERSAO = re.compile(r"^[0-9][0-9A-Za-z.+_-]*$")
+APLICACOES = {"lote", "um_por_vez"}
 
 
 class LockInvalido(ValueError):
@@ -49,9 +55,13 @@ def validar(lock: dict, agora: dt.datetime, max_horas: float) -> tuple[str, list
         raise LockInvalido(f"resultado do ensaio é {dados.get('resultado')!r}, não 'verde'")
     try:
         gerado = dt.datetime.fromisoformat(dados["gerado_em"])
-    except (KeyError, ValueError):
+    except (KeyError, ValueError, TypeError):
         raise LockInvalido("lock sem gerado_em válido")
+    if gerado.tzinfo is not None:
+        raise LockInvalido("gerado_em com fuso horário; o ensaio grava hora local sem fuso")
     idade = (agora - gerado).total_seconds() / 3600
+    if idade < -0.1:
+        raise LockInvalido(f"gerado_em no futuro ({dados['gerado_em']})")
     if idade > max_horas:
         raise LockInvalido(f"lock tem {idade:.0f} h (máximo {max_horas:.0f} h); refaça o ensaio")
     itens = dados.get("itens") or []
@@ -66,8 +76,10 @@ def validar(lock: dict, agora: dt.datetime, max_horas: float) -> tuple[str, list
             raise LockInvalido(f"{slug}: só plugins são aplicados por esta via (tipo {i.get('tipo')!r})")
         if slug in EXCECOES_ATIVACAO:
             raise LockInvalido(f"{slug}: o código não carrega no ensaio local; não pode ser aplicado por esta via")
-        if not i.get("de") or not i.get("para"):
-            raise LockInvalido(f"{slug}: versão de origem ou destino ausente")
+        if not VERSAO.match(str(i.get("de", ""))) or not VERSAO.match(str(i.get("para", ""))):
+            raise LockInvalido(f"{slug}: versão de origem ou destino ausente ou inválida")
+        if i.get("aplicacao") not in APLICACOES:
+            raise LockInvalido(f"{slug}: aplicacao {i.get('aplicacao')!r} desconhecida")
         camada = "critica" if i.get("aplicacao") == "um_por_vez" else i.get("camada", "comum")
         linhas.append(f"{slug} {i['de']} {i['para']} {camada}")
     return sha[:12], linhas

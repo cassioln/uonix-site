@@ -24,11 +24,14 @@ case "$1 $2" in
   "plugin get") [ -f "$p/$3/VERSION" ] && cat "$p/$3/VERSION" || exit 1 ;;
   "plugin update")
     [ "${FAKE_FALHA_UPDATE:-}" = "$3" ] && exit 1
+    [ "${FAKE_DORME:-}" = "$3" ] && sleep 6
+    [ "${FAKE_QUEBRA_PERMANENTE:-}" = "$3" ] && : > "$doc/QUEBRADO"
     v="${4#--version=}"
     [ "${FAKE_VERSAO_ERRADA:-}" = "$3" ] && v="$v.9"
     printf '%s\n' "$v" > "$p/$3/VERSION" ;;
   "maintenance-mode activate") : > "$doc/.maintenance" ;;
   "maintenance-mode deactivate") [ -f "$doc/.maintenance" ] && mv "$doc/.maintenance" "$doc/.maintenance-desligado" ; true ;;
+  "wc update") [ -n "${FAKE_FALHA_WC:-}" ] && exit 1 ; true ;;
   *) : ;;
 esac
 PHP
@@ -36,7 +39,8 @@ chmod +x "$TMP_DIR/php"
 
 preparar() {
   doc="$TMP_DIR/doc-$1"; bk="$TMP_DIR/bk-$1"
-  mkdir -p "$doc/wp-content/plugins/a" "$doc/wp-content/plugins/b" "$doc/wp-content/plugins/c"
+  mkdir -p "$doc/wp-content/plugins/a" "$doc/wp-content/plugins/b" "$doc/wp-content/plugins/c" "$doc/wp-content/plugins/woocommerce"
+  printf '1.0\n' > "$doc/wp-content/plugins/woocommerce/VERSION"
   printf '1.0\n' > "$doc/wp-content/plugins/a/VERSION"
   printf '1.0\n' > "$doc/wp-content/plugins/b/VERSION"
   printf '1.0\n' > "$doc/wp-content/plugins/c/VERSION"
@@ -78,7 +82,7 @@ rodar "$LISTA" UONIX_SMOKE_CMD="! grep -qx 2.0 $doc/wp-content/plugins/b/VERSION
 [ "$(cat "$bk/descartado-b/VERSION")" = 2.0 ] || fail "smoke: pasta quebrada não foi guardada em descartado-b"
 [ "$(versao a)" = 1.1 ] || fail "smoke: a, aplicado antes, deveria continuar 1.1"
 [ ! -e "$doc/.maintenance" ] || fail "smoke: site ficou em manutenção"
-grep -q 'PARADO EM: b (smoke)' "$bk.log" || fail "smoke: relatório sem o ponto de parada"
+grep -q 'PARADO EM: etapa b (smoke); restaurado e site verde' "$bk.log" || fail "smoke: relatório sem o ponto de parada"
 
 # 4. versão instalada diferente do lock
 preparar versao; rodar "$LISTA" UONIX_SMOKE_CMD=true FAKE_VERSAO_ERRADA=a
@@ -98,5 +102,38 @@ preparar barra; rodar $'../a 1.0 1.1 comum' UONIX_SMOKE_CMD=true
 # 7. site já falhando antes: 30, nada alterado
 preparar antes; rodar "$LISTA" UONIX_SMOKE_CMD=false
 [ "$rc" = 30 ] && [ "$(versao a)" = 1.0 ] || fail "site falhando antes saiu $rc"
+
+# 8. culpado no LOTE: o lote reprova no smoke dele; só o lote é restaurado; b nunca é tocado
+preparar lote; rodar "$LISTA" UONIX_SMOKE_CMD="! grep -qx 1.1 $doc/wp-content/plugins/a/VERSION"
+[ "$rc" = 20 ] && [ "$(versao a)" = 1.0 ] && [ "$(versao b)" = 1.0 ] || fail "culpado no lote saiu $rc (a=$(versao a) b=$(versao b)): $(cat "$bk.log")"
+grep -q 'PARADO EM: etapa a (smoke)' "$bk.log" || fail "lote: relatório deveria apontar a etapa do lote"
+
+# 9. restauração falhando (tar corrompido) -> 50, nunca 20
+preparar tarruim
+rodar "$LISTA" UONIX_SMOKE_CMD="if grep -qx 2.0 $doc/wp-content/plugins/b/VERSION; then : > $bk/plugin-b.tar.gz; false; else true; fi"
+[ "$rc" = 50 ] && [ "$(cat "$bk/aplicar.status")" = 50 ] || fail "restauração falha deveria sair 50 (saiu $rc): $(cat "$bk.log")"
+grep -q 'INTERVENÇÃO NECESSÁRIA' "$bk.log" || fail "50 sem o aviso de intervenção"
+[ ! -e "$doc/.maintenance" ] || fail "50: site ficou em manutenção"
+
+# 10. site segue vermelho mesmo depois de restaurar tudo -> 50
+preparar permanente
+rodar "$LISTA" UONIX_SMOKE_CMD="[ ! -e $doc/QUEBRADO ]" FAKE_QUEBRA_PERMANENTE=b
+[ "$rc" = 50 ] && [ "$(versao a)" = 1.0 ] && [ "$(versao b)" = 1.0 ] || fail "vermelho persistente deveria sair 50 com tudo restaurado (saiu $rc, a=$(versao a) b=$(versao b))"
+grep -q 'restaurando TUDO' "$bk.log" || fail "vermelho persistente deveria restaurar tudo o que foi aplicado"
+
+# 11. wp wc update falhando -> restaura o woocommerce, 20
+preparar wc; rodar $'woocommerce 1.0 1.1 critica' UONIX_SMOKE_CMD=true FAKE_FALHA_WC=1
+[ "$rc" = 20 ] && [ "$(versao woocommerce)" = 1.0 ] || fail "wc update falho saiu $rc (wc=$(versao woocommerce))"
+
+# 12. SIGTERM no meio do update: manutenção desligada e status 143 gravado
+preparar sinal
+( UONIX_SMOKE_CMD=true FAKE_DORME=b bash "$JOB" "$doc" "$TMP_DIR/php" /fake/wp-cli.phar "$bk" "$LISTA" > "$bk.log" 2>&1 ) &
+job=$!
+for _ in $(seq 1 30); do grep -q '== b 1.0 -> 2.0' "$bk.log" 2>/dev/null && break; sleep 0.2; done
+sleep 0.5
+pkill -TERM -f "$JOB $doc" || true
+wait "$job" || true
+[ "$(cat "$bk/aplicar.status" 2>/dev/null)" = 143 ] || fail "SIGTERM deveria gravar status 143 (status: $(cat "$bk/aplicar.status" 2>/dev/null || echo ausente)): $(cat "$bk.log")"
+[ ! -e "$doc/.maintenance" ] || fail "SIGTERM deixou o site em manutenção"
 
 printf 'OK: job remoto aplica, recusa drift, restaura sem apagar e nunca deixa manutenção ligada\n'

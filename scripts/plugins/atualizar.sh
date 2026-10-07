@@ -22,8 +22,10 @@
 #       Aplica em PRODUÇÃO as versões exatas de um lock verde do ensaio:
 #       valida o lock, sonda a janela SSH, faz backup do banco, envia o job
 #       (remoto-aplicar.sh) e o executa desacoplado da conexão, e roda o smoke
-#       de produção. Saída 0 aplicado; 20 parou e restaurou; 30 recusado sem
-#       alterar nada; 40 conexão perdida com o job em andamento (ver estado).
+#       de produção. Saída 0 aplicado; 20 parou, restaurou e o site ficou
+#       verde; 30 recusado sem alterar nada; 40 job sem fim conhecido (conexão
+#       perdida ou sinal: ver estado); 50 INTERVENÇÃO: restauração incompleta
+#       ou site vermelho.
 #
 #   atualizar.sh estado-producao [--backup=ID]
 #       Só leitura: manutenção, job vivo, status e fim do log do último job
@@ -242,29 +244,56 @@ echo \"@@STATUS=\$(cat ${q_bk}/aplicar.status 2>/dev/null || echo ausente)\""
   uonix_transport_close_master prod
   status="$(sed -n 's/^@@STATUS=//p' <<<"$saida" | tail -1)"
   case "$status" in
-    0|20|30) ;;
+    0|20|30|50) ;;
     *)
-      echo "Erro: a conexão caiu antes do fim do job (status '${status:-desconhecido}')." >&2
+      # Sem status (conexão caiu) ou 143 (job interrompido por sinal): o estado
+      # das pastas é incerto. Nunca reexecutar às cegas.
+      echo "Erro: o job não terminou normalmente (status '${status:-desconhecido}')." >&2
       echo "  Não reexecute. Leia o estado: atualizar.sh estado-producao --backup=${stamp}" >&2
-      registrar_aplicacao "$dir" "$stamp" "$sha" "conexao-perdida" ""
+      registrar_aplicacao "$dir" "$stamp" "$sha" "${status:-conexao-perdida}" ""
       return 40 ;;
   esac
+  if [ "$status" = 30 ]; then
+    registrar_aplicacao "$dir" "$stamp" "$sha" "$status" ""
+    return 30
+  fi
 
-  local smoke_rc="" extras=()
-  if [ "$status" = 0 ]; then
-    echo "== smoke de produção (só leitura)"
-    while IFS= read -r caminho; do extras+=("--extra=${caminho}"); done < <(
-      python3 -c 'import json,sys; [print(k[len("pagina "):]) for k in json.load(open(sys.argv[1])) if k.startswith("pagina ")]' \
-        "${dir}/smoke-antes.json" 2>/dev/null | grep -vxE '/|/blog/|/servicos/|/produtos/|/cotacao/|/sitemap_index.xml|/wp-json/|/wp-login.php' || true)
-    smoke_rc=0
-    python3 "${ROOT_DIR}/scripts/plugins/smoke_producao.py" --saida "${dir}/smoke-producao.json" ${extras[@]+"${extras[@]}"} || smoke_rc=$?
-  fi
+  # 0, 20 e 50 mudaram produção: o smoke do Mac roda em todos. Ele é a segunda
+  # opinião sobre o site, e não depende do job ter avaliado certo.
+  local smoke_rc=0 extras=()
+  echo "== smoke de produção (só leitura)"
+  while IFS= read -r caminho; do extras+=("--extra=${caminho}"); done < <(
+    python3 -c 'import json,sys; [print(k[len("pagina "):]) for k in json.load(open(sys.argv[1])) if k.startswith("pagina ")]' \
+      "${dir}/smoke-antes.json" 2>/dev/null | grep -vxE '/|/blog/|/servicos/|/produtos/|/cotacao/|/sitemap_index.xml|/wp-json/|/wp-login.php' || true)
+  python3 "${ROOT_DIR}/scripts/plugins/smoke_producao.py" --saida "${dir}/smoke-producao-${stamp}.json" ${extras[@]+"${extras[@]}"} || smoke_rc=$?
   registrar_aplicacao "$dir" "$stamp" "$sha" "$status" "$smoke_rc"
-  if [ "$status" = 0 ] && [ "$smoke_rc" != 0 ]; then
-    echo "ATENÇÃO: aplicado, mas o smoke de produção ficou vermelho. Backup: ${stamp}" >&2
-    return 20
-  fi
-  return "$status"
+
+  local final
+  final="$(saida_final "$status" "$smoke_rc")"
+  case "$final" in
+    0) echo "== APLICADO: ${stamp}" ;;
+    20) echo "== PARADO e restaurado; site verde. Backup: ${stamp}" ;;
+    50)
+      {
+        echo "!! INTERVENÇÃO NECESSÁRIA (job ${status}, smoke de produção ${smoke_rc})."
+        echo "   Estado: atualizar.sh estado-producao --backup=${stamp}"
+        echo "   Pastas: ${bk}/plugin-<slug>.tar.gz (e descartado-<slug>); banco: ${bk}/db-prod-${stamp}.sql.gz"
+      } >&2 ;;
+  esac
+  return "$final"
+}
+
+# Saída final a partir do status do job e do smoke de produção do Mac. O smoke
+# do Mac é a segunda opinião: vermelho depois de 0 ou 20 é intervenção (50),
+# porque o job avaliou o site como verde e não estava.
+saida_final() {
+  local status="$1" smoke="$2"
+  case "$status" in
+    0|20) if [ "$smoke" = 0 ]; then printf '%s\n' "$status"; else printf '50\n'; fi ;;
+    50) printf '50\n' ;;
+    30) printf '30\n' ;;
+    *) printf '40\n' ;;
+  esac
 }
 
 registrar_aplicacao() {
@@ -282,7 +311,7 @@ cmd_estado_producao() {
       *) echo "Erro: argumento desconhecido: $arg" >&2; return 2 ;;
     esac
   done
-  case "$backup" in *[!A-Za-z0-9._-]*) echo "Erro: backup inválido" >&2; return 2 ;; esac
+  case "$backup" in *[!A-Za-z0-9._-]*|.|..|*..*) echo "Erro: backup inválido" >&2; return 2 ;; esac
   carregar_env
   # shellcheck source=scripts/lib/ssh-transport.sh
   source "${ROOT_DIR}/scripts/lib/ssh-transport.sh"
@@ -314,4 +343,5 @@ main() {
   esac
 }
 
-main "$@"
+# Com UONIX_ATUALIZAR_BIBLIOTECA=1, só define as funções (testes).
+[ "${UONIX_ATUALIZAR_BIBLIOTECA:-}" = 1 ] || main "$@"
