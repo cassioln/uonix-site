@@ -425,6 +425,9 @@ jobs:
       - name: Test plugins policy and contracts
         run: python3 scripts/tests/test-plugins-politica-contratos.py
 
+      - name: Test plugins local rehearsal
+        run: python3 scripts/tests/test-plugins-ensaio.py
+
       - name: Test production rollback exit code without mutation
         run: bash scripts/tests/test-production-rollback-no-mutation.sh
 

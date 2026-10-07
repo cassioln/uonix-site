@@ -26,6 +26,60 @@ O comando faz uma única conexão SSH, cortada em 150 s (`UONIX_PLUGINS_LIMITE_S
 
 Para reclassificar um JSON já salvo, sem conectar: `atualizar.sh inventario --entrada=tmp/plugins/<arquivo>.json`.
 
+## Ensaio local — muta só o ambiente local
+
+Requer a janela SSH aberta (para o inventário e o clone) e o ambiente local no ar. Rode do checkout principal:
+
+```bash
+bash scripts/plugins/atualizar.sh ensaiar
+```
+
+O comando faz, nesta ordem:
+
+1. **Inventário** de produção, que é só leitura.
+2. **Plano** (`plano.py`): para cada pendência, decide se entra e em que ordem, ou por que fica de fora. Fica de fora:
+   - versão lançada há menos dias que a quarentena da camada;
+   - major na camada crítica;
+   - camada `decisao_pendente` ou `propria`;
+   - versão que exige PHP ou WordPress acima do site.
+
+   A quarentena é **dispensada quando o changelog do intervalo cita correção de segurança**. A data e o changelog vêm da API do wordpress.org.
+3. **Clone `prod → local`.** Com `--reusar-clone`, reaproveita um clone desta esteira de menos de 24 h (`tmp/plugins/ultimo-clone.json`).
+4. **Alinhamento:** versões e ativação do local iguais às de produção. O clone exclui alguns plugins e preserva a lista de ativos do destino. O `fluent-smtp` fica inativo no local, que usa o Mailpit.
+5. **Backup** do banco local por `mariadb-dump`, validado pelo número de tabelas e pela linha `Dump completed`.
+6. **Smoke antes**, como linha de base. Depois, a atualização para as **versões exatas** do plano:
+   - lote (acoplada e comum) primeiro;
+   - a camada crítica um por vez, com o WooCommerce por último;
+   - `wp wc update` depois do WooCommerce;
+   - contratos estáticos do que mudou e smoke depois de cada etapa.
+7. **Lock** (`lock.json`), gravado **só quando tudo fica verde**, com as versões que a entrega 3 vai aplicar em produção.
+
+Tudo fica em `tmp/plugins/ensaio-<data>/`: inventário, plano, backup, smokes, relatório e lock.
+
+| Saída | Significado |
+|---|---|
+| `0` | Verde, com o lock gravado, ou nada a ensaiar. |
+| `20` | Regressão: um check verde na linha de base ficou vermelho. Também sai assim com contrato quebrado ou atualização que falhou. O relatório diz em qual etapa. |
+| `30` | Falha de preparação: clone, alinhamento, backup ou WP-CLI. Nada foi atualizado. |
+
+Opções: `--aceitar-major=a,b`, `--dispensar-quarentena=a,b`, `--reusar-clone`, `--entrada=<inventário salvo>`.
+
+### O que o smoke confere
+
+A lista sai de `ensaio.py`, na função `smoke()`:
+
+- **Páginas:** home, blog, serviços, produtos, cotação, sitemap, REST, login, um produto, um post e uma página de serviço (do Pods). Cada uma precisa responder 200, sem erro fatal.
+- **Megamenu:** itens e widgets nas colunas.
+- **SEO:** `meta description` e `ld+json`.
+- **Cotação:** adicionar um produto pela Store API.
+- **Contratos em execução:** post type `servicos` e rotas da Store API.
+- **WooCommerce:** banco migrado.
+- **Log:** nenhum `PHP Fatal` novo no `debug.log`.
+
+Cada marcador foi **medido desligando o plugin** no local, e o check precisa ficar vermelho nesse caso. Exemplo: o texto `mega-menu-item` sozinho não serve, porque o nosso CSS inline o repete. Sem o Max Mega Menu, sobravam 71 ocorrências. Ao mudar um marcador, repita a medição.
+
+O WP-CLI do ensaio roda dentro do container do site, no mesmo PHP que serve as páginas, a partir de um `wp-cli.phar` conferido pelo sha512 publicado.
+
 ## Camadas — `ops/plugins/politica.json`
 
 | Camada | Quando | Aplicação | Quarentena | Major |
