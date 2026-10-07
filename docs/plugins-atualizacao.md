@@ -44,8 +44,8 @@ O comando faz, nesta ordem:
    - versão que exige PHP ou WordPress acima do site.
 
    A quarentena é **dispensada quando o changelog do intervalo cita correção de segurança**. A data e o changelog vêm da API do wordpress.org.
-3. **Clone `prod → local`.** Com `--reusar-clone`, reaproveita um clone desta esteira de menos de 24 h (`tmp/plugins/ultimo-clone.json`).
-4. **Alinhamento:** versões e ativação do local iguais às de produção. O clone exclui alguns plugins e preserva a lista de ativos do destino. O `fluent-smtp` fica inativo no local, que usa o Mailpit.
+3. **Clone `prod → local`.** Com `--reusar-clone`, reaproveita um clone desta esteira de menos de 24 h que **nenhum ensaio tocou** (`tmp/plugins/ultimo-clone.json`). O marcador é apagado antes da primeira atualização: depois dela o banco local já está migrado, e um novo ensaio sobre ele não testaria a migração a partir do estado de produção.
+4. **Alinhamento:** versões e ativação do local iguais às de produção. O clone exclui alguns plugins e preserva a lista de ativos do destino. Plugins das camadas `decisao_pendente` e `propria` não são alinhados por versão. O `fluent-smtp` fica inativo no local, que usa o Mailpit. Por isso ele **nunca entra no lock**: o código dele não carrega no ensaio e precisa ser ensaiado à parte.
 5. **Backup** do banco local por `mariadb-dump`, validado pelo número de tabelas e pela linha `Dump completed`.
 6. **Smoke antes**, como linha de base. Depois, a atualização para as **versões exatas** do plano:
    - lote (acoplada e comum) primeiro;
@@ -59,7 +59,7 @@ Tudo fica em `tmp/plugins/ensaio-<data>/`: inventário, plano, backup, smokes, r
 | Saída | Significado |
 |---|---|
 | `0` | Verde, com o lock gravado, ou nada a ensaiar. |
-| `20` | Regressão: um check verde na linha de base ficou vermelho. Também sai assim com contrato quebrado ou atualização que falhou. O relatório diz em qual etapa. |
+| `20` | Regressão: um check verde na linha de base ficou vermelho ou sumiu. Também sai assim com contrato quebrado, atualização que falhou ou instalou versão diferente da do plano, ou erro durante uma etapa (por exemplo, um plugin que derruba o WordPress). O relatório diz em qual etapa. |
 | `30` | Falha de preparação: clone, alinhamento, backup ou WP-CLI. Nada foi atualizado. |
 
 Opções: `--aceitar-major=a,b`, `--dispensar-quarentena=a,b`, `--reusar-clone`, `--entrada=<inventário salvo>`.

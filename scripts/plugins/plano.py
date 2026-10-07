@@ -39,7 +39,16 @@ import urllib.request
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 POLITICA_PADRAO = RAIZ / "ops" / "plugins" / "politica.json"
 API = "https://api.wordpress.org/plugins/info/1.2/"
-SEGURANCA = re.compile(r"secur|cve-|\bxss\b|csrf|vulnerab|privilege escalation|sql injection|sanitiz|escap", re.I)
+# Termos inequívocos. Palavras soltas como "escape", "secure" e "sanitize"
+# dispensariam a quarentena de um crítico por engano ("Escape key closes modal",
+# "Secure cookie option added").
+SEGURANCA = re.compile(
+    r"\bsecurity\b|\bcve-\d{4}|\bxss\b|\bcsrf\b|vulnerab|privilege escalation|sql injection"
+    r"|\bunauthori[sz]ed\b|permission checks?\b|output escaping|\bunescaped html\b", re.I)
+# Cabeçalho de versão: "= 1.2.3 =", "#### 1.2.3", "[4.66.2] 25.09.2026",
+# "1.2.3 - 2026-01-01", "v.1.2.3", "Version: 1.2.4", "Release 1.2.4".
+CABECALHO = re.compile(r"^[=#*\[\s]*(?:v\.?\s*|version:?\s*|release\s+)?(\d+(?:\.\d+){1,3})(?![\d.])", re.I)
+DATA_SOLTA = re.compile(r"^\s*\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\s*$")
 RISCO = re.compile(r"breaking|\bremoved\b|deprecat|database (update|migration)|requires php|drop(ped)? support", re.I)
 ORDEM_CAMADAS = {"acoplada": 0, "comum": 1, "critica": 2}
 
@@ -82,8 +91,11 @@ def trecho_changelog(info: dict | None, de: str, para: str) -> list[str] | None:
     linhas = [l.strip() for l in html.unescape(re.sub(r"<[^>]+>", "\n", bruto)).splitlines() if l.strip()]
     trecho, dentro, achou = [], False, False
     for linha in linhas:
-        m = re.match(r"^[=#*\[\s]*v?(?:ersion\s*)?(\d+(?:\.\d+){1,3})\b", linha, re.I)
-        if m and len(linha) < 60:
+        m = None if DATA_SOLTA.match(linha) else CABECALHO.match(linha)
+        # Linha que é cabeçalho marcado (=, #, [) pode ser longa (data e título);
+        # linha comum só conta se for curta, para não confundir "1.2 compat" no meio.
+        marcado = linha.lstrip()[:1] in {"=", "#", "["}
+        if m and (marcado or len(linha) < 60):
             dentro = versao(de) < versao(m.group(1)) <= versao(para)
             achou = achou or dentro
             continue

@@ -46,14 +46,20 @@ uso() {
   awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"
 }
 
-ler_producao() {
-  local destino="$1"
+# Credenciais do checkout principal, para a leitura de produção e para o clone
+# do ensaio (o clone roda de ROOT_DIR, que numa worktree não tem .env).
+carregar_env() {
   if [ -z "${LOCAWEB_DOCUMENT_ROOT:-}" ] && [ -f "${CHECKOUT}/.env" ]; then
     set -a
     # shellcheck source=/dev/null
     source "${CHECKOUT}/.env"
     set +a
   fi
+}
+
+ler_producao() {
+  local destino="$1"
+  carregar_env
   : "${LOCAWEB_DOCUMENT_ROOT:?Defina LOCAWEB_DOCUMENT_ROOT (rode do checkout principal, que tem o .env)}"
   : "${LOCAWEB_PHP_BIN:?Defina LOCAWEB_PHP_BIN}"
   : "${LOCAWEB_WP_BIN:?Defina LOCAWEB_WP_BIN}"
@@ -135,6 +141,7 @@ cmd_ensaiar() {
       *) echo "Erro: argumento desconhecido: $arg" >&2; return 2 ;;
     esac
   done
+  carregar_env
   local dir
   dir="${SAIDA_DIR}/ensaio-$(date -u +%Y%m%d-%H%M%S)"
   mkdir -p "$dir"

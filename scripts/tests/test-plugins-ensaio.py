@@ -97,6 +97,31 @@ base = {"a": {"ok": True, "detalhe": ""}, "b": {"ok": False, "detalhe": "já rui
 reg, pre = ensaio.comparar(base, {"a": {"ok": False, "detalhe": "quebrou"}, "b": {"ok": False, "detalhe": "já ruim"},
                                   "c": {"ok": False, "detalhe": "novo"}})
 checar(reg == ["a: quebrou", "c: novo"] and pre == ["b: já ruim"], f"comparar() errado: {reg} {pre}")
+reg, _ = ensaio.comparar({"banco do WooCommerce migrado": {"ok": True, "detalhe": ""}}, {})
+checar(reg == ["banco do WooCommerce migrado: check sumiu da execução atual"], f"check sumido não virou regressão: {reg}")
+
+# M3: falsos positivos de segurança e cabeçalhos que não fecham a seção.
+def cl(t):
+    return {"version": "1.2.5", "last_updated": "2026-10-01", "sections": {"changelog": t}}
+casos_cl = {
+    "v.1.2.3 fecha a seção": ("<p>v.1.2.5</p><p>Fix a</p><p>v.1.2.3</p><p>CSRF old</p>", False),
+    "Release fecha a seção": ("<p>Release 1.2.5</p><p>Fix a</p><p>Release 1.2.3</p><p>CSRF old</p>", False),
+    "cabeçalho longo fecha": ("<h4>= 1.2.5 - 2026-10-01 - uma descrição bem longa do lançamento aqui =</h4><p>Fix</p>"
+                              "<h4>= 1.2.3 - 2026-01-01 - outra descrição bem longa do lançamento aqui =</h4><p>xss old</p>", False),
+    "Version: com dois-pontos": ("<p>Version: 1.2.5</p><p>Security: fix</p><p>Version: 1.2.3</p>", True),
+    "data solta não fecha": ("<p>[1.2.5] 25.09.2026</p><p>25.09.2026</p><p>Security fix</p><p>[1.2.3]</p>", True),
+    "palavras ambíguas": ("<p>= 1.2.5 =</p><p>Escape key closes modal</p><p>Secure cookie option added</p>"
+                          "<p>Sanitize filename</p><p>= 1.2.3 =</p>", False),
+}
+for nome, (texto, esperado) in casos_cl.items():
+    trecho = plano.trecho_changelog(cl(texto), "1.2.3", "1.2.5")
+    seg = None if trecho is None else any(plano.SEGURANCA.search(l) for l in trecho)
+    checar(seg == esperado, f"changelog [{nome}]: segurança={seg}, esperado {esperado} ({trecho})")
+for real in ("* Security: Improved output escaping for block attributes.",
+             "Improved plugin security with additional input validation and output escaping hardening.",
+             "Hardens input sanitization and permission checks across field settings, blocks, and entries",
+             "Fixed unescaped HTML loophole in the file path placeholder UI", "Security fix: Thanks to crow and Wordfence."):
+    checar(bool(plano.SEGURANCA.search(real)), f"correção de segurança real não reconhecida: {real}")
 
 
 # --------------------------------------------------------------------------- #
@@ -142,6 +167,9 @@ class FakeLocal:
 
 
 def smoke_fake(local, alvo, contratos):
+    local.smokes = getattr(local, "smokes", 0) + 1
+    if getattr(local, "explode_no_smoke", None) == local.smokes:
+        raise RuntimeError("wp eval falhou (exit 255): PHP Fatal")
     quebrado = local.quebra_em and local.instalados.get(local.quebra_em[0]) == local.quebra_em[1]
     return {"home megamenu": {"ok": not quebrado, "detalhe": "0" if quebrado else "66"},
             "pagina /x": {"ok": False, "detalhe": "http 404"}}  # pré-existente: não pode reprovar
@@ -171,9 +199,14 @@ contratos_ok = lambda slugs: (True, "ok")  # noqa: E731
 with tempfile.TemporaryDirectory() as tmp:
     saida = pathlib.Path(tmp)
 
-    # 3a. verde: lock com as versões exatas; fluent-smtp segue inativo; tema próprio intocado.
+    # 3a. verde: lock com as versões exatas; fluent-smtp segue inativo; tema próprio intocado;
+    # o clone é invalidado antes da primeira atualização (A1).
     loc = FakeLocal()
-    r = executar(loc, plano_exec, inv_prod, {"kadence-blocks": {}}, contratos_ok, saida, None, {"kadence-child"})
+    invalidar = lambda: loc.chamadas.append(("INVALIDAR-CLONE",))  # noqa: E731
+    r = executar(loc, plano_exec, inv_prod, {"kadence-blocks": {}}, contratos_ok, saida, None, {"kadence-child"}, invalidar)
+    pos_inv = loc.chamadas.index(("INVALIDAR-CLONE",)) if ("INVALIDAR-CLONE",) in loc.chamadas else 10**6
+    pos_upd = next((n for n, c in enumerate(loc.chamadas) if len(c) > 1 and c[1] == "update"), -1)
+    checar(0 <= pos_inv < pos_upd, f"clone deveria ser invalidado antes da 1ª atualização ({pos_inv} vs {pos_upd})")
     lock = json.loads((saida / "lock.json").read_text()) if (saida / "lock.json").exists() else {}
     checar(r == 0, f"caminho verde saiu {r}")
     checar([(i["slug"], i["para"]) for i in lock.get("itens", [])] == [("google-site-kit", "1.189.0"), ("kadence-blocks", "3.7.12.1")],
@@ -197,9 +230,11 @@ with tempfile.TemporaryDirectory() as tmp:
     checar(r == 20 and "contrato quebrado em kadence-blocks" in (saida / "relatorio.md").read_text(),
            f"contrato quebrado deveria sair 20 (saiu {r})")
 
-    # 3d. backup inválido: saída 30, nada atualizado.
+    # 3d. backup inválido: saída 30, nada atualizado, clone segue reutilizável.
     loc = FakeLocal(falha_backup=True)
-    r = executar(loc, plano_exec, inv_prod, {}, contratos_ok, saida, None, {"kadence-child"})
+    r = executar(loc, plano_exec, inv_prod, {}, contratos_ok, saida, None, {"kadence-child"},
+                 lambda: loc.chamadas.append(("INVALIDAR-CLONE",)))
+    checar(("INVALIDAR-CLONE",) not in loc.chamadas, "falha de preparação não deveria invalidar o clone")
     checar(r == 30 and not any(c[1] == "update" for c in loc.chamadas if len(c) > 1),
            f"backup inválido deveria sair 30 sem atualizar nada (saiu {r})")
 
@@ -250,6 +285,50 @@ with tempfile.TemporaryDirectory() as tmp:
         else:
             checar(not destino.exists(), f"ler_saida [{nome}]: gravou inventário apesar da falha")
             checar(bruto.exists() and bruto.read_text() == texto, f"ler_saida [{nome}]: saída bruta não foi guardada")
+
+with tempfile.TemporaryDirectory() as tmp:
+    saida = pathlib.Path(tmp)
+
+    # A2: fluent-smtp ativo em produção, inativo no local: fora do lock.
+    plano_smtp = {"itens": plano_exec["itens"] + [
+        {"slug": "fluent-smtp", "tipo": "plugin", "de": "2.4.1", "para": "2.4.2", "camada": "critica", "aplicacao": "um_por_vez"}],
+        "fora": []}
+    loc = FakeLocal()
+    r = executar(loc, plano_smtp, inv_prod, {}, contratos_ok, saida, None, {"kadence-child"})
+    lock = json.loads((saida / "lock.json").read_text())
+    checar(r == 0 and "fluent-smtp" not in [i["slug"] for i in lock["itens"]],
+           "fluent-smtp (código não carregado) não pode entrar no lock")
+    checar(any(f["slug"] == "fluent-smtp" and "não carrega" in f["motivo"] for f in lock["fora"]),
+           "fluent-smtp deveria aparecer em fora com o motivo")
+    checar(("plugin", "update", "fluent-smtp", "--version=2.4.2") not in loc.chamadas, "fluent-smtp não deveria ser atualizado")
+
+    # M1: exceção no smoke depois da linha de base -> 20 com relatório, sem lock.
+    (saida / "lock.json").unlink()
+    loc = FakeLocal()
+    loc.explode_no_smoke = 2
+    r = executar(loc, plano_exec, inv_prod, {}, contratos_ok, saida, None, {"kadence-child"})
+    checar(r == 20 and not (saida / "lock.json").exists() and "RuntimeError" in (saida / "relatorio.md").read_text(),
+           f"exceção no smoke deveria sair 20 com relatório (saiu {r})")
+
+    # B1: versão instalada diferente da do plano -> 20.
+    class Desvia(FakeLocal):
+        def wp(self, *args, **kw):
+            saida_wp = super().wp(*args, **kw)
+            if len(args) > 2 and args[1] == "update" and args[2] == "google-site-kit":
+                self.instalados["google-site-kit"] = "1.189.1"
+            return saida_wp
+    loc = Desvia()
+    r = executar(loc, plano_exec, inv_prod, {}, contratos_ok, saida, None, {"kadence-child"})
+    checar(r == 20 and "instalado 1.189.1, esperado 1.189.0" in (saida / "relatorio.md").read_text(),
+           f"versão divergente após o update deveria sair 20 (saiu {r})")
+
+    # B2: decisao_pendente com versão divergente não é reinstalado.
+    inv_pro = {**inv_prod, "plugins": inv_prod["plugins"] + [{"name": "seo-by-rank-math-pro", "version": "3.0.110", "status": "inactive"}]}
+    loc = FakeLocal()
+    loc.instalados["seo-by-rank-math-pro"] = "3.0.100"
+    r = executar(loc, plano_exec, inv_pro, {}, contratos_ok, saida, None, {"kadence-child", "seo-by-rank-math-pro"})
+    checar(r == 0 and not any(c[:3] == ("plugin", "install", "seo-by-rank-math-pro") for c in loc.chamadas),
+           f"decisao_pendente não deveria ser reinstalado (saiu {r})")
 
 if falhas:
     print("FAIL:")

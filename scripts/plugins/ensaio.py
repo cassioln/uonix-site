@@ -221,8 +221,11 @@ def smoke(local, alvo: dict, contratos: dict) -> dict:
 
 
 def comparar(base: dict, atual: dict) -> tuple[list[str], list[str]]:
-    """(regressões, pré-existentes). Check ausente da base conta como novo vermelho."""
+    """(regressões, pré-existentes). Check ausente da base conta como novo vermelho, e
+    check presente na base e ausente do atual conta como regressão."""
     regressoes, preexistentes = [], []
+    for nome in sorted(base.keys() - atual.keys()):
+        regressoes.append(f"{nome}: check sumiu da execução atual")
     for nome, res in atual.items():
         if res["ok"]:
             continue
@@ -293,8 +296,14 @@ def etapas(plano: dict) -> list[tuple[str, list[dict]]]:
     return seq + [(i["slug"], [i]) for i in criticos]
 
 
+def versao_instalada(local, tipo: str, slug: str) -> str:
+    comando = "theme" if tipo == "tema" else "plugin"
+    lista = json.loads(local.wp(comando, "list", "--fields=name,version", "--format=json"))
+    return next((i.get("version", "") for i in lista if i.get("name") == slug), "")
+
+
 def executar(local, plano: dict, inventario: dict, contratos: dict, verificar_contratos, saida: pathlib.Path,
-             clonar=None, proprios: set[str] = frozenset()) -> int:
+             clonar=None, proprios: set[str] = frozenset(), invalidar_clone=None) -> int:
     relatorio = [f"# Ensaio local — {dt.datetime.now().isoformat(timespec='seconds')}", ""]
 
     def fim(codigo: int, motivo: str) -> int:
@@ -302,6 +311,18 @@ def executar(local, plano: dict, inventario: dict, contratos: dict, verificar_co
         (saida / "relatorio.md").write_text("\n".join(relatorio) + "\n")
         print("\n".join(relatorio))
         return codigo
+
+    # Item cujo código não carrega no local não pode ir ao lock: o smoke nunca o
+    # exercitaria. Hoje é o fluent-smtp, inativo no local por política e ativo
+    # em produção, onde manda todo e-mail.
+    ativos_prod = {p["name"] for p in inventario.get("plugins", []) if p.get("status") == "active"}
+    itens, fora = [], list(plano["fora"])
+    for i in plano["itens"]:
+        if i["slug"] in EXCECOES_ATIVACAO and i["slug"] in ativos_prod:
+            fora.append({**i, "motivo": "código não carrega no local (inativo por política); ensaiar à parte"})
+        else:
+            itens.append(i)
+    plano = {**plano, "itens": itens, "fora": fora}
 
     if not plano["itens"]:
         relatorio.append("Nada a ensaiar.")
@@ -319,33 +340,42 @@ def executar(local, plano: dict, inventario: dict, contratos: dict, verificar_co
         relatorio.append(f"- backup do banco local: {tabelas} tabelas em {saida.name}/db-local-antes.sql.gz")
         alvo = alvos(local)
         base = smoke(local, alvo, contratos)
-    except (Falha, RuntimeError, subprocess.SubprocessError, OSError, ValueError) as erro:
-        return fim(30, f"falha de preparação: {erro}")
+    except Exception as erro:  # noqa: BLE001 — qualquer falha aqui é de preparação
+        return fim(30, f"falha de preparação: {type(erro).__name__}: {erro}")
 
     vermelhos_base = [f"{n}: {r['detalhe']}" for n, r in base.items() if not r["ok"]]
     relatorio += ["", f"## Linha de base: {len(base)} checks, {len(vermelhos_base)} já vermelhos"]
     relatorio += [f"- pré-existente: {v}" for v in vermelhos_base]
     (saida / "smoke-antes.json").write_text(json.dumps(base, ensure_ascii=False, indent=1))
 
-    for nome_etapa, itens in etapas(plano):
+    # A partir daqui o banco local muda (migrações). Um --reusar-clone depois
+    # deste ponto testaria a migração sobre um banco já migrado, então o clone
+    # deixa de ser reutilizável antes da primeira atualização.
+    if invalidar_clone:
+        invalidar_clone()
+
+    for nome_etapa, itens_etapa in etapas(plano):
         relatorio += ["", f"## {nome_etapa}"]
         try:
-            for i in itens:
+            for i in itens_etapa:
                 local.wp("theme" if i["tipo"] == "tema" else "plugin", "update", i["slug"], f"--version={i['para']}")
+                instalada = versao_instalada(local, i["tipo"], i["slug"])
+                if instalada != i["para"]:
+                    return fim(20, f"{i['slug']}: instalado {instalada or 'nada'}, esperado {i['para']}")
                 relatorio.append(f"- {i['slug']} {i['de']} -> {i['para']}")
                 if i["slug"] == "woocommerce":
                     local.wp("wc", "update")
                     relatorio.append("- `wp wc update` executado")
-        except RuntimeError as erro:
-            return fim(20, f"atualização falhou em {nome_etapa}: {erro}")
-        com_contrato = [i["slug"] for i in itens if i["slug"] in contratos]
-        if com_contrato:
-            ok, detalhe = verificar_contratos(com_contrato)
-            relatorio.append(f"- contratos ({', '.join(com_contrato)}): {'ok' if ok else 'QUEBRADO'}")
-            if not ok:
-                relatorio += [f"  {l}" for l in detalhe.splitlines() if l.strip()]
-                return fim(20, f"contrato quebrado em {nome_etapa}")
-        atual = smoke(local, alvo, contratos)
+            com_contrato = [i["slug"] for i in itens_etapa if i["slug"] in contratos]
+            if com_contrato:
+                ok, detalhe = verificar_contratos(com_contrato)
+                relatorio.append(f"- contratos ({', '.join(com_contrato)}): {'ok' if ok else 'QUEBRADO'}")
+                if not ok:
+                    relatorio += [f"  {l}" for l in detalhe.splitlines() if l.strip()]
+                    return fim(20, f"contrato quebrado em {nome_etapa}")
+            atual = smoke(local, alvo, contratos)
+        except Exception as erro:  # noqa: BLE001 — um plugin que derruba o WP cai aqui
+            return fim(20, f"falha em {nome_etapa}: {type(erro).__name__}: {erro}")
         regressoes, preexistentes = comparar(base, atual)
         relatorio.append(f"- smoke: {len(atual)} checks, {len(regressoes)} regressão(ões), {len(preexistentes)} pré-existente(s)")
         if regressoes:
@@ -353,9 +383,13 @@ def executar(local, plano: dict, inventario: dict, contratos: dict, verificar_co
             (saida / "smoke-falha.json").write_text(json.dumps(atual, ensure_ascii=False, indent=1))
             return fim(20, f"regressão depois de {nome_etapa}")
 
+    try:
+        php_local = local.wp("eval", "echo PHP_VERSION;").strip()
+    except Exception as erro:  # noqa: BLE001
+        return fim(20, f"falha ao fechar o ensaio: {erro}")
     lock = {
         "gerado_em": dt.datetime.now().isoformat(timespec="seconds"),
-        "php_local": local.wp("eval", "echo PHP_VERSION;").strip(),
+        "php_local": php_local,
         "itens": [{k: i[k] for k in ("slug", "tipo", "de", "para", "camada", "aplicacao")} for i in plano["itens"]],
         "fora": [{k: f.get(k) for k in ("slug", "de", "para", "motivo")} for f in plano["fora"]],
         "resultado": "verde",
@@ -418,11 +452,15 @@ def main(argv: list[str]) -> int:
         return r.returncode == 0, r.stdout + r.stderr
 
     politica = json.loads((RAIZ / "ops/plugins/politica.json").read_text())
-    proprios = {n for c in ("plugins", "temas") for n, r in politica[c].items() if r["camada"] == "propria"}
+    # Fora do alinhamento por versão: código próprio (deploy) e decisao_pendente,
+    # que não é atualizado pela esteira e pode não existir no wordpress.org.
+    proprios = {n for c in ("plugins", "temas") for n, r in politica[c].items()
+                if politica["camadas"][r["camada"]]["aplicacao"] == "nunca"}
     marcador = a.checkout / "tmp" / "plugins" / "ultimo-clone.json"
     marcador.parent.mkdir(parents=True, exist_ok=True)
     return executar(local, plano, inventario, contratos, verificar_contratos, a.saida,
-                    clonar_producao(a.checkout, marcador, a.reusar_clone), proprios)
+                    clonar_producao(a.checkout, marcador, a.reusar_clone), proprios,
+                    lambda: marcador.unlink(missing_ok=True))
 
 
 if __name__ == "__main__":
