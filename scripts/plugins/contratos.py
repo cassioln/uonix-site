@@ -13,8 +13,9 @@ o fonte do plugin:
   `$this->do_filter( 'json_ld' )`;
 - shortcodes: `add_shortcode( 'nome'` registrado, ou `addShortCode`, do
   framework do Fluent Forms;
-- marcadores: texto que precisa continuar no fonte (classe CSS, nome de opção,
-  ou o trecho que monta o nome de um hook dinâmico).
+- marcadores: texto que precisa continuar no fonte, fora de artefato compilado
+  (`dist/`, `*.min.*`): classe CSS, nome de opção, ou o trecho que monta o
+  nome de um hook dinâmico.
 
 `post_types`, `rotas_rest` e `hooks_dinamicos` não se provam pelo fonte. Eles
 ficam no contrato para a checagem em execução do ensaio local (#393).
@@ -35,7 +36,7 @@ import sys
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 CONTRATOS_PADRAO = RAIZ / "ops" / "plugins" / "contratos.json"
-EXTENSOES = {".php", ".js", ".json", ".inc"}
+EXTENSOES = {".php", ".js", ".css", ".json", ".inc"}
 CAMPOS_ESTATICOS = ("funcoes", "classes", "hooks", "shortcodes", "marcadores")
 DISPARO = r"(?:do_action|do_action_ref_array|do_action_deprecated|apply_filters|apply_filters_ref_array|apply_filters_deprecated)"
 
@@ -49,6 +50,11 @@ def ler_fontes(diretorio: pathlib.Path) -> list[tuple[str, str]]:
             except OSError:
                 continue
     return fontes
+
+
+def compilado(caminho: str) -> bool:
+    partes = pathlib.PurePosixPath(caminho).parts
+    return "dist" in partes or ".min." in partes[-1]
 
 
 def presente(campo: str, nome: str, fontes: list[tuple[str, str]], wrapper: dict | None = None) -> bool:
@@ -72,7 +78,9 @@ def presente(campo: str, nome: str, fontes: list[tuple[str, str]], wrapper: dict
         padrao = re.compile(r"(?:add_shortcode|addShortCode|addShortcode)\(\s*['\"]" + re.escape(nome) + r"['\"]")
         return any(padrao.search(texto) for _, texto in fontes)
     if campo == "marcadores":
-        return any(nome in texto for _, texto in fontes)
+        # Fora de artefato compilado: o mesmo texto costuma aparecer em bundles
+        # (`dist/`, `*.min.*`), que continuariam batendo depois de o fonte mudar.
+        return any(nome in texto for caminho, texto in fontes if not compilado(caminho))
     raise ValueError(campo)
 
 

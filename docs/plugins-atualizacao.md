@@ -16,12 +16,12 @@ Requer a janela SSH da Locaweb aberta. Rode do checkout principal, que tem o `.e
 bash scripts/plugins/atualizar.sh inventario
 ```
 
-O comando faz uma única conexão SSH. Ele salva o JSON lido em `tmp/plugins/` e imprime, por camada, o que tem atualização pendente.
+O comando faz uma única conexão SSH, cortada em 150 s (`UONIX_PLUGINS_LIMITE_SSH`) se a janela estiver fechada. Ele salva o JSON lido em `tmp/plugins/` e imprime, por camada, o que tem atualização pendente.
 
 | Saída | Significado |
 |---|---|
 | `0` | Nenhuma bandeira. |
-| `10` | Há bandeira: versão major na camada crítica, plugin ou tema sem classificação, ou atualização automática ligada. |
+| `10` | Há bandeira: versão major na camada crítica, plugin ou tema sem classificação, atualização automática ligada, ou versão nova indisponível por exigir PHP ou WordPress acima do site. |
 | `1`/`2` | A leitura falhou. Quando a saída de produção vem incompleta, ela fica guardada em `tmp/plugins/*.bruto.txt`. |
 
 Para reclassificar um JSON já salvo, sem conectar: `atualizar.sh inventario --entrada=tmp/plugins/<arquivo>.json`.
@@ -33,8 +33,8 @@ Para reclassificar um JSON já salvo, sem conectar: `atualizar.sh inventario --e
 | `critica` | Orçamento, lead, e-mail, SEO, navegação, cache e páginas de serviço. | Um por vez, com smoke depois de cada um | 7 dias após o lançamento, salvo correção de segurança | Bloqueia: exige decisão |
 | `acoplada` | Nosso código depende de símbolo, marcação ou opção do plugin. | Em lote | — | Alerta |
 | `comum` | Sem dependência medida e fora dos fluxos críticos. | Em lote | — | Alerta |
-| `decisao_pendente` | Inativo ou ferramenta pontual; decidir entre remover e manter. | Nunca pela esteira | — | — |
-| `propria` | Código deste repositório (`kadence-child`). | Só por deploy | — | — |
+| `decisao_pendente` | Inativo ou ferramenta pontual; decidir entre remover e manter. | Nunca pela esteira | — | Não se aplica |
+| `propria` | Código deste repositório (`kadence-child`). | Só por deploy | — | Não se aplica |
 
 Todo plugin que aparece em produção precisa estar na política. Um plugin novo sem classificação vira bandeira no inventário.
 

@@ -119,6 +119,9 @@
       ],
       "shortcodes": [
         "fluentform"
+      ],
+      "marcadores": [
+        "function handleSubmission"
       ]
     },
     "seo-by-rank-math": {
@@ -144,12 +147,23 @@
     },
     "megamenu": {
       "usado_em": [
+        "mu-plugins/uonix-navigation/23-mega-menu-servicos.php",
+        "mu-plugins/uonix-navigation/27-mega-menu-produtos-marcas.php",
+        "mu-plugins/uonix-navigation/49-mobile-menu-indicator.php",
         "mu-plugins/uonix-navigation/50-mega-menu-widget-bloco.php",
-        "mu-plugins/uonix-navigation/23-mega-menu-servicos.php"
+        "mu-plugins/uonix-performance/50-home-primeira-dobra.php",
+        "mu-plugins/uonix-woocommerce/13-carrinho-badge-autoopen.php",
+        "themes/kadence-child/snippets/21-catalogo-banner-produtos.php",
+        "themes/kadence-child/snippets/37-home-hero-slider.php"
       ],
       "marcadores": [
         "'mega-menu'",
-        "mega-menu-item"
+        "mega-menu-item",
+        "mega-menu-link",
+        "mega-indicator",
+        "mega-sub-menu",
+        "mega-toggle-on",
+        "mega-menu-wrap-"
       ]
     },
     "kadence-blocks": {
@@ -158,8 +172,8 @@
       ],
       "marcadores": [
         "wp-block-kadence-header",
-        "kadence/header",
-        "kadence/pane"
+        "'kadence/header'",
+        "'kadence/pane'"
       ]
     },
     "kadence": {
@@ -235,6 +249,7 @@
       "marcadores": [
         "googlesitekit_analytics-4_settings",
         "googlesitekit_tagmanager_settings",
+        "googlesitekit_ads_settings",
         "measurementID",
         "containerID"
       ]

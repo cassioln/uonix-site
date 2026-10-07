@@ -45,10 +45,23 @@ printf '\n@@FIM\n'"
   # imprime o JSON sem quebra final, e o marcador grudaria na última linha.
 
   # Primeiro plano, sem retry: uma leitura, uma conexão (a Locaweb bloqueia
-  # rajadas de conexões curtas). Janela fechada pendura, daí o alarme.
-  bruto="$(perl -e 'alarm 120; exec @ARGV' bash -c \
-    'source "$0/scripts/lib/ssh-transport.sh"; uonix_transport_ssh_once prod "$1"' \
-    "$ROOT_DIR" "$remoto")" || { echo "Erro: leitura de produção falhou (janela SSH aberta?)" >&2; return 1; }
+  # rajadas de conexões curtas). Janela fechada pendura em silêncio, e este Mac
+  # não tem `timeout`. Um alarme no processo pai não basta: o ssh filho manteria
+  # o stdout aberto e o `$(...)` esperaria por ele. O cão de guarda mata os ssh
+  # deste projeto, que são os que usam o diretório de sockets do transporte.
+  # shellcheck source=scripts/lib/ssh-transport.sh
+  source "${ROOT_DIR}/scripts/lib/ssh-transport.sh"
+  local sockets="${UONIX_SSH_CONTROL_DIR:-${RUNNER_TEMP:-/tmp/uonix-ssh-${UID:-0}}}"
+  local limite="${UONIX_PLUGINS_LIMITE_SSH:-150}" vigia status=0
+  ( sleep "$limite"; pkill -9 -f -- "$sockets" ) >/dev/null 2>&1 &
+  vigia=$!
+  bruto="$(uonix_transport_ssh_once prod "$remoto")" || status=$?
+  kill "$vigia" 2>/dev/null || true
+  uonix_transport_close_master prod
+  if [ "$status" -ne 0 ]; then
+    echo "Erro: leitura de produção falhou (exit ${status}; janela SSH aberta? limite ${limite}s)" >&2
+    return 1
+  fi
 
   # Separa pelos marcadores: o shell remoto pode imprimir ruído antes deles.
   BRUTO="$bruto" python3 - "$destino" <<'PY'

@@ -111,6 +111,29 @@ $css = 'exemplo-cabecalho';
     r = verificar(c)
     checar(r.returncode == 20 and "ex/json" in r.stdout, "hook com prefixo passou sem wrapper_hooks declarado")
 
+    # Falsos positivos que o verificador não pode cometer.
+    (plugin / "outro_ns.php").write_text("<?php\nnamespace Exemplo\\Servicos;\nfunction aux() {}\n")
+    (plugin / "classe_solta.php").write_text("<?php\nnamespace Outro;\nclass Solta {}\n")
+    (plugin / "escuta.php").write_text("<?php\nadd_action( 'exemplo_so_escutado', 'cb' );\nadd_filter( 'exemplo_so_filtrado', 'cb' );\n")
+    (plugin / "dist").mkdir()
+    (plugin / "dist" / "bundle.js").write_text("var a='so-no-dist';")
+    (plugin / "app.min.js").write_text("var b='so-no-min';")
+    armadilhas = {
+        "classes": "Exemplo\\Servicos\\Solta",      # classe e namespace em arquivos diferentes
+        "hooks": "exemplo_so_escutado",            # o plugin só escuta, não dispara
+        "marcadores": "so-no-dist",                # só em artefato compilado
+    }
+    for campo, valor in armadilhas.items():
+        c = json.loads(json.dumps(contrato))
+        c["exemplo"][campo] = c["exemplo"][campo] + [valor]
+        r = verificar(c)
+        checar(r.returncode == 20 and valor in r.stdout,
+               f"falso positivo em {campo}: {valor} deu presente (rc={r.returncode})")
+    c = json.loads(json.dumps(contrato))
+    c["exemplo"]["marcadores"].append("so-no-min")
+    r = verificar(c)
+    checar(r.returncode == 20 and "so-no-min" in r.stdout, "marcador só em *.min.* deu presente")
+
     r = verificar({"ausente": {"usado_em": ["x"], "funcoes": ["f"]}})
     checar(r.returncode == 20 and "não está instalado" in r.stdout, f"plugin ausente não reprovou: {r.stdout}")
 
@@ -146,6 +169,11 @@ $css = 'exemplo-cabecalho';
     checar(r.returncode == 10 and "LIGADA" in r.stdout, "atualização automática ligada não virou bandeira")
     r = inventario([item("comum1")], [item("tema-novo", status="inactive")])
     checar(r.returncode == 10 and "tema tema-novo" in r.stdout, "tema sem classificação não virou bandeira")
+    indisponivel = item("comum1", "1.0", "1.1")
+    indisponivel["update"] = "unavailable"
+    r = inventario([indisponivel])
+    checar(r.returncode == 10 and "INDISPONÍVEL" in r.stdout and "indisponível por requisito" in r.stdout,
+           f"pendência unavailable sumiu do relatório: rc={r.returncode}")
     r = inventario([])
     checar(r.returncode == 2, "inventário sem plugins deveria falhar (leitura de produção vazia)")
 

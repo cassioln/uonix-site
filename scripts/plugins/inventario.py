@@ -9,7 +9,9 @@ name, status, version, update, update_version e auto_update.
 Bandeiras, que levam a saída 10:
 - versão major pendente em plugin da camada crítica (a política bloqueia);
 - plugin ou tema instalado sem classificação na política;
-- atualização automática ligada (a esteira deve ser a única via de mudança).
+- atualização automática ligada (a esteira deve ser a única via de mudança);
+- versão nova indisponível por requisito de PHP ou WordPress (`update` igual a
+  "unavailable" no WP-CLI).
 
 Plugin presente na política e ausente de produção é listado, sem bandeira.
 
@@ -55,10 +57,15 @@ def relatorio(inventario: dict, politica: dict) -> tuple[list[str], int]:
             if regra is None:
                 bandeiras.append(f"sem classificação na política: {tipo} {nome} ({status} {item.get('version', '')})")
                 continue
-            if item.get("update") not in {"available", "true", True}:
-                continue
             de, para = item.get("version", ""), item.get("update_version", "")
             camada = regra["camada"]
+            if item.get("update") == "unavailable":
+                # Há versão nova, mas ela exige PHP ou WordPress acima do site.
+                por_camada[camada].append(f"- {tipo} `{nome}` {de} → {para or '?'} **INDISPONÍVEL** (requisito de PHP/WP)")
+                bandeiras.append(f"atualização indisponível por requisito: {tipo} {nome} {de} -> {para or '?'}")
+                continue
+            if item.get("update") not in {"available", "true", True}:
+                continue
             nota = ""
             if maior(de) is not None and maior(para) is not None and maior(para) > maior(de):
                 nota = " **MAJOR**"
