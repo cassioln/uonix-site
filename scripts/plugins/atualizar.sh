@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Esteira de atualização de plugins (#393). Entrega 1: somente leitura.
+# Esteira de atualização de plugins (#393).
 #
 #   atualizar.sh inventario [--entrada=ARQ]
 #       Lê de produção, numa única conexão SSH, os plugins e temas com versão,
@@ -10,26 +10,56 @@
 #       Verifica os contratos contra o fonte instalado. O padrão é o ambiente
 #       local, que é onde o ensaio acontece.
 #
+#   atualizar.sh ensaiar [--entrada=ARQ] [--reusar-clone]
+#                        [--aceitar-major=a,b] [--dispensar-quarentena=a,b]
+#       Lê o inventário de produção, monta o plano (plano.py) e ensaia no local
+#       (ensaio.py): clone prod -> local, alinhamento, backup, smoke antes,
+#       atualização na ordem do plano com smoke e contratos a cada etapa.
+#       Grava o lock só quando tudo fica verde. Saída 0, 20 ou 30.
+#       Muta SOMENTE o ambiente local; produção é só lida.
+#
 # Exige a janela SSH da Locaweb aberta para o inventário. As credenciais vêm do
 # .env do checkout principal, como no clone e no backup de banco.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SAIDA_DIR="${UONIX_PLUGINS_SAIDA_DIR:-${ROOT_DIR}/tmp/plugins}"
+
+# O checkout principal guarda o que não é versionado: .env, local/wp-content e
+# backups/. Rodando de uma worktree, ROOT_DIR não tem nada disso.
+checkout_principal() {
+  if [ -n "${UONIX_CHECKOUT_PRINCIPAL:-}" ]; then
+    printf '%s\n' "$UONIX_CHECKOUT_PRINCIPAL"
+    return
+  fi
+  local comum
+  comum="$(git -C "$ROOT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || {
+    printf '%s\n' "$ROOT_DIR"
+    return
+  }
+  dirname "$comum"
+}
+CHECKOUT="$(checkout_principal)"
+SAIDA_DIR="${UONIX_PLUGINS_SAIDA_DIR:-${CHECKOUT}/tmp/plugins}"
 
 uso() {
   # O bloco de comentário do topo, sem depender de número de linha.
   awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"
 }
 
-ler_producao() {
-  local destino="$1"
-  if [ -z "${LOCAWEB_DOCUMENT_ROOT:-}" ] && [ -f "${ROOT_DIR}/.env" ]; then
+# Credenciais do checkout principal, para a leitura de produção e para o clone
+# do ensaio (o clone roda de ROOT_DIR, que numa worktree não tem .env).
+carregar_env() {
+  if [ -z "${LOCAWEB_DOCUMENT_ROOT:-}" ] && [ -f "${CHECKOUT}/.env" ]; then
     set -a
     # shellcheck source=/dev/null
-    source "${ROOT_DIR}/.env"
+    source "${CHECKOUT}/.env"
     set +a
   fi
+}
+
+ler_producao() {
+  local destino="$1"
+  carregar_env
   : "${LOCAWEB_DOCUMENT_ROOT:?Defina LOCAWEB_DOCUMENT_ROOT (rode do checkout principal, que tem o .env)}"
   : "${LOCAWEB_PHP_BIN:?Defina LOCAWEB_PHP_BIN}"
   : "${LOCAWEB_WP_BIN:?Defina LOCAWEB_WP_BIN}"
@@ -63,26 +93,8 @@ printf '\n@@FIM\n'"
     return 1
   fi
 
-  # Separa pelos marcadores: o shell remoto pode imprimir ruído antes deles.
-  BRUTO="$bruto" python3 - "$destino" <<'PY'
-import json, os, sys
-partes = {}
-atual = None
-for linha in os.environ["BRUTO"].splitlines():
-    if linha.startswith("@@"):
-        atual = linha[2:]
-        partes[atual] = []
-    elif atual:
-        partes[atual].append(linha)
-if "FIM" not in partes:
-    bruto = sys.argv[1] + ".bruto.txt"
-    with open(bruto, "w") as f:
-        f.write(os.environ["BRUTO"])
-    sys.exit(f"Erro: saída de produção incompleta (sem @@FIM). Saída bruta em {bruto}")
-dados = {"plugins": json.loads("\n".join(partes["PLUGINS"])), "temas": json.loads("\n".join(partes["TEMAS"]))}
-with open(sys.argv[1], "w") as f:
-    json.dump(dados, f, ensure_ascii=False, indent=1)
-PY
+  # Separa pelos marcadores; falha de qualquer tipo guarda a saída bruta (#413).
+  printf '%s\n' "$bruto" | python3 "${ROOT_DIR}/scripts/plugins/ler_saida.py" "$destino"
 }
 
 cmd_inventario() {
@@ -104,8 +116,8 @@ cmd_inventario() {
 }
 
 cmd_contratos() {
-  local plugins_dir="${ROOT_DIR}/local/wp-content/plugins"
-  local temas_dir="${ROOT_DIR}/local/wp-content/themes"
+  local plugins_dir="${CHECKOUT}/local/wp-content/plugins"
+  local temas_dir="${CHECKOUT}/local/wp-content/themes"
   local slugs=()
   for arg in "$@"; do
     case "$arg" in
@@ -119,12 +131,39 @@ cmd_contratos() {
     --plugins-dir="$plugins_dir" --temas-dir="$temas_dir" ${slugs[@]+"${slugs[@]}"}
 }
 
+cmd_ensaiar() {
+  local entrada="" reusar="" opcoes=()
+  for arg in "$@"; do
+    case "$arg" in
+      --entrada=*) entrada="${arg#*=}" ;;
+      --reusar-clone) reusar="--reusar-clone" ;;
+      --aceitar-major=*|--dispensar-quarentena=*) opcoes+=("$arg") ;;
+      *) echo "Erro: argumento desconhecido: $arg" >&2; return 2 ;;
+    esac
+  done
+  carregar_env
+  local dir
+  dir="${SAIDA_DIR}/ensaio-$(date -u +%Y%m%d-%H%M%S)"
+  mkdir -p "$dir"
+  if [ -n "$entrada" ]; then
+    cp "$entrada" "${dir}/inventario-prod.json"
+  else
+    ler_producao "${dir}/inventario-prod.json" || return 30
+  fi
+  python3 "${ROOT_DIR}/scripts/plugins/plano.py" --inventario "${dir}/inventario-prod.json" \
+    --saida "${dir}/plano.json" ${opcoes[@]+"${opcoes[@]}"} || return 30
+  echo
+  python3 "${ROOT_DIR}/scripts/plugins/ensaio.py" --inventario "${dir}/inventario-prod.json" \
+    --plano "${dir}/plano.json" --checkout "$CHECKOUT" --saida "$dir" ${reusar:+"$reusar"}
+}
+
 main() {
   local comando="${1:-}"
   [ "$#" -gt 0 ] && shift
   case "$comando" in
     inventario) cmd_inventario "$@" ;;
     contratos) cmd_contratos "$@" ;;
+    ensaiar) cmd_ensaiar "$@" ;;
     -h|--help|'') uso ;;
     *) echo "Erro: subcomando desconhecido: $comando" >&2; uso >&2; return 2 ;;
   esac
