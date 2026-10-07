@@ -172,7 +172,10 @@ if [ -n "$falhou" ]; then
     echo "== restaurando a etapa que falhou: ${da_etapa[*]}"
     restaurar_lista "${da_etapa[@]}" || resultado=50
   fi
-  if [ "$resultado" = 20 ] && checar_site; then
+  # Só conta como "restaurado" se alguma etapa foi de fato restaurada: o
+  # vermelho depois da limpeza de cache não tem etapa (da_etapa vazio) e vai
+  # direto à cascata, senão sairia 20 com as versões novas no ar.
+  if [ "$resultado" = 20 ] && [ "${#da_etapa[@]}" -gt 0 ] && checar_site; then
     echo "== site verde depois de restaurar a etapa"
   else
     reverso=()

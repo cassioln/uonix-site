@@ -125,6 +125,15 @@ grep -q 'restaurando TUDO' "$bk.log" || fail "vermelho persistente deveria resta
 preparar wc; rodar $'woocommerce 1.0 1.1 critica' UONIX_SMOKE_CMD=true FAKE_FALHA_WC=1
 [ "$rc" = 20 ] && [ "$(versao woocommerce)" = 1.0 ] || fail "wc update falho saiu $rc (wc=$(versao woocommerce))"
 
+# 13. vermelho só na conferência depois da limpeza de cache: nada a restaurar
+# na etapa, então vai à cascata; nunca sai 20 com as versões novas no ar.
+preparar cache
+n="$TMP_DIR/contador-cache"; : > "$n"
+rodar "$LISTA" UONIX_SMOKE_CMD="echo x >> $n; [ \$(wc -l < $n) -ne 4 ]"
+[ "$rc" = 20 ] && [ "$(versao a)" = 1.0 ] && [ "$(versao b)" = 1.0 ] \
+  || fail "vermelho pós-cache deveria restaurar tudo antes de sair 20 (saiu $rc, a=$(versao a) b=$(versao b)): $(cat "$bk.log")"
+grep -q 'restaurando TUDO' "$bk.log" || fail "vermelho pós-cache deveria ir à cascata"
+
 # 12. SIGTERM no meio do update: manutenção desligada e status 143 gravado
 preparar sinal
 ( UONIX_SMOKE_CMD=true FAKE_DORME=b bash "$JOB" "$doc" "$TMP_DIR/php" /fake/wp-cli.phar "$bk" "$LISTA" > "$bk.log" 2>&1 ) &
