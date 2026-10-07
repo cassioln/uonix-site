@@ -349,6 +349,9 @@ jobs:
       - name: Test clone mirror perishable metadata
         run: bash scripts/tests/test-clone-mirror-perishable-metadata.sh
 
+      - name: Test clone anchored exclusions
+        run: bash scripts/tests/test-clone-exclusoes-ancoradas.sh
+
       - name: Test clone URL replacement
         run: bash scripts/tests/test-clone-url-replacement.sh
 

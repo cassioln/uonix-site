@@ -244,8 +244,8 @@ Essa é uma **sincronização de espelho**, não uma mesclagem:
   que entram como regra **perecível** (`--filter='-p …'`): continuam sem ser
   copiados e, em diretório que também existe na origem, sem ser apagados, mas não
   impedem a remoção de um diretório que só exista no destino. Dentro desse
-  diretório, eles são apagados mesmo quando um subdiretório protegido (como
-  `cache/`) o mantém de pé. Sem isso, uma pasta de
+  diretório, eles são apagados mesmo quando um subdiretório protegido em
+  qualquer profundidade (como `wc-logs/`) o mantém de pé. Sem isso, uma pasta de
   plugin que contenha apenas o `.DS_Store` do Finder sobrevive ao espelho (#396);
 - se um dos três diretórios inteiros não existir na origem, esse diretório é
   ignorado e o correspondente no destino fica como está;
@@ -263,7 +263,10 @@ Essa é uma **sincronização de espelho**, não uma mesclagem:
 Os padrões abaixo não são copiados dentro de `uploads`, `plugins` ou `languages`:
 
 - metadados e temporários: `.DS_Store`, `._*`, `*~`, `*.log`;
-- cache e logs: `cache/`, `wc-logs/`, `logs/`;
+- cache e logs: `/cache/` e `/logs/` **só na raiz** de cada diretório sincronizado, e
+  `wc-logs/`. A âncora importa: sem ela, o rsync casava qualquer diretório
+  `cache/` ou `logs/` em qualquer profundidade e cortava código de plugin, como o
+  `vendor/psr/cache` (#406);
 - staging e lixeira: `wp-staging/`, `wpmc-trash/`;
 - exportações e dados pessoais: `wp-personal-data-exports/`,
   `curriculos-recebidos/`;
@@ -419,8 +422,9 @@ backups mais recentes por ambiente.
 - dump completo do banco em `gzip` (remoto inclui `--routines --triggers
   --events`; local não inclui rotinas nem eventos);
 - `uploads`, `plugins` e `languages` — o tar do backup exclui subdiretórios
-  `cache/`, `wc-logs/` e `wp-staging/`, portanto esses itens não são
-  restaurados pelo rollback;
+  `wc-logs/` e `wp-staging/`, portanto esses itens não são restaurados pelo
+  rollback. Ele **não** exclui `cache/`: o padrão do tar casa o nome em qualquer
+  nível, e o rollback reinstalaria plugins sem `psr/cache` (#406);
 - `compressx` e `compressx-nextgen`, se existirem;
 - `wp-content/.htaccess`, se existir;
 - snapshots de usuários e opções protegidas, quando aplicáveis;
