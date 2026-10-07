@@ -419,6 +419,9 @@ jobs:
       - name: Test production rollback runtime
         run: python3 scripts/tests/test-production-rollback-runtime.py
 
+      - name: Test plugins policy and contracts
+        run: python3 scripts/tests/test-plugins-politica-contratos.py
+
       - name: Test production rollback exit code without mutation
         run: bash scripts/tests/test-production-rollback-no-mutation.sh
 

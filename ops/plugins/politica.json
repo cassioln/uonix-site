@@ -1,0 +1,72 @@
+{
+  "descricao": "Camada de cada plugin e tema de produção e a regra de atualização de cada camada. Inventário de produção de 2026-10-07. Ver docs/plugins-atualizacao.md.",
+  "camadas": {
+    "critica": {
+      "descricao": "Fluxo de orçamento, lead, e-mail, SEO, navegação, cache ou páginas de serviço.",
+      "aplicacao": "um_por_vez",
+      "quarentena_dias": 7,
+      "major": "bloqueia"
+    },
+    "acoplada": {
+      "descricao": "Mu-plugin ou tema filho depende de símbolo, marcação ou opção do plugin.",
+      "aplicacao": "lote",
+      "quarentena_dias": 0,
+      "major": "alerta"
+    },
+    "comum": {
+      "descricao": "Sem dependência medida do nosso código e fora dos fluxos críticos.",
+      "aplicacao": "lote",
+      "quarentena_dias": 0,
+      "major": "alerta"
+    },
+    "decisao_pendente": {
+      "descricao": "Inativo ou ferramenta pontual em produção; decidir entre remover e manter.",
+      "aplicacao": "nunca",
+      "quarentena_dias": 0,
+      "major": "alerta"
+    },
+    "propria": {
+      "descricao": "Código versionado neste repositório; publicado pelo deploy, nunca por atualização.",
+      "aplicacao": "nunca",
+      "quarentena_dias": 0,
+      "major": "alerta"
+    }
+  },
+  "plugins": {
+    "woocommerce": {"camada": "critica", "contrato": true, "motivo": "Catálogo, cotação e Store API; 31 arquivos do nosso código usam o WooCommerce."},
+    "woo-rfq-for-woocommerce": {"camada": "critica", "contrato": true, "motivo": "Fluxo de solicitação de orçamento; mu-plugins leem opções, meta e handles do plugin."},
+    "fluentform": {"camada": "critica", "contrato": true, "motivo": "Formulários de lead, newsletter, trabalhe conosco e comentários usam o SubmissionHandlerService."},
+    "fluentforms-pdf": {"camada": "critica", "contrato": false, "motivo": "Roda no pipeline de envio do Fluent Forms; um erro fatal aqui quebra o envio."},
+    "fluent-smtp": {"camada": "critica", "contrato": false, "motivo": "Todo e-mail de produção sai por ele."},
+    "seo-by-rank-math": {"camada": "critica", "contrato": true, "motivo": "Metas, sitemap e schema; mu-plugins filtram rank_math/json_ld."},
+    "megamenu": {"camada": "critica", "contrato": true, "motivo": "Navegação principal; o conteúdo das colunas vive na área de widgets do plugin."},
+    "kadence-blocks": {"camada": "critica", "contrato": true, "motivo": "Cabeçalho e blocos das páginas; nosso CSS depende das classes do bloco de cabeçalho."},
+    "wp-super-cache": {"camada": "critica", "contrato": true, "motivo": "Cache de páginas de produção; o painel chama wp_cache_clear_cache."},
+    "pods": {"camada": "critica", "contrato": true, "motivo": "Registra o post type servicos, que o nosso código consulta."},
+    "woocommerce-products-slider": {"camada": "acoplada", "contrato": true, "motivo": "Shortcode wcps e hook de layout usados nos carrosséis."},
+    "woocommerce-products-filter": {"camada": "acoplada", "contrato": true, "motivo": "Tema filho estiliza e manipula a marcação dos filtros do catálogo."},
+    "wp-reviews-plugin-for-google": {"camada": "acoplada", "contrato": true, "motivo": "Avaliações Google carregadas pelo nosso mu-plugin via shortcode."},
+    "google-site-kit": {"camada": "acoplada", "contrato": true, "motivo": "A política de analytics lê as opções googlesitekit_*_settings."},
+    "woo-checkout-field-editor-pro": {"camada": "acoplada", "contrato": false, "motivo": "Define os campos do checkout da cotação; sem acoplamento de código medido."},
+    "conditional-menus": {"camada": "comum", "contrato": false, "motivo": "Menus condicionais; sem acoplamento de código medido."},
+    "wb-custom-product-tabs-for-woocommerce": {"camada": "comum", "contrato": false, "motivo": "Conteúdo das abas de produto; sem acoplamento de código medido."},
+    "pods-alternative-cache": {"camada": "comum", "contrato": false, "motivo": "Cache do Pods."},
+    "compressx": {"camada": "comum", "contrato": false, "motivo": "Conversão de imagens; configuração própria por ambiente."},
+    "bnfw": {"camada": "comum", "contrato": false, "motivo": "Notificações do WordPress."},
+    "classic-editor": {"camada": "comum", "contrato": false, "motivo": "Editor clássico."},
+    "duplicate-page": {"camada": "comum", "contrato": false, "motivo": "Ferramenta do painel."},
+    "fast-indexing-api": {"camada": "comum", "contrato": false, "motivo": "Indexação no Google."},
+    "loco-translate": {"camada": "comum", "contrato": false, "motivo": "Traduções."},
+    "pdf-embedder": {"camada": "comum", "contrato": false, "motivo": "PDFs embutidos."},
+    "user-role-editor": {"camada": "comum", "contrato": false, "motivo": "Papéis e permissões."},
+    "was-this-article-helpful": {"camada": "comum", "contrato": false, "motivo": "Avaliação de artigos."},
+    "wp-crontrol": {"camada": "comum", "contrato": false, "motivo": "Ferramenta do painel para o cron."},
+    "seo-by-rank-math-pro": {"camada": "decisao_pendente", "contrato": false, "motivo": "Inativo em produção."},
+    "wordpress-importer": {"camada": "decisao_pendente", "contrato": false, "motivo": "Ferramenta de migração ativa em produção."}
+  },
+  "temas": {
+    "kadence": {"camada": "critica", "contrato": true, "motivo": "Tema pai do kadence-child."},
+    "kadence-child": {"camada": "propria", "contrato": false, "motivo": "Versionado em themes/kadence-child."},
+    "twentytwentythree": {"camada": "decisao_pendente", "contrato": false, "motivo": "Inativo."}
+  }
+}
