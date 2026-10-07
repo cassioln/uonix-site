@@ -1,0 +1,258 @@
+{
+  "descricao": "O que mu-plugins e tema filho usam de cada plugin ou tema de terceiros. Verificado por scripts/plugins/contratos.py contra o fonte instalado. Ver docs/plugins-atualizacao.md.",
+  "contratos": {
+    "woocommerce": {
+      "usado_em": [
+        "mu-plugins/uonix-woocommerce",
+        "mu-plugins/uonix-fluentforms",
+        "mu-plugins/uonix-admin",
+        "mu-plugins/uonix-content",
+        "mu-plugins/uonix-integrations"
+      ],
+      "funcoes": [
+        "WC",
+        "wc_get_product",
+        "wc_attribute_label",
+        "wc_get_order",
+        "wc_placeholder_img_src",
+        "wc_orders_count",
+        "wc_clean",
+        "wc_delete_product_transients",
+        "wc_get_page_id",
+        "wc_get_orders",
+        "wc_get_order_statuses",
+        "wc_get_product_terms",
+        "wc_display_item_meta",
+        "wc_deferred_product_sync",
+        "wc_delete_shop_order_transients",
+        "wc_get_formatted_variation"
+      ],
+      "classes": [
+        "WC_Product",
+        "WC_Product_Variation",
+        "WC_Cart",
+        "WC_Install",
+        "WC_Admin_Meta_Boxes"
+      ],
+      "hooks": [
+        "woocommerce_after_checkout_validation",
+        "woocommerce_checkout_create_order",
+        "woocommerce_product_tabs",
+        "woocommerce_before_main_content",
+        "woocommerce_page_title",
+        "woocommerce_after_shop_loop_item",
+        "woocommerce_email_order_items_args",
+        "woocommerce_email_header",
+        "woocommerce_email_footer",
+        "woocommerce_review_order_before_submit",
+        "woocommerce_get_item_data",
+        "woocommerce_add_to_cart_fragments",
+        "woocommerce_add_to_cart_hash",
+        "woocommerce_checkout_posted_data",
+        "woocommerce_email_styles",
+        "woocommerce_new_product_variation",
+        "woocommerce_checkout_before_terms_and_conditions",
+        "woocommerce_checkout_order_processed",
+        "woocommerce_admin_order_data_after_billing_address",
+        "woocommerce_thankyou",
+        "woocommerce_add_to_cart",
+        "woocommerce_admin_features",
+        "woocommerce_available_variation",
+        "woocommerce_product_after_variable_attributes",
+        "woocommerce_admin_process_variation_object",
+        "woocommerce_before_shop_loop_item_title",
+        "woocommerce_single_product_summary",
+        "woocommerce_no_products_found",
+        "woocommerce_email_header_image_url",
+        "woocommerce_is_email_preview"
+      ],
+      "hooks_dinamicos": [
+        "woocommerce_add_error",
+        "woocommerce_product_get_name"
+      ],
+      "rotas_rest": [
+        "/wc/store/v1/cart",
+        "/wc/store/v1/cart/add-item",
+        "/wc/store/v1/checkout"
+      ],
+      "marcadores": [
+        "'woocommerce_add_' . $notice_type",
+        "return 'woocommerce_' . $this->object_type . '_get_';",
+        "'woocommerce_email_recipient_' . $this->id"
+      ]
+    },
+    "woo-rfq-for-woocommerce": {
+      "usado_em": [
+        "mu-plugins/uonix-woocommerce/23-rfq-produto-padrao.php",
+        "mu-plugins/uonix-woocommerce/30-rfq-cookie-session-policy.php",
+        "mu-plugins/uonix-woocommerce/31-rfq-lazy-cookie-session.php",
+        "mu-plugins/uonix-woocommerce/32-rfq-stable-asset-version.php"
+      ],
+      "marcadores": [
+        "'gpls_woo_rfq_css'",
+        "'gpls_woo_rfq_js'",
+        "settings_gpls_woo_rfq_cookie_or_phpsession",
+        "_gpls_woo_rfq_rfq_enable",
+        "gpls_woo_rfq_show_prices_customer_email",
+        "'new_rfq'"
+      ],
+      "hooks_dinamicos": [
+        "woocommerce_email_recipient_new_rfq"
+      ]
+    },
+    "fluentform": {
+      "usado_em": [
+        "mu-plugins/uonix-fluentforms",
+        "mu-plugins/uonix-forms",
+        "mu-plugins/uonix-content/10-comentarios-master.php",
+        "mu-plugins/uonix-integrations/39-rastreamento-utm-atribuicao.php"
+      ],
+      "funcoes": [
+        "wpFluentForm"
+      ],
+      "classes": [
+        "FluentForm\\App\\Services\\Form\\SubmissionHandlerService"
+      ],
+      "hooks": [
+        "fluentform_submission_inserted",
+        "fluentform/insert_response_data"
+      ],
+      "shortcodes": [
+        "fluentform"
+      ],
+      "marcadores": [
+        "function handleSubmission"
+      ]
+    },
+    "seo-by-rank-math": {
+      "usado_em": [
+        "mu-plugins/uonix-content/47-seo-organization-schema.php",
+        "mu-plugins/uonix-content/49-seo-product-schema-enhancement.php",
+        "mu-plugins/uonix-integrations/54-comments-nosnippet-seo.php"
+      ],
+      "classes": [
+        "RankMath\\Helper"
+      ],
+      "hooks": [
+        "rank_math/json_ld",
+        "rank_math/frontend/remove_reply_to_com"
+      ],
+      "wrapper_hooks": {
+        "prefixo": "rank_math/",
+        "metodos": [
+          "do_filter",
+          "do_action"
+        ]
+      }
+    },
+    "megamenu": {
+      "usado_em": [
+        "mu-plugins/uonix-navigation/23-mega-menu-servicos.php",
+        "mu-plugins/uonix-navigation/27-mega-menu-produtos-marcas.php",
+        "mu-plugins/uonix-navigation/49-mobile-menu-indicator.php",
+        "mu-plugins/uonix-navigation/50-mega-menu-widget-bloco.php",
+        "mu-plugins/uonix-performance/50-home-primeira-dobra.php",
+        "mu-plugins/uonix-woocommerce/13-carrinho-badge-autoopen.php",
+        "themes/kadence-child/snippets/21-catalogo-banner-produtos.php",
+        "themes/kadence-child/snippets/37-home-hero-slider.php"
+      ],
+      "marcadores": [
+        "'mega-menu'",
+        "mega-menu-item",
+        "mega-menu-link",
+        "mega-indicator",
+        "mega-sub-menu",
+        "mega-toggle-on",
+        "mega-menu-wrap-"
+      ]
+    },
+    "kadence-blocks": {
+      "usado_em": [
+        "mu-plugins/uonix-navigation/27-mega-menu-produtos-marcas.php"
+      ],
+      "marcadores": [
+        "wp-block-kadence-header",
+        "'kadence/header'",
+        "'kadence/pane'"
+      ]
+    },
+    "kadence": {
+      "tipo": "tema",
+      "usado_em": [
+        "mu-plugins/uonix-woocommerce/16-woocommerce-thank-you.php",
+        "themes/kadence-child"
+      ],
+      "marcadores": [
+        "kadence-header-row"
+      ]
+    },
+    "wp-super-cache": {
+      "usado_em": [
+        "mu-plugins/uonix-admin/39-admin-editor-dashboard.php"
+      ],
+      "funcoes": [
+        "wp_cache_clear_cache",
+        "prune_super_cache"
+      ]
+    },
+    "pods": {
+      "usado_em": [
+        "mu-plugins/uonix-navigation/23-mega-menu-servicos.php",
+        "mu-plugins/uonix-content/02-shortcodes-pdf-servicos.php",
+        "mu-plugins/uonix-content/48-seo-master-schema-graph.php",
+        "mu-plugins/uonix-admin/52-admin-analytics-dashboard.php"
+      ],
+      "post_types": [
+        "servicos"
+      ]
+    },
+    "woocommerce-products-slider": {
+      "usado_em": [
+        "mu-plugins/uonix-woocommerce"
+      ],
+      "shortcodes": [
+        "wcps"
+      ],
+      "hooks_dinamicos": [
+        "wcps_layout_element_add_to_cart"
+      ],
+      "marcadores": [
+        "'wcps_layout_element_'"
+      ]
+    },
+    "woocommerce-products-filter": {
+      "usado_em": [
+        "themes/kadence-child/snippets/05-catalogo-filtros-husky-mobile.php"
+      ],
+      "marcadores": [
+        "woof_husky_txt-container",
+        "woof_husky_txt-option-breadcrumb",
+        "woof_husky_txt-input",
+        "woof_show_mobile_filter",
+        "woof_text_search_container",
+        "woof_container_inner",
+        "woof_redraw_zone"
+      ]
+    },
+    "wp-reviews-plugin-for-google": {
+      "usado_em": [
+        "mu-plugins/uonix-integrations/43-avaliacoes-google-trustindex.php"
+      ],
+      "marcadores": [
+        "return 'trustindex';"
+      ]
+    },
+    "google-site-kit": {
+      "usado_em": [
+        "mu-plugins/uonix-integrations/38-integracoes-analytics-lgpd.php"
+      ],
+      "marcadores": [
+        "googlesitekit_analytics-4_settings",
+        "googlesitekit_tagmanager_settings",
+        "googlesitekit_ads_settings",
+        "measurementID",
+        "containerID"
+      ]
+    }
+  }
+}
