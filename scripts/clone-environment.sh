@@ -78,8 +78,8 @@ EXCLUDED_RSYNC_ARGS=(
 
 # Exclusões do tar dos backups do destino, de onde o rollback restaura. Sem
 # `cache`: o padrão do tar casa o nome em qualquer nível, então o rollback
-# reinstalaria plugins sem `psr/cache` (#406). Não há `cache/` na raiz dos
-# diretórios do backup, então tirá-lo não aumenta o arquivo.
+# reinstalaria plugins sem `psr/cache` (#406). O arquivo cresce só pelos
+# `cache/` aninhados, que em `plugins` são código e precisam entrar.
 BACKUP_TAR_EXCLUDES=(
   --exclude='wc-logs'
   --exclude='wp-staging'
