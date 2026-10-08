@@ -47,8 +47,9 @@ if ( ! function_exists( 'uonix_rfq_stable_asset_version' ) ) {
 	 * Versão determinística para um asset do RFQ.
 	 *
 	 * Preferimos o mtime do arquivo: muda quando o asset realmente muda, o que
-	 * preserva o cache-busting. Se o caminho não puder ser resolvido, caímos na
-	 * versão do plugin e, por último, numa constante — nunca em valor aleatório.
+	 * preserva o cache-busting. Se o caminho não puder ser resolvido, caímos
+	 * numa constante fixa — nunca em valor aleatório. O RFQ não define uma
+	 * constante de versão (conferido na 2.4.16), então não há nível intermediário.
 	 */
 	function uonix_rfq_stable_asset_version( $src ) {
 		$path = uonix_rfq_stable_asset_path( $src );
@@ -58,10 +59,6 @@ if ( ! function_exists( 'uonix_rfq_stable_asset_version' ) ) {
 			if ( false !== $mtime ) {
 				return (string) $mtime;
 			}
-		}
-
-		if ( defined( 'gpls_woo_rfq_VERSION' ) && '' !== (string) gpls_woo_rfq_VERSION ) {
-			return (string) gpls_woo_rfq_VERSION;
 		}
 
 		return 'uonix-stable';

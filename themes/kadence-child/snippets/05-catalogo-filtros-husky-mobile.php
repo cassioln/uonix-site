@@ -44,29 +44,6 @@ add_action('wp_footer', function () {
 
 
 // -----------------------------------------------------------------------------
-// Bloco 2 - linhas 5148-5166 do export original.
-// -----------------------------------------------------------------------------
-/**
- * UÔNIX: Force Husky Template Path
- * ---------------------------------------------------------
- * Garante que o plugin use o arquivo do tema Child
- */
-add_filter('woof_husky_txt_template_path', function ($factory_path) {
-    // Aponta para a pasta que você criou no seu tema child
-    $child_theme_path = get_stylesheet_directory() . '/woof/ext/by_text/views/templates/default.php';
-
-    // Se você renomeou para 'husky', use esta linha abaixo:
-    // $child_theme_path = get_stylesheet_directory() . '/husky/ext/by_text/views/templates/default.php';
-
-    if (file_exists($child_theme_path)) {
-        return $child_theme_path;
-    }
-
-    return $factory_path;
-}, 9999);
-
-
-// -----------------------------------------------------------------------------
 // Bloco 3 - linhas 5395-5674 do export original.
 // -----------------------------------------------------------------------------
 /**
