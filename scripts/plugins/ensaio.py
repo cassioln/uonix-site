@@ -243,29 +243,44 @@ def comparar(base: dict, atual: dict) -> tuple[list[str], list[str]]:
 # --------------------------------------------------------------------------- #
 # Alinhamento com produção
 # --------------------------------------------------------------------------- #
+def _estado_alvo(tipo: str, nome: str, status_prod: str) -> str | None:
+    """Estado de ativação que o local deve ter, ou None se não se aplica."""
+    if tipo == "plugin":
+        return EXCECOES_ATIVACAO.get(nome, "active" if status_prod == "active" else "inactive")
+    # Tema: só o ativo é alinhado; "parent" decorre do filho ativo.
+    return "active" if status_prod == "active" else None
+
+
 def alinhar(local, inventario: dict, ignorar: set[str] = frozenset()) -> list[str]:
-    """Iguala versões e ativação às de produção. `ignorar`: código próprio,
-    publicado por deploy e ausente do wordpress.org (camada `propria`)."""
+    """Iguala versões e ativação às de produção.
+
+    `ignorar` (camadas `propria` e `decisao_pendente`) não é alinhado por
+    VERSÃO, porque não é atualizado pela esteira e pode não existir no
+    wordpress.org. A ATIVAÇÃO é alinhada para todos os itens instalados, senão
+    o smoke do ensaio não reflete produção (#419)."""
     acoes = []
     for tipo, chave in (("plugin", "plugins"), ("theme", "temas")):
         locais = {i["name"]: i for i in json.loads(local.wp(tipo, "list", "--fields=name,status,version", "--format=json"))}
         for prod in inventario.get(chave, []):
             nome, versao, status = prod["name"], prod.get("version", ""), prod.get("status", "")
-            if status in {"must-use", "dropin"} or not versao or nome in ignorar:
+            if status in {"must-use", "dropin"} or not versao:
                 continue
             atual = locais.get(nome)
-            if atual is None or atual.get("version") != versao:
+            if nome not in ignorar and (atual is None or atual.get("version") != versao):
                 local.wp(tipo, "install", nome, f"--version={versao}", "--force")
                 acoes.append(f"{tipo} {nome}: {atual.get('version') if atual else 'ausente'} -> {versao}")
-            if tipo == "plugin":
-                alvo = EXCECOES_ATIVACAO.get(nome, "active" if status == "active" else "inactive")
-                ativo = (atual or {}).get("status") == "active"
-                if alvo == "active" and not ativo:
-                    local.wp("plugin", "activate", nome)
-                    acoes.append(f"plugin {nome}: ativado")
-                elif alvo == "inactive" and ativo:
-                    local.wp("plugin", "deactivate", nome)
-                    acoes.append(f"plugin {nome}: desativado")
+                atual = {**(atual or {}), "version": versao, "status": (atual or {}).get("status", "inactive")}
+            if atual is None:
+                acoes.append(f"{tipo} {nome}: ausente no local; ativação não alinhada")
+                continue
+            alvo = _estado_alvo(tipo, nome, status)
+            ativo = atual.get("status") == "active"
+            if alvo == "active" and not ativo:
+                local.wp(tipo, "activate", nome)
+                acoes.append(f"{tipo} {nome}: ativado")
+            elif alvo == "inactive" and ativo:
+                local.wp(tipo, "deactivate", nome)
+                acoes.append(f"{tipo} {nome}: desativado")
     divergentes = verificar_alinhamento(local, inventario, ignorar)
     if divergentes:
         raise Falha("alinhamento incompleto: " + "; ".join(divergentes))
@@ -278,15 +293,18 @@ def verificar_alinhamento(local, inventario: dict, ignorar: set[str] = frozenset
         locais = {i["name"]: i for i in json.loads(local.wp(tipo, "list", "--fields=name,status,version", "--format=json"))}
         for prod in inventario.get(chave, []):
             nome = prod["name"]
-            if prod.get("status") in {"must-use", "dropin"} or not prod.get("version") or nome in ignorar:
+            if prod.get("status") in {"must-use", "dropin"} or not prod.get("version"):
                 continue
-            atual = locais.get(nome, {})
-            if atual.get("version") != prod.get("version"):
+            atual = locais.get(nome)
+            if atual is None:
+                if nome not in ignorar:
+                    divergentes.append(f"{nome} ausente no local")
+                continue
+            if nome not in ignorar and atual.get("version") != prod.get("version"):
                 divergentes.append(f"{nome} versão local {atual.get('version')} != produção {prod.get('version')}")
-            if tipo == "plugin":
-                alvo = EXCECOES_ATIVACAO.get(nome, "active" if prod.get("status") == "active" else "inactive")
-                if (atual.get("status") == "active") != (alvo == "active"):
-                    divergentes.append(f"{nome} status local {atual.get('status')} != esperado {alvo}")
+            alvo = _estado_alvo(tipo, nome, prod.get("status", ""))
+            if alvo is not None and (atual.get("status") == "active") != (alvo == "active"):
+                divergentes.append(f"{nome} status local {atual.get('status')} != esperado {alvo}")
     return divergentes
 
 

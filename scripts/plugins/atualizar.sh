@@ -323,7 +323,10 @@ echo '== jobs de aplicação vivos'; ps -u \"\$(id -un)\" -o pid,etime,args | gr
 b=$(printf '%q' "$backup"); [ -n \"\$b\" ] || b=\$(ls -1d $(printf '%q' "$raiz")/plugins-* 2>/dev/null | tail -1 | xargs -n1 basename)
 d=$(printf '%q' "$raiz")/\$b
 echo \"== job: \$b\"; echo \"status: \$(cat \"\$d/aplicar.status\" 2>/dev/null || echo 'ausente (rodando, ou não chegou a começar)')\"
-echo '== fim do log'; tail -n 25 \"\$d/aplicar.log\" 2>/dev/null || echo '(sem log)'"
+echo '== fim do log'; tail -n 25 \"\$d/aplicar.log\" 2>/dev/null || echo '(sem log)'
+echo '== backup'; ls -1 \"\$d\" 2>/dev/null | grep -E '^(plugin-|descartado-|restaura-|db-prod-)' || echo '(vazio)'
+echo '== versão atual dos plugins com pasta salva'
+for t in \"\$d\"/plugin-*.tar.gz; do [ -e \"\$t\" ] || continue; s=\$(basename \"\$t\" .tar.gz); s=\${s#plugin-}; printf '%s %s\\n' \"\$s\" \"\$($(printf '%q -d disable_functions= %q --path=%q' "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$LOCAWEB_DOCUMENT_ROOT") plugin get \"\$s\" --field=version 2>/dev/null)\"; done"
   com_vigia "${UONIX_PLUGINS_LIMITE_SSH:-150}" uonix_transport_ssh_once prod "$remoto" \
     || { echo "Erro: leitura de produção falhou (janela SSH aberta?)" >&2; uonix_transport_close_master prod; return 1; }
   uonix_transport_close_master prod
