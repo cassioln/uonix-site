@@ -160,6 +160,7 @@ class FakeLocal:
         self.instalados = {"kadence-blocks": "3.7.12", "google-site-kit": "1.188.0", "fluent-smtp": "2.4.1"}
         self.ativos = {"kadence-blocks", "google-site-kit"}
         self.temas = {"kadence": "1.5.2", "kadence-child": "0.0-local"}
+        self.tema_ativo = "kadence-child"
         self.chamadas: list[tuple] = []
         self.quebra_em, self.falha_backup = quebra_em, falha_backup
 
@@ -172,7 +173,11 @@ class FakeLocal:
             return json.dumps([{"name": n, "version": v, "status": "active" if n in self.ativos else "inactive"}
                                for n, v in self.instalados.items()])
         if args[:2] == ("theme", "list"):
-            return json.dumps([{"name": n, "version": v, "status": "active"} for n, v in self.temas.items()])
+            return json.dumps([{"name": n, "version": v, "status": "active" if n == self.tema_ativo else "inactive"}
+                               for n, v in self.temas.items()])
+        if args[:2] == ("theme", "activate"):
+            self.tema_ativo = args[2]
+            return ""
         if args[1] in {"install", "update"}:
             versao = next(a.split("=", 1)[1] for a in args if a.startswith("--version="))
             (self.temas if args[0] == "theme" else self.instalados)[args[2]] = versao
@@ -357,6 +362,56 @@ with tempfile.TemporaryDirectory() as tmp:
     r = executar(loc, plano_exec, inv_pro, {}, contratos_ok, saida, None, {"kadence-child", "seo-by-rank-math-pro"})
     checar(r == 0 and not any(c[:3] == ("plugin", "install", "seo-by-rank-math-pro") for c in loc.chamadas),
            f"decisao_pendente não deveria ser reinstalado (saiu {r})")
+
+# --------------------------------------------------------------------------- #
+# 5. Alinhamento de ativação de itens ignorados e de temas (#419)
+# --------------------------------------------------------------------------- #
+with tempfile.TemporaryDirectory() as tmp:
+    saida = pathlib.Path(tmp)
+    inv_419 = {"plugins": inv_prod["plugins"] + [{"name": "seo-by-rank-math-pro", "version": "3.0.110", "status": "inactive"}],
+               "temas": [{"name": "kadence", "version": "1.5.2", "status": "parent"},
+                         {"name": "kadence-child", "version": "1.4.3", "status": "active"},
+                         {"name": "twentytwentythree", "version": "1.7", "status": "inactive"}]}
+    loc = FakeLocal()
+    loc.instalados["seo-by-rank-math-pro"] = "3.0.100"     # versão diverge, e não deve ser reinstalado
+    loc.ativos.add("seo-by-rank-math-pro")                 # ativo no local, inativo em produção
+    loc.temas["twentytwentythree"] = "1.7"
+    loc.tema_ativo = "twentytwentythree"                   # tema ativo diferente de produção
+    r = executar(loc, plano_exec, inv_419, {}, contratos_ok, saida, None, {"kadence-child", "seo-by-rank-math-pro", "twentytwentythree"})
+    checar(r == 0, f"alinhamento de ativação saiu {r}: {(saida / 'relatorio.md').read_text()[-400:]}")
+    checar("seo-by-rank-math-pro" not in loc.ativos, "item ignorado ativo no local e inativo em produção deveria ser desativado")
+    checar(not any(c[:3] == ("plugin", "install", "seo-by-rank-math-pro") for c in loc.chamadas),
+           "item ignorado não pode ser reinstalado por versão")
+    checar(loc.tema_ativo == "kadence-child", f"o tema ativo de produção deveria ser ativado no local (está {loc.tema_ativo})")
+    checar(not any(c[:2] == ("theme", "install") for c in loc.chamadas), "tema ignorado não pode ser instalado")
+
+# --------------------------------------------------------------------------- #
+# 6. main() liga a invalidação ao marcador do clone (#419)
+# --------------------------------------------------------------------------- #
+with tempfile.TemporaryDirectory() as tmp:
+    base = pathlib.Path(tmp)
+    (base / "tmp" / "plugins").mkdir(parents=True)
+    marcador = base / "tmp" / "plugins" / "ultimo-clone.json"
+    marcador.write_text('{"concluido_em": "2026-10-08T10:00:00", "backup": "x"}')
+    (base / "inv.json").write_text(json.dumps(inv_prod))
+    (base / "plano.json").write_text(json.dumps(plano_exec))
+    chamado = {}
+
+    def executar_falso(local, plano_, inventario, contratos, verificar, saida, clonar, proprios, invalidar):
+        chamado["proprios"] = proprios
+        invalidar()
+        return 0
+
+    original = ensaio.executar
+    ensaio.executar = executar_falso
+    try:
+        rc = ensaio.main(["--inventario", str(base / "inv.json"), "--plano", str(base / "plano.json"),
+                          "--checkout", str(base), "--saida", str(base / "saida"), "--reusar-clone"])
+    finally:
+        ensaio.executar = original
+    checar(rc == 0 and not marcador.exists(), "main() deveria passar a invalidação que apaga o marcador do clone")
+    checar({"kadence-child", "seo-by-rank-math-pro", "wordpress-importer"} <= chamado.get("proprios", set()),
+           f"main() deveria ignorar no alinhamento por versão as camadas com aplicacao 'nunca': {chamado.get('proprios')}")
 
 if falhas:
     print("FAIL:")

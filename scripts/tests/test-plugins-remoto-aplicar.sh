@@ -29,9 +29,10 @@ case "$1 $2" in
     v="${4#--version=}"
     [ "${FAKE_VERSAO_ERRADA:-}" = "$3" ] && v="$v.9"
     printf '%s\n' "$v" > "$p/$3/VERSION" ;;
-  "maintenance-mode activate") : > "$doc/.maintenance" ;;
+  "maintenance-mode activate") [ -n "${FAKE_FALHA_MANUTENCAO:-}" ] && exit 1; : > "$doc/.maintenance" ;;
   "maintenance-mode deactivate") [ -f "$doc/.maintenance" ] && mv "$doc/.maintenance" "$doc/.maintenance-desligado" ; true ;;
   "wc update") [ -n "${FAKE_FALHA_WC:-}" ] && exit 1 ; true ;;
+  eval*) printf '%s\n' "$2" >> "$doc/.eval-log" ;;
   *) : ;;
 esac
 PHP
@@ -88,10 +89,12 @@ grep -q 'PARADO EM: etapa b (smoke); restaurado e site verde' "$bk.log" || fail 
 preparar versao; rodar "$LISTA" UONIX_SMOKE_CMD=true FAKE_VERSAO_ERRADA=a
 [ "$rc" = 20 ] && [ "$(versao a)" = 1.0 ] && [ "$(versao b)" = 1.0 ] || fail "versão divergente saiu $rc (a=$(versao a) b=$(versao b))"
 grep -q 'versão instalada 1.1.9 != lock 1.1' "$bk.log" || fail "versão: relatório sem a divergência"
+[ ! -e "$doc/.maintenance" ] || fail "versão divergente: site ficou em manutenção"
 
 # 5. update falhando
 preparar update; rodar "$LISTA" UONIX_SMOKE_CMD=true FAKE_FALHA_UPDATE=b
 [ "$rc" = 20 ] && [ "$(versao b)" = 1.0 ] || fail "update falho saiu $rc"
+[ ! -e "$doc/.maintenance" ] || fail "update falho: site ficou em manutenção"
 
 # 6. lista vazia e slug inválido: 30 sem tocar em nada
 preparar vazia; rodar "" UONIX_SMOKE_CMD=true
@@ -124,6 +127,7 @@ grep -q 'restaurando TUDO' "$bk.log" || fail "vermelho persistente deveria resta
 # 11. wp wc update falhando -> restaura o woocommerce, 20
 preparar wc; rodar $'woocommerce 1.0 1.1 critica' UONIX_SMOKE_CMD=true FAKE_FALHA_WC=1
 [ "$rc" = 20 ] && [ "$(versao woocommerce)" = 1.0 ] || fail "wc update falho saiu $rc (wc=$(versao woocommerce))"
+[ ! -e "$doc/.maintenance" ] || fail "wc update falho: site ficou em manutenção"
 
 # 13. vermelho só na conferência depois da limpeza de cache: nada a restaurar
 # na etapa, então vai à cascata; nunca sai 20 com as versões novas no ar.
@@ -133,6 +137,26 @@ rodar "$LISTA" UONIX_SMOKE_CMD="echo x >> $n; [ \$(wc -l < $n) -ne 4 ]"
 [ "$rc" = 20 ] && [ "$(versao a)" = 1.0 ] && [ "$(versao b)" = 1.0 ] \
   || fail "vermelho pós-cache deveria restaurar tudo antes de sair 20 (saiu $rc, a=$(versao a) b=$(versao b)): $(cat "$bk.log")"
 grep -q 'restaurando TUDO' "$bk.log" || fail "vermelho pós-cache deveria ir à cascata"
+
+# 14. manutenção que não ativa: aborta antes de qualquer update (#421)
+preparar semmanut; rodar "$LISTA" UONIX_SMOKE_CMD=true FAKE_FALHA_MANUTENCAO=1
+[ "$rc" = 30 ] && [ "$(versao a)" = 1.0 ] && [ "$(versao b)" = 1.0 ] \
+  || fail "manutenção que não ativa deveria sair 30 sem alterar nada (saiu $rc, a=$(versao a) b=$(versao b))"
+grep -q 'não foi possível ativar o modo de manutenção' "$bk.log" || fail "relatório sem o motivo do aborto"
+
+# 15. a cascata limpa também o cache de páginas (wp_cache_clear_cache) (#421)
+preparar cascatacache
+rodar "$LISTA" UONIX_SMOKE_CMD="[ ! -e $doc/QUEBRADO ]" FAKE_QUEBRA_PERMANENTE=b
+grep -q 'wp_cache_clear_cache' "$doc/.eval-log" 2>/dev/null || fail "a cascata não chamou a limpeza do WP Super Cache"
+
+# 16. restauração falha, mas o site volta verde: continua sendo 50, porque a
+# restauração ficou incompleta (o operador precisa saber), nunca 20.
+preparar restaurafalha
+n="$TMP_DIR/contador-rf"; : > "$n"
+# 1ª e 2ª conferências (preflight e lote) verdes; 3ª (etapa b) vermelha e corrompe o tar de b; depois verde.
+rodar "$LISTA" UONIX_SMOKE_CMD="echo x >> $n; if [ \$(wc -l < $n) -eq 3 ]; then : > $bk/plugin-b.tar.gz; false; else true; fi"
+[ "$rc" = 50 ] || fail "restauração que falha com o site verde deveria sair 50 (saiu $rc): $(cat "$bk.log")"
+grep -q 'RESTAURAÇÃO FALHOU' "$bk.log" || fail "relatório sem a falha da restauração"
 
 # 12. SIGTERM no meio do update: manutenção desligada e status 143 gravado
 preparar sinal

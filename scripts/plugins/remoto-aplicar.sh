@@ -126,6 +126,11 @@ lote="$(awk '$4 != "critica"' <<< "$LISTA")"
 [ -n "$lote" ] && etapas+=("$lote")
 while read -r linha; do etapas+=("$linha"); done < <(awk '$4 == "critica"' <<< "$LISTA")
 
+limpar_cache() {
+  wp eval 'if ( function_exists( "wp_cache_clear_cache" ) ) { wp_cache_clear_cache(); echo "supercache limpo\n"; }'
+  wp cache flush
+}
+
 aplicar_item() {  # aplicar_item slug para -> 0 ok
   local slug="$1" para="$2" instalada
   wp plugin update "$slug" --version="$para" || { echo "  update de $slug falhou"; return 1; }
@@ -136,7 +141,13 @@ aplicar_item() {  # aplicar_item slug para -> 0 ok
   fi
 }
 
-wp maintenance-mode activate && em_manutencao=1
+# Sem manutenção, os updates rodariam com o site aberto ao público: aborta
+# antes de qualquer update (#421).
+if ! wp maintenance-mode activate; then
+  echo "ABORTADO: não foi possível ativar o modo de manutenção; nada foi alterado"
+  exit 30
+fi
+em_manutencao=1
 aplicados=()   # todos os slugs tocados nesta execução, na ordem
 falhou=""
 for etapa in "${etapas[@]}"; do
@@ -150,7 +161,11 @@ for etapa in "${etapas[@]}"; do
   if [ -z "$falhou" ]; then
     wp maintenance-mode deactivate >/dev/null && em_manutencao=0
     checar_site || falhou="etapa ${da_etapa[*]} (smoke)"
-    [ -z "$falhou" ] && { wp maintenance-mode activate >/dev/null && em_manutencao=1; }
+    if [ -z "$falhou" ]; then
+      # Entre etapas já há plugins aplicados: parar seria pior do que seguir
+      # sem a página de manutenção. Fica registrado.
+      if wp maintenance-mode activate >/dev/null; then em_manutencao=1; else echo "  AVISO: manutenção não reativou; seguindo"; fi
+    fi
   fi
   [ -n "$falhou" ] && break
 done
@@ -159,8 +174,7 @@ resultado=0
 if [ -z "$falhou" ]; then
   wp maintenance-mode deactivate >/dev/null 2>&1; em_manutencao=0
   echo "== limpeza de cache"
-  wp eval 'if ( function_exists( "wp_cache_clear_cache" ) ) { wp_cache_clear_cache(); echo "supercache limpo\n"; }'
-  wp cache flush
+  limpar_cache
   checar_site || { falhou="site depois da limpeza de cache"; da_etapa=(); }
 fi
 
@@ -182,7 +196,9 @@ if [ -n "$falhou" ]; then
     for ((n=${#aplicados[@]}-1; n>=0; n--)); do reverso+=("${aplicados[n]}"); done
     echo "== restaurando TUDO o que foi aplicado nesta execução: ${reverso[*]}"
     restaurar_lista "${reverso[@]}" || resultado=50
-    wp cache flush >/dev/null 2>&1
+    # Mesma limpeza da etapa final: sem ela, o WP Super Cache seguiria servindo
+    # páginas geradas durante a falha (#421).
+    limpar_cache >/dev/null 2>&1
     if checar_site; then
       [ "$resultado" = 50 ] || resultado=20
     else
