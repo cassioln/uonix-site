@@ -123,6 +123,34 @@ for real in ("* Security: Improved output escaping for block attributes.",
              "Fixed unescaped HTML loophole in the file path placeholder UI", "Security fix: Thanks to crow and Wordfence."):
     checar(bool(plano.SEGURANCA.search(real)), f"correção de segurança real não reconhecida: {real}")
 
+# #418: a palavra solta não basta; exige contexto de correção.
+for falso in ("Compatibility with Wordfence Security 8.0", "Compatibility with Solid Security and All In One WP Security",
+              "Added Security headers settings page", "Fixed unauthorized error message text",
+              "New permission checks screen", "Escape key closes the modal", "Secure cookie option added",
+              "Hardened Mode toggle added", "Tweak - Hardening guide link", "Added hardening options page",
+              "Added unauthenticated access option for public forms", "New: unauthenticated form view setting"):
+    checar(not plano.SEGURANCA.search(falso), f"falso positivo de segurança (dispensaria a quarentena): {falso}")
+for verdadeiro in ("Security Fix: administrator-role protection only excluded the administrator role",
+                   "Fixed a Broken Access Control vulnerability in the REST endpoint",
+                   "Added missing authorization check on the export action", "Fixed missing capability check",
+                   "Fixed a Cross-Site Scripting issue in the widget", "Patched CVE-2026-12345",
+                   "Fixed PHP Object Injection in the importer", "Fixed arbitrary file upload in the form",
+                   "Fixed an SSRF in the URL preview", "Fixed an issue that allowed unauthenticated users to read entries",
+                   "Hardened nonce verification", "Security update for the shortcode handler",
+                   "Hardens input sanitization and permission checks across field settings",
+                   "Fixed an issue that allowed unauthenticated REST requests to export entries",
+                   "Unauthenticated attackers could read private posts"):
+    checar(bool(plano.SEGURANCA.search(verdadeiro)), f"correção de segurança não reconhecida: {verdadeiro}")
+
+# #418: cabeçalhos falsos não abrem nem fecham seção.
+for nome, texto, esperado in (
+    ("1.5x não é versão", "<p>= 1.2.5 =</p><p>* 1.5x faster loading</p><p>Security: fix</p><p>= 1.2.3 =</p>", True),
+    ("data dd.mm.aaaa não é versão", "<p>= 1.2.5 =</p><p>25.09.2026 - Fixed XSS in widget</p><p>= 1.2.3 =</p>", True),
+):
+    trecho = plano.trecho_changelog(cl(texto), "1.2.3", "1.2.5")
+    seg = None if trecho is None else any(plano.SEGURANCA.search(l) for l in trecho)
+    checar(seg == esperado, f"changelog [{nome}]: segurança={seg}, esperado {esperado} ({trecho})")
+
 
 # --------------------------------------------------------------------------- #
 # 3. executar() com ambiente falso
