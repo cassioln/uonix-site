@@ -17,7 +17,7 @@ services:
 
   wordpress:
     platform: linux/arm64
-    image: wordpress:php8.2-apache
+    image: wordpress:php8.5-apache
     container_name: uonix-local-app
     restart: unless-stopped
     depends_on:
@@ -74,7 +74,7 @@ services:
       - tools
     platform: linux/arm64
 
-    image: wordpress:cli-php8.2
+    image: wordpress:cli-php8.5
     depends_on:
       - db
     environment:

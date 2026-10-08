@@ -41,12 +41,27 @@ COMPRESSX_CRITICAL_IMAGE_PATHS=(
   /wp-content/uploads/2026/01/alfa_servicos-e-treinamentos.webp
 )
 
+# Metadados e temporários são excluídos como regra PERECÍVEL (`-p`), e não com
+# `--exclude`: no rsync, um arquivo excluído também fica protegido do `--delete`,
+# então um diretório que só exista no destino e contenha apenas `.DS_Store` não
+# esvazia e sobrevive ao espelho (#396). A regra perecível é ignorada só dentro
+# de diretórios que estão sendo apagados; nos demais, continua sem copiar nem
+# apagar. As exclusões de diretório abaixo seguem protegendo o destino.
+#
+# `cache/` e `logs/` são ANCORADOS na raiz de cada diretório sincronizado
+# (`uploads`, `plugins`, `languages`). Sem a barra inicial, o rsync casa
+# qualquer diretório com esse nome em qualquer profundidade, inclusive código de
+# plugin: o clone cortava `vendor/psr/cache` do fast-indexing-api e o
+# `third-party/psr/cache` do google-site-kit, e o salvamento de posts terminava
+# em erro fatal no destino (#406). Em produção, em 2026-10-07, não havia
+# `cache/` nem `logs/` na raiz desses três diretórios, e havia 5 diretórios
+# com esses nomes dentro de plugins.
 EXCLUDED_RSYNC_ARGS=(
-  --exclude='.DS_Store'
-  --exclude='._*'
-  --exclude='*~'
-  --exclude='*.log'
-  --exclude='cache/'
+  --filter='-p .DS_Store'
+  --filter='-p ._*'
+  --filter='-p *~'
+  --filter='-p *.log'
+  --exclude='/cache/'
   --exclude='wc-logs/'
   --exclude='wp-staging/'
   --exclude='wpmc-trash/'
@@ -57,8 +72,17 @@ EXCLUDED_RSYNC_ARGS=(
   --exclude='wpvivid_uploads/'
   --exclude='wpvividbackups/'
   --exclude='wpvivid_staging/'
-  --exclude='logs/'
+  --exclude='/logs/'
   --exclude='uonix-local/'
+)
+
+# Exclusões do tar dos backups do destino, de onde o rollback restaura. Sem
+# `cache`: o padrão do tar casa o nome em qualquer nível, então o rollback
+# reinstalaria plugins sem `psr/cache` (#406). O arquivo cresce só pelos
+# `cache/` aninhados, que em `plugins` são código e precisam entrar.
+BACKUP_TAR_EXCLUDES=(
+  --exclude='wc-logs'
+  --exclude='wp-staging'
 )
 
 PLUGIN_RSYNC_EXCLUDES=(
@@ -795,7 +819,7 @@ for item in $(shell_join "${backup_items[@]}"); do
 done
 if [ \"\$#\" -gt 0 ]; then
   tar -czf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") \
-    --exclude='cache' --exclude='wc-logs' --exclude='wp-staging' -- \"\$@\"
+    $(shell_join "${BACKUP_TAR_EXCLUDES[@]}") -- \"\$@\"
 else
   tar -czf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") --files-from=/dev/null
 fi
@@ -820,7 +844,7 @@ find $(printf '%q' "$backup_root") -mindepth 1 -maxdepth 1 -type d -printf '%T@ 
     if [ "${#existing_items[@]}" -gt 0 ]; then
       tar -czf "${dir}/files-${env}-${STAMP}.tar.gz" \
         -C "$LOCAL_WP_CONTENT" \
-        --exclude='cache' --exclude='wc-logs' --exclude='wp-staging' \
+        "${BACKUP_TAR_EXCLUDES[@]}" \
         -- "${existing_items[@]}" || return $?
     else
       tar -czf "${dir}/files-${env}-${STAMP}.tar.gz" --files-from=/dev/null || return $?

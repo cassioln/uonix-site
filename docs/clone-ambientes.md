@@ -63,7 +63,9 @@ As branches de deploy continuam sendo `master` para `prod`, `qa` para QA e
 para usar a implementação canônica da ferramenta, mas não publica `master` no
 destino nem troca sua branch de deploy.
 
-O Compose local usa MariaDB 10.11, WordPress/PHP 8.2 e Mailpit. O site responde na
+O Compose local usa MariaDB 10.11, WordPress/PHP 8.5 e Mailpit. A versão menor do
+PHP acompanha a de produção, medida em 2026-10-05 como 8.5.7 tanto no CLI quanto na
+web (cabeçalho `x-powered-by`), para que um ensaio local prove compatibilidade. O site responde na
 porta `8080`; SMTP e interface do Mailpit usam `1025` e `8025`. O procedimento de
 recriação do ambiente está em [local/README.md](../local/README.md).
 
@@ -238,6 +240,13 @@ Essa é uma **sincronização de espelho**, não uma mesclagem:
   origem;
 - item explicitamente excluído não é enviado e não é removido pelo `--delete`,
   pois o transporte não usa `--delete-excluded`;
+- a exceção são os metadados e temporários (`.DS_Store`, `._*`, `*~` e `*.log`),
+  que entram como regra **perecível** (`--filter='-p …'`): continuam sem ser
+  copiados e, em diretório que também existe na origem, sem ser apagados, mas não
+  impedem a remoção de um diretório que só exista no destino. Dentro desse
+  diretório, eles são apagados mesmo quando um subdiretório protegido em
+  qualquer profundidade (como `wc-logs/`) o mantém de pé. Sem isso, uma pasta de
+  plugin que contenha apenas o `.DS_Store` do Finder sobrevive ao espelho (#396);
 - se um dos três diretórios inteiros não existir na origem, esse diretório é
   ignorado e o correspondente no destino fica como está;
 - um erro operacional de transporte não é confundido com diretório ausente: a
@@ -254,7 +263,10 @@ Essa é uma **sincronização de espelho**, não uma mesclagem:
 Os padrões abaixo não são copiados dentro de `uploads`, `plugins` ou `languages`:
 
 - metadados e temporários: `.DS_Store`, `._*`, `*~`, `*.log`;
-- cache e logs: `cache/`, `wc-logs/`, `logs/`;
+- cache e logs: `/cache/` e `/logs/` **só na raiz** de cada diretório sincronizado, e
+  `wc-logs/`. A âncora importa: sem ela, o rsync casava qualquer diretório
+  `cache/` ou `logs/` em qualquer profundidade e cortava código de plugin, como o
+  `vendor/psr/cache` (#406);
 - staging e lixeira: `wp-staging/`, `wpmc-trash/`;
 - exportações e dados pessoais: `wp-personal-data-exports/`,
   `curriculos-recebidos/`;
@@ -410,8 +422,9 @@ backups mais recentes por ambiente.
 - dump completo do banco em `gzip` (remoto inclui `--routines --triggers
   --events`; local não inclui rotinas nem eventos);
 - `uploads`, `plugins` e `languages` — o tar do backup exclui subdiretórios
-  `cache/`, `wc-logs/` e `wp-staging/`, portanto esses itens não são
-  restaurados pelo rollback;
+  `wc-logs/` e `wp-staging/`, portanto esses itens não são restaurados pelo
+  rollback. Ele **não** exclui `cache/`: o padrão do tar casa o nome em qualquer
+  nível, e o rollback reinstalaria plugins sem `psr/cache` (#406);
 - `compressx` e `compressx-nextgen`, se existirem;
 - `wp-content/.htaccess`, se existir;
 - snapshots de usuários e opções protegidas, quando aplicáveis;

@@ -179,6 +179,9 @@ jobs:
       - name: Test fixed product short description without block editor API
         run: php scripts/tests/test-product-short-description-no-block-api.php
 
+      - name: Test fixed blog post excerpt layout
+        run: php scripts/tests/test-blog-resumo-fixo-layout.php
+
       - name: Test variation technical sheet
         run: php scripts/tests/test-variation-technical-sheet.php
 
@@ -231,6 +234,9 @@ jobs:
 
       - name: Test block widgets without content from Max Mega Menu
         run: php scripts/tests/test-navigation-mega-menu-widget-bloco.php
+
+      - name: Test product mega menu without category or WooCommerce
+        run: php scripts/tests/test-navigation-mega-menu-sem-categoria.php
 
       - name: Test dark footer widget areas in widgets editor
         run: php scripts/tests/test-admin-widgets-rodape-fundo-escuro.php
@@ -343,6 +349,12 @@ jobs:
       - name: Test clone dump content
         run: bash scripts/tests/test-clone-dump-content.sh
 
+      - name: Test clone mirror perishable metadata
+        run: bash scripts/tests/test-clone-mirror-perishable-metadata.sh
+
+      - name: Test clone anchored exclusions
+        run: bash scripts/tests/test-clone-exclusoes-ancoradas.sh
+
       - name: Test clone URL replacement
         run: bash scripts/tests/test-clone-url-replacement.sh
 
@@ -412,6 +424,18 @@ jobs:
 
       - name: Test production rollback runtime
         run: python3 scripts/tests/test-production-rollback-runtime.py
+
+      - name: Test plugins policy and contracts
+        run: python3 scripts/tests/test-plugins-politica-contratos.py
+
+      - name: Test plugins local rehearsal
+        run: python3 scripts/tests/test-plugins-ensaio.py
+
+      - name: Test plugins production apply (Mac side)
+        run: python3 scripts/tests/test-plugins-aplicar.py
+
+      - name: Test plugins production apply (remote job)
+        run: bash scripts/tests/test-plugins-remoto-aplicar.sh
 
       - name: Test production rollback exit code without mutation
         run: bash scripts/tests/test-production-rollback-no-mutation.sh
@@ -511,3 +535,8 @@ jobs:
         # O PHP gera o HTML real dos cenários; o Node 22 fala o protocolo DevTools
         # pelo WebSocket nativo, sem dependências de npm.
         run: node scripts/tests/test-admin-atualizacoes-sistemicas-navegador.mjs
+
+      - name: Test editor group menus click in a real browser
+        # Mesmo modelo: HTML real do PHP (classes e script do 67), clique de mouse
+        # do Chrome e posição do submenu medida no layout (issue #392).
+        run: node scripts/tests/test-admin-editor-menus-navegador.mjs

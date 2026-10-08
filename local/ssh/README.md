@@ -61,7 +61,7 @@ O servidor SSH é provisionado **automaticamente** toda vez que o container sobe
 
 ## Observações
 
-- A imagem é a oficial `wordpress:php8.2-apache`; **nada é alterado na imagem**.
+- A imagem é a oficial `wordpress:php8.5-apache`; **nada é alterado na imagem**.
   Toda a configuração é montada via volumes — basta clonar o repo e seguir o setup.
 - O Apache continua sendo o processo principal (PID 1); o sshd roda ao lado.
 - Reiniciar/recriar o container **não** exige mais rodar `service ssh start`.
