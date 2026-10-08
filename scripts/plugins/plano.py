@@ -39,15 +39,29 @@ import urllib.request
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 POLITICA_PADRAO = RAIZ / "ops" / "plugins" / "politica.json"
 API = "https://api.wordpress.org/plugins/info/1.2/"
-# Termos inequívocos. Palavras soltas como "escape", "secure" e "sanitize"
-# dispensariam a quarentena de um crítico por engano ("Escape key closes modal",
-# "Secure cookie option added").
+# Correção de segurança exige CONTEXTO, não a palavra solta: "Compatibility with
+# Wordfence Security", "Added Security headers settings page" e "New permission
+# checks screen" dispensariam a quarentena de um crítico por engano (#418).
+# Um falso negativo só mantém a quarentena (conservador); um falso positivo a
+# dispensa. Por isso a lista é de construções de correção e de classes de
+# vulnerabilidade, e não de palavras.
 SEGURANCA = re.compile(
-    r"\bsecurity\b|\bcve-\d{4}|\bxss\b|\bcsrf\b|vulnerab|privilege escalation|sql injection"
-    r"|\bunauthori[sz]ed\b|permission checks?\b|output escaping|\bunescaped html\b", re.I)
+    r"^\W*security\b[^:\n]{0,20}:"                                   # "Security:", "* Security fix:"
+    r"|\bsecurity (fix|fixes|issue|issues|patch|vulnerabilit\w*|hardening|release|update)\b"
+    r"|\b(improv|harden|strengthen|enhanc|tighten)\w* (the |plugin |overall )?security\b"
+    r"|\bharden(s|ed|ing)\b"                                          # "Hardens input sanitization..."
+    r"|\bcve-\d{4}|\bxss\b|cross[- ]site (scripting|request forgery)|\bcsrf\b|\bssrf\b"
+    r"|vulnerab|privilege escalation|sql injection|object injection|open redirect"
+    r"|arbitrary file (upload|deletion|download|read)|\bunauthenticated\b"
+    r"|broken access control|(missing|insufficient|improper) (authori[sz]ation|capability|permission|nonce|access)( check)?"
+    r"|permission checks? (across|for|on|in|when)\b|output escaping|\bunescaped html\b",
+    re.I | re.M)
 # Cabeçalho de versão: "= 1.2.3 =", "#### 1.2.3", "[4.66.2] 25.09.2026",
 # "1.2.3 - 2026-01-01", "v.1.2.3", "Version: 1.2.4", "Release 1.2.4".
-CABECALHO = re.compile(r"^[=#*\[\s]*(?:v\.?\s*|version:?\s*|release\s+)?(\d+(?:\.\d+){1,3})(?![\d.])", re.I)
+# A versão não pode ser seguida de letra ("* 1.5x faster loading" não é cabeçalho).
+CABECALHO = re.compile(r"^[=#*\[\s]*(?:v\.?\s*|version:?\s*|release\s+)?(\d+(?:\.\d+){1,3})(?![\d.]|[a-z])", re.I)
+# Data no formato dd.mm.aaaa não é versão ("25.09.2026 - Fixed XSS").
+DATA_COMO_VERSAO = re.compile(r"^\d{1,2}\.\d{1,2}\.\d{4}$")
 DATA_SOLTA = re.compile(r"^\s*\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\s*$")
 RISCO = re.compile(r"breaking|\bremoved\b|deprecat|database (update|migration)|requires php|drop(ped)? support", re.I)
 ORDEM_CAMADAS = {"acoplada": 0, "comum": 1, "critica": 2}
@@ -92,6 +106,8 @@ def trecho_changelog(info: dict | None, de: str, para: str) -> list[str] | None:
     trecho, dentro, achou = [], False, False
     for linha in linhas:
         m = None if DATA_SOLTA.match(linha) else CABECALHO.match(linha)
+        if m and DATA_COMO_VERSAO.match(m.group(1)):
+            m = None
         # Linha que é cabeçalho marcado (=, #, [) pode ser longa (data e título);
         # linha comum só conta se for curta, para não confundir "1.2 compat" no meio.
         marcado = linha.lstrip()[:1] in {"=", "#", "["}
