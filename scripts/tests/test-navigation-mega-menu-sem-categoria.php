@@ -5,8 +5,9 @@
  * - sem o WooCommerce (taxonomia ausente) ou com um slug renomeado no painel,
  *   get_term_by() devolve false e get_term_link() um WP_Error, que concatenado
  *   como string era erro fatal no site inteiro (#416);
- * - um filtro de terceiros pode fazer get_term_by() devolver WP_Error, e ler
- *   ->description e ->term_id dele gerava Warning (#423).
+ * - se um filtro de terceiros (`get_term`) fizesse get_term_by() devolver um
+ *   WP_Error, ler ->term_id dele gerava Warning (#423). O ->description não
+ *   gerava: o !empty() daquela linha suprime o aviso.
  *
  * Qualquer Warning, Notice ou Deprecated reprova o teste.
  */

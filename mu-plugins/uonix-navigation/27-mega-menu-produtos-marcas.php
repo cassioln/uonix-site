@@ -1141,8 +1141,8 @@ function uonix_gerar_mega_menu_v14()
                     // painel, get_term_by() devolve false e get_term_link() um WP_Error;
                     // concatenado como string, ele derrubava o site inteiro (#416).
                     $term = get_term_by('slug', $cat['slug'], 'product_cat');
-                    // Um filtro de terceiros pode devolver WP_Error; daqui em diante
-                    // $term é objeto de termo ou false (#423).
+                    // Hipotético: um filtro de terceiros em `get_term` poderia devolver
+                    // WP_Error. Daqui em diante $term é objeto de termo ou false (#423).
                     if (!is_object($term) || is_wp_error($term)) {
                         $term = false;
                     }
