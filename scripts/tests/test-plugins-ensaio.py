@@ -126,7 +126,9 @@ for real in ("* Security: Improved output escaping for block attributes.",
 # #418: a palavra solta não basta; exige contexto de correção.
 for falso in ("Compatibility with Wordfence Security 8.0", "Compatibility with Solid Security and All In One WP Security",
               "Added Security headers settings page", "Fixed unauthorized error message text",
-              "New permission checks screen", "Escape key closes the modal", "Secure cookie option added"):
+              "New permission checks screen", "Escape key closes the modal", "Secure cookie option added",
+              "Hardened Mode toggle added", "Tweak - Hardening guide link", "Added hardening options page",
+              "Added unauthenticated access option for public forms", "New: unauthenticated form view setting"):
     checar(not plano.SEGURANCA.search(falso), f"falso positivo de segurança (dispensaria a quarentena): {falso}")
 for verdadeiro in ("Security Fix: administrator-role protection only excluded the administrator role",
                    "Fixed a Broken Access Control vulnerability in the REST endpoint",
@@ -134,7 +136,10 @@ for verdadeiro in ("Security Fix: administrator-role protection only excluded th
                    "Fixed a Cross-Site Scripting issue in the widget", "Patched CVE-2026-12345",
                    "Fixed PHP Object Injection in the importer", "Fixed arbitrary file upload in the form",
                    "Fixed an SSRF in the URL preview", "Fixed an issue that allowed unauthenticated users to read entries",
-                   "Hardened nonce verification", "Security update for the shortcode handler"):
+                   "Hardened nonce verification", "Security update for the shortcode handler",
+                   "Hardens input sanitization and permission checks across field settings",
+                   "Fixed an issue that allowed unauthenticated REST requests to export entries",
+                   "Unauthenticated attackers could read private posts"):
     checar(bool(plano.SEGURANCA.search(verdadeiro)), f"correção de segurança não reconhecida: {verdadeiro}")
 
 # #418: cabeçalhos falsos não abrem nem fecham seção.

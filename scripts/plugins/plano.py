@@ -43,16 +43,19 @@ API = "https://api.wordpress.org/plugins/info/1.2/"
 # Wordfence Security", "Added Security headers settings page" e "New permission
 # checks screen" dispensariam a quarentena de um crítico por engano (#418).
 # Um falso negativo só mantém a quarentena (conservador); um falso positivo a
-# dispensa. Por isso a lista é de construções de correção e de classes de
-# vulnerabilidade, e não de palavras.
+# dispensa. Por isso palavras ambíguas só contam com contexto: "harden" só com o
+# alvo da correção, "unauthenticated" só como exploração. Os nomes de classe de
+# vulnerabilidade (XSS, CSRF, SSRF...) ainda contam sozinhos, e "Security:" ou
+# "improved security" ainda casam frases de recurso; ver a issue de seguimento.
 SEGURANCA = re.compile(
     r"^\W*security\b[^:\n]{0,20}:"                                   # "Security:", "* Security fix:"
     r"|\bsecurity (fix|fixes|issue|issues|patch|vulnerabilit\w*|hardening|release|update)\b"
     r"|\b(improv|harden|strengthen|enhanc|tighten)\w* (the |plugin |overall )?security\b"
-    r"|\bharden(s|ed|ing)\b"                                          # "Hardens input sanitization..."
+    r"|\bharden\w* (input |output |the )?(nonce|sanitiz|escap|validat|permission|capabilit|access|security)"
     r"|\bcve-\d{4}|\bxss\b|cross[- ]site (scripting|request forgery)|\bcsrf\b|\bssrf\b"
     r"|vulnerab|privilege escalation|sql injection|object injection|open redirect"
-    r"|arbitrary file (upload|deletion|download|read)|\bunauthenticated\b"
+    r"|arbitrary file (upload|deletion|download|read)"
+    r"|allow\w* unauthenticated|unauthenticated (users?|attackers?|visitors?)\b.{0,40}\b(could|can|to|were able|was able)\b"
     r"|broken access control|(missing|insufficient|improper) (authori[sz]ation|capability|permission|nonce|access)( check)?"
     r"|permission checks? (across|for|on|in|when)\b|output escaping|\bunescaped html\b",
     re.I | re.M)
