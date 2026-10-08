@@ -1137,8 +1137,14 @@ function uonix_gerar_mega_menu_v14()
                     $is_featured = ($index === 0);
                     $index++;
 
+                    // Sem o WooCommerce (taxonomia ausente) ou com o slug renomeado no
+                    // painel, get_term_by() devolve false e get_term_link() um WP_Error;
+                    // concatenado como string, ele derrubava o site inteiro (#416).
                     $term = get_term_by('slug', $cat['slug'], 'product_cat');
-                    $link_padrao = get_term_link($term) . '#catalogo-produtos';
+                    $link_termo = $term ? get_term_link($term) : null;
+                    $link_padrao = (!$link_termo || is_wp_error($link_termo))
+                        ? '/produtos/#catalogo-produtos'
+                        : $link_termo . '#catalogo-produtos';
                     $link_husky = '/produtos/swoof2/product_cat-' . $cat['slug'] . '/#catalogo-produtos';
 
                     // Descrição da categoria (limite proporcional de ~450 caracteres para categorias normais)

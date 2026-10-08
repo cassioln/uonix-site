@@ -235,6 +235,9 @@ jobs:
       - name: Test block widgets without content from Max Mega Menu
         run: php scripts/tests/test-navigation-mega-menu-widget-bloco.php
 
+      - name: Test product mega menu without category or WooCommerce
+        run: php scripts/tests/test-navigation-mega-menu-sem-categoria.php
+
       - name: Test dark footer widget areas in widgets editor
         run: php scripts/tests/test-admin-widgets-rodape-fundo-escuro.php
 
