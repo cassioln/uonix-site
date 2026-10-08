@@ -80,6 +80,68 @@ Cada marcador foi **medido desligando o plugin** no local, e o check precisa fic
 
 O WP-CLI do ensaio roda dentro do container do site, no mesmo PHP que serve as páginas, a partir de um `wp-cli.phar` conferido pelo sha512 publicado.
 
+## Aplicação em produção
+
+Requer a janela SSH aberta. Rode do checkout principal, com o lock de um ensaio verde de no máximo 72 h:
+
+```bash
+bash scripts/plugins/atualizar.sh aplicar-producao --lock=tmp/plugins/ensaio-<data>/lock.json
+```
+
+Sem `--confirmacao`, o comando só valida o lock e mostra a frase exata. Ela inclui o sha256 curto do lock, e é preciso repeti-la:
+
+```bash
+bash scripts/plugins/atualizar.sh aplicar-producao --lock=tmp/plugins/ensaio-<data>/lock.json --confirmacao='ATUALIZAR PROD <sha12>'
+```
+
+O comando faz, nesta ordem:
+
+1. **Validação do lock** (`lock.py`). O lock é recusado se o sha256 não conferir, se o resultado não for verde, se tiver mais de 72 h (`UONIX_PLUGINS_LOCK_MAX_HORAS`), se tiver algum item cujo código não carrega no local ou se tiver um slug inválido.
+2. **Sonda da janela SSH**, com corte em 30 s. Janela fechada pendura em silêncio; aqui ela falha rápido.
+3. **Backup do banco** de produção (`backup-remote-database.sh`), sob cão de guarda.
+4. **Job remoto** (`remoto-aplicar.sh`). Ele é enviado ao servidor e roda **desacoplado da conexão** (`nohup`, com log e status em `_uonix-deploy-backups/plugins-<data>/`):
+   - **preflight:** produção precisa estar nas versões "de" do lock; se divergir, sai 30 sem alterar nada;
+   - backup das pastas dos plugins;
+   - modo de manutenção e atualização em **etapas**: os plugins fora da camada crítica formam um lote, e cada crítico é uma etapa sozinho; a versão instalada é conferida, e o `wp wc update` também;
+   - smoke depois de cada etapa e depois da limpeza de cache.
+
+   **Se uma etapa falhar:**
+   1. os plugins **dela** são restaurados, sem apagar nada; a pasta quebrada vai para `descartado-<slug>` no backup;
+   2. se o site seguir vermelho, **tudo o que foi aplicado nesta execução** é restaurado, em ordem reversa.
+
+   Os plugins de etapas anteriores que passaram no smoke ficam aplicados.
+
+   **A restauração devolve as pastas, não o banco.** Migrações de banco (`wp wc update`, upgrades de plugin) não são desfeitas. Se for preciso voltar o banco, o dump está em `_uonix-deploy-backups/plugins-<data>/db-prod-<data>.sql.gz`. Restaurar esse dump desfaz também o que foi gravado depois dele, como solicitações de orçamento, e por isso é uma decisão manual.
+5. **Smoke de produção** do Mac (`smoke_producao.py`), só leitura, com os mesmos marcadores do ensaio e as páginas extras do ensaio (produto, post, serviço).
+6. **Registro** em `aplicacao-<backup>.json`, ao lado do lock.
+
+Aplicar o mesmo lock duas vezes é seguro: na segunda vez, produção já está nas versões "para", o preflight detecta drift e nada muda.
+
+| Saída | Significado |
+|---|---|
+| `0` | Aplicado, com o smoke do job e o smoke de produção do Mac verdes. |
+| `20` | Parou numa etapa, restaurou, e o site ficou **verde** de novo, nos dois smokes. |
+| `30` | Recusado sem alterar nada: lock, confirmação, janela, backup, drift ou site já falhando antes. |
+| `40` | O job não terminou normalmente: a conexão caiu ou ele foi interrompido por sinal. **Não reexecute:** rode `estado-producao`. |
+| `50` | **Intervenção necessária:** uma restauração falhou, o site seguiu vermelho depois de restaurar tudo, ou o smoke do Mac ficou vermelho depois de o job dizer que estava verde. Os caminhos do backup são impressos. |
+
+O smoke de produção do Mac roda depois de **toda** execução que mudou produção (0, 20 e 50). Ele é a segunda opinião e não depende de o job ter avaliado certo.
+
+Se o job receber TERM, INT ou HUP, ele desliga a manutenção e grava o status 143, que o Mac reporta como 40. **SIGKILL não pode ser tratado**, e o matador de processos da hospedagem compartilhada usa SIGKILL. Nesse caso o status fica ausente e o `.maintenance` pode ficar no lugar; o WordPress o ignora depois de 10 minutos. `estado-producao` mostra as duas coisas.
+
+### Depois de uma queda: `estado-producao`
+
+```bash
+bash scripts/plugins/atualizar.sh estado-producao [--backup=plugins-<data>]
+```
+
+O comando é só leitura e mostra:
+- se a manutenção está ativa;
+- se há job vivo;
+- o status e o fim do log do último job, ou do job indicado.
+
+Em 2026-10-07, um job ainda ligado à conexão morreu no meio e deixou o site em manutenção por cerca de 5 minutos. Por isso o job roda desacoplado, e o primeiro passo depois de qualquer queda é **ler o estado**, nunca reexecutar.
+
 ## Camadas — `ops/plugins/politica.json`
 
 | Camada | Quando | Aplicação | Quarentena | Major |

@@ -428,6 +428,12 @@ jobs:
       - name: Test plugins local rehearsal
         run: python3 scripts/tests/test-plugins-ensaio.py
 
+      - name: Test plugins production apply (Mac side)
+        run: python3 scripts/tests/test-plugins-aplicar.py
+
+      - name: Test plugins production apply (remote job)
+        run: bash scripts/tests/test-plugins-remoto-aplicar.sh
+
       - name: Test production rollback exit code without mutation
         run: bash scripts/tests/test-production-rollback-no-mutation.sh
 

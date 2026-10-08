@@ -155,6 +155,18 @@ echo '@@J' . wp_json_encode(array(
 """
 
 
+# Marcadores da home, medidos ligando e desligando cada plugin no local
+# (2026-10-07). Usados no ensaio e no smoke de produção (smoke_producao.py).
+# O texto `mega-menu-item` sozinho NÃO serve: o nosso CSS inline o repete, e
+# sobravam 71 ocorrências com o Max Mega Menu desativado.
+MARCADORES_HOME = (
+    ("megamenu: itens", r"<li[^>]*class=[\"'][^\"']*\bmega-menu-item\b"),  # 32 ligado, 0 desligado
+    ("megamenu: widgets nas colunas", r"\bmega-menu-item-type-widget\b"),   # incidente de 2026-10-02
+    ("meta description", r"<meta name=[\"']description[\"']"),           # 1 com Rank Math, 0 sem
+    ("ld+json", r"application/ld\+json"),                                # 1 com Rank Math, 0 sem
+)
+
+
 def alvos(local) -> dict:
     return local.eval_json(ALVOS_PHP)
 
@@ -170,16 +182,8 @@ def smoke(local, alvo: dict, contratos: dict) -> dict:
         erro = bool(re.search(r"critical error|Fatal error", corpo, re.I))
         r[f"pagina {caminho}"] = {"ok": status == 200 and not erro, "detalhe": f"http {status}{' com erro fatal' if erro else ''}"}
 
-    # Marcadores medidos ligando e desligando o plugin no local (2026-10-07).
-    # O texto `mega-menu-item` sozinho NÃO serve: nosso CSS inline o repete, e
-    # sobravam 71 ocorrências com o Max Mega Menu desativado.
     _, home, _ = local.http("/?uonix_smoke=1")
-    for nome, padrao in (
-        ("megamenu: itens", r"<li[^>]*class=[\"'][^\"']*\bmega-menu-item\b"),            # 32 ligado, 0 desligado
-        ("megamenu: widgets nas colunas", r"\bmega-menu-item-type-widget\b"),             # incidente de 2026-10-02
-        ("meta description", r"<meta name=[\"']description[\"']"),                     # 1 com Rank Math, 0 sem
-        ("ld+json", r"application/ld\+json"),                                          # 1 com Rank Math, 0 sem
-    ):
+    for nome, padrao in MARCADORES_HOME:
         n = len(re.findall(padrao, home))
         r[f"home {nome}"] = {"ok": n > 0, "detalhe": f"{n} ocorrência(s)"}
 
