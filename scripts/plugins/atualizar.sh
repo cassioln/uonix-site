@@ -250,7 +250,10 @@ echo \"@@STATUS=\$(cat ${q_bk}/aplicar.status 2>/dev/null || echo ausente)\""
   saida="$(com_vigia "${UONIX_PLUGINS_LIMITE_JOB:-1800}" uonix_transport_ssh_once prod "$remoto" \
     < "${ROOT_DIR}/scripts/plugins/remoto-aplicar.sh" | tee /dev/stderr)" || true
   uonix_transport_close_master prod
-  printf '%s\n' "$saida" > "${dir}/aplicar-${stamp}.log"
+  # Produção já pode ter mudado: uma falha de escrita aqui não pode abortar o
+  # script (set -e) antes do registro e do smoke.
+  printf '%s\n' "$saida" 2>/dev/null > "${dir}/aplicar-${stamp}.log" \
+    || echo "AVISO: log do job não gravado em ${dir}; o relatório vai sem as versões finais" >&2
   status="$(sed -n 's/^@@STATUS=//p' <<<"$saida" | tail -1)"
   case "$status" in
     0|20|30|50) ;;
@@ -320,13 +323,13 @@ cmd_relatorio() {
     esac
   done
   [ -f "$aplicacao" ] || { echo "Erro: informe --aplicacao=<aplicacao-<backup>.json>" >&2; return 2; }
-  local dir stamp registro
+  local dir stamp status_job smoke
   dir="$(cd "$(dirname "$aplicacao")" && pwd)"
   stamp="$(basename "$aplicacao" .json)"; stamp="${stamp#aplicacao-}"
   if [ -z "$final" ]; then
-    registro="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("status_job",""), d.get("smoke_producao",""))' "$aplicacao")" || return 2
-    # shellcheck disable=SC2086
-    final="$(saida_final $registro '')"
+    status_job="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status_job", ""))' "$aplicacao")" || return 2
+    smoke="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("smoke_producao", ""))' "$aplicacao")" || return 2
+    final="$(saida_final "$status_job" "$smoke")"
   fi
   carregar_env
   local enviar_args=(--enviar)

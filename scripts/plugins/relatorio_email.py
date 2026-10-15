@@ -51,11 +51,11 @@ RESULTADOS = {
     "0": ("Concluída", "#15803d", "#dcfce7",
           "Todas as atualizações foram aplicadas e o site passou na verificação final."),
     "20": ("Interrompida e revertida", "#b45309", "#fef3c7",
-           "Uma etapa falhou na verificação; ela foi revertida e o site está no ar com as versões anteriores dessa etapa."),
+           "Uma etapa falhou na verificação e foi revertida; o site está no ar. A tabela mostra a versão que ficou em cada plugin."),
     "30": ("Recusada, sem alteração", "#475569", "#e2e8f0",
            "A aplicação foi recusada antes de alterar o site (versões divergentes, site já com falha ou manutenção indisponível)."),
     "40": ("Resultado não confirmado", "#b91c1c", "#fee2e2",
-           "A conexão com o servidor terminou antes do fim do processo. O estado está sendo verificado manualmente."),
+           "O processo no servidor não terminou de forma confirmada (conexão perdida ou interrupção). O estado está sendo verificado manualmente."),
     "50": ("Intervenção necessária", "#b91c1c", "#fee2e2",
            "O site não passou na verificação ou a reversão ficou incompleta. A equipe técnica já está atuando."),
 }
@@ -66,7 +66,13 @@ SITUACOES = {
     "mantido": ("Versão anterior mantida", "#b45309", "#fef3c7"),
     "verificar": ("Verificar", "#b91c1c", "#fee2e2"),
     "sem_confirmacao": ("Não confirmado", "#475569", "#e2e8f0"),
+    "nao_aplicado": ("Não aplicado", "#475569", "#e2e8f0"),
 }
+
+# Saída 0 com algum item sem a versão nova confirmada no log: o site passou,
+# mas o relatório não pode afirmar que "todas" foram aplicadas.
+RESUMO_0_PARCIAL = ("O site passou na verificação final, mas a versão instalada de algum plugin não pôde ser "
+                    "confirmada pelo relatório. A tabela mostra o que foi confirmado.")
 
 # Nome comercial e função, para quem lê o relatório não precisar conhecer o slug.
 # Plugin fora do mapa aparece pelo slug.
@@ -167,6 +173,7 @@ def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, ago
     plano = {i.get("slug"): i for i in ler_json(pasta / "plano.json").get("itens", [])}
     stamp = aplicacao.get("backup", "")
     smoke = ler_json(pasta / f"smoke-producao-{stamp}.json") if stamp else {}
+    saida = saida_final if saida_final in RESULTADOS else "40"
     finais = versoes_finais(log)
     itens = []
     for item in lock.get("itens", []):
@@ -178,8 +185,9 @@ def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, ago
             "critico": item.get("camada") == "critica",
             "de": item["de"],
             "para": item["para"],
-            "final": finais.get(item["slug"], ""),
-            "situacao": situacao(item, finais),
+            # Toda saída 30 do job acontece antes de qualquer mudança: nada foi aplicado.
+            "final": item["de"] if saida == "30" else finais.get(item["slug"], ""),
+            "situacao": "nao_aplicado" if saida == "30" else situacao(item, finais),
             "seguranca": bool(p and p.get("seguranca")),
             "notas": notas(p),
         })
@@ -190,7 +198,7 @@ def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, ago
     except ValueError:
         quando = agora or dt.datetime.now().astimezone()
     return {
-        "saida": saida_final if saida_final in RESULTADOS else "40",
+        "saida": saida,
         "quando": quando,
         "backup": stamp,
         "lock": aplicacao.get("lock_sha12", ""),
@@ -201,6 +209,16 @@ def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, ago
         "smoke_total": len(smoke),
         "smoke_falhas": falhas_smoke,
     }
+
+
+def resumo(ctx: dict) -> str:
+    if ctx["saida"] == "0" and any(i["situacao"] != "atualizado" for i in ctx["itens"]):
+        return RESUMO_0_PARCIAL
+    return RESULTADOS[ctx["saida"]][3]
+
+
+def titulo_itens(ctx: dict) -> str:
+    return "Itens previstos (nenhum foi aplicado)" if ctx["saida"] == "30" else "O que foi feito"
 
 
 def assunto(ctx: dict) -> str:
@@ -215,7 +233,7 @@ def _selo(texto: str, cor: str, fundo: str) -> str:
 
 def corpo_html(ctx: dict) -> str:
     e = html.escape
-    rotulo, cor, fundo, resumo = RESULTADOS[ctx["saida"]]
+    rotulo, cor, fundo, _ = RESULTADOS[ctx["saida"]]
     atualizados = sum(1 for i in ctx["itens"] if i["situacao"] == "atualizado")
     com_seguranca = sum(1 for i in ctx["itens"] if i["seguranca"] and i["situacao"] == "atualizado")
     if ctx["smoke_total"]:
@@ -234,9 +252,14 @@ def corpo_html(ctx: dict) -> str:
         s_txt, s_cor, s_fundo = SITUACOES[i["situacao"]]
         final = i["final"] or "—"
         nota = ""
-        if i["seguranca"]:
+        aplicado = i["situacao"] == "atualizado"
+        # Selo e notas do fabricante descrevem a versão nova: só valem se ela
+        # está instalada. Sem isso, a correção é pendente.
+        if i["seguranca"] and aplicado:
             nota += _selo("Correção de segurança", "#1d4ed8", "#dbeafe") + " "
-        if i["notas"]:
+        elif i["seguranca"]:
+            nota += _selo("Correção de segurança pendente", "#b45309", "#fef3c7") + " "
+        if i["notas"] and aplicado:
             nota += "".join(f'<div style="font-size:12px;color:#64748b;margin-top:4px;font-style:italic;">{e(n)}</div>'
                             for n in i["notas"])
         papel = " · ".join(x for x in (i["funcao"], "essencial" if i["critico"] else "") if x)
@@ -282,7 +305,7 @@ def corpo_html(ctx: dict) -> str:
   <div style="font-size:13px;color:#64748b;">{e(CLIENTE)} &middot; {e(SITE)}</div>
   <h1 style="margin:6px 0 12px;font-size:22px;color:#0f172a;">Atualização de plugins</h1>
   {_selo(rotulo, cor, fundo)}
-  <p style="margin:14px 0 0;font-size:14px;line-height:1.6;color:#334155;">{e(resumo)}</p>
+  <p style="margin:14px 0 0;font-size:14px;line-height:1.6;color:#334155;">{e(resumo(ctx))}</p>
   <p style="margin:6px 0 0;font-size:13px;color:#64748b;">Executada em {ctx["quando"]:%d/%m/%Y às %H:%M}.</p>
 </td></tr>
 <tr><td style="padding:20px 28px 4px;">
@@ -293,7 +316,7 @@ def corpo_html(ctx: dict) -> str:
   </tr></table>
 </td></tr>
 <tr><td style="padding:20px 28px 0;">
-  <h3 style="margin:0 0 8px;font-size:15px;color:#0f172a;">O que foi feito</h3>
+  <h3 style="margin:0 0 8px;font-size:15px;color:#0f172a;">{e(titulo_itens(ctx))}</h3>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;">
     <tr>
       <th align="left" width="56%" style="padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Plugin</th>
@@ -325,14 +348,16 @@ def corpo_html(ctx: dict) -> str:
 
 
 def corpo_texto(ctx: dict) -> str:
-    rotulo, _, _, resumo = RESULTADOS[ctx["saida"]]
+    rotulo = RESULTADOS[ctx["saida"]][0]
     linhas = [f"{EMPRESA} | Relatório de manutenção", f"{CLIENTE} ({SITE}): atualização de plugins", "",
-              f"Resultado: {rotulo}", resumo, f"Executada em {ctx['quando']:%d/%m/%Y às %H:%M}.", "", "O que foi feito:"]
+              f"Resultado: {rotulo}", resumo(ctx), f"Executada em {ctx['quando']:%d/%m/%Y às %H:%M}.", "",
+              f"{titulo_itens(ctx)}:"]
     for i in ctx["itens"]:
-        seg = " [correção de segurança]" if i["seguranca"] else ""
+        aplicado = i["situacao"] == "atualizado"
+        seg = (" [correção de segurança]" if aplicado else " [correção de segurança pendente]") if i["seguranca"] else ""
         papel = f" ({i['funcao']})" if i["funcao"] else ""
         linhas.append(f"- {i['nome']}{papel}: {i['de']} -> {i['final'] or '?'}, {SITUACOES[i['situacao']][0]}{seg}")
-        linhas += [f"    {n}" for n in i["notas"]]
+        linhas += [f"    {n}" for n in i["notas"]] if aplicado else []
     if ctx["smoke_total"]:
         linhas += ["", f"Verificação do site: {ctx['smoke_total'] - len(ctx['smoke_falhas'])} de {ctx['smoke_total']} ok"]
         linhas += [f"  falha: {f}" for f in ctx["smoke_falhas"]]
@@ -422,6 +447,9 @@ def main(argv: list[str]) -> int:
         enviar(mensagem(ctx, cfg["de"], cfg["para"]), cfg)
     except (OSError, smtplib.SMTPException) as erro:
         print(f"relatório não enviado: {type(erro).__name__}: {erro}", file=sys.stderr)
+        return 1
+    except Exception as erro:  # noqa: BLE001 - a mensagem poderia citar a senha (ex.: UnicodeEncodeError no login)
+        print(f"relatório não enviado: {type(erro).__name__}", file=sys.stderr)
         return 1
     print(f"relatório enviado para {', '.join(cfg['para'])}: {assunto(ctx)}")
     return 0
