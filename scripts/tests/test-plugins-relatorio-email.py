@@ -91,8 +91,8 @@ with tempfile.TemporaryDirectory() as t:
     checar(ctx["itens"][3]["nome"] == "plugin-sem-nome", "plugin fora do mapa deveria aparecer pelo slug")
     checar(ctx["itens"][1]["notas"] == ["Security: Improved SVG sanitization."], f"nota sem limpar o marcador: {ctx['itens'][1]['notas']}")
     checar(ctx["itens"][3]["notas"] == [], "changelog que não é lista não deveria virar nota")
-    checar("16/10/2026" in ctx["fora"][0]["motivo"] and "quarentena" not in ctx["fora"][0]["motivo"],
-           f"motivo da quarentena sem traduzir: {ctx['fora'][0]['motivo']}")
+    checar("16/10/2026" in ctx["fora"][0]["motivo_cliente"] and "quarentena" not in ctx["fora"][0]["motivo_cliente"],
+           f"motivo da quarentena sem traduzir: {ctx['fora'][0]['motivo_cliente']}")
     checar(ctx["smoke_total"] == 2 and ctx["smoke_falhas"] == ["Store API: produtos: http 500, 0 item(ns)"],
            f"smoke errado: {ctx['smoke_total']} {ctx['smoke_falhas']}")
     checar(rel.assunto(ctx) == "[Uonix] Atualização de plugins em 15/10/2026: Intervenção necessária", f"assunto: {rel.assunto(ctx)}")
@@ -239,7 +239,11 @@ checar(s.logins == [("cassio@ksio.dev", "segredo")], f"login errado: {s.logins}"
 checar(s.envios and s.envios[0][2] == ["marketing@uonix.com.br"], "destinatário errado no envio")
 msg = s.envios[0][0]
 checar(msg["From"] == "Cassio Lima <cassio@ksio.dev>" and msg.is_multipart(), f"remetente ou formato errado: {msg['From']}")
-checar([p.get_content_type() for p in msg.iter_parts()] == ["text/plain", "text/html"], "deveria ter texto e HTML")
+checar(msg.get_body(("plain",)) is not None and msg.get_body(("html",)) is not None, "deveria ter texto e HTML")
+imagens = [p for p in msg.walk() if p.get_content_type() == "image/png"]
+checar(len(imagens) == 1 and imagens[0]["Content-ID"] == f"<{rel.LOGO_CID}>" and f"cid:{rel.LOGO_CID}" in msg.get_body(("html",)).get_content(),
+       "o logo deveria ir inline (CID) e ser referenciado no HTML")
+checar(bool(imagens) and imagens[0].get_content_disposition() == "inline", "o logo não pode chegar como anexo (Gmail mostraria o clipe)")
 rel.enviar(rel.mensagem(ctx_min, local["de"], local["para"]), local, smtp_ssl=None, smtp_local=SmtpFalso)
 s = SmtpFalso.instancias[-1]
 checar((s.host, s.porta) == ("localhost", 1025) and s.logins == [], "sem SSL não pode fazer login")
@@ -247,13 +251,69 @@ checar((s.host, s.porta) == ("localhost", 1025) and s.logins == [], "sem SSL nã
 # 10. marca e assinatura: ksiodev, Cassio Lima, ksio.dev, sem dizer que é automação
 html_cli = rel.corpo_html(ctx_min)
 txt_cli = rel.corpo_texto(ctx_min)
-for trecho in ("Cassio Lima", "Soluções tecnológicas, automação &amp; IA", 'href="https://ksio.dev"', "mailto:cassio@ksio.dev",
-               ">_</span>ksio<span", ">dev</span>", "#2E63C4", "Olá, equipe Uonix!"):
+for trecho in ("Cassio Lima", "ksiodev &middot; Soluções tecnológicas, automação &amp; IA", 'href="https://ksio.dev"',
+               "mailto:cassio@ksio.dev", 'ksio<span style="color:#00c9eb;">.dev</span>', f"cid:{rel.LOGO_CID}", "#080d12",
+               "Olá, equipe Uonix!", "Atualização de plugins <span"):
     checar(trecho in html_cli, f"HTML do cliente sem: {trecho}")
 for trecho in ("Cassio Lima", "ksiodev | Soluções tecnológicas, automação & IA", "https://ksio.dev"):
     checar(trecho in txt_cli, f"texto do cliente sem: {trecho}")
 for proibido in ("KsioDev", "automaticamente", "automática", "esteira", "ensaio"):
     checar(proibido not in html_cli and proibido not in txt_cli, f"e-mail do cliente não pode conter: {proibido}")
+
+# 10b. motivos internos do plano nunca chegam ao cliente; ficam no técnico
+MOTIVOS_INTERNOS = ["sem classificação na política", "camada decisao_pendente não é atualizada pela esteira",
+                    "major na camada critica: exige --aceitar-major=woocommerce",
+                    "código não carrega no local (inativo por política); ensaiar à parte"]
+with tempfile.TemporaryDirectory() as t:
+    stamp = "plugins-20261015-131200"
+    pasta = pasta_fixture(pathlib.Path(t), stamp)
+    lock_dados = json.loads((pasta / "lock.json").read_text())
+    lock_dados["fora"] += [{"slug": f"interno-{n}", "de": "1", "para": "2", "motivo": m} for n, m in enumerate(MOTIVOS_INTERNOS)]
+    (pasta / "lock.json").write_text(json.dumps(lock_dados))
+    c = rel.montar(pasta, json.loads((pasta / f"aplicacao-{stamp}.json").read_text()), "0", "")
+    cliente_html, cliente_txt = rel.corpo_html(c), rel.corpo_texto(c)
+    for m in MOTIVOS_INTERNOS:
+        checar(m not in cliente_html and m not in cliente_txt, f"motivo interno no e-mail do cliente: {m}")
+    checar("interno-" not in cliente_html and "WooCommerce" in cliente_html, "só a quarentena deveria aparecer ao cliente")
+    for proibido in ("esteira", "ensaiar", "aceitar-major", "política"):
+        checar(proibido not in cliente_html and proibido not in cliente_txt, f"e-mail do cliente com: {proibido}")
+    tec = rel.corpo_tecnico(c, "")
+    checar(all(m in tec for m in MOTIVOS_INTERNOS), "o técnico deveria trazer todos os motivos internos")
+
+    # o log técnico mascara a query string de URLs (token de licença em pacote pago)
+    tec = rel.corpo_tecnico(c, "Baixando pacote de https://exemplo.com/pacote.zip?license=SEGREDO123&x=1\n")
+    checar("SEGREDO123" not in tec and "https://exemplo.com/pacote.zip?[omitido]" in tec, "query string do log deveria ser omitida")
+
+    # prévia em arquivo: o logo vai como data URI; sem o PNG, sai sem imagem e sem erro
+    checar((rel.logo_data_uri() or "").startswith("data:image/png;base64,"), "prévia deveria embutir o logo")
+    original_logo = rel.LOGO
+    rel.LOGO = pathlib.Path(t) / "nao-existe.png"
+    sem_logo = rel.mensagem(c, "cassio@ksio.dev", ["x@y"])
+    rel.LOGO = original_logo
+    checar(not [p for p in sem_logo.walk() if p.get_content_type() == "image/png"]
+           and "<img" not in sem_logo.get_body(("html",)).get_content(), "sem o PNG, o e-mail sai sem imagem")
+
+# 10c. nome com link para a página oficial (só se a API do wordpress.org respondeu) e changelog da versão
+with tempfile.TemporaryDirectory() as t:
+    stamp = "plugins-20261015-131200"
+    pasta = pasta_fixture(pathlib.Path(t), stamp)
+    plano_dados = json.loads((pasta / "plano.json").read_text())
+    plano_dados["itens"][0]["changelog"] = [f"* Mudança {n}" for n in range(11)]
+    plano_dados["itens"][3]["changelog"] = "indisponível"  # plugin pago: sem página no wordpress.org
+    (pasta / "plano.json").write_text(json.dumps(plano_dados))
+    log_ok = "== versões finais\n" + "".join(f"  {i['slug']} {i['para']}\n" for i in ITENS)
+    c = rel.montar(pasta, json.loads((pasta / f"aplicacao-{stamp}.json").read_text()), "0", log_ok)
+    h, txt = rel.corpo_html(c), rel.corpo_texto(c)
+    checar('href="https://wordpress.org/plugins/woocommerce-products-filter/"' in h, "nome do plugin sem link para o wordpress.org")
+    checar("wordpress.org/plugins/plugin-sem-nome" not in h, "plugin sem página no wordpress.org não pode ter link")
+    checar("Mudança 7" in h and "Mudança 8" not in h and "e mais 3 alteração(ões): ver o changelog completo" in h,
+           "changelog deveria mostrar 8 itens e o link para o resto")
+    checar('wordpress.org/plugins/woo-rfq-for-woocommerce/#developers' in h and "ver na página do plugin" in h,
+           "sem trecho do changelog, deveria apontar para a página do plugin")
+    checar("Novidades da versão 3.8.0" in h and "Improved SVG sanitization." in h, "Kadence sem as novidades da versão")
+    checar("https://wordpress.org/plugins/woocommerce-products-filter/" in txt and "    - Mudança 0" in txt
+           and "e mais 3 alteração(ões)" in txt, "texto sem link ou sem changelog")
+    checar(rel.pagina_wporg("a b/../c") == "https://wordpress.org/plugins/a%20b/../c/" , "slug deveria ser codificado na URL")
 
 # 11. roteamento: o cliente só recebe sucesso completo; o resto vai para o técnico
 with tempfile.TemporaryDirectory() as t:

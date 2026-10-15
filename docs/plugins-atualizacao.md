@@ -137,6 +137,8 @@ Ao fim da aplicação, sai um e-mail de `cassio@ksio.dev`, assinado por Cassio L
 - **Cliente** (`RELATORIO_PARA`): só quando tudo deu certo, isto é, saída 0, todo plugin confirmado na versão nova e smoke de produção todo verde. O e-mail é pessoal e não menciona automação.
 - **Técnico** (`RELATORIO_PARA_TECNICO`, padrão `uonix@ksio.dev`): em **qualquer** outro caso, inclusive saída 0 com ressalva. O cliente não é notificado. O e-mail técnico traz os motivos, a versão de cada item, o registro, os comandos de diagnóstico e restauração e as últimas 120 linhas do log do job.
 
+O e-mail do cliente segue a linguagem visual do ksio.dev: fundo `#080d12`, ciano `#00c9eb` e o símbolo `<K>`. O símbolo vai como PNG inline (`scripts/plugins/marca/ksio-mark.png`, gerado com `rsvg-convert -w 171` a partir de `assets/brand/ksio-mark.svg` do site), porque SVG não aparece no Gmail nem no Outlook. Cada plugin tem o nome ligado à página oficial no wordpress.org (só quando a API respondeu, então plugin pago fica sem link) e as novidades da versão nova, até 8 itens, com link para o changelog completo. Em "Aguardando o próximo ciclo" entra só a quarentena; os outros motivos do plano são internos e ficam no relatório técnico.
+
 O relatório do cliente traz:
 - o resultado;
 - cada plugin, com nome comercial e função, e a versão de antes e a que ficou instalada;
