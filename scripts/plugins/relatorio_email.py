@@ -205,17 +205,15 @@ def no_wporg(plano_item: dict | None) -> bool:
 
 
 def motivo_fora(motivo: str) -> str | None:
-    """O motivo em linguagem de cliente. Só a quarentena tem tradução: os outros motivos do plano
-    (camada que não se atualiza, major bloqueado, código que não carrega no local) são internos
-    e ficam só no relatório técnico."""
-    if not motivo.startswith("quarentena"):
-        return None
+    """O motivo em linguagem de cliente. Só a quarentena com data de liberação tem tradução.
+    Os outros motivos do plano (camada que não se atualiza, major bloqueado, código que não
+    carrega no local, e a quarentena "não verificável", que depende de conferência manual) são
+    internos e ficam só no relatório técnico. A idade da versão não entra: o lock vale até 72 h,
+    e "há N dias" estaria defasado quando o e-mail sai."""
     m = re.search(r"libera em (\d{4})-(\d{2})-(\d{2})", motivo)
-    dias = re.search(r"lançada há (\d+) de \d+ dias", motivo)
-    lancada = f"lançada há {dias.group(1)} dia(s)" if dias else "lançada há poucos dias"
-    if m:
-        return f"versão {lancada}; entra no site a partir de {m.group(3)}/{m.group(2)}/{m.group(1)}."
-    return f"versão {lancada}; entra no site depois do período de quarentena."
+    if not motivo.startswith("quarentena") or not m:
+        return None
+    return f"versão lançada recentemente; entra no site a partir de {m.group(3)}/{m.group(2)}/{m.group(1)}."
 
 
 def dias_quarentena(ctx: dict) -> int:
@@ -228,7 +226,7 @@ def explicacao_quarentena(ctx: dict) -> str:
     return (f"Por segurança, versões novas de plugins essenciais só são aplicadas depois de {dias_quarentena(ctx)} dias "
             "do lançamento. Nesse período, problemas que surgem logo após uma versão sair costumam ser "
             "corrigidos pelo próprio fabricante, e o site não fica exposto a eles. "
-            "Atualizações que corrigem falhas de segurança não esperam esse prazo.")
+            "Quando o fabricante informa que a versão corrige uma falha de segurança, ela é aplicada sem esperar esse prazo.")
 
 
 def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, agora: dt.datetime | None = None) -> dict:
@@ -621,6 +619,7 @@ def configuracao(env: dict[str, str]) -> dict:
         raise ConfiguracaoIncompleta("RELATORIO_SMTP_PORTA não é um número") from erro
     tecnico = [p.strip() for p in env.get("RELATORIO_PARA_TECNICO", TECNICO_PADRAO).split(",") if p.strip()]
     cco = [p.strip() for p in env.get("RELATORIO_CCO", TECNICO_PADRAO).split(",") if p.strip()]
+    cco = [c for n, c in enumerate(cco) if c.casefold() not in {x.casefold() for x in cco[:n]}]
     return {"host": host, "porta": porta, "seguranca": seguranca, "usuario": usuario, "senha": senha,
             "de": de, "para": para, "para_tecnico": tecnico, "cco": cco}
 
@@ -682,7 +681,9 @@ def main(argv: list[str]) -> int:
         return 2
     para = cfg["para"] if cliente else cfg["para_tecnico"]
     # Cópia oculta só no envelope: o cabeçalho To continua só com o cliente.
-    envelope = para + [c for c in cfg["cco"] if c not in para] if cliente else para
+    ja = {x.casefold() for x in para}
+    extra = [c for c in cfg["cco"] if c.casefold() not in ja] if cliente else []
+    envelope = para + extra
     try:
         msg = mensagem(ctx, cfg["de"], para) if cliente else mensagem_tecnica(ctx, log, cfg["de"], para)
         enviar(msg, cfg, para=envelope)
@@ -692,7 +693,7 @@ def main(argv: list[str]) -> int:
     except Exception as erro:  # noqa: BLE001 - a mensagem poderia citar a senha (ex.: UnicodeEncodeError no login)
         print(f"relatório não enviado: {type(erro).__name__}", file=sys.stderr)
         return 1
-    destino = (f"cliente; cópia oculta para {', '.join(c for c in cfg['cco'] if c not in para) or '-'}" if cliente
+    destino = (f"cliente; cópia oculta para {', '.join(extra) or '-'}" if cliente
                else "técnico; o cliente não foi notificado")
     print(f"relatório enviado para {', '.join(para)} ({destino}): {msg['Subject']}")
     return 0
