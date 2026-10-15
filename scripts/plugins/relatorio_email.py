@@ -185,8 +185,9 @@ def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, ago
             "critico": item.get("camada") == "critica",
             "de": item["de"],
             "para": item["para"],
-            # Toda saída 30 do job acontece antes de qualquer mudança: nada foi aplicado.
-            "final": item["de"] if saida == "30" else finais.get(item["slug"], ""),
+            # Toda saída 30 do job acontece antes de qualquer mudança: nada foi
+            # aplicado, e a versão de produção não foi lida (no drift, nem é a "de").
+            "final": "" if saida == "30" else finais.get(item["slug"], ""),
             "situacao": "nao_aplicado" if saida == "30" else situacao(item, finais),
             "seguranca": bool(p and p.get("seguranca")),
             "notas": notas(p),
@@ -215,6 +216,11 @@ def resumo(ctx: dict) -> str:
     if ctx["saida"] == "0" and any(i["situacao"] != "atualizado" for i in ctx["itens"]):
         return RESUMO_0_PARCIAL
     return RESULTADOS[ctx["saida"]][3]
+
+
+def pendencia(item: dict) -> str:
+    """Correção não aplicada com certeza é "pendente"; com estado desconhecido, "a confirmar"."""
+    return "pendente" if item["situacao"] in ("mantido", "nao_aplicado") else "a confirmar"
 
 
 def titulo_itens(ctx: dict) -> str:
@@ -258,7 +264,7 @@ def corpo_html(ctx: dict) -> str:
         if i["seguranca"] and aplicado:
             nota += _selo("Correção de segurança", "#1d4ed8", "#dbeafe") + " "
         elif i["seguranca"]:
-            nota += _selo("Correção de segurança pendente", "#b45309", "#fef3c7") + " "
+            nota += _selo(f"Correção de segurança {pendencia(i)}", "#b45309", "#fef3c7") + " "
         if i["notas"] and aplicado:
             nota += "".join(f'<div style="font-size:12px;color:#64748b;margin-top:4px;font-style:italic;">{e(n)}</div>'
                             for n in i["notas"])
@@ -354,7 +360,7 @@ def corpo_texto(ctx: dict) -> str:
               f"{titulo_itens(ctx)}:"]
     for i in ctx["itens"]:
         aplicado = i["situacao"] == "atualizado"
-        seg = (" [correção de segurança]" if aplicado else " [correção de segurança pendente]") if i["seguranca"] else ""
+        seg = (" [correção de segurança]" if aplicado else f" [correção de segurança {pendencia(i)}]") if i["seguranca"] else ""
         papel = f" ({i['funcao']})" if i["funcao"] else ""
         linhas.append(f"- {i['nome']}{papel}: {i['de']} -> {i['final'] or '?'}, {SITUACOES[i['situacao']][0]}{seg}")
         linhas += [f"    {n}" for n in i["notas"]] if aplicado else []

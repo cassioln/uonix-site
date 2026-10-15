@@ -111,7 +111,7 @@ with tempfile.TemporaryDirectory() as t:
 
     # 4c. saída 30: nada foi aplicado, mesmo que o log tenha um bloco de versões
     ctx30 = rel.montar(pasta, aplicacao, "30", LOG)
-    checar(all(i["situacao"] == "nao_aplicado" and i["final"] == i["de"] for i in ctx30["itens"]),
+    checar(all(i["situacao"] == "nao_aplicado" and i["final"] == "" for i in ctx30["itens"]),
            f"saída 30 deveria marcar tudo como não aplicado: {[(i['slug'], i['situacao'], i['final']) for i in ctx30['itens']]}")
     corpo30 = rel.corpo_html(ctx30)
     checar("Itens previstos (nenhum foi aplicado)" in corpo30 and "O que foi feito" not in corpo30,
@@ -121,6 +121,13 @@ with tempfile.TemporaryDirectory() as t:
     ctx30["smoke_total"], ctx30["smoke_falhas"] = 0, []
     checar("verificação do site não executada" in rel.corpo_html(ctx30) and "verificações do site ok" not in rel.corpo_html(ctx30),
            "sem smoke, o indicador não pode dizer 'verificações do site ok'")
+
+    # 4c'. estado desconhecido: a correção fica "a confirmar", nunca "pendente"
+    ctx40 = rel.montar(pasta, aplicacao, "40", "")
+    corpo40 = rel.corpo_html(ctx40)
+    checar("Correção de segurança a confirmar" in corpo40 and "pendente" not in corpo40,
+           "sem confirmação, a correção não pode ser dada como pendente")
+    checar("[correção de segurança a confirmar]" in rel.corpo_texto(ctx40), "texto: correção a confirmar")
 
     # 4d. saída 0 com item não confirmado: o resumo não afirma "todas"
     checar(rel.resumo(rel.montar(pasta, aplicacao, "0", LOG)) == rel.RESUMO_0_PARCIAL,
