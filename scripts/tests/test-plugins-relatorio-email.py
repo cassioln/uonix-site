@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory() as t:
     checar(ctx["itens"][3]["nome"] == "plugin-sem-nome", "plugin fora do mapa deveria aparecer pelo slug")
     checar(ctx["itens"][1]["notas"] == ["Security: Improved SVG sanitization."], f"nota sem limpar o marcador: {ctx['itens'][1]['notas']}")
     checar(ctx["itens"][3]["notas"] == [], "changelog que não é lista não deveria virar nota")
-    checar("16/10/2026" in ctx["fora"][0]["motivo_cliente"] and "quarentena" not in ctx["fora"][0]["motivo_cliente"],
+    checar("16/10/2026" in ctx["fora"][0]["motivo_cliente"] and "libera" not in ctx["fora"][0]["motivo_cliente"],
            f"motivo da quarentena sem traduzir: {ctx['fora'][0]['motivo_cliente']}")
     checar(ctx["smoke_total"] == 2 and ctx["smoke_falhas"] == ["Store API: produtos: http 500, 0 item(ns)"],
            f"smoke errado: {ctx['smoke_total']} {ctx['smoke_falhas']}")
@@ -106,7 +106,17 @@ with tempfile.TemporaryDirectory() as t:
     # 4. o changelog vem do wordpress.org: nunca entra cru no HTML
     corpo = rel.corpo_html(ctx)
     checar("<script>" not in corpo and "&lt;script&gt;" in corpo, "changelog deveria ser escapado no HTML")
-    checar("Pontos com falha" in corpo and "Aguardando o próximo ciclo" in corpo, "HTML sem as seções de falha e de fora")
+    checar("Pontos com falha" in corpo and ">Quarentena</div>" in corpo and "Aguardando" not in corpo,
+           "HTML sem as seções de falha e de quarentena")
+    checar("depois de 7 dias do lançamento" in corpo and "não esperam esse prazo" in corpo,
+           "a seção Quarentena deveria explicar o motivo e o prazo")
+    checar(ctx["fora"][0]["motivo_cliente"] == "versão lançada há 6 dia(s); entra no site a partir de 16/10/2026.",
+           f"item da quarentena: {ctx['fora'][0]['motivo_cliente']}")
+    checar("Quarentena:" in rel.corpo_texto(ctx) and "não esperam esse prazo" in rel.corpo_texto(ctx), "texto sem a quarentena")
+    checar(rel.motivo_fora("quarentena: lançada há 2 de 14 dias (libera em 2026-11-01)") ==
+           "versão lançada há 2 dia(s); entra no site a partir de 01/11/2026.", "quarentena com outro prazo")
+    checar(rel.dias_quarentena({"fora": [{"motivo": "quarentena: lançada há 2 de 14 dias (libera em 2026-11-01)"}]}) == 14,
+           "o prazo deveria vir do motivo")
     checar("1/4" in corpo, "indicador de atualizados deveria contar só os confirmados")
     checar("<script>" in rel.corpo_texto(ctx), "a versão em texto é texto puro e pode trazer o changelog literal")
 
