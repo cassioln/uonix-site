@@ -368,7 +368,10 @@ with tempfile.TemporaryDirectory() as t:
     checar(rc_ok == 0 and rc_falha == 0 and len(enviados) == 2, f"deveria enviar duas vezes: rc={rc_ok},{rc_falha} n={len(enviados)}")
     if len(enviados) == 2:
         (m_ok, p_ok), (m_tec, p_tec) = enviados
-        checar(p_ok == ["marketing@uonix.com.br"] and "[técnico]" not in m_ok["Subject"], f"sucesso: {p_ok} {m_ok['Subject']}")
+        checar(p_ok == ["marketing@uonix.com.br", "uonix@ksio.dev"] and "[técnico]" not in m_ok["Subject"],
+               f"sucesso: deveria ir ao cliente com cópia oculta: {p_ok} {m_ok['Subject']}")
+        checar(m_ok["To"] == "marketing@uonix.com.br" and m_ok["Bcc"] is None and "uonix@ksio.dev" not in m_ok.as_string(),
+               "a cópia oculta não pode aparecer no cabeçalho nem no corpo do e-mail do cliente")
         corpo_tec = m_tec.get_body(("plain",)).get_content()
         checar(p_tec == ["uonix@ksio.dev"] and m_tec["Subject"].startswith("[ksiodev][técnico]"), f"falha deveria ir ao técnico: {p_tec} {m_tec['Subject']}")
         checar("O CLIENTE NÃO FOI NOTIFICADO" in corpo_tec and "linha-final-do-log" in corpo_tec
@@ -378,6 +381,8 @@ with tempfile.TemporaryDirectory() as t:
 
 cfg = rel.configuracao({"RELATORIO_SMTP_SENHA": "s"})
 checar(cfg["para_tecnico"] == ["uonix@ksio.dev"], f"técnico padrão errado: {cfg['para_tecnico']}")
+checar(cfg["cco"] == ["uonix@ksio.dev"], f"cópia oculta padrão errada: {cfg['cco']}")
+checar(rel.configuracao({"RELATORIO_SMTP_SENHA": "s", "RELATORIO_CCO": ""})["cco"] == [], "RELATORIO_CCO vazio desliga a cópia")
 checar(rel.configuracao({"RELATORIO_SMTP_SENHA": "s", "RELATORIO_PARA_TECNICO": "a@x, b@y"})["para_tecnico"] == ["a@x", "b@y"],
        "RELATORIO_PARA_TECNICO deveria aceitar vários")
 

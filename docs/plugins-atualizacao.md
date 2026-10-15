@@ -159,6 +159,7 @@ A configuração fica no `.env` do checkout principal:
 | `RELATORIO_DE` | o usuário |
 | `RELATORIO_PARA` | o remetente; vários separados por vírgula. O destino do cliente é `marketing@uonix.com.br`. |
 | `RELATORIO_PARA_TECNICO` | `uonix@ksio.dev` |
+| `RELATORIO_CCO` | `uonix@ksio.dev`: cópia oculta do e-mail do cliente, só no envelope SMTP (o cliente não vê). Vazio desliga. |
 
 `UONIX_RELATORIO_EMAIL=0` desliga o envio; a prévia é gravada mesmo assim.
 

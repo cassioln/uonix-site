@@ -21,7 +21,9 @@ SSL; a configuração vem do ambiente (o atualizar.sh carrega o .env):
   RELATORIO_SMTP_SENHA_FILE, RELATORIO_DE (o usuário), RELATORIO_PARA
   (o remetente; aceita vários, separados por vírgula). Sem RELATORIO_PARA,
   o relatório vai só para o remetente. RELATORIO_PARA_TECNICO
-  (uonix@ksio.dev) recebe o relatório técnico.
+  (uonix@ksio.dev) recebe o relatório técnico. RELATORIO_CCO (uonix@ksio.dev)
+  recebe cópia oculta do e-mail do cliente: só no envelope SMTP, nunca no
+  cabeçalho, então o cliente não vê.
 
 O cliente só recebe o e-mail quando tudo deu certo: saída 0, todo plugin
 confirmado na versão nova e smoke de produção todo verde. Em qualquer outro
@@ -603,8 +605,9 @@ def configuracao(env: dict[str, str]) -> dict:
     except ValueError as erro:
         raise ConfiguracaoIncompleta("RELATORIO_SMTP_PORTA não é um número") from erro
     tecnico = [p.strip() for p in env.get("RELATORIO_PARA_TECNICO", TECNICO_PADRAO).split(",") if p.strip()]
-    return {"host": host, "porta": porta, "seguranca": seguranca,
-            "usuario": usuario, "senha": senha, "de": de, "para": para, "para_tecnico": tecnico}
+    cco = [p.strip() for p in env.get("RELATORIO_CCO", TECNICO_PADRAO).split(",") if p.strip()]
+    return {"host": host, "porta": porta, "seguranca": seguranca, "usuario": usuario, "senha": senha,
+            "de": de, "para": para, "para_tecnico": tecnico, "cco": cco}
 
 
 def mensagem(ctx: dict, de: str, para: list[str]) -> EmailMessage:
@@ -663,16 +666,19 @@ def main(argv: list[str]) -> int:
         print(f"relatório não enviado: {erro}", file=sys.stderr)
         return 2
     para = cfg["para"] if cliente else cfg["para_tecnico"]
+    # Cópia oculta só no envelope: o cabeçalho To continua só com o cliente.
+    envelope = para + [c for c in cfg["cco"] if c not in para] if cliente else para
     try:
         msg = mensagem(ctx, cfg["de"], para) if cliente else mensagem_tecnica(ctx, log, cfg["de"], para)
-        enviar(msg, cfg, para=para)
+        enviar(msg, cfg, para=envelope)
     except (OSError, smtplib.SMTPException) as erro:
         print(f"relatório não enviado: {type(erro).__name__}: {erro}", file=sys.stderr)
         return 1
     except Exception as erro:  # noqa: BLE001 - a mensagem poderia citar a senha (ex.: UnicodeEncodeError no login)
         print(f"relatório não enviado: {type(erro).__name__}", file=sys.stderr)
         return 1
-    destino = "cliente" if cliente else "técnico; o cliente não foi notificado"
+    destino = (f"cliente; cópia oculta para {', '.join(c for c in cfg['cco'] if c not in para) or '-'}" if cliente
+               else "técnico; o cliente não foi notificado")
     print(f"relatório enviado para {', '.join(para)} ({destino}): {msg['Subject']}")
     return 0
 
