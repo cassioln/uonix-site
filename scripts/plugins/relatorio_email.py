@@ -20,7 +20,13 @@ SSL; a configuração vem do ambiente (o atualizar.sh carrega o .env):
   RELATORIO_SMTP_USUARIO (cassio@ksio.dev), RELATORIO_SMTP_SENHA ou
   RELATORIO_SMTP_SENHA_FILE, RELATORIO_DE (o usuário), RELATORIO_PARA
   (o remetente; aceita vários, separados por vírgula). Sem RELATORIO_PARA,
-  o relatório vai só para o remetente.
+  o relatório vai só para o remetente. RELATORIO_PARA_TECNICO
+  (uonix@ksio.dev) recebe o relatório técnico.
+
+O cliente só recebe o e-mail quando tudo deu certo: saída 0, todo plugin
+confirmado na versão nova e smoke de produção todo verde. Em qualquer outro
+caso, o cliente não é notificado e o relatório técnico (motivos, versões,
+registro, comandos de diagnóstico e fim do log) vai para RELATORIO_PARA_TECNICO.
   Para testar no Mailpit do ambiente local: RELATORIO_SMTP_HOST=localhost,
   RELATORIO_SMTP_PORTA=1025, RELATORIO_SMTP_SEGURANCA=nenhuma. Sem SSL só é
   aceito para localhost, e aí a senha é dispensada e nunca enviada.
@@ -42,7 +48,13 @@ import sys
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 
-EMPRESA = "KsioDev"
+MARCA = "ksiodev"
+ASSINANTE = "Cassio Lima"
+SLOGAN = "Soluções tecnológicas, automação & IA"
+SITE_EMPRESA = "ksio.dev"
+EMAIL_ASSINANTE = "cassio@ksio.dev"
+AZUL = "#2E63C4"  # o destaque do ksio.dev
+TECNICO_PADRAO = "uonix@ksio.dev"
 CLIENTE = "Uonix"
 SITE = "uonix.com.br"
 
@@ -203,6 +215,7 @@ def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, ago
         "quando": quando,
         "backup": stamp,
         "lock": aplicacao.get("lock_sha12", ""),
+        "registro": aplicacao,
         "itens": itens,
         "fora": [{"nome": NOMES.get(f.get("slug", ""), (f.get("slug", ""), ""))[0], "de": f.get("de", ""),
                   "para": f.get("para", ""), "motivo": motivo_fora(f.get("motivo", ""))}
@@ -235,6 +248,31 @@ def assunto(ctx: dict) -> str:
 def _selo(texto: str, cor: str, fundo: str) -> str:
     return (f'<span style="display:inline-block;padding:3px 10px;border-radius:999px;background:{fundo};'
             f'color:{cor};font-size:12px;font-weight:600;">{html.escape(texto)}</span>')
+
+
+def marca_html(cor: str, tamanho: int) -> str:
+    """A marca como no ksio.dev: "_" em fonte mono e "dev" em azul."""
+    return (f'<span style="font-family:Quantico,\'Helvetica Neue\',Arial,sans-serif;font-size:{tamanho}px;font-weight:700;'
+            f'letter-spacing:.3px;color:{cor};"><span style="font-family:Menlo,Consolas,monospace;font-weight:500;'
+            f'color:{AZUL};">_</span>ksio<span style="color:{AZUL};">dev</span></span>')
+
+
+def assinatura_html() -> str:
+    e = html.escape
+    return (f'<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+            f'<td style="border-left:3px solid {AZUL};padding:2px 0 2px 14px;">'
+            f'<div style="font-size:15px;font-weight:700;color:#0f172a;">{e(ASSINANTE)}</div>'
+            f'<div style="margin-top:4px;">{marca_html("#0f172a", 15)}</div>'
+            f'<div style="font-size:12px;color:#64748b;margin-top:2px;">{e(SLOGAN)}</div>'
+            f'<div style="font-size:12px;margin-top:8px;">'
+            f'<a href="https://{SITE_EMPRESA}" style="color:{AZUL};text-decoration:none;">{SITE_EMPRESA}</a>'
+            f' <span style="color:#cbd5e1;">&middot;</span> '
+            f'<a href="mailto:{EMAIL_ASSINANTE}" style="color:{AZUL};text-decoration:none;">{EMAIL_ASSINANTE}</a></div>'
+            f'</td></tr></table>')
+
+
+def assinatura_texto() -> str:
+    return f"--\n{ASSINANTE}\n{MARCA} | {SLOGAN}\nhttps://{SITE_EMPRESA} | {EMAIL_ASSINANTE}"
 
 
 def corpo_html(ctx: dict) -> str:
@@ -301,9 +339,9 @@ def corpo_html(ctx: dict) -> str:
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 12px;">
 <tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
-<tr><td style="background:#0f172a;padding:22px 28px;">
+<tr><td style="background:#000000;padding:22px 28px;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-    <td style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:.3px;">{EMPRESA}</td>
+    <td>{marca_html("#ffffff", 22)}</td>
     <td align="right" style="color:#94a3b8;font-size:12px;">Relatório de manutenção</td>
   </tr></table>
 </td></tr>
@@ -311,7 +349,8 @@ def corpo_html(ctx: dict) -> str:
   <div style="font-size:13px;color:#64748b;">{e(CLIENTE)} &middot; {e(SITE)}</div>
   <h1 style="margin:6px 0 12px;font-size:22px;color:#0f172a;">Atualização de plugins</h1>
   {_selo(rotulo, cor, fundo)}
-  <p style="margin:14px 0 0;font-size:14px;line-height:1.6;color:#334155;">{e(resumo(ctx))}</p>
+  <p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:#334155;">Olá, equipe {e(CLIENTE)}!</p>
+  <p style="margin:8px 0 0;font-size:14px;line-height:1.6;color:#334155;">{e(resumo(ctx))}</p>
   <p style="margin:6px 0 0;font-size:13px;color:#64748b;">Executada em {ctx["quando"]:%d/%m/%Y às %H:%M}.</p>
 </td></tr>
 <tr><td style="padding:20px 28px 4px;">
@@ -337,15 +376,17 @@ def corpo_html(ctx: dict) -> str:
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;">
   <tr><td style="padding:16px 18px;font-size:13px;line-height:1.7;color:#334155;">
     <strong style="color:#0f172a;">Como foi feito</strong><br>
-    Cada versão foi ensaiada antes numa cópia do site, com os fluxos principais verificados.
-    Em produção: backup do banco e das pastas, modo de manutenção, aplicação em etapas com verificação
-    a cada etapa e reversão automática em caso de falha.<br>
-    <span style="color:#64748b;">Backup: {e(ctx["backup"] or "—")} &middot; ensaio {e(ctx["lock"] or "—")}</span>
+    Antes de qualquer alteração, cada versão foi testada numa cópia do site, com os fluxos principais
+    verificados. Em produção, a atualização foi feita com backup completo (banco e arquivos), em etapas,
+    com o site verificado a cada etapa.<br>
+    <span style="color:#64748b;">Referência do backup: {e(ctx["backup"] or "—")}</span>
   </td></tr></table>
 </td></tr>
-<tr><td style="padding:18px 28px;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;line-height:1.6;">
-  {EMPRESA} &middot; <a href="mailto:cassio@ksio.dev" style="color:#64748b;">cassio@ksio.dev</a><br>
-  Relatório gerado automaticamente pela esteira de atualização.
+<tr><td style="padding:0 28px 8px;font-size:14px;line-height:1.6;color:#334155;">
+  Qualquer dúvida, fico à disposição.
+</td></tr>
+<tr><td style="padding:16px 28px 26px;">
+  {assinatura_html()}
 </td></tr>
 </table>
 </td></tr></table>
@@ -355,7 +396,7 @@ def corpo_html(ctx: dict) -> str:
 
 def corpo_texto(ctx: dict) -> str:
     rotulo = RESULTADOS[ctx["saida"]][0]
-    linhas = [f"{EMPRESA} | Relatório de manutenção", f"{CLIENTE} ({SITE}): atualização de plugins", "",
+    linhas = [f"{CLIENTE} ({SITE}): atualização de plugins", "", f"Olá, equipe {CLIENTE}!", "",
               f"Resultado: {rotulo}", resumo(ctx), f"Executada em {ctx['quando']:%d/%m/%Y às %H:%M}.", "",
               f"{titulo_itens(ctx)}:"]
     for i in ctx["itens"]:
@@ -370,9 +411,75 @@ def corpo_texto(ctx: dict) -> str:
     if ctx["fora"]:
         linhas += ["", "Aguardando o próximo ciclo:"]
         linhas += [f"- {f['nome']} {f['de']} -> {f['para']}: {f['motivo']}" for f in ctx["fora"]]
-    linhas += ["", f"Backup: {ctx['backup'] or '-'} | ensaio {ctx['lock'] or '-'}", "",
-               f"{EMPRESA} | cassio@ksio.dev", "Relatório gerado automaticamente pela esteira de atualização."]
+    linhas += ["", f"Referência do backup: {ctx['backup'] or '-'}", "",
+               "Qualquer dúvida, fico à disposição.", "", assinatura_texto()]
     return "\n".join(linhas) + "\n"
+
+
+def para_cliente(ctx: dict) -> bool:
+    """O cliente só recebe o relatório quando tudo deu certo, sem nenhuma ressalva."""
+    return (ctx["saida"] == "0" and bool(ctx["itens"])
+            and all(i["situacao"] == "atualizado" for i in ctx["itens"])
+            and ctx["smoke_total"] > 0 and not ctx["smoke_falhas"])
+
+
+def motivos(ctx: dict) -> list[str]:
+    """Por que o relatório não foi para o cliente."""
+    m = []
+    if ctx["saida"] != "0":
+        rotulo, _, _, texto = RESULTADOS[ctx["saida"]]
+        m.append(f"saída {ctx['saida']} ({rotulo}): {texto}")
+    if not ctx["itens"]:
+        m.append("lock sem itens: o relatório não conseguiu ler o plano (lock.json ao lado do registro?)")
+    for i in ctx["itens"]:
+        if i["situacao"] != "atualizado":
+            m.append(f"{i['slug']}: {SITUACOES[i['situacao']][0]} (de {i['de']}, para {i['para']}, lido {i['final'] or '-'})")
+    if not ctx["smoke_total"]:
+        m.append("smoke de produção sem resultado (não rodou ou o arquivo não foi gravado)")
+    m += [f"smoke: {f}" for f in ctx["smoke_falhas"]]
+    return m
+
+
+def assunto_tecnico(ctx: dict) -> str:
+    return (f"[técnico] {CLIENTE}: atualização de plugins em {ctx['quando']:%d/%m/%Y}: "
+            f"{RESULTADOS[ctx['saida']][0]} (saída {ctx['saida']})")
+
+
+def corpo_tecnico(ctx: dict, log: str) -> str:
+    b = ctx["backup"] or "<backup>"
+    linhas = [assunto_tecnico(ctx), "", "O CLIENTE NÃO FOI NOTIFICADO.", "", "Motivos:"]
+    linhas += [f"- {m}" for m in motivos(ctx)] or ["- (nenhum)"]
+    linhas += ["", "Itens (de -> para, lido no fim do job, situação):"]
+    linhas += [f"- {i['slug']}{' (crítico)' if i['critico'] else ''}: {i['de']} -> {i['para']}, lido {i['final'] or '-'}, {SITUACOES[i['situacao']][0]}"
+               for i in ctx["itens"]] or ["- (lock sem itens)"]
+    if ctx["fora"]:
+        linhas += ["", "Fora do ciclo:"] + [f"- {f['nome']} {f['de']} -> {f['para']}: {f['motivo']}" for f in ctx["fora"]]
+    linhas += ["", f"Lock do ensaio: {ctx['lock'] or '-'}", f"Smoke de produção: {ctx['smoke_total'] - len(ctx['smoke_falhas'])} de {ctx['smoke_total']} verdes",
+               "", "Registro (aplicacao-*.json):", json.dumps(ctx.get("registro", {}), ensure_ascii=False),
+               "", "Próximos passos:",
+               f"- estado de produção (só leitura): bash scripts/plugins/atualizar.sh estado-producao --backup={b}",
+               f"- pastas salvas no servidor: <conta>/_uonix-deploy-backups/{b}/plugin-<slug>.tar.gz (e descartado-<slug>)",
+               f"- banco antes da aplicação: <conta>/_uonix-deploy-backups/{b}/db-prod-{b}.sql.gz",
+               "- reenviar este relatório depois de corrigir: bash scripts/plugins/atualizar.sh relatorio --aplicacao=<pasta do ensaio>/aplicacao-"
+               f"{b}.json",
+               "", "Fim do log do job (últimas 120 linhas):"]
+    linhas += log.splitlines()[-120:] if log else ["(sem log)"]
+    return "\n".join(linhas) + "\n"
+
+
+def mensagem_tecnica(ctx: dict, log: str, de: str, para: list[str]) -> EmailMessage:
+    msg = EmailMessage()
+    msg["Subject"] = assunto_tecnico(ctx)
+    msg["From"] = formataddr((ASSINANTE, de))
+    msg["To"] = ", ".join(para)
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=de.rsplit("@", 1)[-1])
+    texto = corpo_tecnico(ctx, log)
+    msg.set_content(texto)
+    msg.add_alternative(f'<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"></head><body>'
+                        f'<pre style="font-family:Menlo,Consolas,monospace;font-size:12px;line-height:1.5;white-space:pre-wrap;">'
+                        f'{html.escape(texto)}</pre></body></html>', subtype="html")
+    return msg
 
 
 LOCAIS = ("localhost", "127.0.0.1", "::1")
@@ -401,14 +508,15 @@ def configuracao(env: dict[str, str]) -> dict:
         porta = int(env.get("RELATORIO_SMTP_PORTA", "465"))
     except ValueError as erro:
         raise ConfiguracaoIncompleta("RELATORIO_SMTP_PORTA não é um número") from erro
+    tecnico = [p.strip() for p in env.get("RELATORIO_PARA_TECNICO", TECNICO_PADRAO).split(",") if p.strip()]
     return {"host": host, "porta": porta, "seguranca": seguranca,
-            "usuario": usuario, "senha": senha, "de": de, "para": para}
+            "usuario": usuario, "senha": senha, "de": de, "para": para, "para_tecnico": tecnico}
 
 
 def mensagem(ctx: dict, de: str, para: list[str]) -> EmailMessage:
     msg = EmailMessage()
     msg["Subject"] = assunto(ctx)
-    msg["From"] = formataddr((EMPRESA, de))
+    msg["From"] = formataddr((ASSINANTE, de))
     msg["To"] = ", ".join(para)
     msg["Date"] = formatdate(localtime=True)
     msg["Message-ID"] = make_msgid(domain=de.rsplit("@", 1)[-1])
@@ -417,7 +525,7 @@ def mensagem(ctx: dict, de: str, para: list[str]) -> EmailMessage:
     return msg
 
 
-def enviar(msg: EmailMessage, cfg: dict, smtp_ssl=smtplib.SMTP_SSL, smtp_local=smtplib.SMTP) -> None:
+def enviar(msg: EmailMessage, cfg: dict, smtp_ssl=smtplib.SMTP_SSL, smtp_local=smtplib.SMTP, para: list[str] | None = None) -> None:
     if cfg["seguranca"] == "nenhuma":
         conexao = smtp_local(cfg["host"], cfg["porta"], timeout=30)
     else:
@@ -425,7 +533,7 @@ def enviar(msg: EmailMessage, cfg: dict, smtp_ssl=smtplib.SMTP_SSL, smtp_local=s
     with conexao:
         if cfg["senha"]:
             conexao.login(cfg["usuario"], cfg["senha"])
-        conexao.send_message(msg, from_addr=cfg["de"], to_addrs=cfg["para"])
+        conexao.send_message(msg, from_addr=cfg["de"], to_addrs=para if para is not None else cfg["para"])
 
 
 def main(argv: list[str]) -> int:
@@ -439,9 +547,11 @@ def main(argv: list[str]) -> int:
     a = p.parse_args(argv)
     log = a.log.read_text(errors="replace") if a.log and a.log.is_file() else ""
     ctx = montar(a.dir, ler_json(a.aplicacao), a.saida_final, log)
+    cliente = para_cliente(ctx)
     if a.previa:
-        a.previa.write_text(corpo_html(ctx))
-        print(f"prévia: {a.previa}")
+        a.previa.write_text(corpo_html(ctx) if cliente else
+                            f"<pre>{html.escape(corpo_tecnico(ctx, log))}</pre>")
+        print(f"prévia ({'cliente' if cliente else 'técnica'}): {a.previa}")
     if not a.enviar:
         return 0
     try:
@@ -449,15 +559,18 @@ def main(argv: list[str]) -> int:
     except ConfiguracaoIncompleta as erro:
         print(f"relatório não enviado: {erro}", file=sys.stderr)
         return 2
+    para = cfg["para"] if cliente else cfg["para_tecnico"]
+    msg = mensagem(ctx, cfg["de"], para) if cliente else mensagem_tecnica(ctx, log, cfg["de"], para)
     try:
-        enviar(mensagem(ctx, cfg["de"], cfg["para"]), cfg)
+        enviar(msg, cfg, para=para)
     except (OSError, smtplib.SMTPException) as erro:
         print(f"relatório não enviado: {type(erro).__name__}: {erro}", file=sys.stderr)
         return 1
     except Exception as erro:  # noqa: BLE001 - a mensagem poderia citar a senha (ex.: UnicodeEncodeError no login)
         print(f"relatório não enviado: {type(erro).__name__}", file=sys.stderr)
         return 1
-    print(f"relatório enviado para {', '.join(cfg['para'])}: {assunto(ctx)}")
+    destino = "cliente" if cliente else "técnico; o cliente não foi notificado"
+    print(f"relatório enviado para {', '.join(para)} ({destino}): {msg['Subject']}")
     return 0
 
 

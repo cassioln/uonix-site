@@ -6,6 +6,8 @@ caso) e a integração com o `atualizar.sh` (o relatório nunca muda a saída).
 Sem rede: o SMTP é falso."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -236,15 +238,82 @@ checar((s.host, s.porta) == ("mail.ksio.dev", 465) and "context" in s.kw, "SSL d
 checar(s.logins == [("cassio@ksio.dev", "segredo")], f"login errado: {s.logins}")
 checar(s.envios and s.envios[0][2] == ["marketing@uonix.com.br"], "destinatário errado no envio")
 msg = s.envios[0][0]
-checar(msg["From"] == "KsioDev <cassio@ksio.dev>" and msg.is_multipart(), f"remetente ou formato errado: {msg['From']}")
+checar(msg["From"] == "Cassio Lima <cassio@ksio.dev>" and msg.is_multipart(), f"remetente ou formato errado: {msg['From']}")
 checar([p.get_content_type() for p in msg.iter_parts()] == ["text/plain", "text/html"], "deveria ter texto e HTML")
 rel.enviar(rel.mensagem(ctx_min, local["de"], local["para"]), local, smtp_ssl=None, smtp_local=SmtpFalso)
 s = SmtpFalso.instancias[-1]
 checar((s.host, s.porta) == ("localhost", 1025) and s.logins == [], "sem SSL não pode fazer login")
 
+# 10. marca e assinatura: ksiodev, Cassio Lima, ksio.dev, sem dizer que é automação
+html_cli = rel.corpo_html(ctx_min)
+txt_cli = rel.corpo_texto(ctx_min)
+for trecho in ("Cassio Lima", "Soluções tecnológicas, automação &amp; IA", 'href="https://ksio.dev"', "mailto:cassio@ksio.dev",
+               ">_</span>ksio<span", ">dev</span>", "#2E63C4", "Olá, equipe Uonix!"):
+    checar(trecho in html_cli, f"HTML do cliente sem: {trecho}")
+for trecho in ("Cassio Lima", "ksiodev | Soluções tecnológicas, automação & IA", "https://ksio.dev"):
+    checar(trecho in txt_cli, f"texto do cliente sem: {trecho}")
+for proibido in ("KsioDev", "automaticamente", "automática", "esteira", "ensaio"):
+    checar(proibido not in html_cli and proibido not in txt_cli, f"e-mail do cliente não pode conter: {proibido}")
+
+# 11. roteamento: o cliente só recebe sucesso completo; o resto vai para o técnico
+with tempfile.TemporaryDirectory() as t:
+    stamp = "plugins-20261015-131200"
+    pasta = pasta_fixture(pathlib.Path(t), stamp)
+    (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
+    aplicacao = json.loads((pasta / f"aplicacao-{stamp}.json").read_text())
+    log_ok = "== versões finais\n" + "".join(f"  {i['slug']} {i['para']}\n" for i in ITENS) + "CONCLUÍDO\n@@STATUS=0\n"
+    checar(rel.para_cliente(rel.montar(pasta, aplicacao, "0", log_ok)), "sucesso completo deveria ir para o cliente")
+    for saida in ("20", "30", "40", "50", "99"):
+        c = rel.montar(pasta, aplicacao, saida, log_ok)
+        checar(not rel.para_cliente(c) and any(m.startswith(f"saída {c['saida']}") for m in rel.motivos(c)),
+               f"saída {saida} não pode ir para o cliente e precisa do motivo")
+    parcial = rel.montar(pasta, aplicacao, "0", LOG)
+    checar(not rel.para_cliente(parcial) and any(m.startswith("kadence-blocks:") for m in rel.motivos(parcial)),
+           "saída 0 com item não atualizado não pode ir para o cliente")
+    (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": False, "detalhe": "http 500"}}))
+    checar(not rel.para_cliente(rel.montar(pasta, aplicacao, "0", log_ok)), "smoke vermelho não pode ir para o cliente")
+    (pasta / f"smoke-producao-{stamp}.json").unlink()
+    sem_smoke = rel.montar(pasta, aplicacao, "0", log_ok)
+    checar(not rel.para_cliente(sem_smoke) and any("smoke" in m for m in rel.motivos(sem_smoke)),
+           "sem smoke não pode ir para o cliente")
+    (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
+    (pasta / "lock.json").write_text(json.dumps({"itens": [], "fora": []}))
+    checar(not rel.para_cliente(rel.montar(pasta, aplicacao, "0", log_ok)), "lock vazio não pode ir para o cliente")
+    pasta_fixture(pathlib.Path(t), stamp)
+    (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
+    (pasta / f"aplicar-{stamp}.log").write_text(log_ok)
+
+    # o main escolhe destino e mensagem
+    enviados: list = []
+    original_enviar, original_env = rel.enviar, dict(os.environ)
+    rel.enviar = lambda msg, cfg, para=None, **kw: enviados.append((msg, para))
+    os.environ.update({"RELATORIO_SMTP_SENHA": "s", "RELATORIO_PARA": "marketing@uonix.com.br"})
+    os.environ.pop("RELATORIO_PARA_TECNICO", None)
+    args = ["--dir", t, "--aplicacao", f"{t}/aplicacao-{stamp}.json", "--log", f"{t}/aplicar-{stamp}.log", "--enviar"]
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc_ok = rel.main(args + ["--saida-final", "0"])
+        (pasta / f"aplicar-{stamp}.log").write_text(LOG + "linha-final-do-log\n")
+        rc_falha = rel.main(args + ["--saida-final", "20"])
+    rel.enviar = original_enviar
+    os.environ.clear()
+    os.environ.update(original_env)
+    checar(rc_ok == 0 and rc_falha == 0 and len(enviados) == 2, f"deveria enviar duas vezes: rc={rc_ok},{rc_falha} n={len(enviados)}")
+    if len(enviados) == 2:
+        (m_ok, p_ok), (m_tec, p_tec) = enviados
+        checar(p_ok == ["marketing@uonix.com.br"] and not m_ok["Subject"].startswith("[técnico]"), f"sucesso: {p_ok} {m_ok['Subject']}")
+        corpo_tec = m_tec.get_body(("plain",)).get_content()
+        checar(p_tec == ["uonix@ksio.dev"] and m_tec["Subject"].startswith("[técnico]"), f"falha deveria ir ao técnico: {p_tec} {m_tec['Subject']}")
+        checar("O CLIENTE NÃO FOI NOTIFICADO" in corpo_tec and "linha-final-do-log" in corpo_tec
+               and "estado-producao --backup=plugins-20261015-131200" in corpo_tec,
+               "relatório técnico sem aviso, fim do log ou comando de diagnóstico")
+        checar("marketing@uonix.com.br" not in m_tec["To"], "falha não pode ir ao cliente")
+
+cfg = rel.configuracao({"RELATORIO_SMTP_SENHA": "s"})
+checar(cfg["para_tecnico"] == ["uonix@ksio.dev"], f"técnico padrão errado: {cfg['para_tecnico']}")
+checar(rel.configuracao({"RELATORIO_SMTP_SENHA": "s", "RELATORIO_PARA_TECNICO": "a@x, b@y"})["para_tecnico"] == ["a@x", "b@y"],
+       "RELATORIO_PARA_TECNICO deveria aceitar vários")
+
 # 9. uma exceção inesperada no envio não pode vazar a senha (ex.: UnicodeEncodeError no login)
-import contextlib  # noqa: E402
-import io  # noqa: E402
 
 with tempfile.TemporaryDirectory() as t:
     stamp = "plugins-20261015-131200"

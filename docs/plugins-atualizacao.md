@@ -132,7 +132,12 @@ Se o job receber TERM, INT ou HUP, ele desliga a manutenção e grava o status 1
 
 ### Relatório por e-mail
 
-Ao fim da aplicação, a KsioDev envia ao cliente um relatório em HTML, com alternativa em texto, a partir de `cassio@ksio.dev`. Ele traz:
+Ao fim da aplicação, sai um e-mail de `cassio@ksio.dev`, assinado por Cassio Lima (ksiodev). O destino depende do resultado:
+
+- **Cliente** (`RELATORIO_PARA`): só quando tudo deu certo, isto é, saída 0, todo plugin confirmado na versão nova e smoke de produção todo verde. O e-mail é pessoal e não menciona automação.
+- **Técnico** (`RELATORIO_PARA_TECNICO`, padrão `uonix@ksio.dev`): em **qualquer** outro caso, inclusive saída 0 com ressalva. O cliente não é notificado. O e-mail técnico traz os motivos, a versão de cada item, o registro, os comandos de diagnóstico e restauração e as últimas 120 linhas do log do job.
+
+O relatório do cliente traz:
 - o resultado;
 - cada plugin, com nome comercial e função, e a versão de antes e a que ficou instalada;
 - as correções de segurança e as notas do fabricante;
@@ -151,6 +156,7 @@ A configuração fica no `.env` do checkout principal:
 | `RELATORIO_SMTP_SENHA` ou `RELATORIO_SMTP_SENHA_FILE` | obrigatória |
 | `RELATORIO_DE` | o usuário |
 | `RELATORIO_PARA` | o remetente; vários separados por vírgula. O destino do cliente é `marketing@uonix.com.br`. |
+| `RELATORIO_PARA_TECNICO` | `uonix@ksio.dev` |
 
 `UONIX_RELATORIO_EMAIL=0` desliga o envio; a prévia é gravada mesmo assim.
 
