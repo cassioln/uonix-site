@@ -117,6 +117,14 @@ for nome, (texto, esperado) in casos_cl.items():
     trecho = plano.trecho_changelog(cl(texto), "1.2.3", "1.2.5")
     seg = None if trecho is None else any(plano.SEGURANCA.search(l) for l in trecho)
     checar(seg == esperado, f"changelog [{nome}]: segurança={seg}, esperado {esperado} ({trecho})")
+# Novidades para o relatório do cliente: o trecho inteiro, só da versão nova.
+texto = "<h4>= 1.2.5 =</h4><p>New: dark mode</p><p>Removed: old API</p><h4>= 1.2.4 =</h4><p>Fix b</p><h4>= 1.2.3 =</h4><p>Fix a</p>"
+checar(plano.trecho_changelog(cl(texto), "1.2.3", "1.2.5", so_para=True) == ["New: dark mode", "Removed: old API"],
+       f"novidades deveriam ser só da 1.2.5: {plano.trecho_changelog(cl(texto), '1.2.3', '1.2.5', so_para=True)}")
+checar(plano.trecho_changelog(cl(texto), "1.2.3", "1.2.5") == ["New: dark mode", "Removed: old API", "Fix b"],
+       "o intervalo continua com as duas versões")
+checar(plano.trecho_changelog(cl("<h4>= 1.2.4 =</h4><p>Fix b</p>"), "1.2.3", "1.2.5", so_para=True) is None,
+       "sem a seção da versão nova, as novidades ficam indisponíveis")
 for real in ("* Security: Improved output escaping for block attributes.",
              "Improved plugin security with additional input validation and output escaping hardening.",
              "Hardens input sanitization and permission checks across field settings, blocks, and entries",
