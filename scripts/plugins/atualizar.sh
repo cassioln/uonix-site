@@ -27,6 +27,14 @@
 #       perdida ou sinal: ver estado); 50 INTERVENÇÃO: restauração incompleta
 #       ou site vermelho.
 #
+#       Ao fim, envia o relatório por e-mail (relatorio_email.py; destino e
+#       SMTP no .env). Falha no envio só avisa: não muda a saída.
+#
+#   atualizar.sh relatorio --aplicacao=ARQ [--saida-final=N] [--sem-enviar]
+#       Monta (e envia) de novo o relatório de uma aplicação já registrada:
+#       aplicacao-<backup>.json, na pasta do ensaio. Sem --saida-final, ela é
+#       recalculada do registro. Com --sem-enviar, só grava a prévia HTML.
+#
 #   atualizar.sh estado-producao [--backup=ID]
 #       Só leitura: manutenção, job vivo, status e fim do log do último job
 #       (ou do backup indicado). É o primeiro passo depois de qualquer queda.
@@ -242,6 +250,10 @@ echo \"@@STATUS=\$(cat ${q_bk}/aplicar.status 2>/dev/null || echo ausente)\""
   saida="$(com_vigia "${UONIX_PLUGINS_LIMITE_JOB:-1800}" uonix_transport_ssh_once prod "$remoto" \
     < "${ROOT_DIR}/scripts/plugins/remoto-aplicar.sh" | tee /dev/stderr)" || true
   uonix_transport_close_master prod
+  # Produção já pode ter mudado: uma falha de escrita aqui não pode abortar o
+  # script (set -e) antes do registro e do smoke.
+  printf '%s\n' "$saida" 2>/dev/null > "${dir}/aplicar-${stamp}.log" \
+    || echo "AVISO: log do job não gravado em ${dir}; o relatório vai sem as versões finais" >&2
   status="$(sed -n 's/^@@STATUS=//p' <<<"$saida" | tail -1)"
   case "$status" in
     0|20|30|50) ;;
@@ -251,10 +263,12 @@ echo \"@@STATUS=\$(cat ${q_bk}/aplicar.status 2>/dev/null || echo ausente)\""
       echo "Erro: o job não terminou normalmente (status '${status:-desconhecido}')." >&2
       echo "  Não reexecute. Leia o estado: atualizar.sh estado-producao --backup=${stamp}" >&2
       registrar_aplicacao "$dir" "$stamp" "$sha" "${status:-conexao-perdida}" ""
+      enviar_relatorio "$dir" "$stamp" 40
       return 40 ;;
   esac
   if [ "$status" = 30 ]; then
     registrar_aplicacao "$dir" "$stamp" "$sha" "$status" ""
+    enviar_relatorio "$dir" "$stamp" 30
     return 30
   fi
 
@@ -280,7 +294,49 @@ echo \"@@STATUS=\$(cat ${q_bk}/aplicar.status 2>/dev/null || echo ausente)\""
         echo "   Pastas: ${bk}/plugin-<slug>.tar.gz (e descartado-<slug>); banco: ${bk}/db-prod-${stamp}.sql.gz"
       } >&2 ;;
   esac
+  enviar_relatorio "$dir" "$stamp" "$final"
   return "$final"
+}
+
+# Relatório por e-mail de uma aplicação. Nunca muda a saída do chamador: o
+# resultado da atualização já está decidido e registrado quando ele roda.
+# UONIX_RELATORIO_EMAIL=0 desliga o envio (a prévia HTML é gravada mesmo assim).
+enviar_relatorio() {
+  local dir="$1" stamp="$2" final="$3" enviar=(--enviar)
+  [ "${UONIX_RELATORIO_EMAIL:-1}" = 0 ] && enviar=()
+  echo "== relatório por e-mail"
+  python3 "${ROOT_DIR}/scripts/plugins/relatorio_email.py" --dir "$dir" \
+    --aplicacao "${dir}/aplicacao-${stamp}.json" --saida-final "$final" \
+    --log "${dir}/aplicar-${stamp}.log" --previa "${dir}/relatorio-${stamp}.html" ${enviar[@]+"${enviar[@]}"} \
+    || echo "   AVISO: relatório não enviado; reenvie com: atualizar.sh relatorio --aplicacao=${dir}/aplicacao-${stamp}.json" >&2
+  return 0
+}
+
+cmd_relatorio() {
+  local aplicacao="" final="" quer_enviar=1
+  for arg in "$@"; do
+    case "$arg" in
+      --aplicacao=*) aplicacao="${arg#*=}" ;;
+      --saida-final=*) final="${arg#*=}" ;;
+      --sem-enviar) quer_enviar=0 ;;
+      *) echo "Erro: argumento desconhecido: $arg" >&2; return 2 ;;
+    esac
+  done
+  [ -f "$aplicacao" ] || { echo "Erro: informe --aplicacao=<aplicacao-<backup>.json>" >&2; return 2; }
+  local dir stamp status_job smoke
+  dir="$(cd "$(dirname "$aplicacao")" && pwd)"
+  stamp="$(basename "$aplicacao" .json)"; stamp="${stamp#aplicacao-}"
+  if [ -z "$final" ]; then
+    status_job="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status_job", ""))' "$aplicacao")" || return 2
+    smoke="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("smoke_producao", ""))' "$aplicacao")" || return 2
+    final="$(saida_final "$status_job" "$smoke")"
+  fi
+  carregar_env
+  local enviar_args=(--enviar)
+  [ "$quer_enviar" = 1 ] || enviar_args=()
+  python3 "${ROOT_DIR}/scripts/plugins/relatorio_email.py" --dir "$dir" --aplicacao "$aplicacao" \
+    --saida-final "$final" --log "${dir}/aplicar-${stamp}.log" --previa "${dir}/relatorio-${stamp}.html" \
+    ${enviar_args[@]+"${enviar_args[@]}"}
 }
 
 # Saída final a partir do status do job e do smoke de produção do Mac. O smoke
@@ -337,6 +393,7 @@ main() {
   [ "$#" -gt 0 ] && shift
   case "$comando" in
     inventario) cmd_inventario "$@" ;;
+    relatorio) cmd_relatorio "$@" ;;
     contratos) cmd_contratos "$@" ;;
     ensaiar) cmd_ensaiar "$@" ;;
     aplicar-producao) cmd_aplicar_producao "$@" ;;

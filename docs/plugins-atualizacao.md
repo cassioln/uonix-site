@@ -113,7 +113,8 @@ O comando faz, nesta ordem:
 
    **A restauração devolve as pastas, não o banco.** Migrações de banco (`wp wc update`, upgrades de plugin) não são desfeitas. Se for preciso voltar o banco, o dump está em `_uonix-deploy-backups/plugins-<data>/db-prod-<data>.sql.gz`. Restaurar esse dump desfaz também o que foi gravado depois dele, como solicitações de orçamento, e por isso é uma decisão manual.
 5. **Smoke de produção** do Mac (`smoke_producao.py`), só leitura, com os mesmos marcadores do ensaio e as páginas extras do ensaio (produto, post, serviço).
-6. **Registro** em `aplicacao-<backup>.json`, ao lado do lock.
+6. **Registro** em `aplicacao-<backup>.json`, ao lado do lock, com o log do job em `aplicar-<backup>.log`.
+7. **Relatório por e-mail** (`relatorio_email.py`), veja abaixo. Ele roda em toda saída que chegou ao job (0, 20, 30 do preflight, 40 e 50) e **nunca muda a saída**: se o envio falhar, só aparece um aviso com o comando para reenviar.
 
 Aplicar o mesmo lock duas vezes é seguro: na segunda vez, produção já está nas versões "para", o preflight detecta drift e nada muda.
 
@@ -128,6 +129,42 @@ Aplicar o mesmo lock duas vezes é seguro: na segunda vez, produção já está 
 O smoke de produção do Mac roda depois de **toda** execução que mudou produção (0, 20 e 50). Ele é a segunda opinião e não depende de o job ter avaliado certo.
 
 Se o job receber TERM, INT ou HUP, ele desliga a manutenção e grava o status 143, que o Mac reporta como 40. **SIGKILL não pode ser tratado**, e o matador de processos da hospedagem compartilhada usa SIGKILL. Nesse caso o status fica ausente e o `.maintenance` pode ficar no lugar; o WordPress o ignora depois de 10 minutos. `estado-producao` mostra as duas coisas.
+
+### Relatório por e-mail
+
+Ao fim da aplicação, a KsioDev envia ao cliente um relatório em HTML, com alternativa em texto, a partir de `cassio@ksio.dev`. Ele traz:
+- o resultado;
+- cada plugin, com nome comercial e função, e a versão de antes e a que ficou instalada;
+- as correções de segurança e as notas do fabricante;
+- o smoke de produção, com os pontos que falharam;
+- o que ficou para o próximo ciclo;
+- o backup.
+
+A versão "depois" é a que o WP-CLI de produção leu no fim do job (bloco `== versões finais` do log), nunca a do plano. Sem log, ela aparece como "não confirmada". A prévia HTML fica em `relatorio-<backup>.html`, ao lado do lock.
+
+A configuração fica no `.env` do checkout principal:
+
+| Variável | Padrão |
+|---|---|
+| `RELATORIO_SMTP_HOST` / `RELATORIO_SMTP_PORTA` | `mail.ksio.dev` / `465` (SSL) |
+| `RELATORIO_SMTP_USUARIO` | `cassio@ksio.dev` |
+| `RELATORIO_SMTP_SENHA` ou `RELATORIO_SMTP_SENHA_FILE` | obrigatória |
+| `RELATORIO_DE` | o usuário |
+| `RELATORIO_PARA` | o remetente; vários separados por vírgula. O destino do cliente é `marketing@uonix.com.br`. |
+
+`UONIX_RELATORIO_EMAIL=0` desliga o envio; a prévia é gravada mesmo assim.
+
+Para reenviar, ou só gerar a prévia de uma aplicação já registrada:
+
+```bash
+bash scripts/plugins/atualizar.sh relatorio --aplicacao=tmp/plugins/ensaio-<data>/aplicacao-<backup>.json [--sem-enviar]
+```
+
+**Para testar o template sem enviar nada para fora**, use o Mailpit do ambiente local (`http://localhost:8025`). Ele captura tudo e tem uma checagem de compatibilidade do HTML com os clientes de e-mail. Sem SSL só é aceito para `localhost`, e nesse caso a senha nem é carregada.
+
+```bash
+RELATORIO_SMTP_HOST=localhost RELATORIO_SMTP_PORTA=1025 RELATORIO_SMTP_SEGURANCA=nenhuma python3 scripts/plugins/relatorio_email.py --dir tmp/plugins/ensaio-<data> --aplicacao tmp/plugins/ensaio-<data>/aplicacao-<backup>.json --saida-final 0 --log tmp/plugins/ensaio-<data>/aplicar-<backup>.log --enviar
+```
 
 ### Depois de uma queda: `estado-producao`
 
