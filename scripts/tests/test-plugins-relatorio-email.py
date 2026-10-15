@@ -95,7 +95,9 @@ with tempfile.TemporaryDirectory() as t:
            f"motivo da quarentena sem traduzir: {ctx['fora'][0]['motivo_cliente']}")
     checar(ctx["smoke_total"] == 2 and ctx["smoke_falhas"] == ["Store API: produtos: http 500, 0 item(ns)"],
            f"smoke errado: {ctx['smoke_total']} {ctx['smoke_falhas']}")
-    checar(rel.assunto(ctx) == "[Uonix] Atualização de plugins em 15/10/2026: Intervenção necessária", f"assunto: {rel.assunto(ctx)}")
+    checar(rel.assunto(ctx) == "[ksiodev] Relatório de manutenção — Site Uonix (15/10/2026)", f"assunto: {rel.assunto(ctx)}")
+    checar(rel.assunto_tecnico(ctx) == "[ksiodev][técnico] Relatório de manutenção — Site Uonix (15/10/2026): Intervenção necessária, saída 50",
+           f"assunto técnico: {rel.assunto_tecnico(ctx)}")
     checar(rel.montar(pasta, aplicacao, "99", LOG)["saida"] == "40", "saída desconhecida deveria virar 40")
 
     # 4. o changelog vem do wordpress.org: nunca entra cru no HTML
@@ -360,9 +362,9 @@ with tempfile.TemporaryDirectory() as t:
     checar(rc_ok == 0 and rc_falha == 0 and len(enviados) == 2, f"deveria enviar duas vezes: rc={rc_ok},{rc_falha} n={len(enviados)}")
     if len(enviados) == 2:
         (m_ok, p_ok), (m_tec, p_tec) = enviados
-        checar(p_ok == ["marketing@uonix.com.br"] and not m_ok["Subject"].startswith("[técnico]"), f"sucesso: {p_ok} {m_ok['Subject']}")
+        checar(p_ok == ["marketing@uonix.com.br"] and "[técnico]" not in m_ok["Subject"], f"sucesso: {p_ok} {m_ok['Subject']}")
         corpo_tec = m_tec.get_body(("plain",)).get_content()
-        checar(p_tec == ["uonix@ksio.dev"] and m_tec["Subject"].startswith("[técnico]"), f"falha deveria ir ao técnico: {p_tec} {m_tec['Subject']}")
+        checar(p_tec == ["uonix@ksio.dev"] and m_tec["Subject"].startswith("[ksiodev][técnico]"), f"falha deveria ir ao técnico: {p_tec} {m_tec['Subject']}")
         checar("O CLIENTE NÃO FOI NOTIFICADO" in corpo_tec and "linha-final-do-log" in corpo_tec
                and "estado-producao --backup=plugins-20261015-131200" in corpo_tec,
                "relatório técnico sem aviso, fim do log ou comando de diagnóstico")

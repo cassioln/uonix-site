@@ -275,8 +275,9 @@ def titulo_itens(ctx: dict) -> str:
 
 
 def assunto(ctx: dict) -> str:
-    rotulo = RESULTADOS[ctx["saida"]][0]
-    return f"[{CLIENTE}] Atualização de plugins em {ctx['quando']:%d/%m/%Y}: {rotulo}"
+    # Só o sucesso completo vai ao cliente, então o assunto não carrega estado;
+    # a data separa os ciclos na caixa de entrada.
+    return f"[{MARCA}] Relatório de manutenção — Site {CLIENTE} ({ctx['quando']:%d/%m/%Y})"
 
 
 def _selo(texto: str, cor: str, fundo: str) -> str:
@@ -529,8 +530,8 @@ def motivos(ctx: dict) -> list[str]:
 
 
 def assunto_tecnico(ctx: dict) -> str:
-    return (f"[técnico] {CLIENTE}: atualização de plugins em {ctx['quando']:%d/%m/%Y}: "
-            f"{RESULTADOS[ctx['saida']][0]} (saída {ctx['saida']})")
+    return (f"[{MARCA}][técnico] Relatório de manutenção — Site {CLIENTE} ({ctx['quando']:%d/%m/%Y}): "
+            f"{RESULTADOS[ctx['saida']][0]}, saída {ctx['saida']}")
 
 
 def corpo_tecnico(ctx: dict, log: str) -> str:
