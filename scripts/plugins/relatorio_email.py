@@ -21,7 +21,9 @@ SSL; a configuração vem do ambiente (o atualizar.sh carrega o .env):
   RELATORIO_SMTP_SENHA_FILE, RELATORIO_DE (o usuário), RELATORIO_PARA
   (o remetente; aceita vários, separados por vírgula). Sem RELATORIO_PARA,
   o relatório vai só para o remetente. RELATORIO_PARA_TECNICO
-  (uonix@ksio.dev) recebe o relatório técnico.
+  (uonix@ksio.dev) recebe o relatório técnico. RELATORIO_CCO (uonix@ksio.dev)
+  recebe cópia oculta do e-mail do cliente: só no envelope SMTP, nunca no
+  cabeçalho, então o cliente não vê.
 
 O cliente só recebe o e-mail quando tudo deu certo: saída 0, todo plugin
 confirmado na versão nova e smoke de produção todo verde. Em qualquer outro
@@ -203,16 +205,28 @@ def no_wporg(plano_item: dict | None) -> bool:
 
 
 def motivo_fora(motivo: str) -> str | None:
-    """O motivo em linguagem de cliente. Só a quarentena tem tradução: os outros motivos do plano
-    (camada que não se atualiza, major bloqueado, código que não carrega no local) são internos
-    e ficam só no relatório técnico."""
+    """O motivo em linguagem de cliente. Só a quarentena com data de liberação tem tradução.
+    Os outros motivos do plano (camada que não se atualiza, major bloqueado, código que não
+    carrega no local, e a quarentena "não verificável", que depende de conferência manual) são
+    internos e ficam só no relatório técnico. A idade da versão não entra: o lock vale até 72 h,
+    e "há N dias" estaria defasado quando o e-mail sai."""
     m = re.search(r"libera em (\d{4})-(\d{2})-(\d{2})", motivo)
-    if motivo.startswith("quarentena") and m:
-        return (f"versão lançada há poucos dias; por segurança, entra depois do período de observação, "
-                f"a partir de {m.group(3)}/{m.group(2)}/{m.group(1)}.")
-    if motivo.startswith("quarentena"):
-        return "versão lançada há poucos dias; entra depois do período de observação."
-    return None
+    if not motivo.startswith("quarentena") or not m:
+        return None
+    return f"versão lançada recentemente; entra no site a partir de {m.group(3)}/{m.group(2)}/{m.group(1)}."
+
+
+def dias_quarentena(ctx: dict) -> int:
+    """O prazo da política, lido do motivo do plano ("lançada há 6 de 7 dias")."""
+    prazos = [int(m.group(1)) for f in ctx["fora"] for m in [re.search(r"de (\d+) dias", f.get("motivo", ""))] if m]
+    return max(prazos) if prazos else 7
+
+
+def explicacao_quarentena(ctx: dict) -> str:
+    return (f"Por segurança, versões novas de plugins essenciais só são aplicadas depois de {dias_quarentena(ctx)} dias "
+            "do lançamento. Nesse período, problemas que surgem logo após uma versão sair costumam ser "
+            "corrigidos pelo próprio fabricante, e o site não fica exposto a eles. "
+            "Quando o fabricante informa que a versão corrige uma falha de segurança, ela é aplicada sem esperar esse prazo.")
 
 
 def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, agora: dt.datetime | None = None) -> dict:
@@ -412,7 +426,8 @@ def corpo_html(ctx: dict, logo_src: str | None = f"cid:{LOGO_CID}") -> str:
             f'<li><strong style="color:{FUNDO};">{e(f["nome"])}</strong> {e(f["de"])} &rarr; {e(f["para"])}: {e(f["motivo_cliente"])}</li>'
             for f in fora_cliente(ctx))
         blocos_extra.append(
-            f'<div style="margin-top:28px;">{_rotulo_secao("Aguardando o próximo ciclo")}'
+            f'<div style="margin-top:28px;">{_rotulo_secao("Quarentena")}'
+            f'<p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#334155;">{e(explicacao_quarentena(ctx))}</p>'
             f'<ul style="margin:0;padding-left:18px;font-size:13px;color:#334155;line-height:1.7;">{itens}</ul></div>')
 
     return f"""<!DOCTYPE html>
@@ -501,7 +516,7 @@ def corpo_texto(ctx: dict) -> str:
         linhas += ["", f"Verificação do site: {ctx['smoke_total'] - len(ctx['smoke_falhas'])} de {ctx['smoke_total']} ok"]
         linhas += [f"  falha: {f}" for f in ctx["smoke_falhas"]]
     if fora_cliente(ctx):
-        linhas += ["", "Aguardando o próximo ciclo:"]
+        linhas += ["", "Quarentena:", explicacao_quarentena(ctx)]
         linhas += [f"- {f['nome']} {f['de']} -> {f['para']}: {f['motivo_cliente']}" for f in fora_cliente(ctx)]
     linhas += ["", f"Referência do backup: {ctx['backup'] or '-'}", "",
                "Qualquer dúvida, fico à disposição.", "", assinatura_texto()]
@@ -603,8 +618,10 @@ def configuracao(env: dict[str, str]) -> dict:
     except ValueError as erro:
         raise ConfiguracaoIncompleta("RELATORIO_SMTP_PORTA não é um número") from erro
     tecnico = [p.strip() for p in env.get("RELATORIO_PARA_TECNICO", TECNICO_PADRAO).split(",") if p.strip()]
-    return {"host": host, "porta": porta, "seguranca": seguranca,
-            "usuario": usuario, "senha": senha, "de": de, "para": para, "para_tecnico": tecnico}
+    cco = [p.strip() for p in env.get("RELATORIO_CCO", TECNICO_PADRAO).split(",") if p.strip()]
+    cco = [c for n, c in enumerate(cco) if c.casefold() not in {x.casefold() for x in cco[:n]}]
+    return {"host": host, "porta": porta, "seguranca": seguranca, "usuario": usuario, "senha": senha,
+            "de": de, "para": para, "para_tecnico": tecnico, "cco": cco}
 
 
 def mensagem(ctx: dict, de: str, para: list[str]) -> EmailMessage:
@@ -663,16 +680,21 @@ def main(argv: list[str]) -> int:
         print(f"relatório não enviado: {erro}", file=sys.stderr)
         return 2
     para = cfg["para"] if cliente else cfg["para_tecnico"]
+    # Cópia oculta só no envelope: o cabeçalho To continua só com o cliente.
+    ja = {x.casefold() for x in para}
+    extra = [c for c in cfg["cco"] if c.casefold() not in ja] if cliente else []
+    envelope = para + extra
     try:
         msg = mensagem(ctx, cfg["de"], para) if cliente else mensagem_tecnica(ctx, log, cfg["de"], para)
-        enviar(msg, cfg, para=para)
+        enviar(msg, cfg, para=envelope)
     except (OSError, smtplib.SMTPException) as erro:
         print(f"relatório não enviado: {type(erro).__name__}: {erro}", file=sys.stderr)
         return 1
     except Exception as erro:  # noqa: BLE001 - a mensagem poderia citar a senha (ex.: UnicodeEncodeError no login)
         print(f"relatório não enviado: {type(erro).__name__}", file=sys.stderr)
         return 1
-    destino = "cliente" if cliente else "técnico; o cliente não foi notificado"
+    destino = (f"cliente; cópia oculta para {', '.join(extra) or '-'}" if cliente
+               else "técnico; o cliente não foi notificado")
     print(f"relatório enviado para {', '.join(para)} ({destino}): {msg['Subject']}")
     return 0
 

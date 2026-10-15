@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory() as t:
     checar(ctx["itens"][3]["nome"] == "plugin-sem-nome", "plugin fora do mapa deveria aparecer pelo slug")
     checar(ctx["itens"][1]["notas"] == ["Security: Improved SVG sanitization."], f"nota sem limpar o marcador: {ctx['itens'][1]['notas']}")
     checar(ctx["itens"][3]["notas"] == [], "changelog que não é lista não deveria virar nota")
-    checar("16/10/2026" in ctx["fora"][0]["motivo_cliente"] and "quarentena" not in ctx["fora"][0]["motivo_cliente"],
+    checar("16/10/2026" in ctx["fora"][0]["motivo_cliente"] and "libera" not in ctx["fora"][0]["motivo_cliente"],
            f"motivo da quarentena sem traduzir: {ctx['fora'][0]['motivo_cliente']}")
     checar(ctx["smoke_total"] == 2 and ctx["smoke_falhas"] == ["Store API: produtos: http 500, 0 item(ns)"],
            f"smoke errado: {ctx['smoke_total']} {ctx['smoke_falhas']}")
@@ -106,7 +106,20 @@ with tempfile.TemporaryDirectory() as t:
     # 4. o changelog vem do wordpress.org: nunca entra cru no HTML
     corpo = rel.corpo_html(ctx)
     checar("<script>" not in corpo and "&lt;script&gt;" in corpo, "changelog deveria ser escapado no HTML")
-    checar("Pontos com falha" in corpo and "Aguardando o próximo ciclo" in corpo, "HTML sem as seções de falha e de fora")
+    checar("Pontos com falha" in corpo and ">Quarentena</div>" in corpo and "Aguardando" not in corpo,
+           "HTML sem as seções de falha e de quarentena")
+    checar("depois de 7 dias do lançamento" in corpo and "sem esperar esse prazo" in corpo,
+           "a seção Quarentena deveria explicar o motivo e o prazo")
+    checar(ctx["fora"][0]["motivo_cliente"] == "versão lançada recentemente; entra no site a partir de 16/10/2026.",
+           f"item da quarentena: {ctx['fora'][0]['motivo_cliente']}")
+    checar("Quarentena:" in rel.corpo_texto(ctx) and "sem esperar esse prazo" in rel.corpo_texto(ctx), "texto sem a quarentena")
+    checar(rel.motivo_fora("quarentena: lançada há 2 de 14 dias (libera em 2026-11-01)") ==
+           "versão lançada recentemente; entra no site a partir de 01/11/2026.", "quarentena com outro prazo")
+    # o formato "não verificável" do plano.py depende de conferência manual: só no técnico
+    checar(rel.motivo_fora("quarentena de 7 dias não verificável (data de lançamento desconhecida)") is None,
+           "quarentena não verificável não pode ir ao cliente")
+    checar(rel.dias_quarentena({"fora": [{"motivo": "quarentena: lançada há 2 de 14 dias (libera em 2026-11-01)"}]}) == 14,
+           "o prazo deveria vir do motivo")
     checar("1/4" in corpo, "indicador de atualizados deveria contar só os confirmados")
     checar("<script>" in rel.corpo_texto(ctx), "a versão em texto é texto puro e pode trazer o changelog literal")
 
@@ -362,13 +375,20 @@ with tempfile.TemporaryDirectory() as t:
         rc_ok = rel.main(args + ["--saida-final", "0"])
         (pasta / f"aplicar-{stamp}.log").write_text(LOG + "linha-final-do-log\n")
         rc_falha = rel.main(args + ["--saida-final", "20"])
+        (pasta / f"aplicar-{stamp}.log").write_text(log_ok)
+        os.environ.update({"RELATORIO_PARA": "Marketing@Uonix.com.br", "RELATORIO_CCO": "marketing@uonix.com.br"})
+        rel.main(args + ["--saida-final", "0"])
     rel.enviar = original_enviar
     os.environ.clear()
     os.environ.update(original_env)
-    checar(rc_ok == 0 and rc_falha == 0 and len(enviados) == 2, f"deveria enviar duas vezes: rc={rc_ok},{rc_falha} n={len(enviados)}")
-    if len(enviados) == 2:
-        (m_ok, p_ok), (m_tec, p_tec) = enviados
-        checar(p_ok == ["marketing@uonix.com.br"] and "[técnico]" not in m_ok["Subject"], f"sucesso: {p_ok} {m_ok['Subject']}")
+    checar(rc_ok == 0 and rc_falha == 0 and len(enviados) == 3, f"deveria enviar três vezes: rc={rc_ok},{rc_falha} n={len(enviados)}")
+    if len(enviados) == 3:
+        (m_ok, p_ok), (m_tec, p_tec), (_, p_dup) = enviados
+        checar(p_dup == ["Marketing@Uonix.com.br"], f"cópia oculta igual ao cliente (outra caixa) não pode duplicar: {p_dup}")
+        checar(p_ok == ["marketing@uonix.com.br", "uonix@ksio.dev"] and "[técnico]" not in m_ok["Subject"],
+               f"sucesso: deveria ir ao cliente com cópia oculta: {p_ok} {m_ok['Subject']}")
+        checar(m_ok["To"] == "marketing@uonix.com.br" and m_ok["Bcc"] is None and "uonix@ksio.dev" not in m_ok.as_string(),
+               "a cópia oculta não pode aparecer no cabeçalho nem no corpo do e-mail do cliente")
         corpo_tec = m_tec.get_body(("plain",)).get_content()
         checar(p_tec == ["uonix@ksio.dev"] and m_tec["Subject"].startswith("[ksiodev][técnico]"), f"falha deveria ir ao técnico: {p_tec} {m_tec['Subject']}")
         checar("O CLIENTE NÃO FOI NOTIFICADO" in corpo_tec and "linha-final-do-log" in corpo_tec
@@ -378,6 +398,10 @@ with tempfile.TemporaryDirectory() as t:
 
 cfg = rel.configuracao({"RELATORIO_SMTP_SENHA": "s"})
 checar(cfg["para_tecnico"] == ["uonix@ksio.dev"], f"técnico padrão errado: {cfg['para_tecnico']}")
+checar(cfg["cco"] == ["uonix@ksio.dev"], f"cópia oculta padrão errada: {cfg['cco']}")
+checar(rel.configuracao({"RELATORIO_SMTP_SENHA": "s", "RELATORIO_CCO": ""})["cco"] == [], "RELATORIO_CCO vazio desliga a cópia")
+checar(rel.configuracao({"RELATORIO_SMTP_SENHA": "s", "RELATORIO_CCO": "a@x, A@X ,b@y"})["cco"] == ["a@x", "b@y"],
+       "a cópia oculta deveria eliminar duplicatas sem diferenciar maiúsculas")
 checar(rel.configuracao({"RELATORIO_SMTP_SENHA": "s", "RELATORIO_PARA_TECNICO": "a@x, b@y"})["para_tecnico"] == ["a@x", "b@y"],
        "RELATORIO_PARA_TECNICO deveria aceitar vários")
 
