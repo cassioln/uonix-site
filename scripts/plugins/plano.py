@@ -100,8 +100,9 @@ def data_lancamento(info: dict | None, para: str) -> dt.date | None:
     return dt.date(int(m[1]), int(m[2]), int(m[3])) if m else None
 
 
-def trecho_changelog(info: dict | None, de: str, para: str) -> list[str] | None:
-    """Linhas do changelog entre `de` (exclusive) e `para` (inclusive)."""
+def trecho_changelog(info: dict | None, de: str, para: str, so_para: bool = False) -> list[str] | None:
+    """Linhas do changelog entre `de` (exclusive) e `para` (inclusive); com `so_para`,
+    só as da versão `para` (as novidades que o relatório mostra ao cliente)."""
     if not info:
         return None
     bruto = info.get("sections", {}).get("changelog", "")
@@ -115,7 +116,7 @@ def trecho_changelog(info: dict | None, de: str, para: str) -> list[str] | None:
         # linha comum só conta se for curta, para não confundir "1.2 compat" no meio.
         marcado = linha.lstrip()[:1] in {"=", "#", "["}
         if m and (marcado or len(linha) < 60):
-            dentro = versao(de) < versao(m.group(1)) <= versao(para)
+            dentro = (versao(m.group(1)) == versao(para)) if so_para else (versao(de) < versao(m.group(1)) <= versao(para))
             achou = achou or dentro
             continue
         if dentro:
@@ -155,6 +156,9 @@ def planejar(inventario: dict, politica: dict, api: dict, hoje: dt.date,
             base["changelog"] = ("indisponível" if info is None else
                                  "sem as versões do intervalo" if trecho is None else
                                  [l for l in trecho if SEGURANCA.search(l) or RISCO.search(l)][:8])
+            # O changelog acima é o filtro de segurança e risco do intervalo, para a
+            # decisão; as novidades são o trecho inteiro só da versão nova, para o cliente.
+            base["novidades"] = trecho_changelog(info, de, para, so_para=True) if info else None
 
             if (maior(para) or 0) > (maior(de) or 0) and camadas[camada]["major"] == "bloqueia" \
                     and nome not in aceitar_major:

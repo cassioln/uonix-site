@@ -53,9 +53,12 @@ def pasta_fixture(tmp: pathlib.Path, stamp: str) -> pathlib.Path:
     (tmp / "lock.json").write_text(json.dumps({"itens": ITENS, "resultado": "verde", "fora": [
         {"slug": "woocommerce", "de": "11.1.2", "para": "11.2.1", "motivo": "quarentena: lançada há 6 de 7 dias (libera em 2026-10-16)"}]}))
     (tmp / "plano.json").write_text(json.dumps({"itens": [
-        {"slug": "woocommerce-products-filter", "seguranca": True, "changelog": ["Security fix <script>alert(1)</script>"]},
-        {"slug": "kadence-blocks", "seguranca": True, "changelog": ["* Security: Improved SVG sanitization."]},
-        {"slug": "woo-rfq-for-woocommerce", "seguranca": False, "changelog": []},
+        {"slug": "woocommerce-products-filter", "seguranca": True, "changelog": ["Security fix <script>alert(1)</script>"],
+         "novidades": ["Security fix <script>alert(1)</script>"]},
+        {"slug": "kadence-blocks", "seguranca": True, "changelog": ["* Security: Improved SVG sanitization."],
+         "novidades": ["* Security: Improved SVG sanitization."]},
+        # o "changelog" do plano é o filtro de segurança e risco: nunca vira novidade
+        {"slug": "woo-rfq-for-woocommerce", "seguranca": False, "changelog": ["Removed: legacy quote form"], "novidades": None},
         {"slug": "plugin-sem-nome", "seguranca": None, "changelog": "sem as versões do intervalo"}]}))
     (tmp / f"aplicacao-{stamp}.json").write_text(json.dumps(
         {"executado_em": "2026-10-15T13:12:00Z", "backup": stamp, "lock_sha12": "0f93b1dbf12d", "status_job": "0", "smoke_producao": "20"}))
@@ -300,7 +303,7 @@ with tempfile.TemporaryDirectory() as t:
     stamp = "plugins-20261015-131200"
     pasta = pasta_fixture(pathlib.Path(t), stamp)
     plano_dados = json.loads((pasta / "plano.json").read_text())
-    plano_dados["itens"][0]["changelog"] = [f"* Mudança {n}" for n in range(11)]
+    plano_dados["itens"][0]["novidades"] = [f"* Mudança {n}" for n in range(11)]
     plano_dados["itens"][3]["changelog"] = "indisponível"  # plugin pago: sem página no wordpress.org
     (pasta / "plano.json").write_text(json.dumps(plano_dados))
     log_ok = "== versões finais\n" + "".join(f"  {i['slug']} {i['para']}\n" for i in ITENS)
@@ -316,6 +319,9 @@ with tempfile.TemporaryDirectory() as t:
     checar("https://wordpress.org/plugins/woocommerce-products-filter/" in txt and "    - Mudança 0" in txt
            and "e mais 3 alteração(ões)" in txt, "texto sem link ou sem changelog")
     checar(rel.pagina_wporg("a b/../c") == "https://wordpress.org/plugins/a%20b/../c/" , "slug deveria ser codificado na URL")
+    checar("Removed: legacy quote form" not in h and "Removed: legacy quote form" not in txt,
+           "o filtro de segurança e risco do plano não pode aparecer como novidade")
+    checar(rel.pagina_wporg("kadence", "tema") == "https://wordpress.org/themes/kadence/", "tema deveria apontar para /themes/")
 
 # 11. roteamento: o cliente só recebe sucesso completo; o resto vai para o técnico
 with tempfile.TemporaryDirectory() as t:

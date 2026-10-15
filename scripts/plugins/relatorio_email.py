@@ -177,9 +177,11 @@ def situacao(item: dict, finais: dict[str, str]) -> str:
 
 
 def notas(plano_item: dict | None) -> list[str]:
+    """As novidades da versão nova, como o fabricante escreveu. O campo "changelog" do
+    plano não serve: é só o filtro de segurança e risco do intervalo inteiro."""
     if not plano_item:
         return []
-    linhas = plano_item.get("changelog")
+    linhas = plano_item.get("novidades")
     if not isinstance(linhas, list):
         return []
     limpas = [re.sub(r"^\W+", "", l).strip() for l in linhas if isinstance(l, str)]
@@ -190,8 +192,9 @@ def notas(plano_item: dict | None) -> list[str]:
 MAX_NOTAS = 8
 
 
-def pagina_wporg(slug: str) -> str:
-    return f"https://wordpress.org/plugins/{urllib.parse.quote(slug)}/"
+def pagina_wporg(slug: str, tipo: str = "plugin") -> str:
+    secao = "themes" if tipo == "tema" else "plugins"
+    return f"https://wordpress.org/{secao}/{urllib.parse.quote(slug)}/"
 
 
 def no_wporg(plano_item: dict | None) -> bool:
@@ -235,7 +238,7 @@ def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, ago
             "situacao": "nao_aplicado" if saida == "30" else situacao(item, finais),
             "seguranca": bool(p and p.get("seguranca")),
             "notas": notas(p),
-            "pagina": pagina_wporg(item["slug"]) if no_wporg(p) else "",
+            "pagina": pagina_wporg(item["slug"], item.get("tipo", "plugin")) if no_wporg(p) else "",
         })
     falhas_smoke = [f"{nome}: {r.get('detalhe', '')}" for nome, r in smoke.items() if not r.get("ok")]
     executado = aplicacao.get("executado_em") or aplicacao.get("aplicado_em") or ""
