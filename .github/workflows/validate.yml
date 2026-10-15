@@ -437,6 +437,9 @@ jobs:
       - name: Test plugins production apply (remote job)
         run: bash scripts/tests/test-plugins-remoto-aplicar.sh
 
+      - name: Test plugins apply email report
+        run: python3 scripts/tests/test-plugins-relatorio-email.py
+
       - name: Test production rollback exit code without mutation
         run: bash scripts/tests/test-production-rollback-no-mutation.sh
 
