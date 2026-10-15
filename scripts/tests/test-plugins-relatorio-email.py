@@ -118,6 +118,9 @@ with tempfile.TemporaryDirectory() as t:
            "saída 30 não pode dizer 'O que foi feito'")
     checar("Correção de segurança<" not in corpo30 and "Security fix" not in corpo30,
            "saída 30 não pode exibir correção de segurança como aplicada")
+    ctx30["smoke_total"], ctx30["smoke_falhas"] = 0, []
+    checar("verificação do site não executada" in rel.corpo_html(ctx30) and "verificações do site ok" not in rel.corpo_html(ctx30),
+           "sem smoke, o indicador não pode dizer 'verificações do site ok'")
 
     # 4d. saída 0 com item não confirmado: o resumo não afirma "todas"
     checar(rel.resumo(rel.montar(pasta, aplicacao, "0", LOG)) == rel.RESUMO_0_PARCIAL,

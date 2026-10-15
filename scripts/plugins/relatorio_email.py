@@ -238,9 +238,9 @@ def corpo_html(ctx: dict) -> str:
     com_seguranca = sum(1 for i in ctx["itens"] if i["seguranca"] and i["situacao"] == "atualizado")
     if ctx["smoke_total"]:
         verdes = ctx["smoke_total"] - len(ctx["smoke_falhas"])
-        smoke_txt = f"{verdes} de {ctx['smoke_total']}"
+        smoke_txt, smoke_legenda = f"{verdes} de {ctx['smoke_total']}", "verificações do site ok"
     else:
-        smoke_txt = "não executado"
+        smoke_txt, smoke_legenda = "—", "verificação do site não executada"
 
     def indicador(valor: str, legenda: str) -> str:
         return (f'<td width="33%" style="padding:14px 8px;text-align:center;border:1px solid #e2e8f0;border-radius:8px;">'
@@ -312,7 +312,7 @@ def corpo_html(ctx: dict) -> str:
   <table role="presentation" width="100%" cellpadding="0" cellspacing="6"><tr>
     {indicador(f"{atualizados}/{len(ctx['itens'])}", "plugins atualizados")}
     {indicador(str(com_seguranca), "correções de segurança")}
-    {indicador(smoke_txt, "verificações do site ok")}
+    {indicador(smoke_txt, smoke_legenda)}
   </tr></table>
 </td></tr>
 <tr><td style="padding:20px 28px 0;">
