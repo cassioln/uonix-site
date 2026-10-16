@@ -56,33 +56,53 @@ COMPRESSX_CRITICAL_IMAGE_PATHS=(
 # em erro fatal no destino (#406). Em produção, em 2026-10-07, não havia
 # `cache/` nem `logs/` na raiz desses três diretórios, e havia 5 diretórios
 # com esses nomes dentro de plugins.
+#
+# Os de DADOS PESSOAIS (`curriculos-recebidos/`, `wp-personal-data-exports/`)
+# ficam SEM âncora e valem nos três diretórios, de propósito: nem uma cópia
+# aninhada desses arquivos pode atravessar ambientes. Nenhum plugin usa esses
+# nomes como diretório de código.
 EXCLUDED_RSYNC_ARGS=(
   --filter='-p .DS_Store'
   --filter='-p ._*'
   --filter='-p *~'
   --filter='-p *.log'
   --exclude='/cache/'
-  --exclude='wc-logs/'
-  --exclude='wp-staging/'
-  --exclude='wpmc-trash/'
   --exclude='wp-personal-data-exports/'
   --exclude='curriculos-recebidos/'
-  --exclude='FLUENT_PDF_TEMPLATES/'
-  --exclude='ai1wm-backups/'
-  --exclude='wpvivid_uploads/'
-  --exclude='wpvividbackups/'
-  --exclude='wpvivid_staging/'
   --exclude='/logs/'
   --exclude='uonix-local/'
+)
+
+# Diretórios de runtime que plugins criam em `uploads` (logs do WooCommerce,
+# staging, lixeira, backups, templates do Fluent PDF). Valem SÓ em `uploads` e
+# ancorados na raiz dele (#415). Em `plugins`, o mesmo nome é código: o plugin
+# WP Staging fica em `plugins/wp-staging/`, na raiz, e uma âncora não o salvaria.
+# Em produção, em 2026-10-16, desses só existia `uploads/wc-logs`; nenhum em
+# `plugins` ou `languages`, nem aninhado em `uploads`.
+UPLOADS_RSYNC_EXCLUDES=(
+  --exclude='/wc-logs/'
+  --exclude='/wp-staging/'
+  --exclude='/wpmc-trash/'
+  --exclude='/FLUENT_PDF_TEMPLATES/'
+  --exclude='/ai1wm-backups/'
+  --exclude='/wpvivid_uploads/'
+  --exclude='/wpvividbackups/'
+  --exclude='/wpvivid_staging/'
 )
 
 # Exclusões do tar dos backups do destino, de onde o rollback restaura. Sem
 # `cache`: o padrão do tar casa o nome em qualquer nível, então o rollback
 # reinstalaria plugins sem `psr/cache` (#406). O arquivo cresce só pelos
 # `cache/` aninhados, que em `plugins` são código e precisam entrar.
+# O tar roda em wp-content, então o padrão é o caminho `uploads/<nome>` (#415):
+# saem os logs do WooCommerce e o staging de uploads, e `plugins/wp-staging`
+# entra. Sem `--anchored`, que o bsdtar do Mac não tem, o padrão casa a sequência
+# `uploads/wc-logs` em QUALQUER nível: um plugin que traga `uploads/wc-logs` no
+# próprio código também perde esse trecho no backup. Nenhum plugin de produção
+# tem isso (2026-10-16); ver a issue de seguimento.
 BACKUP_TAR_EXCLUDES=(
-  --exclude='wc-logs'
-  --exclude='wp-staging'
+  --exclude='uploads/wc-logs'
+  --exclude='uploads/wp-staging'
 )
 
 PLUGIN_RSYNC_EXCLUDES=(
@@ -1700,6 +1720,8 @@ bridge_upload_payload() {
 
   if [ "$relative_dir" = plugins ]; then
     rsync_args+=("${PLUGIN_RSYNC_EXCLUDES[@]}")
+  elif [ "$relative_dir" = uploads ]; then
+    rsync_args+=("${UPLOADS_RSYNC_EXCLUDES[@]}")
   fi
 
   uonix_rsync_from_runner "$target_env" "$payload_dir" "$target_path" "${rsync_args[@]}" || return $?
@@ -1745,6 +1767,8 @@ bridge_runtime_directory() {
 
   if [ "$relative_dir" = plugins ]; then
     rsync_args+=("${PLUGIN_RSYNC_EXCLUDES[@]}")
+  elif [ "$relative_dir" = uploads ]; then
+    rsync_args+=("${UPLOADS_RSYNC_EXCLUDES[@]}")
   fi
 
   source_path="$(content_path "$source_env")/${relative_dir}" || return $?
