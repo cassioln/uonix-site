@@ -271,7 +271,10 @@ def alinhar(local, inventario: dict, ignorar: set[str] = frozenset()) -> list[st
                 acoes.append(f"{tipo} {nome}: {atual.get('version') if atual else 'ausente'} -> {versao}")
                 atual = {**(atual or {}), "version": versao, "status": (atual or {}).get("status", "inactive")}
             if atual is None:
-                acoes.append(f"{tipo} {nome}: ausente no local; ativação não alinhada")
+                # Ignorado inativo e ausente não importa; ativo e ausente reprova na
+                # verificação abaixo (#428).
+                if _estado_alvo(tipo, nome, status) == "active":
+                    acoes.append(f"{tipo} {nome}: ausente no local; ativação não alinhada")
                 continue
             alvo = _estado_alvo(tipo, nome, status)
             ativo = atual.get("status") == "active"
@@ -299,6 +302,10 @@ def verificar_alinhamento(local, inventario: dict, ignorar: set[str] = frozenset
             if atual is None:
                 if nome not in ignorar:
                     divergentes.append(f"{nome} ausente no local")
+                elif _estado_alvo(tipo, nome, prod.get("status", "")) == "active":
+                    # Mesmo ignorado (tema próprio, por exemplo): o smoke rodaria sem ele,
+                    # com outro tema ou plugin no lugar, e não refletiria produção (#428).
+                    divergentes.append(f"{nome} ativo em produção e ausente no local")
                 continue
             if nome not in ignorar and atual.get("version") != prod.get("version"):
                 divergentes.append(f"{nome} versão local {atual.get('version')} != produção {prod.get('version')}")

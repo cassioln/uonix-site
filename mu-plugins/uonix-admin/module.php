@@ -38,6 +38,7 @@ uonix_mu_require_files(
 		'66-admin-editor-sem-personalizador.php',
 		'67-admin-editor-menus.php',
 		'68-admin-editor-marketing.php',
+		'69-admin-personalizador-widgets-classicos.php',
 	),
 	'uonix-admin'
 );

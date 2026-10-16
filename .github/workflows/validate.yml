@@ -232,6 +232,9 @@ jobs:
       - name: Test editor without Customizer access
         run: php scripts/tests/test-admin-editor-sem-personalizador.php
 
+      - name: Test Customizer with classic widgets
+        run: php scripts/tests/test-admin-personalizador-widgets-classicos.php
+
       - name: Test block widgets without content from Max Mega Menu
         run: php scripts/tests/test-navigation-mega-menu-widget-bloco.php
 
