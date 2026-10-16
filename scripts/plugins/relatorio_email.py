@@ -187,7 +187,26 @@ def notas(plano_item: dict | None) -> list[str]:
     if not isinstance(linhas, list):
         return []
     limpas = [re.sub(r"^\W+", "", l).strip() for l in linhas if isinstance(l, str)]
-    return [l for l in limpas if l]
+    return [l for l in limpas if not _ruido(l)]
+
+
+# O plano quebra o HTML do changelog em linha a cada tag, então link e rótulo viram
+# linhas soltas: "#69649" (o link do PR), "WooCommerce" (o <strong> do produto),
+# "See changelog for all versions" e "." (vistos no WooCommerce 11.2.1, 2026-10-16).
+# Só a exibição filtra; a detecção de segurança do plano segue com todas as linhas.
+_VER_CHANGELOG = re.compile(r"^(see|view|read)\b.{0,20}\bchangelog\b"
+                            r"|^(props|thanks)\b|^full changelog\b|^release notes\b", re.I)
+# Chinês, japonês e coreano não separam palavras com espaço: uma frase inteira
+# seria lida como "palavra solta" (revisão do #440).
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]{4,}")
+
+
+def _ruido(linha: str) -> bool:
+    return (not re.search(r"[^\W\d_]", linha)                       # sem letra: "69649", "."
+            or (not re.search(r"\s", linha) and not _CJK.search(linha))  # palavra solta: "WooCommerce"
+            # rótulo de link ("See changelog for all versions"): só se for curto, para
+            # não derrubar uma frase real que comece com "Read the changelog…"
+            or (bool(_VER_CHANGELOG.match(linha)) and len(linha.split()) <= 6))
 
 
 # Quantos itens do changelog o e-mail mostra por plugin; o resto fica no link.
