@@ -282,8 +282,10 @@ plugins criam ali:
 Em `plugins`, esses nomes são código: o plugin WP Staging fica em
 `plugins/wp-staging/`, e uma exclusão global o cortaria do clone e do backup do
 rollback. Em produção, em 2026-10-16, desses diretórios só existia
-`uploads/wc-logs`. O tar do backup do destino exclui só `uploads/wc-logs` e
-`uploads/wp-staging`.
+`uploads/wc-logs`. O tar do backup do destino exclui `uploads/wc-logs` e
+`uploads/wp-staging`; sem âncora, essa sequência casa em qualquer nível, então
+um `plugins/<p>/uploads/wc-logs` também ficaria fora do backup (nenhum plugin
+de produção tem isso).
 
 Em especial, os **arquivos** em `curriculos-recebidos/` e
 `wp-personal-data-exports/` nunca atravessam ambientes pelo clone. Isso não
@@ -431,9 +433,9 @@ backups mais recentes por ambiente.
 
 - dump completo do banco em `gzip` (remoto inclui `--routines --triggers
   --events`; local não inclui rotinas nem eventos);
-- `uploads`, `plugins` e `languages` — o tar do backup exclui subdiretórios
-  `wc-logs/` e `wp-staging/`, portanto esses itens não são restaurados pelo
-  rollback. Ele **não** exclui `cache/`: o padrão do tar casa o nome em qualquer
+- `uploads`, `plugins` e `languages` — o tar do backup exclui `uploads/wc-logs`
+  e `uploads/wp-staging`, portanto esses itens não são restaurados pelo
+  rollback; `plugins/wp-staging` entra. Ele **não** exclui `cache/`: o padrão do tar casa o nome em qualquer
   nível, e o rollback reinstalaria plugins sem `psr/cache` (#406);
 - `compressx` e `compressx-nextgen`, se existirem;
 - `wp-content/.htaccess`, se existir;

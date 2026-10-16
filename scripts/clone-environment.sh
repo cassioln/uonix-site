@@ -95,9 +95,11 @@ UPLOADS_RSYNC_EXCLUDES=(
 # reinstalaria plugins sem `psr/cache` (#406). O arquivo cresce só pelos
 # `cache/` aninhados, que em `plugins` são código e precisam entrar.
 # O tar roda em wp-content, então o padrão é o caminho `uploads/<nome>` (#415):
-# saem só os logs do WooCommerce e o staging de uploads, e `plugins/wp-staging`
-# entra. Sem `--anchored`, que o bsdtar do Mac não tem: no GNU tar e no bsdtar,
-# o padrão com barra só casa essa sequência de diretórios.
+# saem os logs do WooCommerce e o staging de uploads, e `plugins/wp-staging`
+# entra. Sem `--anchored`, que o bsdtar do Mac não tem, o padrão casa a sequência
+# `uploads/wc-logs` em QUALQUER nível: um plugin que traga `uploads/wc-logs` no
+# próprio código também perde esse trecho no backup. Nenhum plugin de produção
+# tem isso (2026-10-16); ver a issue de seguimento.
 BACKUP_TAR_EXCLUDES=(
   --exclude='uploads/wc-logs'
   --exclude='uploads/wp-staging'

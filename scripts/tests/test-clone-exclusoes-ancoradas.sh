@@ -135,6 +135,11 @@ bridge_runtime_directory local local uploads "$TMP_DIR/ponte" >/dev/null 2>&1 ||
 # um não pode mascarar o outro.
 grep -qx -- "--exclude=/wc-logs/" "$registro.download" || fail 'download de uploads sem as exclusões de uploads'
 grep -qx -- "--exclude=/wc-logs/" "$registro" || fail 'upload de uploads sem as exclusões de uploads'
+for dir in plugins languages; do
+  : > "$registro.download"; mkdir -p "$TMP_DIR/fonte-local/wp-content/$dir"
+  bridge_runtime_directory local local "$dir" "$TMP_DIR/ponte" >/dev/null 2>&1 || true
+  ! grep -qx -- "--exclude=/wc-logs/" "$registro.download" || fail "download de $dir não deveria levar as exclusões de uploads"
+done
 unset -f uonix_rsync_from_runner uonix_rsync_to_runner content_path write_directory_manifest verify_directory_manifest verify_payload_at_target
 
 # 2. Backup: o tar com as exclusões reais, como create_backup.
@@ -151,8 +156,15 @@ listagem="$(tar -tzf "$arquivo")"
 grep -q 'plugins/wp-staging/Backend/Main.php' <<<"$listagem" || fail 'backup do rollback perdeu o plugin wp-staging'
 grep -q 'plugins/wc-logs/fatal.txt' <<<"$listagem" || fail 'backup do rollback perdeu plugins/wc-logs (só uploads/wc-logs sai)'
 grep -q 'uploads/2026/foto.webp' <<<"$listagem" || fail 'backup do rollback perdeu mídia de uploads'
-! grep -q 'uploads/wc-logs/' <<<"$listagem" || fail 'backup incluiu uploads/wc-logs, que deveria ser excluído'
-! grep -q 'uploads/wp-staging/' <<<"$listagem" || fail 'backup incluiu uploads/wp-staging, que deveria ser excluído'
+! grep -q '^uploads/wc-logs/' <<<"$listagem" || fail 'backup incluiu uploads/wc-logs, que deveria ser excluído'
+! grep -q '^uploads/wp-staging/' <<<"$listagem" || fail 'backup incluiu uploads/wp-staging, que deveria ser excluído'
+# Comportamento conhecido, travado aqui para a documentação não mentir de novo:
+# sem âncora, o tar também tira `plugins/<p>/uploads/wc-logs` (issue de seguimento).
+mkdir -p "$TMP_DIR/origem/plugins/com-uploads/uploads/wc-logs"
+printf 'codigo\n' > "$TMP_DIR/origem/plugins/com-uploads/uploads/wc-logs/x.php"
+tar -czf "$arquivo" -C "$TMP_DIR/origem" "${BACKUP_TAR_EXCLUDES[@]}" -- uploads plugins || fail 'tar do backup falhou'
+! tar -tzf "$arquivo" | grep -q 'plugins/com-uploads/uploads/wc-logs/x.php' \
+  || fail 'o tar passou a ancorar: atualize o comentário de BACKUP_TAR_EXCLUDES e docs/clone-ambientes.md'
 grep -q 'fast-indexing-api/vendor/psr/cache/src/CacheItemPoolInterface.php' <<<"$listagem" \
   || fail 'backup do rollback perdeu vendor/psr/cache'
 grep -q 'google-site-kit/third-party/psr/cache/' <<<"$listagem" \
