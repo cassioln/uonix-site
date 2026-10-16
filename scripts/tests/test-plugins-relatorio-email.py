@@ -318,8 +318,13 @@ woo = {"novidades": ["WooCommerce", "Fix – Restore how the classic checkout se
 checar(rel.notas(woo) == ["Fix – Restore how the classic checkout sends order review and coupon requests.",
                           "Fix – Accept legacy four-digit Argentine postcodes in the Checkout block again."],
        f"sobras do changelog deveriam sair: {rel.notas(woo)}")
-checar(rel.notas({"novidades": ["Fixed XSS in widget", "Tweak: faster 2x loading", "Dev – Bump PHP to 8.1"]}) ==
-       ["Fixed XSS in widget", "Tweak: faster 2x loading", "Dev – Bump PHP to 8.1"], "itens reais não podem sair")
+reais = ["Fixed XSS in widget", "Tweak: faster 2x loading", "Dev – Bump PHP to 8.1", "Tested up to 6.9", "PHP 8.4",
+         "Security fix", "Performance improvements", "Corrigido erro no checkout", "修复了小工具的错误",
+         "ウィジェットの不具合を修正", "Read the changelog format guide for details on deprecated hooks"]
+checar(rel.notas({"novidades": reais}) == reais, f"itens reais não podem sair: {set(reais) - set(rel.notas({'novidades': reais}))}")
+sobras = ["Props @user", "Thanks to @john for the report", "Thanks @john!", "Full changelog: https://x/y",
+          "Full Changelog", "Release notes", "Release Notes:", "@user", "v2.0.0", "https://exemplo.com/a"]
+checar(rel.notas({"novidades": sobras}) == [], f"sobras deveriam sair: {rel.notas({'novidades': sobras})}")
 
 # 10c. nome com link para a página oficial (só se a API do wordpress.org respondeu) e changelog da versão
 with tempfile.TemporaryDirectory() as t:
