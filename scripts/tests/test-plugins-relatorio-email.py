@@ -311,6 +311,21 @@ with tempfile.TemporaryDirectory() as t:
     checar(not [p for p in sem_logo.walk() if p.get_content_type() == "image/png"]
            and "<img" not in sem_logo.get_body(("html",)).get_content(), "sem o PNG, o e-mail sai sem imagem")
 
+# 10b'. sobras do HTML do changelog não viram novidade (WooCommerce 11.2.1, 2026-10-16)
+woo = {"novidades": ["WooCommerce", "Fix – Restore how the classic checkout sends order review and coupon requests.",
+                     "#69649", "Fix – Accept legacy four-digit Argentine postcodes in the Checkout block again.",
+                     "#69662", "See changelog for all versions", ".", "   ", "* 2.0", "View the full changelog here"]}
+checar(rel.notas(woo) == ["Fix – Restore how the classic checkout sends order review and coupon requests.",
+                          "Fix – Accept legacy four-digit Argentine postcodes in the Checkout block again."],
+       f"sobras do changelog deveriam sair: {rel.notas(woo)}")
+reais = ["Fixed XSS in widget", "Tweak: faster 2x loading", "Dev – Bump PHP to 8.1", "Tested up to 6.9", "PHP 8.4",
+         "Security fix", "Performance improvements", "Corrigido erro no checkout", "修复了小工具的错误",
+         "ウィジェットの不具合を修正", "Read the changelog format guide for details on deprecated hooks"]
+checar(rel.notas({"novidades": reais}) == reais, f"itens reais não podem sair: {set(reais) - set(rel.notas({'novidades': reais}))}")
+sobras = ["Props @user", "Thanks to @john for the report", "Thanks @john!", "Full changelog: https://x/y",
+          "Full Changelog", "Release notes", "Release Notes:", "@user", "v2.0.0", "https://exemplo.com/a"]
+checar(rel.notas({"novidades": sobras}) == [], f"sobras deveriam sair: {rel.notas({'novidades': sobras})}")
+
 # 10c. nome com link para a página oficial (só se a API do wordpress.org respondeu) e changelog da versão
 with tempfile.TemporaryDirectory() as t:
     stamp = "plugins-20261015-131200"
