@@ -29,7 +29,12 @@ case "$1 $2" in
     v="${4#--version=}"
     [ "${FAKE_VERSAO_ERRADA:-}" = "$3" ] && v="$v.9"
     printf '%s\n' "$v" > "$p/$3/VERSION" ;;
-  "maintenance-mode activate") [ -n "${FAKE_FALHA_MANUTENCAO:-}" ] && exit 1; : > "$doc/.maintenance" ;;
+  "maintenance-mode activate")
+    [ -n "${FAKE_FALHA_MANUTENCAO:-}" ] && exit 1
+    # A N-ésima ativação em diante falha (a 1ª é a inicial; a 2ª, a reativação entre etapas).
+    n=$(( $(cat "$doc/.ativacoes" 2>/dev/null || echo 0) + 1 )); printf '%s\n' "$n" > "$doc/.ativacoes"
+    [ -n "${FAKE_FALHA_MANUTENCAO_A_PARTIR_DE:-}" ] && [ "$n" -ge "$FAKE_FALHA_MANUTENCAO_A_PARTIR_DE" ] && exit 1
+    : > "$doc/.maintenance" ;;
   "maintenance-mode deactivate") [ -f "$doc/.maintenance" ] && mv "$doc/.maintenance" "$doc/.maintenance-desligado" ; true ;;
   "wc update") [ -n "${FAKE_FALHA_WC:-}" ] && exit 1 ; true ;;
   eval*) printf '%s\n' "$2" >> "$doc/.eval-log" ;;
@@ -168,5 +173,14 @@ pkill -TERM -f "$JOB $doc" || true
 wait "$job" || true
 [ "$(cat "$bk/aplicar.status" 2>/dev/null)" = 143 ] || fail "SIGTERM deveria gravar status 143 (status: $(cat "$bk/aplicar.status" 2>/dev/null || echo ausente)): $(cat "$bk.log")"
 [ ! -e "$doc/.maintenance" ] || fail "SIGTERM deixou o site em manutenção"
+
+# 17. a reativação da manutenção entre etapas falha: segue, avisa e não deixa manutenção (#428)
+preparar reativa; rodar "$LISTA" UONIX_SMOKE_CMD=true FAKE_FALHA_MANUTENCAO_A_PARTIR_DE=2
+[ "$rc" = 0 ] && [ "$(versao a)" = 1.1 ] && [ "$(versao b)" = 2.0 ] \
+  || fail "reativação falha deveria seguir e aplicar tudo (saiu $rc, a=$(versao a) b=$(versao b)): $(cat "$bk.log")"
+# Duas etapas (lote "a", depois o crítico "b"): a ativação inicial e uma reativação depois de cada etapa.
+[ "$(grep -c 'AVISO: manutenção não reativou; seguindo' "$bk.log")" = 2 ] || fail "reativação falha sem os 2 avisos: $(cat "$bk.log")"
+[ "$(cat "$doc/.ativacoes")" = 3 ] || fail "deveria haver 3 ativações (inicial e uma por etapa): $(cat "$doc/.ativacoes")"
+[ ! -e "$doc/.maintenance" ] || fail "reativação falha deixou o site em manutenção"
 
 printf 'OK: job remoto aplica, recusa drift, restaura sem apagar e nunca deixa manutenção ligada\n'

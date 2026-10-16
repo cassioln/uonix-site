@@ -44,27 +44,62 @@ API = "https://api.wordpress.org/plugins/info/1.2/"
 # checks screen" dispensariam a quarentena de um crítico por engano (#418).
 # Um falso negativo só mantém a quarentena (conservador); um falso positivo a
 # dispensa. Por isso palavras ambíguas só contam com contexto: "harden" só com o
-# alvo da correção, "unauthenticated" só como exploração. Os nomes de classe de
-# vulnerabilidade (XSS, CSRF, SSRF...) ainda contam sozinhos, e "Security:" ou
-# "improved security" ainda casam frases de recurso; ver a issue de seguimento.
-SEGURANCA = re.compile(
+# alvo da correção, "unauthenticated" só como exploração.
+_CONTEXTO = re.compile(
     r"^\W*security\b[^:\n]{0,20}:"                                   # "Security:", "* Security fix:"
     r"|\bsecurity (fix|fixes|issue|issues|patch|vulnerabilit\w*|hardening|release|update)\b"
     r"|\b(improv|harden|strengthen|enhanc|tighten)\w* (the |plugin |overall )?security\b"
     r"|\bharden\w* (input |output |the )?(nonce|sanitiz|escap|validat|permission|capabilit|access|security)"
-    r"|\bcve-\d{4}|\bxss\b|cross[- ]site (scripting|request forgery)|\bcsrf\b|\bssrf\b"
-    r"|vulnerab|privilege escalation|sql injection|object injection|open redirect"
-    r"|arbitrary file (upload|deletion|download|read)"
     r"|allow\w* unauthenticated|unauthenticated (users?|attackers?|visitors?)\b.{0,40}\b(could|can|to|were able|was able)\b"
     r"|broken access control|(missing|insufficient|improper) (authori[sz]ation|capability|permission|nonce|access)( check)?"
     r"|permission checks? (across|for|on|in|when)\b|output escaping|\bunescaped html\b",
     re.I | re.M)
+# "security" diante de um recurso não é correção: "Security: new settings tab",
+# "Improved security scan performance", "Security update notifications" (#425).
+# Vale só para os ramos de "security" acima; os outros contextos não mudam.
+_RECURSO = re.compile(
+    r"\bsecurity( (update|release)s?)? (settings?|page|tab|scan\w*|dashboard|widget|ui|headers?|notices?"
+    r"|checker|notifications?|options?|log|report)\b"
+    r"|^\W*security\b[^:\n]{0,20}:\s*new\b", re.I | re.M)
+# Nome de classe de vulnerabilidade também nomeia recurso ("Added XSS filter
+# toggle", "SSRF protection setting", "Vulnerability scanner integration"):
+# só conta com verbo de correção na mesma linha ou na forma "<classe>
+# vulnerability/issue" (#425). CVE só aparece para vulnerabilidade e conta sozinho.
+_CVE = re.compile(r"\bcve-\d{4}", re.I)
+_CLASSE = (r"\bxss\b|cross[- ]site (scripting|request forgery)|\bcsrf\b|\bssrf\b|privilege escalation"
+           r"|sql injection|object injection|open redirect|arbitrary file (upload|deletion|download|read)")
+_CLASSE_VULN = re.compile(_CLASSE + r"|vulnerab", re.I)
+_CORRECAO = re.compile(
+    r"\b(fix\w*|patch\w*|prevent\w*|resolv\w*|address(ed|es|ing)|mitigat\w*|remediat\w*|correct(ed|s|ing)?)\b"
+    r"|(" + _CLASSE + r")\s+(vulnerabilit\w*|issue|flaw|exploit)", re.I)
+
+
+class _Seguranca:
+    """Mesma interface de um re.Pattern (`.search`), com as três regras acima."""
+
+    def search(self, linha: str):
+        if m := _CVE.search(linha):
+            return m
+        if (m := _CLASSE_VULN.search(linha)) and _CORRECAO.search(linha):
+            return m
+        recurso = _RECURSO.search(linha)
+        for m in _CONTEXTO.finditer(linha):
+            if not (recurso and "security" in m.group(0).lower()):
+                return m
+        return None
+
+
+SEGURANCA = _Seguranca()
 # Cabeçalho de versão: "= 1.2.3 =", "#### 1.2.3", "[4.66.2] 25.09.2026",
 # "1.2.3 - 2026-01-01", "v.1.2.3", "Version: 1.2.4", "Release 1.2.4".
-# A versão não pode ser seguida de letra ("* 1.5x faster loading" não é cabeçalho).
-CABECALHO = re.compile(r"^[=#*\[\s]*(?:v\.?\s*|version:?\s*|release\s+)?(\d+(?:\.\d+){1,3})(?![\d.]|[a-z])", re.I)
-# Data no formato dd.mm.aaaa não é versão ("25.09.2026 - Fixed XSS").
-DATA_COMO_VERSAO = re.compile(r"^\d{1,2}\.\d{1,2}\.\d{4}$")
+# A versão não pode ser seguida de letra ("* 1.5x faster loading" não é cabeçalho),
+# exceto o sufixo de pré-release colado ("= 1.2.3a =", "= 2.0.0beta =", "1.2.3-rc1"),
+# que conta como a versão numérica (#425).
+CABECALHO = re.compile(r"^[=#*\[\s]*(?:v\.?\s*|version:?\s*|release\s+)?(\d+(?:\.\d+){1,3})"
+                       r"(?:-?(?:alpha|beta|rc|a|b)\.?\d*)?(?![\d.]|[a-z])", re.I)
+# Data no formato dd.mm.aaaa não é versão ("25.09.2026 - Fixed XSS"). Só uma data
+# plausível: "1.2.1000" é versão de 3 partes (#425).
+DATA_COMO_VERSAO = re.compile(r"^(0?[1-9]|[12]\d|3[01])\.(0?[1-9]|1[0-2])\.(19|20)\d{2}$")
 DATA_SOLTA = re.compile(r"^\s*\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\s*$")
 RISCO = re.compile(r"breaking|\bremoved\b|deprecat|database (update|migration)|requires php|drop(ped)? support", re.I)
 ORDEM_CAMADAS = {"acoplada": 0, "comum": 1, "critica": 2}
