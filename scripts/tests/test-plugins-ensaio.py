@@ -150,6 +150,63 @@ for verdadeiro in ("Security Fix: administrator-role protection only excluded th
                    "Unauthenticated attackers could read private posts"):
     checar(bool(plano.SEGURANCA.search(verdadeiro)), f"correção de segurança não reconhecida: {verdadeiro}")
 
+# #425: "security" diante de recurso e classe de vulnerabilidade como nome de recurso.
+for falso in ("Security: new settings tab", "Security Headers: new page", "Security Hardening: new checklist UI",
+              "Improved security settings page layout", "Enhanced security dashboard widget",
+              "Improved security scan performance", "Security update notifications in dashboard",
+              "Added Security Release notices", "Tweak: Security update checker UI",
+              "Added XSS filter toggle", "New CSRF token settings", "SSRF protection setting",
+              "New: open redirect setting", "Vulnerability scanner integration added",
+              "Added XSS protection for the IP address field", "New IP address field for the open redirect allowlist"):
+    checar(not plano.SEGURANCA.search(falso), f"falso positivo de segurança (#425): {falso}")
+# As linhas reais de 2026-10 (HUSKY 1.4.6, BNFW 1.10, WP Crontrol 1.22.0, Kadence 3.8.0) seguem reconhecidas,
+# e também classe com verbo de correção, mesmo que a linha cite um recurso.
+for verdadeiro in ("Security fix. Thanks to Sawyer for the responsible disclosure and to Wordfence for coordinating it",
+                   "Fixed: Various security issues to better harden the plugin.",
+                   "Security: Hardens several permission and integrity checks for cron events.",
+                   "* Security: Improved SVG sanitization and reject vector imports that can’t be safely cleaned.",
+                   "Prevented XSS in the shortcode output", "XSS vulnerability in the widget title",
+                   "Fixed XSS in the security settings page", "Resolved a CSRF issue on the export action",
+                   "Addressed an open redirect in the login form", "Security: Added nonce verification to the AJAX handler",
+                   "Added missing capability check to the security settings page"):
+    checar(bool(plano.SEGURANCA.search(verdadeiro)), f"correção de segurança não reconhecida (#425): {verdadeiro}")
+# Revisão do #436: a primeira versão do #425 perdia avisos reais (formato Wordfence/Patchstack,
+# classe forte sem verbo, recurso suprimindo a linha inteira, "Security: new <correção>").
+for verdadeiro in ("Authenticated (Contributor+) Stored Cross-Site Scripting",
+                   "Stored XSS in the admin area (reported by Wordfence)", "SQL injection in REST endpoint",
+                   "Potential XSS", "Sanitize input to avoid XSS", "Escape output to protect against CSRF",
+                   "Block SQL injection in search", "Hardened security settings page against CSRF",
+                   "Fixed security issue in the security settings page",
+                   "Security fix: security log readable by subscribers",
+                   "Security update: patched the security headers module",
+                   "Security: Escape output on the security settings page",
+                   "Security: new nonce check on import", "Security: New sanitization for user input",
+                   "Fixed CSRF token validation bypass", "Reflected XSS reported by Patchstack"):
+    checar(bool(plano.SEGURANCA.search(verdadeiro)), f"aviso de segurança real não reconhecido (revisão #436): {verdadeiro}")
+# ... e os falsos positivos que já existiam antes do #425: classe fraca diante de nome de recurso.
+for falso in ("Fixed layout of the XSS filter toggle", "Fix: typo in CSRF protection setting label",
+              "Fixed SSRF protection setting not saving", "Fixed vulnerability scanner integration",
+              "Fixed issue with vulnerability report export", "Fixed a crash in the CSRF token refresh",
+              "Prevent duplicate XSS filter rules", "Integrated with Patchstack for vulnerability data"):
+    checar(not plano.SEGURANCA.search(falso), f"falso positivo de segurança (revisão #436): {falso}")
+
+# #425: pré-release colado abre seção e conta como a versão numérica; 1.2.1000 é versão, não data.
+for nome, texto, para, esperado in (
+    ("pré-release colado", "<p>= 1.2.5a =</p><p>Security: fix</p><p>= 1.2.3 =</p><p>old</p>", "1.2.5", ["Security: fix"]),
+    ("beta colado", "<p>= 2.0.0beta =</p><p>New UI</p><p>= 1.9.0 =</p><p>old</p>", "2.0.0", ["New UI"]),
+    ("versão 1.2.1000", "<p>= 1.2.1000 =</p><p>Fix</p><p>= 1.2.999 =</p><p>old</p>", "1.2.1000", ["Fix"]),
+):
+    obtido = plano.trecho_changelog(cl(texto), "1.0", para, so_para=True)
+    checar(obtido == esperado, f"cabeçalho [{nome}]: {obtido}, esperado {esperado}")
+checar(plano.DATA_COMO_VERSAO.match("25.09.2026") and not plano.DATA_COMO_VERSAO.match("1.2.1000"),
+       "dd.mm.aaaa é data; 1.2.1000 é versão")
+# o sufixo só vale em cabeçalho marcado: "* 2.0b improvements" não é versão (revisão do #436)
+for linha in ("* 2.0b improvements", "* 1.2a tweaks", "* 3.0rc ready", "* 2.0beta testers welcome", "2.0b improvements"):
+    checar(plano.trecho_changelog(cl(f"<p>= 1.2.5 =</p><p>{linha}</p><p>Security: fix</p><p>= 1.2.3 =</p>"),
+                                  "1.2.3", "1.2.5") == [linha, "Security: fix"], f"linha comum virou cabeçalho: {linha}")
+checar(plano.trecho_changelog(cl("<h4>## 1.2.5-rc1</h4><p>Fix</p><h4>## 1.2.3</h4><p>old</p>"), "1.2.3", "1.2.5",
+                              so_para=True) == ["Fix"], "## 1.2.5-rc1 deveria abrir a seção")
+
 # #418: cabeçalhos falsos não abrem nem fecham seção.
 for nome, texto, esperado in (
     ("1.5x não é versão", "<p>= 1.2.5 =</p><p>* 1.5x faster loading</p><p>Security: fix</p><p>= 1.2.3 =</p>", True),
@@ -205,6 +262,80 @@ class FakeLocal:
 
     def eval_json(self, php):
         return {"paginas": [], "produto": None}
+
+
+# #428: verificar_alinhamento com estado desalinhado (o FakeLocal sempre alinha).
+class LocalFixo:
+    """Só responde ao `list`, com o estado dado: a verificação nunca muda nada."""
+
+    def __init__(self, plugins, temas):
+        self.plugins, self.temas = plugins, temas
+
+    def wp(self, *args, **kw):
+        if args[:2] == ("plugin", "list"):
+            return json.dumps(self.plugins)
+        if args[:2] == ("theme", "list"):
+            return json.dumps(self.temas)
+        raise AssertionError(f"verificar_alinhamento não pode mutar o local: {args}")
+
+
+inv_alinh = {"plugins": [{"name": "comum-a", "version": "2.0", "status": "active"},
+                         {"name": "comum-b", "version": "1.0", "status": "inactive"},
+                         {"name": "ignorado-velho", "version": "9.0", "status": "active"},
+                         {"name": "ignorado-inativo", "version": "1.0", "status": "inactive"},
+                         {"name": "fluent-smtp", "version": "2.4.1", "status": "active"},
+                         {"name": "mu", "version": "1", "status": "must-use"}],
+             "temas": [{"name": "pai", "version": "1.0", "status": "parent"},
+                       {"name": "filho", "version": "1.4", "status": "active"}]}
+ign_alinh = {"ignorado-velho", "ignorado-inativo", "filho"}
+alinhado = LocalFixo([{"name": "comum-a", "version": "2.0", "status": "active"},
+                      {"name": "comum-b", "version": "1.0", "status": "inactive"},
+                      {"name": "ignorado-velho", "version": "1.0", "status": "active"},
+                      {"name": "fluent-smtp", "version": "2.4.1", "status": "inactive"}],
+                     [{"name": "pai", "version": "1.0", "status": "inactive"},
+                      {"name": "filho", "version": "0.0-local", "status": "active"}])
+checar(ensaio.verificar_alinhamento(alinhado, inv_alinh, ign_alinh) == [],
+       f"alinhado (ignorado com outra versão, ignorado inativo ausente, fluent-smtp inativo por exceção, pai sem alvo) "
+       f"deveria passar: {ensaio.verificar_alinhamento(alinhado, inv_alinh, ign_alinh)}")
+desalinhado = LocalFixo([{"name": "comum-a", "version": "1.9", "status": "inactive"},
+                         {"name": "ignorado-velho", "version": "1.0", "status": "inactive"},
+                         {"name": "fluent-smtp", "version": "2.4.1", "status": "active"}],
+                        [{"name": "pai", "version": "1.0", "status": "active"}])
+div = ensaio.verificar_alinhamento(desalinhado, inv_alinh, ign_alinh)
+for esperado in ("comum-a versão local 1.9 != produção 2.0", "comum-a status local inactive != esperado active",
+                 "comum-b ausente no local", "ignorado-velho status local inactive != esperado active",
+                 "fluent-smtp status local active != esperado inactive", "filho ativo em produção e ausente no local"):
+    checar(esperado in div, f"verificar_alinhamento deveria apontar '{esperado}': {div}")
+checar(not any("ignorado-inativo" in d or "ignorado-velho versão" in d or d.startswith("pai") or d.startswith("mu ")
+               for d in div), f"ignorado não confere versão, ignorado inativo ausente e tema pai não divergem: {div}")
+
+# #428: plugin ausente no local e ativo em produção: install cria e a ativação é alinhada.
+inv_base = {"plugins": [{"name": "kadence-blocks", "version": "3.7.12", "status": "active"},
+                        {"name": "google-site-kit", "version": "1.188.0", "status": "active"},
+                        {"name": "fluent-smtp", "version": "2.4.1", "status": "active"}],
+            "temas": [{"name": "kadence", "version": "1.5.2", "status": "parent"},
+                      {"name": "kadence-child", "version": "1.4.3", "status": "active"}]}
+fl = FakeLocal()
+inv_ausente = {"plugins": inv_base["plugins"] + [{"name": "novo-ativo", "version": "3.0", "status": "active"}],
+               "temas": inv_base["temas"]}
+acoes = ensaio.alinhar(fl, inv_ausente, ignorar={"kadence-child"})
+checar(fl.instalados.get("novo-ativo") == "3.0" and "novo-ativo" in fl.ativos,
+       f"ausente no local deveria ser instalado e ativado: {fl.instalados} {fl.ativos}")
+checar("plugin novo-ativo: ausente -> 3.0" in acoes and "plugin novo-ativo: ativado" in acoes, f"ações: {acoes}")
+# ignorado inativo e ausente: sem aviso; ignorado ativo e ausente: aviso e reprovação
+fl = FakeLocal()
+inv_ign = {"plugins": inv_base["plugins"] + [{"name": "pago-inativo", "version": "1", "status": "inactive"}],
+           "temas": inv_base["temas"]}
+acoes = ensaio.alinhar(fl, inv_ign, ignorar={"kadence-child", "pago-inativo"})
+checar(not any("pago-inativo" in a for a in acoes), f"ignorado inativo ausente não deveria gerar aviso: {acoes}")
+fl = FakeLocal()
+del fl.temas["kadence-child"]
+fl.tema_ativo = "kadence"
+try:
+    ensaio.alinhar(fl, inv_base, ignorar={"kadence-child"})
+    falhas.append("tema ativo em produção e ausente no local deveria reprovar o alinhamento")
+except ensaio.Falha as erro:
+    checar("kadence-child ativo em produção e ausente no local" in str(erro), f"motivo errado: {erro}")
 
 
 def smoke_fake(local, alvo, contratos):
