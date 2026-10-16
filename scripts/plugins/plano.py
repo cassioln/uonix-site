@@ -56,35 +56,57 @@ _CONTEXTO = re.compile(
     re.I | re.M)
 # "security" diante de um recurso não é correção: "Security: new settings tab",
 # "Improved security scan performance", "Security update notifications" (#425).
-# Vale só para os ramos de "security" acima; os outros contextos não mudam.
+# Vale só para o próprio "security" do recurso: "Fixed security issue in the
+# security settings page" continua correção (revisão do #436).
+_RECURSO_NOME = (r"(settings?|page|tab|scan\w*|dashboard|widget|ui|headers?|notices?|checker|notifications?"
+                 r"|options?|log|report|checklist|screen|panel|menu|section|toggle)")
 _RECURSO = re.compile(
-    r"\bsecurity( (update|release)s?)? (settings?|page|tab|scan\w*|dashboard|widget|ui|headers?|notices?"
-    r"|checker|notifications?|options?|log|report)\b"
-    r"|^\W*security\b[^:\n]{0,20}:\s*new\b", re.I | re.M)
-# Nome de classe de vulnerabilidade também nomeia recurso ("Added XSS filter
-# toggle", "SSRF protection setting", "Vulnerability scanner integration"):
-# só conta com verbo de correção na mesma linha ou na forma "<classe>
-# vulnerability/issue" (#425). CVE só aparece para vulnerabilidade e conta sozinho.
+    r"\bsecurity( (update|release)s?)? " + _RECURSO_NOME + r"\b"
+    r"|^\W*security\b[^:\n]{0,20}:\s*new\s+(\w+\s+){0,2}" + _RECURSO_NOME + r"\b", re.I | re.M)
+# Classe de vulnerabilidade. As FORTES quase nunca nomeiam recurso e contam
+# sozinhas ("SQL injection in REST endpoint"). As FRACAS também nomeiam recurso
+# ("Added XSS filter toggle", "SSRF protection setting", "Vulnerability scanner"):
+# só contam com verbo de correção ou qualificador de aviso de vulnerabilidade
+# ("Stored XSS", "Authenticated (Contributor+) Stored Cross-Site Scripting",
+# "Potential XSS", "XSS vulnerability"), e não diante de nome de recurso ("XSS
+# filter", "CSRF token"), salvo se a linha falar em bypass ou exploit (#425).
+# CVE só aparece para vulnerabilidade e conta sozinho.
 _CVE = re.compile(r"\bcve-\d{4}", re.I)
-_CLASSE = (r"\bxss\b|cross[- ]site (scripting|request forgery)|\bcsrf\b|\bssrf\b|privilege escalation"
-           r"|sql injection|object injection|open redirect|arbitrary file (upload|deletion|download|read)")
-_CLASSE_VULN = re.compile(_CLASSE + r"|vulnerab", re.I)
+_CLASSE_FORTE = re.compile(r"cross[- ]site (scripting|request forgery)|privilege escalation|sql injection"
+                           r"|object injection|arbitrary file (upload|deletion|download|read)", re.I)
+_CLASSE_FRACA = r"\bxss\b|\bcsrf\b|\bssrf\b|open redirect|\bvulnerab\w*"
+_CLASSE_FRACA_RE = re.compile(_CLASSE_FRACA, re.I)
 _CORRECAO = re.compile(
-    r"\b(fix\w*|patch\w*|prevent\w*|resolv\w*|address(ed|es|ing)|mitigat\w*|remediat\w*|correct(ed|s|ing)?)\b"
-    r"|(" + _CLASSE + r")\s+(vulnerabilit\w*|issue|flaw|exploit)", re.I)
+    r"\b(fix\w*|patch(ed|es|ing)?|prevent\w*|resolv\w*|address(ed|es|ing)|mitigat\w*|remediat\w*"
+    r"|correct(ed|s|ing)?|avoid\w*|sanitiz\w*|escap\w*|block\w*|harden\w*)\b|\bprotect\w* against\b"
+    r"|\b(stored|reflected|dom[- ]based|persistent|blind|potential|possible|authenticated|unauthenticated)\b"
+    r"|(" + _CLASSE_FRACA + r")\s+(vulnerabilit\w*|issue|flaw|exploit)", re.I)
+_CLASSE_RECURSO = re.compile(r"(\bxss\b|\bcsrf\b|\bssrf\b|open redirect|\bvulnerabilit(y|ies)\b)\s+"
+                             r"(filter|toggle|protection|token|scanner|scan|rules?|report|settings?|options?|integration)\b",
+                             re.I)
+_ATAQUE = re.compile(r"\b(bypass\w*|exploit\w*|attack\w*)\b", re.I)
+
+
+def _posicoes_security(regex: re.Pattern, linha: str) -> set[int]:
+    return {m.start() + m.group(0).lower().index("security") for m in regex.finditer(linha)
+            if "security" in m.group(0).lower()}
 
 
 class _Seguranca:
-    """Mesma interface de um re.Pattern (`.search`), com as três regras acima."""
+    """Mesma interface de um re.Pattern (`.search`), com as regras acima."""
 
     def search(self, linha: str):
         if m := _CVE.search(linha):
             return m
-        if (m := _CLASSE_VULN.search(linha)) and _CORRECAO.search(linha):
+        if m := _CLASSE_FORTE.search(linha):
             return m
-        recurso = _RECURSO.search(linha)
+        if (m := _CLASSE_FRACA_RE.search(linha)) and _CORRECAO.search(linha) \
+                and (not _CLASSE_RECURSO.search(linha) or _ATAQUE.search(linha)):
+            return m
+        recurso = _posicoes_security(_RECURSO, linha)
         for m in _CONTEXTO.finditer(linha):
-            if not (recurso and "security" in m.group(0).lower()):
+            texto = m.group(0).lower()
+            if "security" not in texto or m.start() + texto.index("security") not in recurso:
                 return m
         return None
 
@@ -93,10 +115,13 @@ SEGURANCA = _Seguranca()
 # Cabeçalho de versão: "= 1.2.3 =", "#### 1.2.3", "[4.66.2] 25.09.2026",
 # "1.2.3 - 2026-01-01", "v.1.2.3", "Version: 1.2.4", "Release 1.2.4".
 # A versão não pode ser seguida de letra ("* 1.5x faster loading" não é cabeçalho),
-# exceto o sufixo de pré-release colado ("= 1.2.3a =", "= 2.0.0beta =", "1.2.3-rc1"),
+# exceto o sufixo de pré-release colado ("= 1.2.3a =", "= 2.0.0beta =", "## 1.2.3-rc1"),
 # que conta como a versão numérica (#425).
-CABECALHO = re.compile(r"^[=#*\[\s]*(?:v\.?\s*|version:?\s*|release\s+)?(\d+(?:\.\d+){1,3})"
-                       r"(?:-?(?:alpha|beta|rc|a|b)\.?\d*)?(?![\d.]|[a-z])", re.I)
+CABECALHO = re.compile(r"^[=#*\[\s]*(?:v\.?\s*|version:?\s*|release\s+)?(\d+(?:\.\d+){1,3})(?![\d.]|[a-z])", re.I)
+# O sufixo de pré-release só vale em cabeçalho marcado (=, #, [): numa linha comum,
+# "* 2.0b improvements" viraria a versão 2.0 (revisão do #436).
+CABECALHO_PRE = re.compile(r"^[=#\[\s]*(?:v\.?\s*|version:?\s*|release\s+)?(\d+(?:\.\d+){1,3})"
+                           r"-?(?:alpha|beta|rc|a|b)\.?\d*(?![\d.]|[a-z])", re.I)
 # Data no formato dd.mm.aaaa não é versão ("25.09.2026 - Fixed XSS"). Só uma data
 # plausível: "1.2.1000" é versão de 3 partes (#425).
 DATA_COMO_VERSAO = re.compile(r"^(0?[1-9]|[12]\d|3[01])\.(0?[1-9]|1[0-2])\.(19|20)\d{2}$")
@@ -144,12 +169,13 @@ def trecho_changelog(info: dict | None, de: str, para: str, so_para: bool = Fals
     linhas = [l.strip() for l in html.unescape(re.sub(r"<[^>]+>", "\n", bruto)).splitlines() if l.strip()]
     trecho, dentro, achou = [], False, False
     for linha in linhas:
-        m = None if DATA_SOLTA.match(linha) else CABECALHO.match(linha)
-        if m and DATA_COMO_VERSAO.match(m.group(1)):
-            m = None
         # Linha que é cabeçalho marcado (=, #, [) pode ser longa (data e título);
         # linha comum só conta se for curta, para não confundir "1.2 compat" no meio.
         marcado = linha.lstrip()[:1] in {"=", "#", "["}
+        m = None if DATA_SOLTA.match(linha) else (CABECALHO.match(linha) or
+                                                  (CABECALHO_PRE.match(linha) if marcado else None))
+        if m and DATA_COMO_VERSAO.match(m.group(1)):
+            m = None
         if m and (marcado or len(linha) < 60):
             dentro = (versao(m.group(1)) == versao(para)) if so_para else (versao(de) < versao(m.group(1)) <= versao(para))
             achou = achou or dentro

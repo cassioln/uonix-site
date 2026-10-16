@@ -157,7 +157,7 @@ for falso in ("Security: new settings tab", "Security Headers: new page", "Secur
               "Added Security Release notices", "Tweak: Security update checker UI",
               "Added XSS filter toggle", "New CSRF token settings", "SSRF protection setting",
               "New: open redirect setting", "Vulnerability scanner integration added",
-              "Added XSS protection for the IP address field"):
+              "Added XSS protection for the IP address field", "New IP address field for the open redirect allowlist"):
     checar(not plano.SEGURANCA.search(falso), f"falso positivo de segurança (#425): {falso}")
 # As linhas reais de 2026-10 (HUSKY 1.4.6, BNFW 1.10, WP Crontrol 1.22.0, Kadence 3.8.0) seguem reconhecidas,
 # e também classe com verbo de correção, mesmo que a linha cite um recurso.
@@ -170,6 +170,26 @@ for verdadeiro in ("Security fix. Thanks to Sawyer for the responsible disclosur
                    "Addressed an open redirect in the login form", "Security: Added nonce verification to the AJAX handler",
                    "Added missing capability check to the security settings page"):
     checar(bool(plano.SEGURANCA.search(verdadeiro)), f"correção de segurança não reconhecida (#425): {verdadeiro}")
+# Revisão do #436: a primeira versão do #425 perdia avisos reais (formato Wordfence/Patchstack,
+# classe forte sem verbo, recurso suprimindo a linha inteira, "Security: new <correção>").
+for verdadeiro in ("Authenticated (Contributor+) Stored Cross-Site Scripting",
+                   "Stored XSS in the admin area (reported by Wordfence)", "SQL injection in REST endpoint",
+                   "Potential XSS", "Sanitize input to avoid XSS", "Escape output to protect against CSRF",
+                   "Block SQL injection in search", "Hardened security settings page against CSRF",
+                   "Fixed security issue in the security settings page",
+                   "Security fix: security log readable by subscribers",
+                   "Security update: patched the security headers module",
+                   "Security: Escape output on the security settings page",
+                   "Security: new nonce check on import", "Security: New sanitization for user input",
+                   "Fixed CSRF token validation bypass", "Reflected XSS reported by Patchstack"):
+    checar(bool(plano.SEGURANCA.search(verdadeiro)), f"aviso de segurança real não reconhecido (revisão #436): {verdadeiro}")
+# ... e os falsos positivos que já existiam antes do #425: classe fraca diante de nome de recurso.
+for falso in ("Fixed layout of the XSS filter toggle", "Fix: typo in CSRF protection setting label",
+              "Fixed SSRF protection setting not saving", "Fixed vulnerability scanner integration",
+              "Fixed issue with vulnerability report export", "Fixed a crash in the CSRF token refresh",
+              "Prevent duplicate XSS filter rules", "Integrated with Patchstack for vulnerability data"):
+    checar(not plano.SEGURANCA.search(falso), f"falso positivo de segurança (revisão #436): {falso}")
+
 # #425: pré-release colado abre seção e conta como a versão numérica; 1.2.1000 é versão, não data.
 for nome, texto, para, esperado in (
     ("pré-release colado", "<p>= 1.2.5a =</p><p>Security: fix</p><p>= 1.2.3 =</p><p>old</p>", "1.2.5", ["Security: fix"]),
@@ -180,6 +200,12 @@ for nome, texto, para, esperado in (
     checar(obtido == esperado, f"cabeçalho [{nome}]: {obtido}, esperado {esperado}")
 checar(plano.DATA_COMO_VERSAO.match("25.09.2026") and not plano.DATA_COMO_VERSAO.match("1.2.1000"),
        "dd.mm.aaaa é data; 1.2.1000 é versão")
+# o sufixo só vale em cabeçalho marcado: "* 2.0b improvements" não é versão (revisão do #436)
+for linha in ("* 2.0b improvements", "* 1.2a tweaks", "* 3.0rc ready", "* 2.0beta testers welcome", "2.0b improvements"):
+    checar(plano.trecho_changelog(cl(f"<p>= 1.2.5 =</p><p>{linha}</p><p>Security: fix</p><p>= 1.2.3 =</p>"),
+                                  "1.2.3", "1.2.5") == [linha, "Security: fix"], f"linha comum virou cabeçalho: {linha}")
+checar(plano.trecho_changelog(cl("<h4>## 1.2.5-rc1</h4><p>Fix</p><h4>## 1.2.3</h4><p>old</p>"), "1.2.3", "1.2.5",
+                              so_para=True) == ["Fix"], "## 1.2.5-rc1 deveria abrir a seção")
 
 # #418: cabeçalhos falsos não abrem nem fecham seção.
 for nome, texto, esperado in (
