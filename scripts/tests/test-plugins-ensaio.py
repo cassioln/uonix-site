@@ -117,6 +117,64 @@ for nome, (texto, esperado) in casos_cl.items():
     trecho = plano.trecho_changelog(cl(texto), "1.2.3", "1.2.5")
     seg = None if trecho is None else any(plano.SEGURANCA.search(l) for l in trecho)
     checar(seg == esperado, f"changelog [{nome}]: segurança={seg}, esperado {esperado} ({trecho})")
+# Corte por item (relatório): tags de bloco separam itens; <code>, <a> e <strong> ficam dentro da
+# frase. O corte por tag, usado na decisão de segurança, não muda.
+html_gsk = ("<h4>= 1.190.0 =</h4><p><strong>Enhanced</strong></p><ul>"
+            "<li>Add the <code>rrmSurveyCTA</code> feature flag. See <a href=\"https://x/1\">#13716</a>.</li>"
+            "<li>Add a dashboard callout introducing the <em>Add features</em> button. See <a href=\"https://x/2\">#13360</a>.</li>"
+            "<li>Fix cut-off axis labels. Props someone. See <a>#13218</a>, <a>#13219</a>.</li></ul>"
+            "<p>See changelog for all versions.</p><h4>= 1.189.0 =</h4><ul><li>Velho</li></ul>")
+info_gsk = {"version": "1.190.0", "last_updated": "2026-10-19", "sections": {"changelog": html_gsk}}
+por_item = plano.trecho_changelog(info_gsk, "1.189.0", "1.190.0", so_para=True, por_item=True)
+checar(por_item == ["Enhanced",
+                    "Add the rrmSurveyCTA feature flag. See #13716.",
+                    "Add a dashboard callout introducing the Add features button. See #13360.",
+                    "Fix cut-off axis labels. Props someone. See #13218, #13219.",
+                    "See changelog for all versions."], f"corte por item: {por_item}")
+por_tag = plano.trecho_changelog(info_gsk, "1.189.0", "1.190.0", so_para=True)
+checar("Add the" in por_tag and "rrmSurveyCTA" in por_tag, f"o corte por tag deveria continuar fragmentando: {por_tag}")
+checar(plano.trecho_changelog(info_gsk, "1.189.0", "1.190.0") == plano.trecho_changelog(info_gsk, "1.189.0", "1.190.0", por_item=False),
+       "o padrão (sem por_item) não pode mudar")
+# O caminho padrão (decisão de segurança) não normaliza espaços: o corte por item é quem normaliza.
+info_esp = {"version": "2", "last_updated": "2026-10-20", "sections": {"changelog":
+            "<h4>= 2.0 =</h4><p>Cross  site scripting hole</p><p>SQL\xa0 injection</p><h4>= 1.9 =</h4>"}}
+cru = plano.trecho_changelog(info_esp, "1.9", "2.0")
+checar(cru == ["Cross  site scripting hole", "SQL\xa0 injection"], f"o padrão não pode normalizar espaços: {cru}")
+checar(not any(plano.SEGURANCA.search(l) for l in cru), "a decisão de segurança não pode mudar com espaço duplo")
+checar(plano.trecho_changelog(info_esp, "1.9", "2.0", por_item=True) == ["Cross site scripting hole", "SQL injection"],
+       "o corte por item normaliza espaços")
+# cabeçalho com tag inline e texto longo continua sendo cabeçalho no corte por item (revisão do #441)
+cab_inline = {"version": "2", "last_updated": "2026-10-20", "sections": {"changelog":
+              "<h4>= 2.0 =</h4><p>Item novo</p><h4>= 1.9 =</h4><p><strong>1.9</strong> <em>Released January 1st 2026 as a maintenance update for everyone</em></p><p>Item velho</p>"}}
+checar(plano.trecho_changelog(cab_inline, "1.9", "2.0", so_para=True, por_item=True) == ["Item novo"],
+       f"item velho não pode vazar nas novidades: {plano.trecho_changelog(cab_inline, '1.9', '2.0', so_para=True, por_item=True)}")
+sec_a = {"version": "2", "last_updated": "2026-10-20", "sections": {"changelog": "<h4>= 2.0 =</h4><p>Security: Escape output.</p><p>New tab.</p><h4>= 1.9 =</h4>"}}
+checar(any(plano.SEGURANCA.search(l) for l in plano.trecho_changelog(sec_a, "1.9", "2.0")), "a decisão de segurança segue com o corte por tag")
+
+# regravar_novidades.py: refaz só o campo "novidades" de um plano antigo (rede simulada).
+import io as _io, tempfile as _tf, urllib.request as _ur
+sys.path.insert(0, str(pathlib.Path(plano.__file__).resolve().parent))
+import regravar_novidades as _rg
+_html = "<h4>= 2.0 =</h4><ul><li>Add the <code>x</code> flag. See <a>#1</a>.</li></ul><h4>= 1.9 =</h4><ul><li>Velho</li></ul>"
+class _Resp(_io.BytesIO):
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+_original = _ur.urlopen
+_ur.urlopen = lambda url, timeout=0: _Resp(json.dumps({"version": "2.0", "last_updated": "2026-10-20", "sections": {"changelog": _html}}).encode())
+with _tf.TemporaryDirectory() as _d:
+    _pasta = pathlib.Path(_d)
+    _antigo = {"gerado_em": "x", "itens": [{"slug": "p", "de": "1.9", "para": "2.0", "seguranca": True,
+               "changelog": ["Security fix"], "novidades": ["Add the", "x", "flag. See", "#1", "."]}], "fora": []}
+    (_pasta / "plano.json").write_text(json.dumps(_antigo))
+    with contextlib.redirect_stdout(io.StringIO()):
+        _rc = _rg.main([str(_pasta)])
+    _novo = json.loads((_pasta / "plano.json").read_text())
+    checar(_rc == 0 and _novo["itens"][0]["novidades"] == ["Add the x flag. See #1."], f"regravar: {_novo['itens'][0]['novidades']}")
+    checar(_novo["itens"][0]["changelog"] == ["Security fix"] and _novo["itens"][0]["seguranca"] is True,
+           "regravar não pode mexer na decisão de segurança")
+    checar(json.loads((_pasta / "plano.antes-por-item.json").read_text())["itens"][0]["novidades"][0] == "Add the", "o original fica guardado")
+_ur.urlopen = _original
+
 # Novidades para o relatório do cliente: o trecho inteiro, só da versão nova.
 texto = "<h4>= 1.2.5 =</h4><p>New: dark mode</p><p>Removed: old API</p><h4>= 1.2.4 =</h4><p>Fix b</p><h4>= 1.2.3 =</h4><p>Fix a</p>"
 checar(plano.trecho_changelog(cl(texto), "1.2.3", "1.2.5", so_para=True) == ["New: dark mode", "Removed: old API"],
