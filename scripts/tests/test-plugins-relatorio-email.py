@@ -326,6 +326,14 @@ sobras = ["Props @user", "Thanks to @john for the report", "Thanks @john!", "Ful
           "Full Changelog", "Release notes", "Release Notes:", "@user", "v2.0.0", "https://exemplo.com/a"]
 checar(rel.notas({"novidades": sobras}) == [], f"sobras deveriam sair: {rel.notas({'novidades': sobras})}")
 
+# 10b''. referência a PR e data de lançamento não são novidade (google-site-kit 1.190.0, kadence 3.8.0.2)
+checar(rel.notas({"novidades": ["Add the rrmSurveyCTA feature flag. See #13716.", "Fix labels. Props a, b. See #13218, #13219.",
+                                "Improve errors. See #1 and #2.", "Release Date: 22nd October 2026", "Date: 2026-10-22",
+                                "Fix: Database queries no longer load admin files. See the docs."]}) ==
+       ["Add the rrmSurveyCTA feature flag.", "Fix labels. Props a, b.", "Improve errors.",
+        "Fix: Database queries no longer load admin files. See the docs."],
+       f"referência a PR e data: {rel.notas({'novidades': ['Add the rrmSurveyCTA feature flag. See #13716.', 'Release Date: 22nd October 2026']})}")
+
 # 10c. nome com link para a página oficial (só se a API do wordpress.org respondeu) e changelog da versão
 with tempfile.TemporaryDirectory() as t:
     stamp = "plugins-20261015-131200"

@@ -117,6 +117,27 @@ for nome, (texto, esperado) in casos_cl.items():
     trecho = plano.trecho_changelog(cl(texto), "1.2.3", "1.2.5")
     seg = None if trecho is None else any(plano.SEGURANCA.search(l) for l in trecho)
     checar(seg == esperado, f"changelog [{nome}]: segurança={seg}, esperado {esperado} ({trecho})")
+# Corte por item (relatório): tags de bloco separam itens; <code>, <a> e <strong> ficam dentro da
+# frase. O corte por tag, usado na decisão de segurança, não muda.
+html_gsk = ("<h4>= 1.190.0 =</h4><p><strong>Enhanced</strong></p><ul>"
+            "<li>Add the <code>rrmSurveyCTA</code> feature flag. See <a href=\"https://x/1\">#13716</a>.</li>"
+            "<li>Add a dashboard callout introducing the <em>Add features</em> button. See <a href=\"https://x/2\">#13360</a>.</li>"
+            "<li>Fix cut-off axis labels. Props someone. See <a>#13218</a>, <a>#13219</a>.</li></ul>"
+            "<p>See changelog for all versions.</p><h4>= 1.189.0 =</h4><ul><li>Velho</li></ul>")
+info_gsk = {"version": "1.190.0", "last_updated": "2026-10-19", "sections": {"changelog": html_gsk}}
+por_item = plano.trecho_changelog(info_gsk, "1.189.0", "1.190.0", so_para=True, por_item=True)
+checar(por_item == ["Enhanced",
+                    "Add the rrmSurveyCTA feature flag. See #13716.",
+                    "Add a dashboard callout introducing the Add features button. See #13360.",
+                    "Fix cut-off axis labels. Props someone. See #13218, #13219.",
+                    "See changelog for all versions."], f"corte por item: {por_item}")
+por_tag = plano.trecho_changelog(info_gsk, "1.189.0", "1.190.0", so_para=True)
+checar("Add the" in por_tag and "rrmSurveyCTA" in por_tag, f"o corte por tag deveria continuar fragmentando: {por_tag}")
+checar(plano.trecho_changelog(info_gsk, "1.189.0", "1.190.0") == plano.trecho_changelog(info_gsk, "1.189.0", "1.190.0", por_item=False),
+       "o padrão (sem por_item) não pode mudar")
+sec_a = {"version": "2", "last_updated": "2026-10-20", "sections": {"changelog": "<h4>= 2.0 =</h4><p>Security: Escape output.</p><p>New tab.</p><h4>= 1.9 =</h4>"}}
+checar(any(plano.SEGURANCA.search(l) for l in plano.trecho_changelog(sec_a, "1.9", "2.0")), "a decisão de segurança segue com o corte por tag")
+
 # Novidades para o relatório do cliente: o trecho inteiro, só da versão nova.
 texto = "<h4>= 1.2.5 =</h4><p>New: dark mode</p><p>Removed: old API</p><h4>= 1.2.4 =</h4><p>Fix b</p><h4>= 1.2.3 =</h4><p>Fix a</p>"
 checar(plano.trecho_changelog(cl(texto), "1.2.3", "1.2.5", so_para=True) == ["New: dark mode", "Removed: old API"],

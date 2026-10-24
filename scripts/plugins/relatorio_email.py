@@ -186,8 +186,17 @@ def notas(plano_item: dict | None) -> list[str]:
     linhas = plano_item.get("novidades")
     if not isinstance(linhas, list):
         return []
-    limpas = [re.sub(r"^\W+", "", l).strip() for l in linhas if isinstance(l, str)]
+    limpas = [_sem_referencia(re.sub(r"^\W+", "", l).strip()) for l in linhas if isinstance(l, str)]
     return [l for l in limpas if not _ruido(l)]
+
+
+# "… Improve rate limit errors. See #13630." / "… Props @user. See #1, #2": a referência ao PR
+# não diz nada ao cliente.
+_REFERENCIA = re.compile(r"\s*\bSee\s+(?:#\d+(?:\s*(?:,|and|&)\s*)?)+\.?\s*$", re.I)
+
+
+def _sem_referencia(linha: str) -> str:
+    return _REFERENCIA.sub(".", linha).replace("..", ".") if _REFERENCIA.search(linha) else linha
 
 
 # O plano quebra o HTML do changelog em linha a cada tag, então link e rótulo viram
@@ -195,7 +204,8 @@ def notas(plano_item: dict | None) -> list[str]:
 # "See changelog for all versions" e "." (vistos no WooCommerce 11.2.1, 2026-10-16).
 # Só a exibição filtra; a detecção de segurança do plano segue com todas as linhas.
 _VER_CHANGELOG = re.compile(r"^(see|view|read)\b.{0,20}\bchangelog\b"
-                            r"|^(props|thanks)\b|^full changelog\b|^release notes\b", re.I)
+                            r"|^(props|thanks)\b|^full changelog\b|^release notes\b"
+                            r"|^release date\b|^date\b\s*:", re.I)
 # Chinês, japonês e coreano não separam palavras com espaço: uma frase inteira
 # seria lida como "palavra solta" (revisão do #440).
 _CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]{4,}")

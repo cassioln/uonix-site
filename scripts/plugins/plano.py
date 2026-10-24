@@ -160,13 +160,28 @@ def data_lancamento(info: dict | None, para: str) -> dt.date | None:
     return dt.date(int(m[1]), int(m[2]), int(m[3])) if m else None
 
 
-def trecho_changelog(info: dict | None, de: str, para: str, so_para: bool = False) -> list[str] | None:
+# Tags que separam itens do changelog. As demais (<code>, <a>, <strong>…) ficam dentro
+# da frase do item.
+_BLOCOS = re.compile(r"</?(?:li|p|h[1-6]|ul|ol|div|br|tr|dt|dd|blockquote)\b[^>]*>", re.I)
+
+
+def _linhas_changelog(bruto: str, por_item: bool) -> list[str]:
+    """Uma linha por tag (como a detecção de segurança sempre leu) ou, com `por_item`, uma
+    linha por item do changelog: "Add the <code>x</code> feature flag. See <a>#1</a>." deixa
+    de virar quatro fragmentos soltos ("Add the", "x", "feature flag. See", "#1")."""
+    texto = re.sub(r"<[^>]+>", "", _BLOCOS.sub("\n", bruto)) if por_item else re.sub(r"<[^>]+>", "\n", bruto)
+    return [re.sub(r"\s+", " ", l).strip() for l in html.unescape(texto).splitlines() if l.strip()]
+
+
+def trecho_changelog(info: dict | None, de: str, para: str, so_para: bool = False,
+                     por_item: bool = False) -> list[str] | None:
     """Linhas do changelog entre `de` (exclusive) e `para` (inclusive); com `so_para`,
-    só as da versão `para` (as novidades que o relatório mostra ao cliente)."""
+    só as da versão `para` (as novidades que o relatório mostra ao cliente). Com `por_item`,
+    cada item é uma linha só; a decisão de segurança segue com o corte por tag."""
     if not info:
         return None
     bruto = info.get("sections", {}).get("changelog", "")
-    linhas = [l.strip() for l in html.unescape(re.sub(r"<[^>]+>", "\n", bruto)).splitlines() if l.strip()]
+    linhas = _linhas_changelog(bruto, por_item)
     trecho, dentro, achou = [], False, False
     for linha in linhas:
         # Linha que é cabeçalho marcado (=, #, [) pode ser longa (data e título);
@@ -219,7 +234,7 @@ def planejar(inventario: dict, politica: dict, api: dict, hoje: dt.date,
                                  [l for l in trecho if SEGURANCA.search(l) or RISCO.search(l)][:8])
             # O changelog acima é o filtro de segurança e risco do intervalo, para a
             # decisão; as novidades são o trecho inteiro só da versão nova, para o cliente.
-            base["novidades"] = trecho_changelog(info, de, para, so_para=True) if info else None
+            base["novidades"] = trecho_changelog(info, de, para, so_para=True, por_item=True) if info else None
 
             if (maior(para) or 0) > (maior(de) or 0) and camadas[camada]["major"] == "bloqueia" \
                     and nome not in aceitar_major:
