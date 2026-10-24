@@ -169,7 +169,11 @@ def _linhas_changelog(bruto: str, por_item: bool) -> list[str]:
     """Uma linha por tag (como a detecção de segurança sempre leu) ou, com `por_item`, uma
     linha por item do changelog: "Add the <code>x</code> feature flag. See <a>#1</a>." deixa
     de virar quatro fragmentos soltos ("Add the", "x", "feature flag. See", "#1")."""
-    texto = re.sub(r"<[^>]+>", "", _BLOCOS.sub("\n", bruto)) if por_item else re.sub(r"<[^>]+>", "\n", bruto)
+    if not por_item:
+        # Caminho da decisão de segurança: idêntico ao que sempre foi, sem normalizar nada.
+        texto = re.sub(r"<[^>]+>", "\n", bruto)
+        return [l.strip() for l in html.unescape(texto).splitlines() if l.strip()]
+    texto = re.sub(r"<[^>]+>", "", _BLOCOS.sub("\n", bruto))
     return [re.sub(r"\s+", " ", l).strip() for l in html.unescape(texto).splitlines() if l.strip()]
 
 
