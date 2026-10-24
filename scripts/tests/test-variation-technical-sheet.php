@@ -2064,6 +2064,28 @@ foreach (
 	vts_assert_same( null, $invalid_parsed['remaining_description'], 'falha não produz descrição parcial em ' . $case_name );
 }
 
+// Atributo duplicado é recusado pelo próprio parser, sem depender de a libxml reportá-lo (#442).
+// A libxml 2.15 do runner ubuntu-26.04 deixou de reportar, e o HTML passou a ser aceito.
+foreach (
+	array(
+		'class repetido'                   => str_replace( '<div class="uonix-ficha-header">', '<div class="uonix-ficha-header" class="outra">', $legacy_description ),
+		'class repetido com maiúsculas'    => str_replace( '<div class="uonix-ficha-header">', '<div class="uonix-ficha-header" CLASS="outra">', $legacy_description ),
+		'class repetido com aspas simples' => str_replace( '<div class="uonix-ficha-header">', "<div class=\"uonix-ficha-header\" class='outra'>", $legacy_description ),
+		'atributo repetido sem valor'      => str_replace( '<div class="uonix-ficha-header">', '<div class="uonix-ficha-header" hidden hidden>', $legacy_description ),
+		'class repetido colado, sem espaço' => str_replace( '<div class="uonix-ficha-header">', '<div class="uonix-ficha-header"class="outra">', $legacy_description ),
+		'outro atributo repetido e colado'  => str_replace( '<div class="uonix-ficha-header">', '<div class="uonix-ficha-header"id="a" id="b">', $legacy_description ),
+		'repetido numa tag aninhada'        => str_replace( '<span', '<span id="x" id="y"', $legacy_description ),
+	) as $dup_name => $dup_legacy
+) {
+	$dup_parsed = Uonix_VTS_Migration_Command::parse_legacy_description( $dup_legacy );
+	vts_assert_same( false, $dup_parsed['ok'], 'parser recusa ' . $dup_name );
+	vts_assert_same( 'invalid_markup', $dup_parsed['code'], 'atributo duplicado usa o código invalid_markup em ' . $dup_name );
+}
+// Duas tags diferentes com o mesmo atributo, e um valor que cita outro atributo, não são duplicata.
+$dup_ok = str_replace( '<div class="uonix-ficha-header">', '<div class="uonix-ficha-header" data-x="class=1">', $legacy_description );
+vts_assert_same( true, Uonix_VTS_Migration_Command::parse_legacy_description( $dup_ok )['ok'], 'atributo cujo valor cita "class=" não é duplicata' );
+vts_assert_same( true, Uonix_VTS_Migration_Command::parse_legacy_description( $legacy_description )['ok'], 'a ficha legada válida segue aceita' );
+
 vts_assert_same(
 	array( array( 'name' => 'uonix ficha-tecnica', 'callable' => 'Uonix_VTS_Migration_Command' ) ),
 	$GLOBALS['vts_cli_commands'],
