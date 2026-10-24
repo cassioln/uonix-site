@@ -326,6 +326,22 @@ sobras = ["Props @user", "Thanks to @john for the report", "Thanks @john!", "Ful
           "Full Changelog", "Release notes", "Release Notes:", "@user", "v2.0.0", "https://exemplo.com/a"]
 checar(rel.notas({"novidades": sobras}) == [], f"sobras deveriam sair: {rel.notas({'novidades': sobras})}")
 
+# 10b''. referência a PR e data não são novidade (google-site-kit 1.190.0, kadence 3.8.0.2)
+entradas = ["Add the rrmSurveyCTA feature flag. See #13716.", "Fix labels. Props a, b. See #13218, #13219.",
+            "Improve errors. See #1 and #2.", "Fix x! See #1.", "Fix x? See #5.", "Fix; see #4", "Loading... done. See #1.",
+            "Fix. See #1..", "Fixed #123 in the importer", "Please see #1 for details", "Fix: no longer fails. See the docs.",
+            "Release Date: 22nd October 2026", "Release date: 1/1/2026"]
+# "Fix; see #4" e "Fix. See #1.." viram uma palavra só sem a referência, e palavra solta sai.
+esperadas = ["Add the rrmSurveyCTA feature flag.", "Fix labels. Props a, b.", "Improve errors.", "Fix x!", "Fix x?",
+             "Loading... done.", "Fixed #123 in the importer", "Please see #1 for details",
+             "Fix: no longer fails. See the docs."]
+obtidas = rel.notas({"novidades": entradas})
+checar(obtidas == esperadas, f"referência a PR e data: {obtidas}")
+# frases reais que começam com "Date"/"Release date" (sem dois-pontos) precisam ficar
+reais_data = ["Date picker now supports ranges", "Release date format fixed", "Release dates are now localized",
+              "Date: ranges now supported in the picker"]
+checar(rel.notas({"novidades": reais_data}) == reais_data, f"frases reais com 'date' não podem sair: {rel.notas({'novidades': reais_data})}")
+
 # 10c. nome com link para a página oficial (só se a API do wordpress.org respondeu) e changelog da versão
 with tempfile.TemporaryDirectory() as t:
     stamp = "plugins-20261015-131200"
