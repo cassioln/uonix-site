@@ -30,6 +30,14 @@ jobs:
           php-version: ${{ matrix.php-version }}
           coverage: none
 
+      - name: Show runner, PHP and libxml versions
+        # A troca de runner (ubuntu-24.04 -> 26.04) quebrou um teste que depende de a libxml
+        # reportar atributo duplicado (#442). Com a versão no log, a próxima troca custa uma
+        # leitura, e não uma investigação.
+        run: |
+          echo "runner: ${ImageOS:-?} ${ImageVersion:-?}"
+          php -r 'echo "PHP ", PHP_VERSION, " | libxml ", LIBXML_DOTTED_VERSION, " (", LIBXML_VERSION, ")\n";'
+
       - name: Lint managed PHP
         # `scripts` entra aqui porque scripts/maintenance/ ficou sem lint e sem
         # teste, e foi exatamente onde uma chamada órfã a um plugin removido
