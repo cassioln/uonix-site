@@ -974,7 +974,7 @@ final class Uonix_VTS_Migration_Command {
 	}
 
 	/**
-	 * Recusa atributo repetido na mesma tag (`class="a" class="b"`). A libxml 2.9 reportava isso
+	 * Recusa atributo repetido na mesma tag (`class="a" class="b"`, também colado: `class="a"class="b"`). A libxml 2.9 reportava isso
 	 * como erro de `loadHTML`, e o parser dependia disso; a 2.15 (runner ubuntu-26.04 do CI,
 	 * 2026-10-24) deixou de reportar e o HTML passou a ser aceito (#442). A checagem fica aqui,
 	 * sem depender da versão da libxml. O nome é comparado sem diferenciar maiúsculas, como o HTML faz.
@@ -986,7 +986,7 @@ final class Uonix_VTS_Migration_Command {
 			return false;
 		}
 		$attributes = preg_match_all(
-			'/\s([a-z_:][-a-z0-9_:.]*)(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s"\'=<>`]+))?/iu',
+			'/(?:\s|(?<=["\']))([a-z_:][-a-z0-9_:.]*)(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s"\'=<>`]+))?/iu',
 			$inner[1],
 			$found
 		);
