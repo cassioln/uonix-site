@@ -948,6 +948,10 @@ final class Uonix_VTS_Migration_Command {
 				return false;
 			}
 
+			if ( self::has_duplicate_attribute( $tag ) ) {
+				return false;
+			}
+
 			if ( 1 === preg_match( '/^<\/([a-z][a-z0-9]*)\s*>$/iu', $tag, $closing ) ) {
 				$name = strtolower( $closing[1] );
 				if ( empty( $stack ) || $name !== end( $stack ) ) {
@@ -967,6 +971,30 @@ final class Uonix_VTS_Migration_Command {
 
 		$tail = substr( $wrapper, $cursor );
 		return false === strpbrk( $tail, '<>' ) && empty( $stack );
+	}
+
+	/**
+	 * Recusa atributo repetido na mesma tag (`class="a" class="b"`, também colado: `class="a"class="b"`). A libxml 2.9 reportava isso
+	 * como erro de `loadHTML`, e o parser dependia disso; a 2.15 (runner ubuntu-26.04 do CI,
+	 * 2026-10-24) deixou de reportar e o HTML passou a ser aceito (#442). A checagem fica aqui,
+	 * sem depender da versão da libxml. O nome é comparado sem diferenciar maiúsculas, como o HTML faz.
+	 *
+	 * @param string $tag Tag completa, de abertura ou de fechamento.
+	 */
+	private static function has_duplicate_attribute( $tag ) {
+		if ( 1 !== preg_match( '/^<[a-z][a-z0-9]*\b(.*)>$/isu', $tag, $inner ) ) {
+			return false;
+		}
+		$attributes = preg_match_all(
+			'/(?:\s|(?<=["\']))([a-z_:][-a-z0-9_:.]*)(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s"\'=<>`]+))?/iu',
+			$inner[1],
+			$found
+		);
+		if ( false === $attributes || 0 === $attributes ) {
+			return false;
+		}
+		$names = array_map( 'strtolower', $found[1] );
+		return count( $names ) !== count( array_unique( $names ) );
 	}
 
 	/**
