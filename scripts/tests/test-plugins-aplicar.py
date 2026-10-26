@@ -62,6 +62,9 @@ _, linhas_tema = lockmod.validar(lock(itens=[{"slug": "kadence", "tipo": "tema",
 checar(linhas_tema == ["kadence 1.5.2 1.5.3 critica tema"], f"linha de tema errada: {linhas_tema}")
 invalido(lock(itens=[{"slug": "kadence", "tipo": "pacote", "de": "1", "para": "2", "camada": "critica", "aplicacao": "um_por_vez"}]), "só plugins e temas")
 invalido(lock(itens=[{"slug": "../themes", "tipo": "tema", "de": "1", "para": "2", "camada": "critica", "aplicacao": "um_por_vez"}]), "slug inválido")
+# Slug repetido (plugin e tema homônimos) é recusado: o job remoto os confundiria.
+invalido(lock(itens=[{"slug": "kadence", "tipo": "plugin", "de": "9.0", "para": "9.1", "camada": "comum", "aplicacao": "lote"},
+                     {"slug": "kadence", "tipo": "tema", "de": "1.5.1", "para": "1.5.2", "camada": "critica", "aplicacao": "um_por_vez"}]), "slug repetido")
 # O slug do tema não herda a exceção de ativação do plugin homônimo.
 _, linhas_hom = lockmod.validar(lock(itens=[{"slug": "fluent-smtp", "tipo": "tema", "de": "1", "para": "2", "camada": "comum", "aplicacao": "lote"}]), AGORA, 72)
 checar(linhas_hom == ["fluent-smtp 1 2 comum tema"], f"tema homônimo de exceção recusado: {linhas_hom}")

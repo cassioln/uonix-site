@@ -170,7 +170,7 @@ MARCADORES_HOME = (
     ("tema: pai carregado", r"<link[^>]*themes/kadence/assets/css/global"),
     ("tema: classe do pai no body", r"\bwp-theme-kadence\b"),
     ("tema: filho carregado", r"\bwp-child-theme-kadence-child\b"),
-    ("tema: rodapé", r"<footer id=[\"']colophon[\"'] class=[\"']site-footer"),
+    ("tema: rodapé", r"<footer[^>]*\bid=[\"']colophon[\"']"),
 )
 
 

@@ -9,7 +9,7 @@ Recusa o lock quando:
   é sinal de que o ensaio deve ser refeito;
 - algum item tem código que não carrega no local (EXCECOES_ATIVACAO do ensaio):
   ele nunca foi exercitado e não pode ir para produção por esta via;
-- algum slug é inválido (vazio, com "/", "." ou "..");
+- algum slug é inválido (vazio, com "/", "." ou ".."), ou aparece duas vezes;
 - alguma versão tem espaço ou formato inválido, ou `aplicacao` é desconhecida;
 - `gerado_em` está no futuro ou traz fuso horário.
 
@@ -69,10 +69,16 @@ def validar(lock: dict, agora: dt.datetime, max_horas: float) -> tuple[str, list
     if not itens:
         raise LockInvalido("lock sem itens")
     linhas = []
+    vistos: set[str] = set()
     for i in itens:
         slug = i.get("slug", "")
         if not SLUG.match(slug) or slug in {".", ".."}:
             raise LockInvalido(f"slug inválido no lock: {slug!r}")
+        # O job remoto acha o tipo, o backup e a pasta pelo slug: plugin e tema de mesmo
+        # slug se confundiriam. Hoje não há homônimos; se surgirem, vão em locks separados.
+        if slug in vistos:
+            raise LockInvalido(f"{slug}: slug repetido no lock (plugin e tema de mesmo slug vão em locks separados)")
+        vistos.add(slug)
         tipo = i.get("tipo")
         if tipo not in TIPOS:
             raise LockInvalido(f"{slug}: só plugins e temas são aplicados por esta via (tipo {tipo!r})")

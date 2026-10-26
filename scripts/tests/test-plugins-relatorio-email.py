@@ -351,7 +351,9 @@ with tempfile.TemporaryDirectory() as t:
                {"slug": "fluentform", "tipo": "plugin", "de": "6.2.15", "para": "6.2.16", "camada": "critica", "aplicacao": "um_por_vez"}]
     (pasta / "lock.json").write_text(json.dumps({"itens": itens_t, "resultado": "verde", "fora": []}))
     (pasta / "plano.json").write_text(json.dumps({"itens": [
-        {"slug": "kadence", "seguranca": False, "changelog": "sem as versões do intervalo", "novidades": None},
+        {"slug": "kadence", "tipo": "tema", "seguranca": False, "changelog": "sem as versões do intervalo", "novidades": None},
+        # plugin homônimo no plano: não pode vazar para o tema
+        {"slug": "kadence", "tipo": "plugin", "seguranca": True, "changelog": ["Security: x"], "novidades": ["* Security: x"]},
         {"slug": "fluentform", "seguranca": False, "changelog": ["x"], "novidades": ["* Fix: campo"]}]}))
     (pasta / f"aplicacao-{stamp}.json").write_text(json.dumps(
         {"executado_em": "2026-10-26T18:15:00Z", "backup": stamp, "lock_sha12": "c530cf0c854c", "status_job": "0", "smoke_producao": "0"}))
@@ -359,6 +361,7 @@ with tempfile.TemporaryDirectory() as t:
     log_t = "== versões finais\n  kadence 1.5.2\n  fluentform 6.2.16\n"
     c = rel.montar(pasta, json.loads((pasta / f"aplicacao-{stamp}.json").read_text()), "0", log_t)
     h, txt = rel.corpo_html(c), rel.corpo_texto(c)
+    checar(c["itens"][0]["seguranca"] is False and c["itens"][0]["notas"] == [], f"plano do homônimo vazou para o tema: {c['itens'][0]}")
     checar(c["itens"][0]["nome"] == "Kadence (tema)" and c["itens"][0]["tipo"] == "tema", f"nome do tema errado: {c['itens'][0]}")
     checar(c["itens"][0]["pagina"] == "https://wordpress.org/themes/kadence/", f"página do tema errada: {c['itens'][0]['pagina']}")
     checar('href="https://wordpress.org/themes/kadence/"' in h, "nome do tema sem link para wordpress.org/themes")

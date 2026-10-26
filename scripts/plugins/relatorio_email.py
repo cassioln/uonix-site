@@ -82,7 +82,7 @@ RESULTADOS = {
     "0": ("Concluída", "#15803d", "#dcfce7",
           "Todas as atualizações foram aplicadas e o site passou na verificação final."),
     "20": ("Interrompida e revertida", "#b45309", "#fef3c7",
-           "Uma etapa falhou na verificação e foi revertida; o site está no ar. A tabela mostra a versão que ficou em cada plugin."),
+           "Uma etapa falhou na verificação e foi revertida; o site está no ar. A tabela mostra a versão que ficou em cada item."),
     "30": ("Recusada, sem alteração", "#475569", "#e2e8f0",
            "A aplicação foi recusada antes de alterar o site (versões divergentes, site já com falha ou manutenção indisponível)."),
     "40": ("Resultado não confirmado", "#b91c1c", "#fee2e2",
@@ -102,7 +102,7 @@ SITUACOES = {
 
 # Saída 0 com algum item sem a versão nova confirmada no log: o site passou,
 # mas o relatório não pode afirmar que "todas" foram aplicadas.
-RESUMO_0_PARCIAL = ("O site passou na verificação final, mas a versão instalada de algum plugin não pôde ser "
+RESUMO_0_PARCIAL = ("O site passou na verificação final, mas a versão instalada de algum item não pôde ser "
                     "confirmada pelo relatório. A tabela mostra o que foi confirmado.")
 
 # Nome comercial e função, para quem lê o relatório não precisar conhecer o slug.
@@ -258,7 +258,7 @@ def dias_quarentena(ctx: dict) -> int:
 
 
 def explicacao_quarentena(ctx: dict) -> str:
-    return (f"Por segurança, versões novas de plugins essenciais só são aplicadas depois de {dias_quarentena(ctx)} dias "
+    return (f"Por segurança, versões novas de itens essenciais só são aplicadas depois de {dias_quarentena(ctx)} dias "
             "do lançamento. Nesse período, problemas que surgem logo após uma versão sair costumam ser "
             "corrigidos pelo próprio fabricante, e o site não fica exposto a eles. "
             "Quando o fabricante informa que a versão corrige uma falha de segurança, ela é aplicada sem esperar esse prazo.")
@@ -266,14 +266,14 @@ def explicacao_quarentena(ctx: dict) -> str:
 
 def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, agora: dt.datetime | None = None) -> dict:
     lock = ler_json(pasta / "lock.json")
-    plano = {i.get("slug"): i for i in ler_json(pasta / "plano.json").get("itens", [])}
+    plano = {(i.get("tipo", "plugin"), i.get("slug")): i for i in ler_json(pasta / "plano.json").get("itens", [])}
     stamp = aplicacao.get("backup", "")
     smoke = ler_json(pasta / f"smoke-producao-{stamp}.json") if stamp else {}
     saida = saida_final if saida_final in RESULTADOS else "40"
     finais = versoes_finais(log)
     itens = []
     for item in lock.get("itens", []):
-        p = plano.get(item["slug"])
+        p = plano.get((item.get("tipo", "plugin"), item["slug"]))
         itens.append({
             "slug": item["slug"],
             "nome": NOMES.get(item["slug"], (item["slug"], ""))[0],
