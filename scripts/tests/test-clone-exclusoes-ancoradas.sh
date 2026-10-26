@@ -185,11 +185,67 @@ grep -q 'fast-indexing-api/vendor/psr/cache/src/CacheItemPoolInterface.php' <<<"
 grep -q 'google-site-kit/third-party/psr/cache/' <<<"$listagem" \
   || fail 'backup do rollback perdeu third-party/psr/cache'
 
-# O ramo remoto monta o tar com `declare -f` da mesma função e a versão do tar do SERVIDOR: o corpo é
-# conferido por texto, porque ele só roda no servidor.
+# O ramo remoto: renderiza o script que prepare_target_backup enviaria ao servidor (remote_run vira um stub
+# que o grava), confere a sintaxe e EXECUTA o trecho do tar contra um wp-content simulado (#439). O dump do
+# banco e as conferências de conteúdo ficam de fora: só a parte do tar importa aqui.
 corpo_prepare="$(declare -f prepare_target_backup)"
 grep -q 'backup_tar_exclude_args' <<<"$corpo_prepare" || fail 'prepare_target_backup não usa backup_tar_exclude_args'
 ! grep -q 'BACKUP_TAR_EXCLUDES' <<<"$corpo_prepare" || fail 'prepare_target_backup ainda usa a lista antiga sem âncora'
+
+rc=0
+(
+  set +e
+  wc_remoto="$TMP_DIR/remoto/wp-content"
+  mkdir -p "$wc_remoto/uploads/wc-logs" "$wc_remoto/uploads/wp-staging" "$wc_remoto/uploads/2026" \
+           "$wc_remoto/plugins/p/uploads/wc-logs" "$wc_remoto/plugins/wp-staging"
+  printf 'x\n' > "$wc_remoto/uploads/wc-logs/a"; printf 'x\n' > "$wc_remoto/uploads/wp-staging/s"
+  printf 'x\n' > "$wc_remoto/uploads/2026/foto"; printf '<?php\n' > "$wc_remoto/plugins/p/uploads/wc-logs/c.php"
+  printf '<?php\n' > "$wc_remoto/plugins/wp-staging/Main.php"
+  # Substitutos: tudo que faria rede, banco ou SSH. Sobra o tar.
+  is_remote_env() { return 0; }
+  wp_path() { printf '%s\n' "$TMP_DIR/remoto"; }
+  wp_cli_shell() { printf 'true\n'; }
+  resolve_backup_root() { printf '%s\n' "$TMP_DIR/backups"; }
+  validate_backup_destination() { return 0; }
+  # O dump é falso, mas existe: o script remoto faz chmod nele depois do tar.
+  remote_db_dump_snippet() { printf ': > %q\n' "$3"; }
+  remote_dump_content_check_snippet() { printf 'true\n'; }
+  log() { :; }
+  remote_run() { printf '%s\n' "$2" > "$TMP_DIR/script-remoto.sh"; }
+  INCLUDE_GIT_FILES=0 STAMP=teste
+  prepare_target_backup remota "$TMP_DIR/backups/destino" >/dev/null 2>&1
+  [ -s "$TMP_DIR/script-remoto.sh" ] || exit 11
+  bash -n "$TMP_DIR/script-remoto.sh" || exit 12
+  # O texto leva a lista de caminhos e a função (declare -p / declare -f), e o tar do servidor é lido lá.
+  grep -q 'BACKUP_TAR_EXCLUDED_PATHS' "$TMP_DIR/script-remoto.sh" || exit 13
+  grep -q 'backup_tar_exclude_args ()' "$TMP_DIR/script-remoto.sh" || exit 14
+  grep -q 'tar --version' "$TMP_DIR/script-remoto.sh" || exit 15
+  mkdir -p "$TMP_DIR/backups/destino"
+  # A rotação de backups do script usa `find -printf`, que só o GNU find tem (o servidor); no Mac um
+  # find falso, antes no PATH, devolve vazio. Só essa rotação é trocada: o tar roda de verdade.
+  mkdir -p "$TMP_DIR/bin-find"
+  printf '#!/bin/sh\nexit 0\n' > "$TMP_DIR/bin-find/find"; chmod +x "$TMP_DIR/bin-find/find"
+  PATH="$TMP_DIR/bin-find:$PATH" bash "$TMP_DIR/script-remoto.sh" >"$TMP_DIR/script-remoto.log" 2>&1 || exit 16
+  exit 0
+) || rc=$?
+case "$rc" in
+  0) ;;
+  11) fail 'remoto: prepare_target_backup não enviou script algum' ;;
+  12) fail 'remoto: o script enviado ao servidor tem erro de sintaxe' ;;
+  13) fail 'remoto: o script não leva BACKUP_TAR_EXCLUDED_PATHS (declare -p)' ;;
+  14) fail 'remoto: o script não leva a função backup_tar_exclude_args (declare -f)' ;;
+  15) fail 'remoto: o script não lê a versão do tar do servidor' ;;
+  *) fail "remoto: o script enviado ao servidor falhou ao executar (rc=$rc): $(tail -5 "$TMP_DIR/script-remoto.log" 2>/dev/null)" ;;
+esac
+arq_remoto=""
+for arq_remoto in "$TMP_DIR"/backups/destino/files-*.tar.gz; do break; done
+[ -n "$arq_remoto" ] || fail 'remoto: o script não gerou o tar do backup'
+lista_remota="$(tar -tzf "$arq_remoto")"
+! grep -q '^uploads/wc-logs/' <<<"$lista_remota" || fail 'remoto: o backup incluiu uploads/wc-logs'
+! grep -q '^uploads/wp-staging/' <<<"$lista_remota" || fail 'remoto: o backup incluiu uploads/wp-staging'
+grep -q 'uploads/2026/foto' <<<"$lista_remota" || fail 'remoto: o backup perdeu mídia de uploads'
+grep -q 'plugins/p/uploads/wc-logs/c.php' <<<"$lista_remota" || fail 'remoto: o backup perdeu plugins/<p>/uploads/wc-logs (código)'
+grep -q 'plugins/wp-staging/Main.php' <<<"$lista_remota" || fail 'remoto: o backup perdeu o plugin wp-staging'
 
 # 2b. GNU tar de verdade, quando houver um contêiner Linux disponível (o Mac só tem bsdtar). No CI o tar
 # local já é GNU e foi exercitado acima; aqui o Mac confere o ramo GNU sem depender do servidor.
@@ -200,7 +256,11 @@ if command -v podman >/dev/null 2>&1 && podman image exists public.ecr.aws/docke
   if [ -n "$saida_gnu" ]; then
     ! grep -q '^uploads/wc-logs/' <<<"$saida_gnu" || fail 'GNU tar: incluiu uploads/wc-logs'
     grep -q 'plugins/com-uploads/uploads/wc-logs/x.php' <<<"$saida_gnu" || fail 'GNU tar: --anchored não preservou plugins/<p>/uploads/wc-logs'
+  else
+    printf 'SKIP: o contêiner com GNU tar falhou; o ramo GNU fica para o CI (tar local GNU)\n' >&2
   fi
+else
+  printf 'SKIP: sem podman ou sem a imagem debian; o ramo GNU fica para o CI (tar local GNU)\n' >&2
 fi
 
 printf 'OK: exclusões ancoradas preservam código de plugin no espelho e no backup; dados pessoais nunca atravessam\n'
