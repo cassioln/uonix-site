@@ -327,6 +327,82 @@ uox_ai_assert( 'http_request_failed: falha [chave] fim' === $ep, '#404: a chave 
 $GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', "cURL error 6: falha \xC3\x28 no servidor" ) );
 $eu = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
 uox_ai_assert( false !== strpos( $eu, 'cURL error 6' ) && false !== strpos( $eu, 'no servidor' ) && 1 === preg_match( '//u', $eu ), '#404: UTF-8 inválido não apaga a causa: o resto fica e o texto gravado é UTF-8 válido; obteve ' . var_export( $eu, true ) );
+// Vetores do revisor do PR #451: separador que não é espaço, caixa, chave curta, tag aberta, C1 e bidi.
+$k_rev = 'chave-de-teste';
+$no_meio = static function ( $sep ) use ( $k_rev ) {
+	return 'falha ' . substr( $k_rev, 0, 7 ) . $sep . substr( $k_rev, 7 ) . ' fim';
+};
+foreach ( array( 'hífen suave' => "\u{00AD}", 'zero-width' => "\u{200B}", 'mais' => '+', 'tab e quebra' => "\t\r\n", 'NBSP' => "\u{00A0}" ) as $nome_sep => $sep ) {
+	$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', $no_meio( $sep ) ) );
+	$ev = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
+	uox_ai_assert( 'http_request_failed: falha [chave] fim' === $ev, "#404: a chave partida por {$nome_sep} também sai; obteve " . var_export( $ev, true ) );
+}
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'falha ' . substr( $k_rev, 0, 7 ) . '%20' . substr( $k_rev, 7 ) . ' fim' ) );
+$ev = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
+uox_ai_assert( 'http_request_failed: falha [chave] fim' === $ev, '#404: a chave partida por %20 também sai; obteve ' . var_export( $ev, true ) );
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'falha ' . strtoupper( $k_rev ) . ' e ' . ucfirst( $k_rev ) . ' fim' ) );
+$ev = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
+uox_ai_assert( 'http_request_failed: falha [chave] e [chave] fim' === $ev, '#404: a chave em outra caixa também sai; obteve ' . var_export( $ev, true ) );
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'falha AIza' . str_repeat( 'a', 19 ) . ' fim' ) );
+$ev = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
+uox_ai_assert( false === strpos( $ev, 'AIza' ), '#404: AIza com menos de 20 caracteres também sai; obteve ' . var_export( $ev, true ) );
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out after 15001 milliseconds' ) );
+$ev_curta = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 );
+uox_ai_assert( 'http_request_failed: cURL error 28: Operation timed out after 15001 milliseconds' === ( $ev_curta['error'] ?? '' ), '#404: a causa não depende da chave configurada; obteve ' . var_export( $ev_curta['error'] ?? null, true ) );
+// Subprocesso: a chave e o JIT do PCRE são do processo, e a mensagem grande vai por stdin (variável de ambiente de 300 KB estoura o limite por string no Linux).
+function uox_ai_transport_sub( $chave, $mensagem, $jit = true, $backtrack = null ) {
+	$codigo = 'define( "ABSPATH", "/" ); $k = getenv( "UOX_K" ); if ( false !== $k && "" !== $k ) { define( "UONIX_GEMINI_API_KEY", $k ); } '
+		. 'class WP_Error { function __construct( public $c = "", public $m = "" ) {} function get_error_code() { return $this->c; } function get_error_message() { return $this->m; } } '
+		. 'function is_wp_error( $v ) { return $v instanceof WP_Error; } function add_action( ...$a ) {} function add_filter( ...$a ) {} '
+		. 'require getenv( "UOX_F" ); $m = stream_get_contents( fopen( "php://stdin", "r" ) ); $t = microtime( true ); '
+		. '$r = uonix_intelligence_ai_transport_error( new WP_Error( "http_request_failed", $m ) ); echo json_encode( array( "r" => $r, "s" => microtime( true ) - $t ) );';
+	$env  = array( 'UOX_K' => $chave, 'UOX_F' => dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/54-admin-intelligence-ai.php', 'PATH' => (string) getenv( 'PATH' ) );
+	$proc = proc_open( array_merge( array( PHP_BINARY, '-n', '-d', 'pcre.jit=' . ( $jit ? '1' : '0' ) ), null === $backtrack ? array() : array( '-d', 'pcre.backtrack_limit=' . $backtrack ), array( '-r', $codigo ) ), array( 0 => array( 'pipe', 'r' ), 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes, null, $env );
+	if ( ! is_resource( $proc ) ) {
+		return null;
+	}
+	fwrite( $pipes[0], $mensagem );
+	fclose( $pipes[0] );
+	$saida = stream_get_contents( $pipes[1] );
+	fclose( $pipes[1] );
+	fclose( $pipes[2] );
+	proc_close( $proc );
+	$d = json_decode( (string) $saida, true );
+
+	return is_array( $d ) ? $d : null;
+}
+$sub = uox_ai_transport_sub( 'chave-de-teste', 'cURL error 28: Operation timed out' );
+uox_ai_assert( is_array( $sub ) && 'http_request_failed: cURL error 28: Operation timed out' === $sub['r'], '#404: o subprocesso do teste roda e devolve a causa; obteve ' . var_export( $sub, true ) );
+
+// Chave curta casaria no meio das palavras e destruiria a causa; o piso é de 8 caracteres.
+foreach ( array( 'e', 'a', 'ab', 'abc1234' ) as $curta ) {
+	$sc = uox_ai_transport_sub( $curta, 'cURL error 28: Operation timed out after 15001 milliseconds' );
+	uox_ai_assert( is_array( $sc ) && 'http_request_failed: cURL error 28: Operation timed out after 15001 milliseconds' === $sc['r'], "#404: chave de " . strlen( $curta ) . ' caractere(s) não toca a causa; obteve ' . var_export( $sc, true ) );
+}
+$s8 = uox_ai_transport_sub( 'abcd1234', 'falha com abcd1234 no meio' );
+uox_ai_assert( is_array( $s8 ) && 'http_request_failed: falha com [chave] no meio' === $s8['r'], '#404: chave de 8 caracteres (o piso) é trocada; obteve ' . var_export( $s8, true ) );
+
+// C1, bidi e formatação, sem tag na frente (a tag aberta apaga o resto da linha).
+$sc1 = uox_ai_transport_sub( 'chave-de-teste', "a\u{009B}b\u{202E}c\u{2066}d\u{200B}e fim" );
+uox_ai_assert( is_array( $sc1 ) && 'http_request_failed: a b c d e fim' === $sc1['r'], '#404: C1, bidi e zero-width viram espaço; obteve ' . bin2hex( (string) ( $sc1['r'] ?? '' ) ) );
+
+// Tag sem fechamento: sem o `>?`, o `<script …` sobrava inteiro.
+$sa = uox_ai_transport_sub( 'chave-de-teste', 'falha <script src=//x onerror=1 y' );
+uox_ai_assert( is_array( $sa ) && false === strpos( $sa['r'], '<' ) && false === strpos( $sa['r'], 'onerror' ), '#404: tag sem fechamento não sobra; obteve ' . var_export( $sa, true ) );
+// Quebra de linha com indentação no meio da chave: o espaço em branco é colapsado antes de procurar a chave.
+$sq = uox_ai_transport_sub( 'chave-de-teste', "falha chave-d\n          e-teste fim" );
+uox_ai_assert( is_array( $sq ) && 'http_request_failed: falha [chave] fim' === $sq['r'], '#404: chave partida por quebra de linha com 10 espaços de indentação também sai; obteve ' . var_export( $sq, true ) );
+
+// Se o PCRE desistir (limite de backtracking), a causa é omitida; devolver o texto sem a limpeza seria pior.
+$so = uox_ai_transport_sub( 'abcd1234', 'abcd1234 fim ' . str_repeat( 'a b ', 400 ) . 'http://x', false, 5 );
+uox_ai_assert( is_array( $so ) && '[causa omitida]' === $so['r'], '#404: PCRE que desiste omite a causa, e não devolve o texto sem limpar; obteve ' . var_export( $so, true ) );
+$sn = uox_ai_transport_sub( 'abcd1234', 'abcd1234 fim ' . str_repeat( 'a b ', 400 ), false );
+uox_ai_assert( is_array( $sn ) && '[causa omitida]' !== $sn['r'] && false !== strpos( $sn['r'], '[chave]' ), '#404: sem o limite baixo, a mesma mensagem é limpa normalmente; obteve ' . var_export( $sn, true ) );
+
+// Sem o JIT do PCRE, `scheme://\S+` é quadrático: 1,8 s para 100 KB e 15 s para 300 KB, medido; o gatilho fica a 100 KB para o teste pegar um corte alto demais. O corte em 2 KB antes dos regex evita isso.
+$sj = uox_ai_transport_sub( 'chave-de-teste', str_repeat( 'a', 100000 ) . ' ://' . str_repeat( 'b', 120000 ), false );
+uox_ai_assert( is_array( $sj ) && $sj['s'] < 0.5 && '' !== $sj['r'] && mb_strlen( $sj['r'], 'UTF-8' ) <= 160, '#404: mensagem de 220 KB com o gatilho a 100 KB, sem JIT, custa menos de 0,5 s; obteve ' . var_export( is_array( $sj ) ? round( $sj['s'], 3 ) . ' s' : $sj, true ) );
+
 // Corte no meio de um espaço: 'http_request_failed: ' tem 21 caracteres, então 138 'a' + ' ' + 'b' põem o espaço na posição 160.
 $GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', str_repeat( 'a', 138 ) . ' b' ) );
 $eb = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';

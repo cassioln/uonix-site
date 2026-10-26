@@ -482,9 +482,14 @@ if ( ! function_exists( 'uonix_intelligence_ai_transport_error' ) ) {
 	/**
 	 * A causa de um erro de transporte (`WP_Error` de `wp_remote_post`), para gravar no cache.
 	 *
-	 * O `http` 0 sozinho não separa tempo esgotado de DNS ou TLS (#404). A causa sai em uma linha,
-	 * sem tag, sem endereço, sem chave e com teto de 160 caracteres. O nome do servidor, sem
-	 * `https://`, fica: não é segredo e é o que diferencia o DNS.
+	 * O `http` 0 sozinho não diz o que houve (#404). A causa sai em uma linha, cortada em 2 KB antes
+	 * de qualquer regex e em 160 caracteres no fim. Tira: tag, controle e formatação Unicode, o texto
+	 * de `scheme://…` (vira `[url]`) e a chave configurada, quando tem 8 caracteres ou mais (vira
+	 * `[chave]`), mesmo com até 4 bytes quaisquer entre os caracteres dela, em qualquer caixa. Tira
+	 * também o que começa em `AIza` e tem 10 caracteres de chave ou mais. Não é uma garantia: a
+	 * chave só viaja no cabeçalho `x-goog-api-key`, e esta limpeza é uma camada a mais para o caso
+	 * de uma mensagem de transporte repeti-la. Um `<` sem `>` apaga dali até o fim; IP e porta sem
+	 * `scheme://` ficam.
 	 *
 	 * @param mixed $erro O retorno de `wp_remote_post`.
 	 * @return string Vazio quando não é um `WP_Error` ou não tem código nem mensagem.
@@ -496,23 +501,37 @@ if ( ! function_exists( 'uonix_intelligence_ai_transport_error' ) ) {
 		$codigo   = (string) $erro->get_error_code();
 		$mensagem = (string) $erro->get_error_message();
 		$texto    = trim( $codigo . ( '' !== $codigo && '' !== $mensagem ? ': ' : '' ) . $mensagem );
-		// Ordem importa. UTF-8 inválido faz o `preg_replace` com /u devolver null e apagaria a causa
-		// toda; tag e controle viram espaço antes da chave, porque uma chave partida por espaço tem de
-		// ser achada; a chave sai antes do endereço, senão a troca do endereço engole só a primeira
-		// metade de uma chave partida dentro dele.
-		if ( function_exists( 'mb_scrub' ) ) {
+		// Ordem importa. A mensagem é cortada primeiro: nenhum regex corre sobre mais de 2 KB.
+		// O espaço em branco vira um só espaço antes de procurar a chave, para a quebra de linha com
+		// indentação não pedir folga grande. A chave sai antes de qualquer limpeza que mude bytes: o
+		// `mb_scrub` troca byte inválido por `?` e a chave partida por ele deixaria de casar. Entre os
+		// caracteres da chave cabem até 4 bytes quaisquer (hífen suave, zero-width, `+`, `%20`,
+		// NBSP, UTF-8 inválido); mais que isso passaria a casar no meio de palavras, medido. A caixa
+		// não importa. Se um `preg_replace` desistir (limite de backtracking), a causa inteira é
+		// omitida: devolver o texto sem a limpeza seria o pior desfecho.
+		$omitida = '[causa omitida]';
+		// Cada passo devolve null se o PCRE desistir, e o null segue até a checagem única do fim.
+		$limpa = static function ( $entrada, $padrao, $troca ) {
+			return is_string( $entrada ) ? preg_replace( $padrao, $troca, $entrada ) : null;
+		};
+		$texto = function_exists( 'mb_strcut' ) ? mb_strcut( $texto, 0, 2048, 'UTF-8' ) : substr( $texto, 0, 2048 );
+		$texto = $limpa( $texto, '/\s+/', ' ' );
+		$chave = function_exists( 'uonix_intelligence_ai_api_key' ) ? (string) uonix_intelligence_ai_api_key() : '';
+		// Chave curta casaria no meio de palavras e apagaria a causa. Chave do Gemini tem 39.
+		if ( strlen( $chave ) >= 8 ) {
+			$padrao = '/' . implode( '.{0,4}?', array_map( static function ( $byte ) {
+				return preg_quote( $byte, '/' );
+			}, str_split( $chave ) ) ) . '/is';
+			$texto  = $limpa( $texto, $padrao, '[chave]' );
+		}
+		if ( is_string( $texto ) && function_exists( 'mb_scrub' ) ) {
 			$texto = mb_scrub( $texto, 'UTF-8' );
 		}
-		$texto = (string) preg_replace( array( '/<[^>]*>/', '/[\x00-\x1F\x7F\s]+/u' ), ' ', $texto );
-		$chave = function_exists( 'uonix_intelligence_ai_api_key' ) ? (string) uonix_intelligence_ai_api_key() : '';
-		if ( '' !== $chave && 1 === preg_match( '//u', $chave ) ) {
-			$letras = preg_split( '//u', $chave, -1, PREG_SPLIT_NO_EMPTY );
-			$padrao = '/' . implode( '\\s*', array_map( static function ( $letra ) {
-				return preg_quote( $letra, '/' );
-			}, (array) $letras ) ) . '/u';
-			$texto  = (string) preg_replace( $padrao, '[chave]', $texto );
+		$texto = $limpa( $texto, array( '/<[^>]*>?/', '/[\p{Cc}\p{Cf}\s]+/u' ), ' ' );
+		$texto = $limpa( $texto, array( '/AIza[0-9A-Za-z_-]{10,}/', '#[a-z][a-z0-9+.-]*://\S+#i' ), array( '[chave]', '[url]' ) );
+		if ( ! is_string( $texto ) ) {
+			return $omitida;
 		}
-		$texto = (string) preg_replace( array( '/AIza[0-9A-Za-z_-]{20,}/', '#[a-z][a-z0-9+.-]*://\S+#i' ), array( '[chave]', '[url]' ), $texto );
 		$texto = trim( $texto );
 		if ( function_exists( 'mb_substr' ) ) {
 			$texto = mb_substr( $texto, 0, 160, 'UTF-8' );
