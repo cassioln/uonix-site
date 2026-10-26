@@ -2,6 +2,15 @@
 
 Plugins e o tema pai de produção são atualizados por uma esteira, e não pelo painel nem pela atualização automática do WordPress. O desenho completo, com as próximas entregas, está na issue #393. Este documento cobre o que já existe.
 
+## Temas (#445)
+
+O tema pai `kadence` (camada crítica) passa pela mesma esteira, na mesma ordem e com a mesma quarentena de 7 dias. Diferenças:
+
+- O job usa `wp theme update/get` e guarda a pasta em `wp-content/themes/<slug>` como `tema-<slug>.tar.gz`. A linha da lista do job ganhou o 5º campo, `tipo` (`plugin` ou `tema`); sem ele vale `plugin`.
+- A API de temas do wordpress.org dá versão e data (a quarentena funciona), mas **não traz changelog**. O tema fica sem "novidades" no e-mail, que aponta para `wordpress.org/themes/<slug>/`. Na chave do mapa da API o tema leva o prefixo `tema:`, porque plugin e tema podem ter o mesmo slug.
+- `kadence-child` (camada `propria`) e `twentytwentythree` (`decisao_pendente`) nunca são aplicados.
+- Restaurar o tema ativo move a pasta atual para `descartado-<slug>` e devolve a do tar, como nos plugins. O smoke roda em seguida.
+
 ## Regra de ouro
 
 **O que vai para produção é exatamente o que foi ensaiado no local.** Atualiza-se para a versão ensaiada (`--version=<v>`), nunca "para a última".
@@ -74,6 +83,7 @@ A lista sai de `ensaio.py`, na função `smoke()`:
 - **Páginas:** home, blog, serviços, produtos, cotação, sitemap, REST, login, um produto, um post e uma página de serviço (do Pods). Cada uma precisa responder 200, sem erro fatal.
 - **Megamenu:** itens e widgets nas colunas.
 - **SEO:** `meta description` e `ld+json`.
+- **Tema:** o CSS global do `kadence`, a classe `wp-theme-kadence` e a `wp-child-theme-kadence-child` no `<body>`, e o rodapé `#colophon`. Medidos com o `kadence-child` ativo (1 de cada) e com o `twentytwentythree` no lugar (0 de cada).
 - **Cotação:** adicionar um produto pela Store API.
 - **Contratos em execução:** post type `servicos` e rotas da Store API.
 - **WooCommerce:** banco migrado.
@@ -99,12 +109,12 @@ bash scripts/plugins/atualizar.sh aplicar-producao --lock=tmp/plugins/ensaio-<da
 
 O comando faz, nesta ordem:
 
-1. **Validação do lock** (`lock.py`). O lock é recusado se o sha256 não conferir, se o resultado não for verde, se tiver mais de 72 h (`UONIX_PLUGINS_LOCK_MAX_HORAS`), se tiver algum item cujo código não carrega no local ou se tiver um slug inválido.
+1. **Validação do lock** (`lock.py`). O lock é recusado se o sha256 não conferir, se o resultado não for verde, se tiver mais de 72 h (`UONIX_PLUGINS_LOCK_MAX_HORAS`), se tiver algum item cujo código não carrega no local ou se tiver um slug inválido. Plugin e tema são aceitos (campo `tipo` do item); qualquer outro tipo é recusado. Plugin e tema são aceitos (`tipo` do item); outro tipo é recusado.
 2. **Sonda da janela SSH**, com corte em 30 s. Janela fechada pendura em silêncio; aqui ela falha rápido.
 3. **Backup do banco** de produção (`backup-remote-database.sh`), sob cão de guarda.
 4. **Job remoto** (`remoto-aplicar.sh`). Ele é enviado ao servidor e roda **desacoplado da conexão** (`nohup`, com log e status em `_uonix-deploy-backups/plugins-<data>/`):
    - **preflight:** produção precisa estar nas versões "de" do lock; se divergir, sai 30 sem alterar nada;
-   - backup das pastas dos plugins;
+   - backup das pastas dos plugins e dos temas (`plugin-<slug>.tar.gz` e `tema-<slug>.tar.gz`);
    - modo de manutenção e atualização em **etapas**: os plugins fora da camada crítica formam um lote, e cada crítico é uma etapa sozinho; a versão instalada é conferida, e o `wp wc update` também;
    - smoke depois de cada etapa e depois da limpeza de cache.
 

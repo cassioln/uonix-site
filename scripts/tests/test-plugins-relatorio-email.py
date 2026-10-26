@@ -342,6 +342,38 @@ reais_data = ["Date picker now supports ranges", "Release date format fixed", "R
               "Date: ranges now supported in the picker"]
 checar(rel.notas({"novidades": reais_data}) == reais_data, f"frases reais com 'date' não podem sair: {rel.notas({'novidades': reais_data})}")
 
+# 10b'. tema no lock (#445): rótulo "plugins e temas", link de /themes/ sem a âncora #developers,
+# nome amigável e o texto de backup com tema-<slug>.tar.gz
+with tempfile.TemporaryDirectory() as t:
+    stamp = "plugins-20261026-181500"
+    pasta = pathlib.Path(t)
+    itens_t = [{"slug": "kadence", "tipo": "tema", "de": "1.5.1", "para": "1.5.2", "camada": "critica", "aplicacao": "um_por_vez"},
+               {"slug": "fluentform", "tipo": "plugin", "de": "6.2.15", "para": "6.2.16", "camada": "critica", "aplicacao": "um_por_vez"}]
+    (pasta / "lock.json").write_text(json.dumps({"itens": itens_t, "resultado": "verde", "fora": []}))
+    (pasta / "plano.json").write_text(json.dumps({"itens": [
+        {"slug": "kadence", "seguranca": False, "changelog": "sem as versões do intervalo", "novidades": None},
+        {"slug": "fluentform", "seguranca": False, "changelog": ["x"], "novidades": ["* Fix: campo"]}]}))
+    (pasta / f"aplicacao-{stamp}.json").write_text(json.dumps(
+        {"executado_em": "2026-10-26T18:15:00Z", "backup": stamp, "lock_sha12": "c530cf0c854c", "status_job": "0", "smoke_producao": "0"}))
+    (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
+    log_t = "== versões finais\n  kadence 1.5.2\n  fluentform 6.2.16\n"
+    c = rel.montar(pasta, json.loads((pasta / f"aplicacao-{stamp}.json").read_text()), "0", log_t)
+    h, txt = rel.corpo_html(c), rel.corpo_texto(c)
+    checar(c["itens"][0]["nome"] == "Kadence (tema)" and c["itens"][0]["tipo"] == "tema", f"nome do tema errado: {c['itens'][0]}")
+    checar(c["itens"][0]["pagina"] == "https://wordpress.org/themes/kadence/", f"página do tema errada: {c['itens'][0]['pagina']}")
+    checar('href="https://wordpress.org/themes/kadence/"' in h, "nome do tema sem link para wordpress.org/themes")
+    checar("themes/kadence/#developers" not in h, "página de tema não tem a âncora #developers")
+    checar("ver na página do tema" in h, "tema sem notas deveria apontar para a página do tema")
+    checar("Atualização de plugins e temas" in h and "plugins e temas atualizados" in h and "atualização de plugins e temas" in txt,
+           "rótulo deveria ser 'plugins e temas'")
+    checar(rel.rotulo_itens(c) == "plugins e temas", "rotulo_itens errado")
+    checar(rel.para_cliente(c), "sucesso completo com tema deveria ir ao cliente")
+    c1 = rel.montar(pasta, json.loads((pasta / f"aplicacao-{stamp}.json").read_text()), "0", log_t)
+    c1["itens"] = [i for i in c1["itens"] if i["tipo"] == "tema"]
+    checar(rel.rotulo_itens(c1) == "temas", "só tema deveria dizer 'temas'")
+    c1["itens"] = [i for i in c1["itens"] if i["tipo"] != "tema"] or [{"tipo": "plugin"}]
+    checar(rel.rotulo_itens(c1) == "plugins", "só plugin deveria seguir dizendo 'plugins'")
+
 # 10c. nome com link para a página oficial (só se a API do wordpress.org respondeu) e changelog da versão
 with tempfile.TemporaryDirectory() as t:
     stamp = "plugins-20261015-131200"

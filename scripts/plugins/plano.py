@@ -15,7 +15,8 @@ e em que ordem, ou por que fica de fora:
   quarentena não é verificável e o item fica de fora sem a dispensa explícita.
 
 A data e o changelog vêm da API do wordpress.org. Em teste, --api-cache aponta
-para um JSON {slug: resposta da API | null} e nada é buscado na rede.
+para um JSON {slug: resposta da API | null} e nada é buscado na rede. Tema leva o
+prefixo "tema:" na chave ("tema:kadence"), porque plugin e tema podem ter o mesmo slug.
 
 Ordem: camadas em lote (acoplada, comum) primeiro; a crítica depois, um por
 vez, com o woocommerce por último, porque é o que migra o banco.
@@ -39,6 +40,7 @@ import urllib.request
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 POLITICA_PADRAO = RAIZ / "ops" / "plugins" / "politica.json"
 API = "https://api.wordpress.org/plugins/info/1.2/"
+API_TEMAS = "https://api.wordpress.org/themes/info/1.2/"
 # Correção de segurança exige CONTEXTO, não a palavra solta: "Compatibility with
 # Wordfence Security", "Added Security headers settings page" e "New permission
 # checks screen" dispensariam a quarentena de um crítico por engano (#418).
@@ -139,13 +141,24 @@ def maior(v: str) -> int | None:
     return partes[0] if partes else None
 
 
-def buscar_api(slug: str) -> dict | None:
+def chave_api(tipo: str, slug: str) -> str:
+    """Chave do item no mapa da API: plugin e tema podem ter o mesmo slug, então o tema leva prefixo."""
+    return f"tema:{slug}" if tipo == "tema" else slug
+
+
+def buscar_api(slug: str, tipo: str = "plugin") -> dict | None:
+    # A API de temas dá versão e data (a quarentena precisa delas), mas não traz changelog:
+    # `sections` só tem a descrição, então o tema segue sem changelog nem novidades (#445).
+    if tipo == "tema":
+        endpoint, acao = API_TEMAS, "theme_information"
+    else:
+        endpoint, acao = API, "plugin_information"
     query = urllib.parse.urlencode({
-        "action": "plugin_information", "request[slug]": slug,
+        "action": acao, "request[slug]": slug,
         "request[fields][sections]": 1, "request[fields][versions]": 0,
     })
     try:
-        with urllib.request.urlopen(f"{API}?{query}", timeout=30) as resposta:
+        with urllib.request.urlopen(f"{endpoint}?{query}", timeout=30) as resposta:
             dados = json.load(resposta)
     except (OSError, ValueError):
         return None
@@ -229,7 +242,7 @@ def planejar(inventario: dict, politica: dict, api: dict, hoje: dt.date,
                 fora.append({**base, "motivo": "versão nova exige PHP ou WordPress acima do site"})
                 continue
 
-            info = api.get(nome)
+            info = api.get(chave_api(tipo, nome))
             trecho = trecho_changelog(info, de, para)
             seguranca = None if trecho is None else any(SEGURANCA.search(l) for l in trecho)
             base["seguranca"] = seguranca
@@ -287,12 +300,12 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError) as erro:
         print(f"ERRO: entrada ilegível: {erro}")
         return 2
-    pendentes = [i.get("name") for c in ("plugins", "temas") for i in inventario.get(c, [])
-                 if i.get("update") in {"available", "unavailable"}]
+    pendentes = [(tipo, i.get("name")) for tipo, c in (("plugin", "plugins"), ("tema", "temas"))
+                 for i in inventario.get(c, []) if i.get("update") in {"available", "unavailable"}]
     if a.api_cache:
         api = json.loads(a.api_cache.read_text())
     else:
-        api = {slug: buscar_api(slug) for slug in pendentes}
+        api = {chave_api(tipo, slug): buscar_api(slug, tipo) for tipo, slug in pendentes}
     plano = planejar(inventario, politica, api, hoje, lista(a.aceitar_major), lista(a.dispensar_quarentena))
     texto = json.dumps(plano, ensure_ascii=False, indent=1)
     if a.saida:

@@ -111,6 +111,7 @@ NOMES = {
     "woocommerce": ("WooCommerce", "Loja e catálogo de produtos"),
     "woo-rfq-for-woocommerce": ("NP Quote Request for WooCommerce", "Solicitação de orçamento"),
     "kadence-blocks": ("Kadence Blocks", "Blocos das páginas"),
+    "kadence": ("Kadence (tema)", "Tema base do site"),
     "woocommerce-products-filter": ("HUSKY Products Filter", "Filtros do catálogo"),
     "woocommerce-products-slider": ("Product Slider for WooCommerce", "Carrossel de produtos"),
     "woo-checkout-field-editor-pro": ("Checkout Field Editor", "Campos do formulário de orçamento"),
@@ -277,6 +278,7 @@ def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, ago
             "slug": item["slug"],
             "nome": NOMES.get(item["slug"], (item["slug"], ""))[0],
             "funcao": NOMES.get(item["slug"], ("", ""))[1],
+            "tipo": item.get("tipo", "plugin"),
             "critico": item.get("camada") == "critica",
             "de": item["de"],
             "para": item["para"],
@@ -319,6 +321,14 @@ def resumo(ctx: dict) -> str:
 def pendencia(item: dict) -> str:
     """Correção não aplicada com certeza é "pendente"; com estado desconhecido, "a confirmar"."""
     return "pendente" if item["situacao"] in ("mantido", "nao_aplicado") else "a confirmar"
+
+
+def rotulo_itens(ctx: dict) -> str:
+    """"plugins", "temas" ou "plugins e temas", conforme o que o lock traz (#445)."""
+    tipos = {i.get("tipo", "plugin") for i in ctx["itens"]}
+    if tipos == {"tema"}:
+        return "temas"
+    return "plugins e temas" if "tema" in tipos else "plugins"
 
 
 def titulo_itens(ctx: dict) -> str:
@@ -385,14 +395,18 @@ def novidades_html(item: dict) -> str:
     if not item["notas"]:
         if not item.get("pagina"):
             return ""
+        tema = item.get("tipo") == "tema"
+        # A âncora #developers existe só na página de plugin; a de tema não a tem.
+        link = item["pagina"] if tema else f'{item["pagina"]}#developers'
         return (f'<div style="font-size:12px;color:{MUTED};margin-top:6px;">Novidades desta versão: '
-                f'<a href="{e(item["pagina"])}#developers" style="{estilo_link}">ver na página do plugin</a></div>')
+                f'<a href="{e(link)}" style="{estilo_link}">ver na página do {"tema" if tema else "plugin"}</a></div>')
     itens = "".join(f'<li style="margin:2px 0;">{e(n)}</li>' for n in item["notas"][:MAX_NOTAS])
     resto = len(item["notas"]) - MAX_NOTAS
     mais = ""
     if item.get("pagina"):
         texto = f"e mais {resto} alteração(ões): ver o changelog completo" if resto > 0 else "ver o changelog completo"
-        mais = f'<div style="margin-top:4px;"><a href="{e(item["pagina"])}#developers" style="{estilo_link}">{e(texto)}</a></div>'
+        ancora = "" if item.get("tipo") == "tema" else "#developers"
+        mais = f'<div style="margin-top:4px;"><a href="{e(item["pagina"])}{ancora}" style="{estilo_link}">{e(texto)}</a></div>'
     elif resto > 0:
         mais = f'<div style="margin-top:4px;">e mais {resto} alteração(ões)</div>'
     return (f'<div style="font-size:12px;color:{MUTED};margin-top:8px;line-height:1.5;">'
@@ -468,7 +482,7 @@ def corpo_html(ctx: dict, logo_src: str | None = f"cid:{LOGO_CID}") -> str:
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light only"><title>{e(assunto(ctx))}</title></head>
 <body style="margin:0;padding:0;background:#eef2f5;font-family:{CORPO};">
-<div style="display:none;max-height:0;overflow:hidden;">{e(rotulo)}: {atualizados} de {len(ctx["itens"])} plugin(s) atualizados em {SITE}.</div>
+<div style="display:none;max-height:0;overflow:hidden;">{e(rotulo)}: {atualizados} de {len(ctx["itens"])} item(ns) atualizados em {SITE}.</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f5;padding:24px 12px;">
 <tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:6px;overflow:hidden;border:1px solid {BORDA};">
@@ -481,7 +495,7 @@ def corpo_html(ctx: dict, logo_src: str | None = f"cid:{LOGO_CID}") -> str:
 <tr><td bgcolor="{FUNDO}" style="background:{FUNDO};padding:30px 30px 30px;border-bottom:3px solid {CIANO};">
   <div style="font-family:{CORPO};font-size:13px;color:{SECUNDARIO};">{e(CLIENTE)} &middot; {e(SITE)}</div>
   <h1 style="margin:8px 0 10px;font-family:{DISPLAY};font-size:30px;line-height:1.15;font-weight:500;letter-spacing:-1px;color:{TEXTO_CLARO};">
-    Atualização de plugins <span style="color:{CIANO};">{e(rotulo.lower())}.</span></h1>
+    Atualização de {e(rotulo_itens(ctx))} <span style="color:{CIANO};">{e(rotulo.lower())}.</span></h1>
   <div style="font-family:{CORPO};font-size:13px;color:{MUTED};">Executada em {ctx["quando"]:%d/%m/%Y às %H:%M}</div>
 </td></tr>
 <tr><td style="padding:28px 30px 4px;">
@@ -490,7 +504,7 @@ def corpo_html(ctx: dict, logo_src: str | None = f"cid:{LOGO_CID}") -> str:
 </td></tr>
 <tr><td style="padding:18px 24px 4px;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="6"><tr>
-    {indicador(f"{atualizados}/{len(ctx['itens'])}", "plugins atualizados")}
+    {indicador(f"{atualizados}/{len(ctx['itens'])}", f"{rotulo_itens(ctx)} atualizados")}
     {indicador(str(com_seguranca), "correções de segurança")}
     {indicador(smoke_txt, smoke_legenda)}
   </tr></table>
@@ -531,7 +545,7 @@ def corpo_html(ctx: dict, logo_src: str | None = f"cid:{LOGO_CID}") -> str:
 
 def corpo_texto(ctx: dict) -> str:
     rotulo = RESULTADOS[ctx["saida"]][0]
-    linhas = [f"{CLIENTE} ({SITE}): atualização de plugins", "", f"Olá, equipe {CLIENTE}!", "",
+    linhas = [f"{CLIENTE} ({SITE}): atualização de {rotulo_itens(ctx)}", "", f"Olá, equipe {CLIENTE}!", "",
               f"Resultado: {rotulo}", resumo(ctx), f"Executada em {ctx['quando']:%d/%m/%Y às %H:%M}.", "",
               f"{titulo_itens(ctx)}:"]
     for i in ctx["itens"]:
@@ -599,7 +613,7 @@ def corpo_tecnico(ctx: dict, log: str) -> str:
                "", "Registro (aplicacao-*.json):", json.dumps(ctx.get("registro", {}), ensure_ascii=False),
                "", "Próximos passos:",
                f"- estado de produção (só leitura): bash scripts/plugins/atualizar.sh estado-producao --backup={b}",
-               f"- pastas salvas no servidor: <conta>/_uonix-deploy-backups/{b}/plugin-<slug>.tar.gz (e descartado-<slug>)",
+               f"- pastas salvas no servidor: <conta>/_uonix-deploy-backups/{b}/plugin-<slug>.tar.gz ou tema-<slug>.tar.gz (e descartado-<slug>)",
                f"- banco antes da aplicação: <conta>/_uonix-deploy-backups/{b}/db-prod-{b}.sql.gz",
                "- reenviar este relatório (a saída é recalculada do registro, então vai de novo ao técnico; "
                "--saida-final=N força outra saída, e o cliente só recebe com sucesso completo): "

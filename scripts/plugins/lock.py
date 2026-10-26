@@ -14,8 +14,8 @@ Recusa o lock quando:
 - `gerado_em` está no futuro ou traz fuso horário.
 
 Saída padrão, quando válido: a 1ª linha é o sha256 curto (12 caracteres, usado
-na frase de confirmação); as seguintes são "slug de para camada", na ordem do
-lock, com a camada crítica marcada como "critica".
+na frase de confirmação); as seguintes são "slug de para camada tipo", na ordem do
+lock, com a camada crítica marcada como "critica", seguidas de "plugin" ou "tema".
 
 Uso: lock.py validar --lock ARQ [--max-horas N] [--agora AAAA-MM-DDTHH:MM:SS]
 Saída: 0 válido, 2 inválido.
@@ -38,6 +38,7 @@ SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 # separada por espaço, e um espaço em `para` deslocaria a camada.
 VERSAO = re.compile(r"^[0-9][0-9A-Za-z.+_-]*$")
 APLICACOES = {"lote", "um_por_vez"}
+TIPOS = {"plugin", "tema"}
 
 
 class LockInvalido(ValueError):
@@ -72,16 +73,17 @@ def validar(lock: dict, agora: dt.datetime, max_horas: float) -> tuple[str, list
         slug = i.get("slug", "")
         if not SLUG.match(slug) or slug in {".", ".."}:
             raise LockInvalido(f"slug inválido no lock: {slug!r}")
-        if i.get("tipo") != "plugin":
-            raise LockInvalido(f"{slug}: só plugins são aplicados por esta via (tipo {i.get('tipo')!r})")
-        if slug in EXCECOES_ATIVACAO:
+        tipo = i.get("tipo")
+        if tipo not in TIPOS:
+            raise LockInvalido(f"{slug}: só plugins e temas são aplicados por esta via (tipo {tipo!r})")
+        if tipo == "plugin" and slug in EXCECOES_ATIVACAO:
             raise LockInvalido(f"{slug}: o código não carrega no ensaio local; não pode ser aplicado por esta via")
         if not VERSAO.match(str(i.get("de", ""))) or not VERSAO.match(str(i.get("para", ""))):
             raise LockInvalido(f"{slug}: versão de origem ou destino ausente ou inválida")
         if i.get("aplicacao") not in APLICACOES:
             raise LockInvalido(f"{slug}: aplicacao {i.get('aplicacao')!r} desconhecida")
         camada = "critica" if i.get("aplicacao") == "um_por_vez" else i.get("camada", "comum")
-        linhas.append(f"{slug} {i['de']} {i['para']} {camada}")
+        linhas.append(f"{slug} {i['de']} {i['para']} {camada} {tipo}")
     return sha[:12], linhas
 
 

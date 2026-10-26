@@ -50,7 +50,7 @@ def invalido(l: dict, trecho: str, horas: float = 72) -> None:
 # 1. lock.py
 sha, linhas = lockmod.validar(lock(), AGORA, 72)
 checar(len(sha) == 12, "sha curto deveria ter 12 caracteres")
-checar(linhas == ["google-site-kit 1.188.0 1.189.0 acoplada", "kadence-blocks 3.7.12 3.7.12.1 critica"], f"linhas erradas: {linhas}")
+checar(linhas == ["google-site-kit 1.188.0 1.189.0 acoplada plugin", "kadence-blocks 3.7.12 3.7.12.1 critica plugin"], f"linhas erradas: {linhas}")
 invalido(lock(adulterar=True), "sha256 não confere")
 invalido(lock(resultado="regressao"), "não 'verde'")
 invalido(lock(gerado="2026-10-03T10:00:00"), "refaça o ensaio")
@@ -58,7 +58,13 @@ invalido(lock(itens=[]), "sem itens")
 invalido(lock(itens=[{"slug": "fluent-smtp", "tipo": "plugin", "de": "2.4.1", "para": "2.4.2", "camada": "critica", "aplicacao": "um_por_vez"}]), "não carrega")
 invalido(lock(itens=[{"slug": "../wp-content", "tipo": "plugin", "de": "1", "para": "2", "camada": "comum", "aplicacao": "lote"}]), "slug inválido")
 invalido(lock(itens=[{"slug": "", "tipo": "plugin", "de": "1", "para": "2", "camada": "comum", "aplicacao": "lote"}]), "slug inválido")
-invalido(lock(itens=[{"slug": "kadence", "tipo": "tema", "de": "1", "para": "2", "camada": "critica", "aplicacao": "um_por_vez"}]), "só plugins")
+_, linhas_tema = lockmod.validar(lock(itens=[{"slug": "kadence", "tipo": "tema", "de": "1.5.2", "para": "1.5.3", "camada": "critica", "aplicacao": "um_por_vez"}]), AGORA, 72)
+checar(linhas_tema == ["kadence 1.5.2 1.5.3 critica tema"], f"linha de tema errada: {linhas_tema}")
+invalido(lock(itens=[{"slug": "kadence", "tipo": "pacote", "de": "1", "para": "2", "camada": "critica", "aplicacao": "um_por_vez"}]), "só plugins e temas")
+invalido(lock(itens=[{"slug": "../themes", "tipo": "tema", "de": "1", "para": "2", "camada": "critica", "aplicacao": "um_por_vez"}]), "slug inválido")
+# O slug do tema não herda a exceção de ativação do plugin homônimo.
+_, linhas_hom = lockmod.validar(lock(itens=[{"slug": "fluent-smtp", "tipo": "tema", "de": "1", "para": "2", "camada": "comum", "aplicacao": "lote"}]), AGORA, 72)
+checar(linhas_hom == ["fluent-smtp 1 2 comum tema"], f"tema homônimo de exceção recusado: {linhas_hom}")
 invalido(lock(itens=[{"slug": "x", "tipo": "plugin", "de": "", "para": "2", "camada": "comum", "aplicacao": "lote"}]), "ausente")
 invalido(lock(itens=[{"slug": "x", "tipo": "plugin", "de": "1.0", "para": "2.0 critica", "camada": "comum", "aplicacao": "lote"}]), "inválida")
 invalido(lock(itens=[{"slug": "x", "tipo": "plugin", "de": "1.0", "para": "2.0\nwoocommerce 1 2 comum", "camada": "comum", "aplicacao": "lote"}]), "inválida")
@@ -69,7 +75,10 @@ invalido(lock(gerado="2026-10-07T18:55:00+00:00"), "fuso")
 
 # 2. smoke_producao.py com HTTP falso
 HOME_OK = ('<meta name="description" content="x"><script type="application/ld+json">{}</script>'
-           '<li class="mega-menu-item mega-menu-item-type-widget">a</li>')
+           '<li class="mega-menu-item mega-menu-item-type-widget">a</li>'
+           '<link rel="stylesheet" href="/wp-content/themes/kadence/assets/css/global.min.css?ver=1">'
+           '<body class="wp-theme-kadence wp-child-theme-kadence-child">'
+           '<footer id="colophon" class="site-footer" role="contentinfo"></footer>')
 
 
 def fake(home=HOME_OK, status_pagina=200):
@@ -90,6 +99,17 @@ checar("pagina /servico/a/" in r, "caminho extra não conferido")
 r = smoke_producao.smoke("https://x.com.br", fake(home='<meta name="description"><style>.mega-menu-item{}</style>'))
 checar(not r["home megamenu: itens"]["ok"], "megamenu só no CSS deveria ficar vermelho")
 checar(not r["home ld+json"]["ok"], "ld+json ausente deveria ficar vermelho")
+# Tema (#445): cada marcador, tirado sozinho da home, deixa o smoke vermelho; o CSS do
+# pai só citado no texto (script inline, por exemplo) não conta como carregado.
+for nome, trecho in (("tema: pai carregado", "themes/kadence/assets/css/global"),
+                     ("tema: classe do pai no body", "wp-theme-kadence "),
+                     ("tema: filho carregado", "wp-child-theme-kadence-child"),
+                     ("tema: rodapé", 'id="colophon" class="site-footer"')):
+    sem = HOME_OK.replace(trecho, "x")
+    r = smoke_producao.smoke("https://x.com.br", fake(home=sem))
+    checar(not r[f"home {nome}"]["ok"], f"sem {nome!r} o smoke deveria ficar vermelho")
+r = smoke_producao.smoke("https://x.com.br", fake(home=HOME_OK.replace('<link rel="stylesheet" href="/wp-content/themes/kadence/assets/css/global.min.css?ver=1">', '<script>var u="themes/kadence/assets/css/global";</script>')))
+checar(not r["home tema: pai carregado"]["ok"], "CSS do pai só citado em script não deveria contar")
 r = smoke_producao.smoke("https://x.com.br", lambda url: (0, "connection refused"))
 checar(not any(v["ok"] for v in r.values()), "site fora do ar deveria deixar todos vermelhos")
 

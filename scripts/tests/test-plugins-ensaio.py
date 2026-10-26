@@ -85,6 +85,36 @@ entram2 = [i["slug"] for i in pl2["itens"]]
 checar("megamenu" in entram2 and entram2[-1] == "woocommerce",
        f"--aceitar-major e --dispensar-quarentena deveriam liberar; woocommerce por último: {entram2}")
 
+# Tema (#445): a chave da API leva o prefixo "tema:", a data vem da API de temas e não há changelog.
+def api_tema(versao, lancado):
+    return {"version": versao, "last_updated": lancado, "sections": {"description": "Tema."}}
+
+
+def plano_tema(de, para, cache_tema, extra_plugins=None, extra_cache=None):
+    inv_t = {"plugins": extra_plugins or [], "temas": [item("kadence", de, para)]}
+    return plano.planejar(inv_t, POLITICA, {**(extra_cache or {}), **cache_tema}, HOJE, set(), set())
+
+
+pt = plano_tema("1.5.2", "1.5.3", {"tema:kadence": api_tema("1.5.3", "2026-09-27")})
+checar([(i["slug"], i["tipo"], i["camada"], i["quarentena"]) for i in pt["itens"]] == [("kadence", "tema", "critica", "cumprida")],
+       f"tema crítico lançado há mais de 7 dias deveria entrar: {pt}")
+checar(pt["itens"][0]["novidades"] is None and pt["itens"][0]["changelog"] == "sem as versões do intervalo",
+       f"tema não tem changelog na API: {pt['itens'][0]}")
+pt = plano_tema("1.5.2", "1.5.3", {"tema:kadence": api_tema("1.5.3", "2026-10-07")})
+checar(not pt["itens"] and "quarentena: lançada há 0 de 7" in pt["fora"][0]["motivo"], f"tema novo deveria cumprir quarentena: {pt}")
+pt = plano_tema("1.5.2", "1.5.3", {})
+checar(not pt["itens"] and "não verificável" in pt["fora"][0]["motivo"], f"tema sem API deveria ficar em quarentena não verificável: {pt}")
+pt = plano_tema("1.5.2", "2.0.0", {"tema:kadence": api_tema("2.0.0", "2026-09-01")})
+checar(not pt["itens"] and "--aceitar-major=kadence" in pt["fora"][0]["motivo"], f"major do tema deveria bloquear: {pt}")
+# Plugin e tema de mesmo slug não trocam de resposta da API.
+pt = plano_tema("1.5.2", "1.5.3", {"tema:kadence": api_tema("1.5.3", "2026-09-27")},
+                extra_plugins=[item("kadence", "9.0", "9.1")], extra_cache={"kadence": api("9.1", "2026-10-07")})
+checar(sorted((i["tipo"], i["quarentena"]) for i in pt["itens"]) == [("tema", "cumprida")]
+       and any(f["tipo"] == "plugin" for f in pt["fora"]),
+       f"plugin e tema homônimos não podem compartilhar a resposta da API: {pt}")
+checar(plano.chave_api("tema", "kadence") == "tema:kadence" and plano.chave_api("plugin", "kadence") == "kadence",
+       "chave_api errada")
+
 checar(plano.trecho_changelog(api("2", "x", "<p>sem versões</p>"), "1", "2") is None,
        "changelog sem as versões do intervalo deveria dar None, não lista vazia")
 checar(plano.data_lancamento(api("11.2.1", "2026-10-07"), "11.2.0") is None,

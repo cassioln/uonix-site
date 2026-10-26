@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Job que roda NO SERVIDOR de produção para aplicar um lock de plugins (#393).
+# Job que roda NO SERVIDOR de produção para aplicar um lock de plugins e temas (#393, #445).
 #
 # Enviado pelo `atualizar.sh aplicar-producao` e executado sob nohup, desacoplado
 # da conexão SSH: se ela cair, o job termina sozinho e o resultado fica em
@@ -7,7 +7,8 @@
 # à conexão morreu no meio e deixou o site em manutenção.
 #
 # Uso: remoto-aplicar.sh DOCROOT PHP WPCLI BACKUP_DIR LISTA
-#   LISTA: uma linha por item, "slug de para camada", na ordem do lock.
+#   LISTA: uma linha por item, "slug de para camada tipo", na ordem do lock. O
+#          tipo é "plugin" ou "tema"; sem ele, vale "plugin".
 #
 # Etapas: os itens que não são da camada crítica formam um lote; cada crítico é
 # uma etapa sozinho. Depois de cada etapa, o site é conferido. Se uma etapa
@@ -19,7 +20,8 @@
 #   20  parou numa etapa, restaurou e o site ficou VERDE de novo;
 #   30  preflight recusou, nada alterado;
 #   50  restauração falhou ou o site seguiu vermelho depois de restaurar tudo:
-#       INTERVENÇÃO HUMANA. Pastas em <backup>/plugin-<slug>.tar.gz; banco em
+#       INTERVENÇÃO HUMANA. Pastas em <backup>/plugin-<slug>.tar.gz (ou
+#       tema-<slug>.tar.gz); banco em
 #       <backup>/db-prod-*.sql.gz (as migrações de banco não são desfeitas);
 #   143 interrompido por sinal (a manutenção é desligada antes de sair).
 # SIGKILL não pode ser tratado: o status fica ausente e o .maintenance pode
@@ -43,6 +45,18 @@ cd "$DOCROOT" || exit 30
 
 # stdin fechado: os comandos rodam dentro de laços que leem a LISTA.
 wp() { "$PHP" -d disable_functions= "$WPCLI" --path="$DOCROOT" "$@" </dev/null; }
+
+# Tipo do item (campo 5 da LISTA; ausente = plugin). Daí saem o comando do
+# WP-CLI, a pasta e o prefixo do tar de backup (#445).
+tipo_de() {
+  awk -v s="$1" '$1 == s { print ($5 == "tema" ? "tema" : "plugin"); exit }' <<< "$LISTA"
+}
+pasta_de() { [ "$(tipo_de "$1")" = tema ] && echo "wp-content/themes/$1" || echo "wp-content/plugins/$1"; }
+tar_de() { echo "$BK/$(tipo_de "$1")-$1.tar.gz"; }
+wp_item() {  # wp_item <slug> <subcomando> [args...]: wp plugin|theme <subcomando> <slug> ...
+  local slug="$1" sub="$2"; shift 2
+  if [ "$(tipo_de "$slug")" = tema ]; then wp theme "$sub" "$slug" "$@"; else wp plugin "$sub" "$slug" "$@"; fi
+}
 
 em_manutencao=0
 # shellcheck disable=SC2329  # chamada pelo trap abaixo
@@ -73,23 +87,25 @@ checar_site() {
 
 # Restaura sem apagar nada: a pasta atual vai para dentro do backup, e a do tar
 # é extraída à parte e movida para o lugar. Slug vazio é recusado, porque
-# "wp-content/plugins/" sozinho seria a pasta de TODOS os plugins.
+# "wp-content/plugins/" sozinho seria a pasta de TODOS os plugins (ou de todos
+# os temas).
 restaurar() {
-  local slug="$1" destino
+  local slug="$1" destino tar pasta
+  tar="$(tar_de "$slug")"; pasta="$(pasta_de "$slug")"
   case "$slug" in ''|*/*|.|..) echo "  RESTAURAÇÃO RECUSADA: slug inválido '$slug'"; return 1 ;; esac
-  [ -s "$BK/plugin-$slug.tar.gz" ] || { echo "  RESTAURAÇÃO FALHOU: sem backup de $slug"; return 1; }
+  [ -s "$tar" ] || { echo "  RESTAURAÇÃO FALHOU: sem backup de $slug"; return 1; }
   echo "  RESTAURANDO pasta de $slug"
-  if ! mkdir -p "$BK/restaura-$slug" || ! tar -xzf "$BK/plugin-$slug.tar.gz" -C "$BK/restaura-$slug"; then
+  if ! mkdir -p "$BK/restaura-$slug" || ! tar -xzf "$tar" -C "$BK/restaura-$slug"; then
     echo "  RESTAURAÇÃO FALHOU: tar de $slug ilegível"
     return 1
   fi
   [ -d "$BK/restaura-$slug/$slug" ] || { echo "  RESTAURAÇÃO FALHOU: tar sem a pasta $slug"; return 1; }
-  if [ -e "wp-content/plugins/$slug" ]; then
+  if [ -e "$pasta" ]; then
     destino="$BK/descartado-$slug"
     [ -e "$destino" ] && destino="$BK/descartado-$slug-$(date +%s)"
-    mv "wp-content/plugins/$slug" "$destino" || { echo "  RESTAURAÇÃO FALHOU: não moveu a pasta atual de $slug"; return 1; }
+    mv "$pasta" "$destino" || { echo "  RESTAURAÇÃO FALHOU: não moveu a pasta atual de $slug"; return 1; }
   fi
-  mv "$BK/restaura-$slug/$slug" "wp-content/plugins/$slug" \
+  mv "$BK/restaura-$slug/$slug" "$pasta" \
     || { echo "  RESTAURAÇÃO FALHOU: não pôs a pasta de $slug no lugar"; return 1; }
 }
 
@@ -104,21 +120,21 @@ restaurar_lista() {
 
 echo "== preflight: versões de origem"
 drift=0
-while read -r slug de para camada; do
+while read -r slug de para camada _; do
   case "$slug" in ''|*/*|.|..) echo "  slug inválido na lista: '$slug'"; drift=1; continue ;; esac
-  atual=$(wp plugin get "$slug" --field=version 2>/dev/null)
+  atual=$(wp_item "$slug" get --field=version 2>/dev/null)
   [ "$atual" = "$de" ] || { echo "  DRIFT $slug: produção=${atual:-ausente} lock=$de"; drift=1; }
 done <<< "$LISTA"
 [ "$drift" = 0 ] || { echo "ABORTADO: produção divergiu do ensaio; nada foi alterado"; exit 30; }
 echo "  sem drift"
 checar_site || { echo "ABORTADO: site já falhava antes; nada foi alterado"; exit 30; }
 
-echo "== backup das pastas de plugin em $BK"
+echo "== backup das pastas de plugin e tema em $BK"
 while read -r slug _; do
-  tar -czf "$BK/plugin-$slug.tar.gz" -C wp-content/plugins "$slug" \
+  tar -czf "$(tar_de "$slug")" -C "$(dirname "$(pasta_de "$slug")")" "$slug" \
     || { echo "ABORTADO: tar de $slug falhou; nada foi alterado"; exit 30; }
 done <<< "$LISTA"
-echo "  pastas salvas: $(find "$BK" -maxdepth 1 -name 'plugin-*.tar.gz' | wc -l | tr -d ' ')"
+echo "  pastas salvas: $(find "$BK" -maxdepth 1 \( -name 'plugin-*.tar.gz' -o -name 'tema-*.tar.gz' \) | wc -l | tr -d ' ')"
 
 # Etapas: o lote (camadas não críticas) primeiro, depois um crítico por etapa.
 etapas=()
@@ -133,8 +149,8 @@ limpar_cache() {
 
 aplicar_item() {  # aplicar_item slug para -> 0 ok
   local slug="$1" para="$2" instalada
-  wp plugin update "$slug" --version="$para" || { echo "  update de $slug falhou"; return 1; }
-  instalada=$(wp plugin get "$slug" --field=version 2>/dev/null)
+  wp_item "$slug" update --version="$para" || { echo "  update de $slug falhou"; return 1; }
+  instalada=$(wp_item "$slug" get --field=version 2>/dev/null)
   [ "$instalada" = "$para" ] || { echo "  versão instalada ${instalada:-nenhuma} != lock $para"; return 1; }
   if [ "$slug" = woocommerce ]; then
     wp wc update || { echo "  wp wc update falhou"; return 1; }
@@ -152,7 +168,7 @@ aplicados=()   # todos os slugs tocados nesta execução, na ordem
 falhou=""
 for etapa in "${etapas[@]}"; do
   da_etapa=()
-  while read -r slug de para camada; do
+  while read -r slug de para camada _; do
     echo "== $slug $de -> $para ($camada)"
     da_etapa+=("$slug")
     aplicados+=("$slug")
@@ -208,7 +224,7 @@ if [ -n "$falhou" ]; then
 fi
 
 echo "== versões finais"
-while read -r slug _; do printf '  %s %s\n' "$slug" "$(wp plugin get "$slug" --field=version 2>/dev/null)"; done <<< "$LISTA"
+while read -r slug _; do printf '  %s %s\n' "$slug" "$(wp_item "$slug" get --field=version 2>/dev/null)"; done <<< "$LISTA"
 case "$resultado" in
   0) echo "CONCLUÍDO (backup em $BK)" ;;
   20) echo "PARADO EM: $falhou; restaurado e site verde (backup em $BK)" ;;
