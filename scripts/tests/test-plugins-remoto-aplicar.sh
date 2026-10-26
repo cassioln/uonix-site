@@ -252,6 +252,16 @@ rodar $'b 1.0 2.0 critica' PATH="$TMP_DIR/fake-tar:$PATH" FAKE_TAR_FALHAS=99 FAK
 [ "$rc" = 30 ] && [ "$(cat "$ctr")" = 1 ] || fail "tar com saída 2 deveria abortar na 1ª tentativa (saiu $rc, tentou $(cat "$ctr"))"
 [ ! -e "$doc/.maintenance" ] && [ "$(versao b)" = 1.0 ] || fail "tar com erro: algo foi alterado"
 
+# Vários itens, repetição só no 1º tar: o 2º é salvo de primeira, e a restauração depois de um
+# smoke vermelho usa o backup obtido na repetição (a LISTA não pode ser consumida pelo tar)
+preparar tarmulti; ctr="$TMP_DIR/ctr-multi"; : > "$ctr"
+rodar "$LISTA" PATH="$TMP_DIR/fake-tar:$PATH" FAKE_TAR_FALHAS=1 FAKE_TAR_CONTADOR="$ctr" TAR_ESPERA=0 \
+  UONIX_SMOKE_CMD="! grep -qx 2.0 $doc/wp-content/plugins/b/VERSION"
+[ "$rc" = 20 ] && [ "$(versao a)" = 1.1 ] && [ "$(versao b)" = 1.0 ] \
+  || fail "vários itens com repetição: smoke vermelho em b deveria restaurar b (saiu $rc, a=$(versao a) b=$(versao b)): $(cat "$bk.log")"
+[ -s "$bk/plugin-a.tar.gz" ] && [ -s "$bk/plugin-b.tar.gz" ] || fail "vários itens: os dois backups deveriam existir"
+[ "$(grep -c 'arquivo mudou durante a leitura (tentativa' "$bk.log")" = 1 ] || fail "vários itens: deveria haver uma só repetição"
+
 # tar que "termina bem" mas deixa um arquivo ilegível: o backup não pode ser aceito
 cat > "$TMP_DIR/fake-tar/tar" <<TAR
 #!/usr/bin/env bash

@@ -69,12 +69,15 @@ salvar_pasta() {
   local slug="$1" destino tentativa=1 rc=0 max="${TAR_TENTATIVAS:-3}"
   destino="$(tar_de "$slug")"
   while :; do
-    tar -czf "$destino" -C "$(dirname "$(pasta_de "$slug")")" "$slug"; rc=$?
+    # stdin fechado, como no wp(): o laço que chama esta função lê a LISTA.
+    tar -czf "$destino" -C "$(dirname "$(pasta_de "$slug")")" "$slug" </dev/null; rc=$?
     if [ "$rc" = 0 ]; then
-      tar -tzf "$destino" >/dev/null 2>&1 && return 0
+      # Só o stdout vai para o lixo: o motivo de um arquivo ilegível fica no log do job.
+      tar -tzf "$destino" </dev/null >/dev/null && return 0
       echo "  tar de $slug ficou ilegível"; return 1
     fi
-    [ "$rc" = 1 ] && [ "$tentativa" -lt "$max" ] || { echo "  tar de $slug saiu $rc (tentativa $tentativa de $max)"; return 1; }
+    if [ "$rc" != 1 ]; then echo "  tar de $slug saiu $rc: erro, sem repetir"; return 1; fi
+    if [ "$tentativa" -ge "$max" ]; then echo "  tar de $slug: arquivo mudou durante a leitura em todas as $max tentativas"; return 1; fi
     echo "  tar de $slug: arquivo mudou durante a leitura (tentativa $tentativa de $max); repetindo em ${TAR_ESPERA:-5}s"
     tentativa=$((tentativa + 1))
     sleep "${TAR_ESPERA:-5}"
