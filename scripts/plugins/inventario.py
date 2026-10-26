@@ -33,7 +33,11 @@ IGNORADOS = {"must-use", "dropin"}
 ORDEM = ["critica", "acoplada", "comum", "decisao_pendente", "propria", "nucleo"]
 
 
-def maior(versao: str) -> int | None:
+def maior(versao: str, tipo: str = "plugin") -> int | tuple[int, int] | None:
+    """Major da política: o primeiro número; no núcleo, a série x.y (7.1 -> 7.2) (#448)."""
+    if tipo == "nucleo":
+        m = re.match(r"\s*v?(\d+)(?:\.(\d+))?", versao or "")
+        return (int(m.group(1)), int(m.group(2) or 0)) if m else None
     m = re.match(r"\s*v?(\d+)", versao or "")
     return int(m.group(1)) if m else None
 
@@ -68,7 +72,7 @@ def relatorio(inventario: dict, politica: dict) -> tuple[list[str], int]:
             if item.get("update") not in {"available", "true", True}:
                 continue
             nota = ""
-            if maior(de) is not None and maior(para) is not None and maior(para) > maior(de):
+            if maior(de, tipo) is not None and maior(para, tipo) is not None and maior(para, tipo) > maior(de, tipo):
                 nota = " **MAJOR**"
                 if camadas[camada]["major"] == "bloqueia":
                     bandeiras.append(f"major em camada {camada}: {nome} {de} -> {para} (exige decisão)")
@@ -84,7 +88,8 @@ def relatorio(inventario: dict, politica: dict) -> tuple[list[str], int]:
         linhas.extend(itens or ["- nada pendente"])
         linhas.append("")
 
-    ausentes = [f"{chave[:-1]} {nome}" for chave in ("plugins", "temas")
+    rotulo = {"plugins": "plugin", "temas": "tema", "nucleo": "nucleo"}
+    ausentes = [f"{rotulo[chave]} {nome}" for chave in ("plugins", "temas", "nucleo")
                 for nome in politica.get(chave, {}) if (chave, nome) not in instalados]
     if ausentes:
         linhas.append("## Na política e ausentes da produção")

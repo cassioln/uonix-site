@@ -54,8 +54,9 @@ def separar(texto: str) -> dict:
 def _nucleo(partes: dict[str, list[str]]) -> dict | None:
     """Item do núcleo no mesmo formato de `wp plugin list`, ou None se a leitura não o trouxe.
 
-    Das atualizações, vale a menor versão da MESMA série (a menor, "minor") mais nova; só se
-    não houver nenhuma, a major mais nova (que a política bloqueia)."""
+    Das ofertas, vale a mais nova da MESMA série x.y da instalada (7.1.3 -> 7.1.5); só se não
+    houver nenhuma, a mais nova de todas (7.2), que a política bloqueia. A série é calculada
+    aqui, e não lida do `update_type` do WP-CLI, cujo vocabulário não foi medido."""
     versao = "\n".join(partes.get("NUCLEO_VERSAO", [])).strip()
     if not versao:
         return None
@@ -72,9 +73,11 @@ def _nucleo(partes: dict[str, list[str]]) -> dict | None:
     def chave(o: dict) -> tuple[int, ...]:
         return tuple(int(x) for x in re.findall(r"\d+", str(o.get("version", ""))))
 
-    validas = [o for o in ofertas if isinstance(o, dict) and re.fullmatch(r"\d+(?:\.\d+){1,3}", str(o.get("version", "")))]
-    menores = [o for o in validas if o.get("update_type") == "minor"]
-    escolhida = max(menores or validas, key=chave, default=None)
+    validas = [o for o in ofertas if isinstance(o, dict) and re.fullmatch(r"\d+(?:\.\d+){1,3}", str(o.get("version", "")))
+               and chave(o) > chave({"version": versao})]
+    serie = chave({"version": versao})[:2]
+    da_serie = [o for o in validas if chave(o)[:2] == serie]
+    escolhida = max(da_serie or validas, key=chave, default=None)
     return {"name": "wordpress", "status": "active", "version": versao,
             "update": "available" if escolhida else "none",
             "update_version": str(escolhida["version"]) if escolhida else "", "auto_update": "off"}

@@ -85,6 +85,23 @@ entram2 = [i["slug"] for i in pl2["itens"]]
 checar("megamenu" in entram2 and entram2[-1] == "woocommerce",
        f"--aceitar-major e --dispensar-quarentena deveriam liberar; woocommerce por último: {entram2}")
 
+# Núcleo (#448): sem API, sem quarentena; entra no plano na frente de nada e por último; major bloqueia.
+def plano_nucleo(de, para, extra=None, aceitar=frozenset()):
+    inv_n = {"plugins": extra or [], "temas": [], "nucleo": [item("wordpress", de, para)]}
+    return plano.planejar(inv_n, POLITICA, {}, HOJE, set(aceitar), set())
+
+
+pn = plano_nucleo("7.1.3", "7.1.4", extra=[item("loco-translate", "2.8.9", "2.9.0")])
+checar(pn["itens"][-1]["slug"] == "wordpress" and pn["itens"][-1]["tipo"] == "nucleo" and pn["itens"][-1]["camada"] == "nucleo",
+       f"o núcleo deveria entrar por último: {pn['itens']}")
+checar(pn["itens"][-1]["quarentena"] == "não se aplica" and pn["itens"][-1]["aplicacao"] == "um_por_vez", f"núcleo sem quarentena e um por vez: {pn['itens'][-1]}")
+pn = plano_nucleo("7.1.3", "7.2")
+checar(not pn["itens"] and "--aceitar-major=wordpress" in pn["fora"][0]["motivo"], f"major do núcleo deveria bloquear: {pn}")
+pn = plano_nucleo("7.1.3", "7.2", aceitar={"wordpress"})
+checar([i["slug"] for i in pn["itens"]] == ["wordpress"], f"--aceitar-major=wordpress deveria liberar: {pn}")
+checar(plano.chave_api("nucleo", "wordpress") == "nucleo:wordpress" and plano.buscar_api("wordpress", "nucleo") is None,
+       "o núcleo nunca consulta a API (o slug 'wordpress' dos plugins é outro projeto)")
+
 # Tema (#445): a chave da API leva o prefixo "tema:", a data vem da API de temas e não há changelog.
 def api_tema(versao, lancado):
     return {"version": versao, "last_updated": lancado, "sections": {"description": "Tema."}}
@@ -532,6 +549,30 @@ cenarios = {
     "lista de plugins vazia": ("@@PLUGINS\n[]\n@@TEMAS\n[]\n@@FIM\n", 1),
     "saída vazia": ("", 1),
 }
+# Núcleo (#448): marcadores opcionais; a menor versão da série vence a major; saída ruim não vira inventário.
+NUC = lambda v, o: f"@@PLUGINS\n{PLUG}\n@@TEMAS\n{TEMA}\n@@NUCLEO_VERSAO\n{v}\n@@NUCLEO_ATUALIZACOES\n{o}\n@@FIM\n"
+sys.path.insert(0, str(RAIZ / "scripts/plugins"))
+import ler_saida  # noqa: E402
+
+# update_type propositalmente trocado: a série vem das versões, não do rótulo do WP-CLI
+n = ler_saida.separar(NUC("7.1.3", '[{"version":"7.1.4","update_type":"major"},{"version":"7.2","update_type":"minor"},{"version":"7.1.5","update_type":"patch"}]'))["nucleo"][0]
+checar((n["name"], n["version"], n["update"], n["update_version"]) == ("wordpress", "7.1.3", "available", "7.1.5"),
+       f"deveria escolher a menor versão da série mais nova (7.1.5): {n}")
+n = ler_saida.separar(NUC("7.1.3", '[{"version":"7.2","update_type":"major"}]'))["nucleo"][0]
+checar(n["update"] == "available" and n["update_version"] == "7.2", f"sem menor, a major é a oferta (a política a bloqueia): {n}")
+n = ler_saida.separar(NUC("7.1.3", '[{"version":"7.1.3"},{"version":"7.0.9"}]'))["nucleo"][0]
+checar(n["update"] == "none", f"oferta igual ou mais antiga que a instalada não é atualização: {n}")
+n = ler_saida.separar(NUC("7.1.3", ""))["nucleo"][0]
+checar(n["update"] == "none" and n["update_version"] == "", f"sem oferta (saída vazia do check-update): {n}")
+checar("nucleo" not in ler_saida.separar(f"@@PLUGINS\n{PLUG}\n@@TEMAS\n{TEMA}\n@@FIM\n"), "sem os marcadores do núcleo, o inventário não tem 'nucleo'")
+checar("nucleo" not in ler_saida.separar(NUC("", "[]")), "versão do núcleo vazia (core version falhou): sem 'nucleo'")
+for ruim, motivo in ((NUC("7.1.3; rm -rf /", "[]"), "versão com lixo"), (NUC("7.1.3", "{nao-json"), "JSON ruim"), (NUC("7.1.3", '{"a":1}'), "objeto no lugar de lista")):
+    try:
+        ler_saida.separar(ruim)
+        falhas.append(f"ler_saida: {motivo} deveria ser recusado")
+    except ler_saida.SaidaInvalida:
+        pass
+
 with tempfile.TemporaryDirectory() as tmp:
     for nome, (texto, esperado) in cenarios.items():
         destino = pathlib.Path(tmp) / f"{abs(hash(nome))}.json"

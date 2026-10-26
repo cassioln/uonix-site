@@ -11,6 +11,17 @@ O tema pai `kadence` (camada crítica) passa pela mesma esteira, na mesma ordem 
 - `kadence-child` (camada `propria`) e `twentytwentythree` (`decisao_pendente`) nunca são aplicados.
 - Restaurar o tema ativo move a pasta atual para `descartado-<slug>` e devolve a do tar, como nos plugins. O smoke roda em seguida.
 
+## Núcleo do WordPress (#448)
+
+O núcleo (`wordpress`, item único da camada `nucleo`) passa pela mesma esteira, sempre **por último** e sozinho.
+
+- **Leitura:** `wp core version` e `wp core check-update` entram na mesma conexão SSH do inventário. Das ofertas vale a **mais nova da mesma série x.y** (7.1.3 → 7.1.5); só sem nenhuma, a de série nova (7.2), que fica **bloqueada** (`--aceitar-major=wordpress`). A série é calculada das versões, não do `update_type` do WP-CLI.
+- **Sem quarentena:** nem a API de plugins nem a de temas conhecem o núcleo, então não há data de lançamento. O WordPress já aplica sozinho as versões menores de segurança; esta via existe para que a aplicação passe por ensaio, backup e smoke.
+- **Ensaio:** o núcleo local é igualado ao de produção (`wp core download --force --skip-content`), depois atualizado com `wp core update --version=<lock> --locale=<do site>`, `wp core update-db` e `wp core verify-checksums`. O smoke ganhou o check "núcleo: arquivos íntegros (checksums)".
+- **Job de produção:** o backup é `nucleo-wordpress.tar.gz` com `wp-admin/`, `wp-includes/` e os arquivos do núcleo na raiz. **Nunca** leva `wp-config.php`, `.htaccess` nem `wp-content/`. A restauração devolve só esses caminhos e move o que estava no lugar para `descartado-wordpress`. A atualização usa `--locale` do site (sem ele, um site pt_BR viraria en_US).
+- **O banco não volta:** `update-db` não é desfeito pela restauração. O dump do deploy (`db-prod-<data>.sql.gz`) cobre isso.
+- **E-mail:** o núcleo aparece como "WordPress" e aponta para `wordpress.org/news/category/releases/`.
+
 ## Regra de ouro
 
 **O que vai para produção é exatamente o que foi ensaiado no local.** Atualiza-se para a versão ensaiada (`--version=<v>`), nunca "para a última".

@@ -136,14 +136,24 @@ def versao(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in re.findall(r"\d+", v or ""))
 
 
-def maior(v: str) -> int | None:
+def maior(v: str, tipo: str = "plugin") -> int | tuple[int, int] | None:
+    """O que a política chama de "major". No núcleo é a série x.y (7.1 -> 7.2 muda o banco e traz
+    recursos; 7.1.3 -> 7.1.4 é correção). Em plugin e tema, o primeiro número (#448)."""
     partes = versao(v)
-    return partes[0] if partes else None
+    if not partes:
+        return None
+    return (partes[0], partes[1] if len(partes) > 1 else 0) if tipo == "nucleo" else partes[0]
 
 
 def chave_api(tipo: str, slug: str) -> str:
     """Chave do item no mapa da API: plugin, tema e núcleo podem ter o mesmo slug, então só o plugin vai sem prefixo."""
     return slug if tipo == "plugin" else f"{tipo}:{slug}"
+
+
+def _subiu_major(de: str, para: str, tipo: str) -> bool:
+    """O destino tem major maior que a origem. Sem versão legível em um dos lados, não há major."""
+    a, b = maior(de, tipo), maior(para, tipo)
+    return a is not None and b is not None and b > a
 
 
 def buscar_api(slug: str, tipo: str = "plugin") -> dict | None:
@@ -257,7 +267,7 @@ def planejar(inventario: dict, politica: dict, api: dict, hoje: dt.date,
             # decisão; as novidades são o trecho inteiro só da versão nova, para o cliente.
             base["novidades"] = trecho_changelog(info, de, para, so_para=True, por_item=True) if info else None
 
-            if (maior(para) or 0) > (maior(de) or 0) and camadas[camada]["major"] == "bloqueia" \
+            if _subiu_major(de, para, tipo) and camadas[camada]["major"] == "bloqueia" \
                     and nome not in aceitar_major:
                 fora.append({**base, "motivo": f"major na camada {camada}: exige --aceitar-major={nome}"})
                 continue
