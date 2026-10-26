@@ -299,6 +299,27 @@ for falso in ("Fixed layout of the XSS filter toggle", "Fix: typo in CSRF protec
               "Prevent duplicate XSS filter rules", "Integrated with Patchstack for vulnerability data"):
     checar(not plano.SEGURANCA.search(falso), f"falso positivo de segurança (revisão #436): {falso}")
 
+# #437: residuais da v2. Falsos positivos (dispensariam a quarentena): classe forte diante de recurso de produto de
+# segurança, e qualificador em frase de recurso. Falsos negativos (mantêm a quarentena): a falha é do próprio
+# recurso, ou a classe aparece também fora do nome do recurso.
+for falso in ("SQL injection protection setting", "Added SQL injection firewall rules", "Cross-site scripting filter toggle",
+              "New privilege escalation detection module", "Arbitrary file upload extension list setting",
+              "Unauthenticated visitors now see the vulnerability notice", "Avoid duplicate CSRF notices",
+              "Added escaping toggle for XSS", "Blocked IPs list now shows XSS attempts",
+              # vizinhos que a regra nova não pode liberar
+              "Added object injection scanner", "New SQL injection detection rules screen", "Setting for CSRF",
+              "Added a toggle for the XSS filter", "Option to enable the privilege escalation module"):
+    checar(not plano.SEGURANCA.search(falso), f"falso positivo de segurança (#437): {falso}")
+for verdadeiro in ("Fixed CSRF token validation", "Fixed missing CSRF token check", "Fixed CSRF token not being verified",
+                   "Fixed XSS in the XSS filter settings", "Fixed vulnerability report: XSS in widget",
+                   "Fixed CSRF protection missing on settings save", "Fixed open redirect protection",
+                   # a classe forte com verbo de correção continua valendo, mesmo diante de recurso
+                   "Fixed SQL injection in the firewall rules importer", "Patched privilege escalation in the settings page",
+                   "Fixed arbitrary file upload via the extension list", "Fixed CSRF token validation bypass",
+                   "Fixed XSS in the widget title and in the XSS filter settings"):
+    checar(bool(plano.SEGURANCA.search(verdadeiro)), f"aviso de segurança real não reconhecido (#437): {verdadeiro}")
+# a decisão continua a mesma para o que já era negativo ou positivo antes (conjunto fechado do #425/#436, acima)
+
 # #425: pré-release colado abre seção e conta como a versão numérica; 1.2.1000 é versão, não data.
 for nome, texto, para, esperado in (
     ("pré-release colado", "<p>= 1.2.5a =</p><p>Security: fix</p><p>= 1.2.3 =</p><p>old</p>", "1.2.5", ["Security: fix"]),
