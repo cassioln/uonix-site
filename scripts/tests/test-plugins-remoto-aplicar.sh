@@ -221,4 +221,56 @@ rodar "$LISTA_TEMA" UONIX_SMOKE_CMD="if grep -qx 2.0 $doc/wp-content/themes/t/VE
 preparar semtipo; rodar "$LISTA" UONIX_SMOKE_CMD=true
 [ "$rc" = 0 ] && [ "$(versao b)" = 2.0 ] && [ -s "$bk/plugin-b.tar.gz" ] || fail "lista sem tipo deveria valer como plugin (saiu $rc)"
 
+# 23. tar que sai com 1 (arquivo mudou durante a leitura) repete e passa; com 2 aborta na hora (#447)
+mkdir -p "$TMP_DIR/fake-tar"
+REAL_TAR="$(command -v tar)"
+cat > "$TMP_DIR/fake-tar/tar" <<TAR
+#!/usr/bin/env bash
+# Só o tar de backup (-czf) é falho; o resto (-tzf, -xzf) vai para o tar de verdade.
+if [ "\$1" = -czf ] && [ -n "\${FAKE_TAR_FALHAS:-}" ]; then
+  n=\$(( \$(cat "\$FAKE_TAR_CONTADOR" 2>/dev/null || echo 0) + 1 )); printf '%s\n' "\$n" > "\$FAKE_TAR_CONTADOR"
+  if [ "\$n" -le "\$FAKE_TAR_FALHAS" ]; then "$REAL_TAR" "\$@"; echo "tar: x: file changed as we read it" >&2; exit "\${FAKE_TAR_SAIDA:-1}"; fi
+fi
+exec "$REAL_TAR" "\$@"
+TAR
+chmod +x "$TMP_DIR/fake-tar/tar"
+
+preparar tarrepete; ctr="$TMP_DIR/ctr-repete"; : > "$ctr"
+rodar $'b 1.0 2.0 critica' PATH="$TMP_DIR/fake-tar:$PATH" FAKE_TAR_FALHAS=2 FAKE_TAR_CONTADOR="$ctr" TAR_ESPERA=0 UONIX_SMOKE_CMD=true
+[ "$rc" = 0 ] && [ "$(versao b)" = 2.0 ] || fail "tar que falha 2x com saída 1 deveria passar na 3ª (saiu $rc): $(cat "$bk.log")"
+[ "$(grep -c 'arquivo mudou durante a leitura' "$bk.log")" = 2 ] || fail "tar: deveria registrar 2 repetições: $(cat "$bk.log")"
+tar -tzf "$bk/plugin-b.tar.gz" >/dev/null || fail "tar repetido: backup ilegível"
+
+preparar tarsempre; ctr="$TMP_DIR/ctr-sempre"; : > "$ctr"
+rodar $'b 1.0 2.0 critica' PATH="$TMP_DIR/fake-tar:$PATH" FAKE_TAR_FALHAS=99 FAKE_TAR_CONTADOR="$ctr" TAR_ESPERA=0 UONIX_SMOKE_CMD=true
+[ "$rc" = 30 ] && [ "$(versao b)" = 1.0 ] || fail "tar que sempre sai 1 deveria abortar com 30 sem alterar nada (saiu $rc)"
+[ "$(cat "$ctr")" = 3 ] || fail "tar: deveria tentar 3 vezes antes de abortar (tentou $(cat "$ctr"))"
+grep -q 'ABORTADO: tar de b falhou' "$bk.log" || fail "tar: relatório sem o aborto"
+
+preparar tarerro; ctr="$TMP_DIR/ctr-erro"; : > "$ctr"
+rodar $'b 1.0 2.0 critica' PATH="$TMP_DIR/fake-tar:$PATH" FAKE_TAR_FALHAS=99 FAKE_TAR_SAIDA=2 FAKE_TAR_CONTADOR="$ctr" TAR_ESPERA=0 UONIX_SMOKE_CMD=true
+[ "$rc" = 30 ] && [ "$(cat "$ctr")" = 1 ] || fail "tar com saída 2 deveria abortar na 1ª tentativa (saiu $rc, tentou $(cat "$ctr"))"
+[ ! -e "$doc/.maintenance" ] && [ "$(versao b)" = 1.0 ] || fail "tar com erro: algo foi alterado"
+
+# Vários itens, repetição só no 1º tar: o 2º é salvo de primeira, e a restauração depois de um
+# smoke vermelho usa o backup obtido na repetição (a LISTA não pode ser consumida pelo tar)
+preparar tarmulti; ctr="$TMP_DIR/ctr-multi"; : > "$ctr"
+rodar "$LISTA" PATH="$TMP_DIR/fake-tar:$PATH" FAKE_TAR_FALHAS=1 FAKE_TAR_CONTADOR="$ctr" TAR_ESPERA=0 \
+  UONIX_SMOKE_CMD="! grep -qx 2.0 $doc/wp-content/plugins/b/VERSION"
+[ "$rc" = 20 ] && [ "$(versao a)" = 1.1 ] && [ "$(versao b)" = 1.0 ] \
+  || fail "vários itens com repetição: smoke vermelho em b deveria restaurar b (saiu $rc, a=$(versao a) b=$(versao b)): $(cat "$bk.log")"
+[ -s "$bk/plugin-a.tar.gz" ] && [ -s "$bk/plugin-b.tar.gz" ] || fail "vários itens: os dois backups deveriam existir"
+[ "$(grep -c 'arquivo mudou durante a leitura (tentativa' "$bk.log")" = 1 ] || fail "vários itens: deveria haver uma só repetição"
+
+# tar que "termina bem" mas deixa um arquivo ilegível: o backup não pode ser aceito
+cat > "$TMP_DIR/fake-tar/tar" <<TAR
+#!/usr/bin/env bash
+if [ "\$1" = -czf ]; then printf 'lixo' > "\$2"; exit 0; fi
+exec "$REAL_TAR" "\$@"
+TAR
+preparar tarilegivel
+rodar $'b 1.0 2.0 critica' PATH="$TMP_DIR/fake-tar:$PATH" TAR_ESPERA=0 UONIX_SMOKE_CMD=true
+[ "$rc" = 30 ] && [ "$(versao b)" = 1.0 ] || fail "backup ilegível deveria abortar com 30 (saiu $rc)"
+grep -q 'ficou ilegível' "$bk.log" || fail "backup ilegível sem o aviso"
+
 printf 'OK: job remoto aplica, recusa drift, restaura sem apagar e nunca deixa manutenção ligada\n'
