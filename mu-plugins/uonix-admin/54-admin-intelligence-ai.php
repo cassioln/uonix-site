@@ -814,6 +814,19 @@ if ( ! function_exists( 'uonix_intelligence_ai_suggestion_for' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_site_time' ) ) {
+	/**
+	 * Um instante no fuso do site, que é o que o restante da tela usa (`wp_date`). Sem `wp_date`, cai
+	 * em UTC e diz "(UTC)": o rótulo só aparece quando o fuso do site não é conhecido (#386).
+	 *
+	 * @param int    $timestamp Instante.
+	 * @param string $formato   Formato de `date()`.
+	 */
+	function uonix_intelligence_site_time( $timestamp, $formato ) {
+		return function_exists( 'wp_date' ) ? (string) wp_date( $formato, (int) $timestamp ) : gmdate( $formato, (int) $timestamp ) . ' (UTC)';
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_ai_state_message' ) ) {
 	/**
 	 * Texto para o operador de cada estado sem sugestão. Estado desconhecido cai em
@@ -843,7 +856,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_state_message' ) ) {
 		$texto = isset( $mapa[ $status ] ) ? $mapa[ $status ] : $mapa['pending'];
 		$volta = isset( $detalhe['retry_at'] ) && is_string( $detalhe['retry_at'] ) ? strtotime( $detalhe['retry_at'] ) : false;
 		if ( false !== $volta && ( 'quota_exhausted' === $status || ( 'deferred' === $status && 'quota_exhausted' === $motivo ) ) ) {
-			$texto .= ' A cota renova por volta de ' . gmdate( 'd/m H:i', $volta ) . ' (UTC).';
+			$texto .= ' A cota renova por volta de ' . uonix_intelligence_site_time( $volta, 'd/m H:i' ) . '.';
 		}
 
 		return $texto;

@@ -619,7 +619,12 @@ if ( ! function_exists( 'uonix_intelligence_report_radar_html' ) ) {
 		$painel = isset( $context['panel_url'] ) ? (string) $context['panel_url'] : '';
 		$html   = '<tr><td style="padding:24px 28px 8px 28px;">';
 		$html  .= '<div style="color:#0e3780;font-size:16px;font-weight:bold;">Pautas novas para o blog</div>';
-		$html  .= '<div style="color:#64748b;font-size:11px;padding-top:6px;">Fonte: Search Console, 90 dias · consultas em que o site aparece depois da 15.ª posição</div>';
+		$lista  = isset( $radar['list_at'] ) && is_string( $radar['list_at'] ) && '' !== $radar['list_at'] ? strtotime( $radar['list_at'] ) : false;
+		$fonte  = 'Fonte: Search Console, 90 dias' . ( false !== $lista ? ' · lista de ' . gmdate( 'd/m/Y H:i', $lista ) . ' (UTC)' : '' ) . ' · consultas em que o site aparece depois da 15.ª posição';
+		$html  .= '<div style="color:#64748b;font-size:11px;padding-top:6px;">' . esc_html( $fonte ) . '</div>';
+		if ( ! empty( $radar['failed'] ) ) {
+			$html .= '<div style="color:#92400e;font-size:11px;padding-top:3px;">' . esc_html( 'A última execução do Radar não conseguiu ler o Search Console: esta é a lista anterior.' ) . '</div>';
+		}
 		$html  .= '</td></tr>';
 		$html  .= '<tr><td style="padding:8px 28px 24px 28px;">';
 		foreach ( $itens as $c ) {
@@ -640,9 +645,10 @@ if ( ! function_exists( 'uonix_intelligence_report_radar_html' ) ) {
 			}
 			$html .= '</div>';
 		}
-		$a_mais = ( isset( $radar['panel_count'] ) ? (int) $radar['panel_count'] : 0 ) - count( $itens );
+		// Só as novas que não couberam: o total do painel inclui as já enviadas (#380).
+		$a_mais = isset( $radar['more'] ) && is_int( $radar['more'] ) ? $radar['more'] : 0;
 		if ( $a_mais > 0 ) {
-			$frase = 'Mais ' . $a_mais . ( 1 === $a_mais ? ' pauta' : ' pautas' ) . ' no painel.';
+			$frase = 'Mais ' . $a_mais . ( 1 === $a_mais ? ' pauta nova' : ' pautas novas' ) . ' no painel.';
 			$html .= '<div style="padding-top:10px;font-size:12px;color:#334155;">';
 			$html .= '' !== $painel ? '<a href="' . esc_url( $painel ) . '" style="color:#0e3780;">' . esc_html( $frase ) . '</a>' : esc_html( $frase );
 			$html .= '</div>';

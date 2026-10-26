@@ -670,6 +670,26 @@ uox_ai_assert( count( $textos ) === count( array_unique( $textos ) ), 'Cada esta
 uox_ai_assert( false !== strpos( $textos['model_missing'], 'UONIX_GEMINI_MODEL' ) && false !== strpos( $textos['not_configured'], 'UONIX_GEMINI_API_KEY' ), 'Os textos de configuração nomeiam a constante' );
 $t_cota = uonix_intelligence_ai_state_message( 'quota_exhausted', array( 'retry_at' => '2026-10-04T00:00:15+00:00' ) );
 uox_ai_assert( 0 === strpos( $t_cota, 'Cota diária do Gemini esgotada.' ) && false !== strpos( $t_cota, 'A cota renova por volta de 04/10 00:00 (UTC).' ), '#384: a cota esgotada diz o motivo e a hora da renovação; obteve ' . $t_cota );
+// #386: com `wp_date` (o fuso do site), a hora da renovação sai no fuso do site e sem "(UTC)"; sem ele, cai em UTC e diz.
+uox_ai_assert( false !== strpos( $t_cota, '04/10 00:00 (UTC).' ), '#386: sem wp_date (teste), a hora cai em UTC e o rótulo avisa' );
+$sub_fuso = static function ( $tz ) {
+	$codigo = 'define( "ABSPATH", "/" ); function wp_date( $f, $t = null ) { return ( new DateTimeImmutable( "@" . (int) $t ) )->setTimezone( new DateTimeZone( getenv( "UOX_TZ" ) ) )->format( $f ); } '
+		. 'function add_action( ...$a ) {} function add_filter( ...$a ) {} require getenv( "UOX_F" ); '
+		. 'echo uonix_intelligence_ai_state_message( "quota_exhausted", array( "retry_at" => "2026-10-04T00:00:15+00:00" ) ), "|", uonix_intelligence_ai_state_message( "deferred", array( "reason" => "quota_exhausted", "retry_at" => "2026-10-04T00:00:15+00:00" ) );';
+	$proc = proc_open( array( PHP_BINARY, '-n', '-r', $codigo ), array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes, null, array( 'UOX_TZ' => $tz, 'UOX_F' => dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/54-admin-intelligence-ai.php', 'PATH' => (string) getenv( 'PATH' ) ) );
+	$saida = is_resource( $proc ) ? stream_get_contents( $pipes[1] ) : '';
+	if ( is_resource( $proc ) ) {
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		proc_close( $proc );
+	}
+
+	return (string) $saida;
+};
+$com_sp  = $sub_fuso( 'America/Sao_Paulo' );
+$com_utc = $sub_fuso( 'UTC' );
+uox_ai_assert( 2 === substr_count( $com_sp, 'A cota renova por volta de 03/10 21:00.' ) && false === strpos( $com_sp, '(UTC)' ), '#386: Módulo 3, com o fuso do site: 00:00 UTC é 21:00 do dia anterior, sem "(UTC)", na cota esgotada e na adiada; obteve ' . $com_sp );
+uox_ai_assert( 2 === substr_count( $com_utc, 'A cota renova por volta de 04/10 00:00.' ), '#386: Módulo 3, com o site em UTC: 00:00, sem rótulo; o fuso vem do site e não está fixo no código; obteve ' . $com_utc );
 uox_ai_assert( false === strpos( $textos['quota_exhausted'], 'renova' ) && false === strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', array( 'retry_at' => 'não é data' ) ), 'renova' ), '#384: sem hora válida, a mensagem não inventa uma' );
 $t_adiada_cota = uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'quota_exhausted', 'retry_at' => '2026-10-04T00:00:15+00:00' ) );
 $t_adiada_falh = uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'failures' ) );
