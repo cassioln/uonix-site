@@ -594,6 +594,14 @@ uox_assert( '' === uonix_intelligence_report_radar_html( array( 'content_radar' 
 $html_lixo = uonix_intelligence_report_radar_html( array( 'content_radar' => array( 'items' => array( array( 'key' => str_repeat( 'a', 64 ), 'query' => 'x y', 'impressions' => 9, 'position' => 20.0, 'page' => 'lixo', 'ai' => array( 'status' => 'ok', 'suggestion' => 'lixo' ) ) ), 'panel_count' => 1 ) ) );
 uox_assert( false !== strpos( $html_lixo, 'Consulta: x y' ) && false === strpos( $html_lixo, 'Post novo' ), 'Item com sugestão malformada sai só com a consulta e os números' );
 
+// #404: a causa do erro de transporte é diagnóstico do cache; o e-mail não a mostra.
+$cand_erro                  = uox_radar_cand( 'ancoragem estrutural', 'nova', 'unavailable' );
+$cand_erro['ai']           += array( 'http' => 0, 'attempts' => 2, 'error' => 'http_request_failed: CAUSA-SECRETA-404 cURL error 28' );
+$cand_ok_erro               = uox_radar_cand( 'ancoragem predial' );
+$cand_ok_erro['ai']        += array( 'error' => 'http_request_failed: CAUSA-SECRETA-404 resto de uma falha antiga' );
+$GLOBALS['uox_options']     = uox_radar_opcoes( array( $cand_ok_erro, $cand_erro ) );
+$html_com_erro              = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) );
+uox_assert( false !== strpos( $html_com_erro, 'Pautas novas para o blog' ) && false === strpos( $html_com_erro, 'CAUSA-SECRETA-404' ) && false === strpos( $html_com_erro, 'cURL error' ), '#404: o e-mail do Radar não mostra a causa do erro de transporte, nem na candidata ok nem na que falhou' );
 $GLOBALS['uox_options']     = uox_radar_opcoes( array( uox_radar_cand( 'ancoragem predial' ), uox_radar_cand( 'teste de ancoragem' ) ) );
 $chaves_radar               = array( uonix_intelligence_radar_query_key( 'ancoragem predial' ), uonix_intelligence_radar_query_key( 'teste de ancoragem' ) );
 $GLOBALS['uox_mail_calls']  = array();

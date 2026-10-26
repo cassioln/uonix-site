@@ -478,6 +478,71 @@ if ( ! function_exists( 'uonix_intelligence_ai_quota_info' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_ai_transport_error' ) ) {
+	/**
+	 * A causa de um erro de transporte (`WP_Error` de `wp_remote_post`), para gravar no cache.
+	 *
+	 * O `http` 0 sozinho não diz o que houve (#404). A causa sai em uma linha, cortada em 2 KB antes
+	 * de qualquer regex e em 160 caracteres no fim. Tira: tag, controle e formatação Unicode, o texto
+	 * de `scheme://…` (vira `[url]`) e a chave configurada, quando tem 8 caracteres ou mais (vira
+	 * `[chave]`), mesmo com até 4 bytes quaisquer entre os caracteres dela, em qualquer caixa. Tira
+	 * também o que começa em `AIza` e tem 10 caracteres de chave ou mais. Não é uma garantia: a
+	 * chave só viaja no cabeçalho `x-goog-api-key`, e esta limpeza é uma camada a mais para o caso
+	 * de uma mensagem de transporte repeti-la. Um `<` sem `>` apaga dali até o fim; IP e porta sem
+	 * `scheme://` ficam.
+	 *
+	 * @param mixed $erro O retorno de `wp_remote_post`.
+	 * @return string Vazio quando não é um `WP_Error` ou não tem código nem mensagem.
+	 */
+	function uonix_intelligence_ai_transport_error( $erro ) {
+		if ( ! function_exists( 'is_wp_error' ) || ! is_wp_error( $erro ) ) {
+			return '';
+		}
+		$codigo   = (string) $erro->get_error_code();
+		$mensagem = (string) $erro->get_error_message();
+		$texto    = trim( $codigo . ( '' !== $codigo && '' !== $mensagem ? ': ' : '' ) . $mensagem );
+		// Ordem importa. A mensagem é cortada primeiro: nenhum regex corre sobre mais de 2 KB.
+		// O espaço em branco vira um só espaço antes de procurar a chave, para a quebra de linha com
+		// indentação não pedir folga grande. A chave sai antes de qualquer limpeza que mude bytes: o
+		// `mb_scrub` troca byte inválido por `?` e a chave partida por ele deixaria de casar. Entre os
+		// caracteres da chave cabem até 4 bytes quaisquer (hífen suave, zero-width, `+`, `%20`,
+		// NBSP, UTF-8 inválido); mais que isso passaria a casar no meio de palavras, medido. A caixa
+		// não importa. Se um `preg_replace` desistir (limite de backtracking), a causa inteira é
+		// omitida: devolver o texto sem a limpeza seria o pior desfecho.
+		$omitida = '[causa omitida]';
+		// Cada passo devolve null se o PCRE desistir, e o null segue até a checagem única do fim.
+		$limpa = static function ( $entrada, $padrao, $troca ) {
+			return is_string( $entrada ) ? preg_replace( $padrao, $troca, $entrada ) : null;
+		};
+		$texto = function_exists( 'mb_strcut' ) ? mb_strcut( $texto, 0, 2048, 'UTF-8' ) : substr( $texto, 0, 2048 );
+		$texto = $limpa( $texto, '/\s+/', ' ' );
+		$chave = function_exists( 'uonix_intelligence_ai_api_key' ) ? (string) uonix_intelligence_ai_api_key() : '';
+		// Chave curta casaria no meio de palavras e apagaria a causa. Chave do Gemini tem 39.
+		if ( strlen( $chave ) >= 8 ) {
+			$padrao = '/' . implode( '.{0,4}?', array_map( static function ( $byte ) {
+				return preg_quote( $byte, '/' );
+			}, str_split( $chave ) ) ) . '/is';
+			$texto  = $limpa( $texto, $padrao, '[chave]' );
+		}
+		if ( is_string( $texto ) && function_exists( 'mb_scrub' ) ) {
+			$texto = mb_scrub( $texto, 'UTF-8' );
+		}
+		$texto = $limpa( $texto, array( '/<[^>]*>?/', '/[\p{Cc}\p{Cf}\s]+/u' ), ' ' );
+		$texto = $limpa( $texto, array( '/AIza[0-9A-Za-z_-]{10,}/', '#[a-z][a-z0-9+.-]*://\S+#i' ), array( '[chave]', '[url]' ) );
+		if ( ! is_string( $texto ) ) {
+			return $omitida;
+		}
+		$texto = trim( $texto );
+		if ( function_exists( 'mb_substr' ) ) {
+			$texto = mb_substr( $texto, 0, 160, 'UTF-8' );
+		} else {
+			$texto = substr( $texto, 0, 160 );
+		}
+
+		return trim( $texto );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 	/**
 	 * Transporte de um pedido ao Gemini, sem saber o que o pedido pede.
@@ -496,10 +561,11 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 	 *
 	 * @param array  $body  Corpo do `generateContent`.
 	 * @param string $model Modelo, como `uonix_intelligence_ai_model()` devolve.
-	 * @return array{status: string, http?: int, attempts?: int, retry_after?: int, text?: string}
+	 * @return array{status: string, http?: int, attempts?: int, error?: string, retry_after?: int, text?: string}
 	 *         `http` é o código da última resposta (0 em erro de transporte) e `attempts` os pedidos
-	 *         feitos; os dois só faltam em `not_configured`. `text` só com `ok`; `retry_after` só
-	 *         com `quota_exhausted`, quando o corpo diz.
+	 *         feitos; os dois só faltam em `not_configured`. `error` é a causa do erro de transporte
+	 *         da última tentativa, saneada (#404), e só existe com `http` 0. `text` só com `ok`;
+	 *         `retry_after` só com `quota_exhausted`, quando o corpo diz.
 	 */
 	function uonix_intelligence_ai_generate( array $body, $model, $pause = 2 ) {
 		$chave = uonix_intelligence_ai_api_key();
@@ -530,6 +596,10 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 			break;
 		}
 		$feito = array( 'http' => $codigo, 'attempts' => $tentativa );
+		$causa = uonix_intelligence_ai_transport_error( $resposta );
+		if ( '' !== $causa ) {
+			$feito['error'] = $causa;
+		}
 		if ( is_array( $cota ) && $cota['daily'] ) {
 			return array( 'status' => 'quota_exhausted' ) + $feito + ( $cota['retry_after'] > 0 ? array( 'retry_after' => $cota['retry_after'] ) : array() );
 		}
@@ -654,7 +724,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 			$resultado = uonix_intelligence_ai_call( $input, $pause );
 			++$chamadas;
 			$entrada = array( 'status' => $resultado['status'], 'input_hash' => $hash, 'attempted_at' => $agora, 'model' => $input['model'] );
-			$entrada += array_intersect_key( $resultado, array( 'http' => true, 'attempts' => true ) );
+			$entrada += array_intersect_key( $resultado, array( 'http' => true, 'attempts' => true, 'error' => true ) );
 			if ( '' !== $input['redirected_to'] ) {
 				$entrada['redirected_to'] = $input['redirected_to'];
 			}

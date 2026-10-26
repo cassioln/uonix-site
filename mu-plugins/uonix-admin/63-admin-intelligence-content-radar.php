@@ -717,6 +717,11 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 						$ai[ $campo ] = $resposta[ $campo ];
 					}
 				}
+				// A causa do erro de transporte (#404). O transporte já a entrega saneada; aqui só
+				// entra texto não vazio, com o mesmo teto, para um gerador de fora não gravar lixo.
+				if ( is_array( $resposta ) && isset( $resposta['error'] ) && is_string( $resposta['error'] ) && '' !== trim( $resposta['error'] ) ) {
+					$ai['error'] = function_exists( 'mb_substr' ) ? mb_substr( $resposta['error'], 0, 160, 'UTF-8' ) : substr( $resposta['error'], 0, 160 );
+				}
 				if ( 'quota_exhausted' === $ai['status'] ) {
 					$parada = array( 'reason' => 'quota_exhausted' );
 					$espera = is_array( $resposta ) && isset( $resposta['retry_after'] ) && is_int( $resposta['retry_after'] ) ? $resposta['retry_after'] : 0;
