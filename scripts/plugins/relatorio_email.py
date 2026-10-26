@@ -112,6 +112,7 @@ NOMES = {
     "woo-rfq-for-woocommerce": ("NP Quote Request for WooCommerce", "Solicitação de orçamento"),
     "kadence-blocks": ("Kadence Blocks", "Blocos das páginas"),
     "kadence": ("Kadence (tema)", "Tema base do site"),
+    "wordpress": ("WordPress", "Núcleo do site"),
     "woocommerce-products-filter": ("HUSKY Products Filter", "Filtros do catálogo"),
     "woocommerce-products-slider": ("Product Slider for WooCommerce", "Carrossel de produtos"),
     "woo-checkout-field-editor-pro": ("Checkout Field Editor", "Campos do formulário de orçamento"),
@@ -230,6 +231,8 @@ MAX_NOTAS = 8
 
 
 def pagina_wporg(slug: str, tipo: str = "plugin") -> str:
+    if tipo == "nucleo":
+        return "https://wordpress.org/news/category/releases/"
     secao = "themes" if tipo == "tema" else "plugins"
     return f"https://wordpress.org/{secao}/{urllib.parse.quote(slug)}/"
 
@@ -288,7 +291,8 @@ def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, ago
             "situacao": "nao_aplicado" if saida == "30" else situacao(item, finais),
             "seguranca": bool(p and p.get("seguranca")),
             "notas": notas(p),
-            "pagina": pagina_wporg(item["slug"], item.get("tipo", "plugin")) if no_wporg(p) else "",
+            # O núcleo não está na API de plugins nem na de temas, mas tem página própria de versões.
+            "pagina": pagina_wporg(item["slug"], item.get("tipo", "plugin")) if no_wporg(p) or item.get("tipo") == "nucleo" else "",
         })
     falhas_smoke = [f"{nome}: {r.get('detalhe', '')}" for nome, r in smoke.items() if not r.get("ok")]
     executado = aplicacao.get("executado_em") or aplicacao.get("aplicado_em") or ""
@@ -324,11 +328,13 @@ def pendencia(item: dict) -> str:
 
 
 def rotulo_itens(ctx: dict) -> str:
-    """"plugins", "temas" ou "plugins e temas", conforme o que o lock traz (#445)."""
+    """O que foi atualizado, conforme o que o lock traz: "plugins", "temas", "núcleo do WordPress" ou
+    a combinação ("plugins e temas", "plugins e núcleo", "plugins, temas e núcleo") (#445, #448)."""
     tipos = {i.get("tipo", "plugin") for i in ctx["itens"]}
-    if tipos == {"tema"}:
-        return "temas"
-    return "plugins e temas" if "tema" in tipos else "plugins"
+    nomes = [n for t, n in (("plugin", "plugins"), ("tema", "temas"), ("nucleo", "núcleo do WordPress")) if t in tipos]
+    if not nomes:
+        return "plugins"
+    return nomes[0] if len(nomes) == 1 else ", ".join(nomes[:-1]) + " e " + nomes[-1]
 
 
 def titulo_itens(ctx: dict) -> str:
@@ -395,17 +401,18 @@ def novidades_html(item: dict) -> str:
     if not item["notas"]:
         if not item.get("pagina"):
             return ""
-        tema = item.get("tipo") == "tema"
-        # A âncora #developers existe só na página de plugin; a de tema não a tem.
-        link = item["pagina"] if tema else f'{item["pagina"]}#developers'
+        tipo = item.get("tipo", "plugin")
+        # A âncora #developers existe só na página de plugin; a de tema e a do núcleo não a têm.
+        link = f'{item["pagina"]}#developers' if tipo == "plugin" else item["pagina"]
+        onde = {"tema": "página do tema", "nucleo": "página de versões do WordPress"}.get(tipo, "página do plugin")
         return (f'<div style="font-size:12px;color:{MUTED};margin-top:6px;">Novidades desta versão: '
-                f'<a href="{e(link)}" style="{estilo_link}">ver na página do {"tema" if tema else "plugin"}</a></div>')
+                f'<a href="{e(link)}" style="{estilo_link}">ver na {onde}</a></div>')
     itens = "".join(f'<li style="margin:2px 0;">{e(n)}</li>' for n in item["notas"][:MAX_NOTAS])
     resto = len(item["notas"]) - MAX_NOTAS
     mais = ""
     if item.get("pagina"):
         texto = f"e mais {resto} alteração(ões): ver o changelog completo" if resto > 0 else "ver o changelog completo"
-        ancora = "" if item.get("tipo") == "tema" else "#developers"
+        ancora = "#developers" if item.get("tipo", "plugin") == "plugin" else ""
         mais = f'<div style="margin-top:4px;"><a href="{e(item["pagina"])}{ancora}" style="{estilo_link}">{e(texto)}</a></div>'
     elif resto > 0:
         mais = f'<div style="margin-top:4px;">e mais {resto} alteração(ões)</div>'

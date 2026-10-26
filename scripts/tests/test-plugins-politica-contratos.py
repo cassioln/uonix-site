@@ -37,7 +37,7 @@ for nome, regra in camadas.items():
         checar(campo in regra, f"camada {nome} sem {campo}")
     checar(regra.get("aplicacao") in {"um_por_vez", "lote", "nunca"}, f"camada {nome}: aplicacao inválida")
     checar(regra.get("major") in {"bloqueia", "alerta"}, f"camada {nome}: major inválido")
-for chave in ("plugins", "temas"):
+for chave in ("plugins", "temas", "nucleo"):
     for slug, regra in POLITICA[chave].items():
         checar(regra.get("camada") in camadas, f"{chave} {slug}: camada desconhecida {regra.get('camada')}")
         checar(isinstance(regra.get("contrato"), bool), f"{chave} {slug}: campo contrato deve ser booleano")
@@ -145,8 +145,11 @@ $css = 'exemplo-cabecalho';
         "temas": {"tema": {"camada": "critica", "contrato": False, "motivo": "t"}}}
     (base / "pol.json").write_text(json.dumps(pol))
 
-    def inventario(plugins: list, temas: list | None = None) -> subprocess.CompletedProcess:
-        (base / "inv.json").write_text(json.dumps({"plugins": plugins, "temas": temas or []}))
+    def inventario(plugins: list, temas: list | None = None, nucleo: list | None = None) -> subprocess.CompletedProcess:
+        dados = {"plugins": plugins, "temas": temas or []}
+        if nucleo is not None:
+            dados["nucleo"] = nucleo
+        (base / "inv.json").write_text(json.dumps(dados))
         return rodar(str(INVENTARIO_PY), "--entrada", str(base / "inv.json"), "--politica", str(base / "pol.json"))
 
     def item(nome, de="1.0", para="", status="active", auto="off"):
@@ -169,6 +172,17 @@ $css = 'exemplo-cabecalho';
     checar(r.returncode == 10 and "LIGADA" in r.stdout, "atualização automática ligada não virou bandeira")
     r = inventario([item("comum1")], [item("tema-novo", status="inactive")])
     checar(r.returncode == 10 and "tema tema-novo" in r.stdout, "tema sem classificação não virou bandeira")
+    # Núcleo (#448): item "wordpress" da camada "nucleo"; major bloqueia; ausente da leitura não é bandeira.
+    pol_n = json.loads((base / "pol.json").read_text())
+    pol_n["camadas"]["nucleo"] = {"descricao": "n", "aplicacao": "um_por_vez", "quarentena_dias": 0, "major": "bloqueia"}
+    pol_n["nucleo"] = {"wordpress": {"camada": "nucleo", "contrato": False, "motivo": "t"}}
+    (base / "pol.json").write_text(json.dumps(pol_n))
+    r = inventario([item("comum1")], nucleo=[item("wordpress", "7.1.3", "7.1.4")])
+    checar(r.returncode == 0 and "nucleo `wordpress` 7.1.3 → 7.1.4" in r.stdout, f"núcleo menor não listado: {r.returncode} {r.stdout}")
+    r = inventario([item("comum1")], nucleo=[item("wordpress", "7.1.3", "7.2")])
+    checar(r.returncode == 10 and "major em camada nucleo" in r.stdout, f"major do núcleo deveria ser bandeira: {r.stdout}")
+    r = inventario([item("comum1")])
+    checar(r.returncode == 0 and "nucleo wordpress" in r.stdout, "núcleo na política e ausente da leitura deveria ser listado, sem bandeira")
     indisponivel = item("comum1", "1.0", "1.1")
     indisponivel["update"] = "unavailable"
     r = inventario([indisponivel])

@@ -62,6 +62,10 @@ _, linhas_tema = lockmod.validar(lock(itens=[{"slug": "kadence", "tipo": "tema",
 checar(linhas_tema == ["kadence 1.5.2 1.5.3 critica tema"], f"linha de tema errada: {linhas_tema}")
 invalido(lock(itens=[{"slug": "kadence", "tipo": "pacote", "de": "1", "para": "2", "camada": "critica", "aplicacao": "um_por_vez"}]), "só plugins e temas")
 invalido(lock(itens=[{"slug": "../themes", "tipo": "tema", "de": "1", "para": "2", "camada": "critica", "aplicacao": "um_por_vez"}]), "slug inválido")
+# Núcleo (#448): tipo "nucleo" só com o slug "wordpress"
+_, linhas_n = lockmod.validar(lock(itens=[{"slug": "wordpress", "tipo": "nucleo", "de": "7.1.3", "para": "7.1.4", "camada": "nucleo", "aplicacao": "um_por_vez"}]), AGORA, 72)
+checar(linhas_n == ["wordpress 7.1.3 7.1.4 critica nucleo"], f"linha do núcleo errada: {linhas_n}")
+invalido(lock(itens=[{"slug": "outra-coisa", "tipo": "nucleo", "de": "7.1.3", "para": "7.1.4", "camada": "nucleo", "aplicacao": "um_por_vez"}]), "só pode ter o slug 'wordpress'")
 # Slug repetido (plugin e tema homônimos) é recusado: o job remoto os confundiria.
 invalido(lock(itens=[{"slug": "kadence", "tipo": "plugin", "de": "9.0", "para": "9.1", "camada": "comum", "aplicacao": "lote"},
                      {"slug": "kadence", "tipo": "tema", "de": "1.5.1", "para": "1.5.2", "camada": "critica", "aplicacao": "um_por_vez"}]), "slug repetido")

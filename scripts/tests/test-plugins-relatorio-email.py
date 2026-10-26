@@ -377,6 +377,31 @@ with tempfile.TemporaryDirectory() as t:
     c1["itens"] = [i for i in c1["itens"] if i["tipo"] != "tema"] or [{"tipo": "plugin"}]
     checar(rel.rotulo_itens(c1) == "plugins", "só plugin deveria seguir dizendo 'plugins'")
 
+# 10b''. núcleo (#448): nome, rótulo, link de versões sem âncora, mesmo sem a API
+with tempfile.TemporaryDirectory() as t:
+    stamp = "plugins-20261026-190000"
+    pasta = pathlib.Path(t)
+    (pasta / "lock.json").write_text(json.dumps({"itens": [
+        {"slug": "wordpress", "tipo": "nucleo", "de": "7.1.3", "para": "7.1.4", "camada": "nucleo", "aplicacao": "um_por_vez"}],
+        "resultado": "verde", "fora": []}))
+    (pasta / "plano.json").write_text(json.dumps({"itens": [
+        {"slug": "wordpress", "tipo": "nucleo", "seguranca": None, "changelog": "indisponível", "novidades": None}]}))
+    (pasta / f"aplicacao-{stamp}.json").write_text(json.dumps(
+        {"executado_em": "2026-10-26T19:00:00Z", "backup": stamp, "lock_sha12": "abc", "status_job": "0", "smoke_producao": "0"}))
+    (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
+    c = rel.montar(pasta, json.loads((pasta / f"aplicacao-{stamp}.json").read_text()), "0", "== versões finais\n  wordpress 7.1.4\n")
+    h, txt = rel.corpo_html(c), rel.corpo_texto(c)
+    checar(c["itens"][0]["nome"] == "WordPress" and c["itens"][0]["funcao"] == "Núcleo do site", f"nome do núcleo errado: {c['itens'][0]}")
+    checar(c["itens"][0]["pagina"] == "https://wordpress.org/news/category/releases/", f"página do núcleo errada: {c['itens'][0]['pagina']}")
+    checar("Atualização de núcleo do WordPress" in h and "núcleo do WordPress atualizados" in h, "rótulo do núcleo errado")
+    checar("releases/#developers" not in h and "página de versões do WordPress" in h, "link do núcleo sem âncora e com o texto certo")
+    checar(rel.para_cliente(c), "sucesso completo do núcleo deveria ir ao cliente")
+    for tipos, esperado in ((["plugin", "nucleo"], "plugins e núcleo do WordPress"), (["plugin", "tema", "nucleo"], "plugins, temas e núcleo do WordPress"),
+                            (["tema", "nucleo"], "temas e núcleo do WordPress"), ([], "plugins")):
+        got = rel.rotulo_itens({"itens": [{"tipo": t} for t in tipos]})
+        checar(got == esperado, f"rotulo_itens({tipos}) = {got!r}, esperado {esperado!r}")
+
+
 # 10c. nome com link para a página oficial (só se a API do wordpress.org respondeu) e changelog da versão
 with tempfile.TemporaryDirectory() as t:
     stamp = "plugins-20261015-131200"
