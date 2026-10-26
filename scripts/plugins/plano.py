@@ -86,25 +86,32 @@ _CORRECAO = re.compile(
     r"|(" + _CLASSE_FRACA + r")\s+(vulnerabilit\w*|issue|flaw|exploit)", re.I)
 # Nome de recurso que segue a classe. Diante de um destes, a ocorrência da classe é o nome de um
 # recurso ("XSS filter", "CSRF token"), e não uma vulnerabilidade (#425). A supressão vale por
-# ocorrência, e não para a linha toda (#437): em "Fixed XSS in the XSS filter settings" o primeiro
-# XSS é a falha corrigida.
+# OCORRÊNCIA, e não para a linha toda (#437): em "Fixed XSS in the XSS filter settings" o primeiro
+# XSS é a falha corrigida. Uma LISTA de classes antes do recurso é um nome só ("XSS and CSRF filter
+# settings", "XSS vulnerability scanner"); uma palavra entre a classe e o recurso ("file upload
+# EXTENSION list") é aceita, menos preposição e conjunção, que separam a falha do recurso
+# ("XSS vulnerability IN token handling" é falha).
 _RECURSO_DA_CLASSE = (r"(?:filter|toggle|protection|token|scanner|scan|rules?|report|settings?|options?"
                       r"|integration|firewall|detection|module|list|notices?|attempts?)")
 _CLASSES_TODAS = r"\bxss\b|\bcsrf\b|\bssrf\b|open redirect|\bvulnerabilit(?:y|ies)\b|" + _CLASSE_FORTE_TEXTO
+_LISTA_DE_CLASSES = r"(?:(?:" + _CLASSES_TODAS + r")(?:\s*,\s*|\s+(?:and|or)\s+|\s+))+"
+_PALAVRA_DE_LIGACAO = r"(?!(?:in|on|of|for|to|via|from|when|with|through|by|at|and|or|the|a|an)\b)\w+\s+"
 _CLASSE_RECURSO = re.compile(
-    r"(?:" + _CLASSES_TODAS + r")\s+(?:\w+\s+){0,1}?(?P<r>" + _RECURSO_DA_CLASSE + r")\b", re.I)
+    r"(?P<lista>" + _LISTA_DE_CLASSES + r")(?:" + _PALAVRA_DE_LIGACAO + r")?(?P<r>" + _RECURSO_DA_CLASSE + r")\b", re.I)
 # O recurso também pode vir ANTES da classe: "Added escaping toggle for XSS", "Setting for CSRF".
 _RECURSO_ANTES = re.compile(
     r"\b(?:toggle|setting|option|rule|filter|module|feature|list|notice)s?\s+(?:for|against|of)\s+(?:(?:the|a|an)\s+)?"
-    r"(?P<c>" + _CLASSES_TODAS + r")", re.I)
-# Falha DO recurso, que é a vulnerabilidade: "Fixed CSRF token validation", "Fixed missing CSRF token
-# check", "CSRF token not being verified", "Fixed CSRF protection missing on settings save". Exige um verbo
-# de correção de fato (não basta "Added") e só vale para token e protection (#437).
-_FALHA_DO_RECURSO = re.compile(r"\b(validation|check\w*|verif\w*|missing|not (?:being )?(?:verified|checked|validated))\b", re.I)
-_VERBO_CORRECAO = re.compile(r"\b(fix\w*|patch(?:ed|es|ing)?|resolv\w*|address(?:ed|es|ing)|mitigat\w*|correct(?:ed|s|ing)?|prevent\w*)\b", re.I)
-# "Fixed open redirect protection": o verbo de correção abre a linha e a classe + protection a fecha.
-_CORRIGE_PROTECAO = re.compile(r"^\W*(?:fix\w*|patch\w*|resolv\w*|address\w*)\s+(?:the\s+|an?\s+)?(?:" + _CLASSES_TODAS + r")\s+protection\s*[.!]?\s*$", re.I)
+    r"(?P<c>(?:" + _CLASSES_TODAS + r")(?:(?:\s*,\s*|\s+(?:and|or)\s+)(?:" + _CLASSES_TODAS + r"))*)", re.I)
 _ATAQUE = re.compile(r"\b(bypass\w*|exploit\w*|attack\w*)\b", re.I)
+
+
+def _inicios_de_classe(regex: re.Pattern, grupo: str, linha: str) -> set[int]:
+    """Posições de TODA classe que aparece dentro do grupo (a lista inteira é o nome do recurso)."""
+    inicios: set[int] = set()
+    for m in regex.finditer(linha):
+        base = m.start(grupo)
+        inicios |= {base + c.start() for c in re.finditer(_CLASSES_TODAS, m.group(grupo), re.I)}
+    return inicios
 
 
 def _posicoes_security(regex: re.Pattern, linha: str) -> set[int]:
@@ -116,38 +123,26 @@ class _Seguranca:
     """Mesma interface de um re.Pattern (`.search`), com as regras acima."""
 
     @staticmethod
-    def _ocorrencia_livre(linha: str, classe: re.Pattern, ataque: bool = False) -> bool:
-        """Há alguma ocorrência da classe que NÃO seja o nome de um recurso (#437)?
-        Com `ataque`, a linha que fala em bypass, exploit ou attack vale como falha mesmo diante de recurso
-        ("Fixed CSRF token validation bypass"). Para a classe forte, sem verbo de correção, só a ocorrência
-        livre conta; diante de recurso, exige o verbo, como a fraca."""
-        achados = list(_CLASSE_RECURSO.finditer(linha))
-        recursos = {m.start() for m in achados} | {m.start("c") for m in _RECURSO_ANTES.finditer(linha)}
-        livres = [m for m in classe.finditer(linha) if m.start() not in recursos]
-        if livres:
+    def _ocorrencia_livre(linha: str, classe: re.Pattern) -> bool:
+        """Há alguma ocorrência da classe que NÃO seja o nome de um recurso (#437)? Se todas são nome de
+        recurso, só vale a linha que fala em bypass, exploit ou attack ("Fixed CSRF token validation
+        bypass"): a falha, então, é do próprio recurso. Vale para a classe forte e para a fraca."""
+        recursos = (_inicios_de_classe(_CLASSE_RECURSO, "lista", linha)
+                    | _inicios_de_classe(_RECURSO_ANTES, "c", linha))
+        if any(m.start() not in recursos for m in classe.finditer(linha)):
             return True
-        if not recursos:
-            return False
-        if _ATAQUE.search(linha):
-            return True
-        if classe is _CLASSE_FORTE and _CORRECAO.search(linha):
-            return True
-        # A falha é do próprio recurso: token ou protection que não valida, que falta, que não é verificado.
-        if any(m.group("r").lower() in {"token", "protection"} for m in achados) \
-                and _VERBO_CORRECAO.search(linha) and _FALHA_DO_RECURSO.search(linha):
-            return True
-        return bool(_CORRIGE_PROTECAO.search(linha))
+        return bool(recursos) and bool(_ATAQUE.search(linha))
 
     def search(self, linha: str):
         if m := _CVE.search(linha):
             return m
         if m := _CLASSE_FORTE.search(linha):
             # Classe forte diante de recurso ("SQL injection protection setting") segue a regra
-            # da fraca: precisa de verbo de correção, e de bypass/exploit se nomear o recurso.
+            # da fraca: só conta a ocorrência fora do nome do recurso, ou a linha com bypass/exploit.
             if self._ocorrencia_livre(linha, _CLASSE_FORTE):
                 return m
         if (m := _CLASSE_FRACA_RE.search(linha)) and _CORRECAO.search(linha) \
-                and self._ocorrencia_livre(linha, _CLASSE_FRACA_RE, ataque=True):
+                and self._ocorrencia_livre(linha, _CLASSE_FRACA_RE):
             return m
         recurso = _posicoes_security(_RECURSO, linha)
         for m in _CONTEXTO.finditer(linha):

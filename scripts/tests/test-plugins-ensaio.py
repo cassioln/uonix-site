@@ -299,26 +299,54 @@ for falso in ("Fixed layout of the XSS filter toggle", "Fix: typo in CSRF protec
               "Prevent duplicate XSS filter rules", "Integrated with Patchstack for vulnerability data"):
     checar(not plano.SEGURANCA.search(falso), f"falso positivo de segurança (revisão #436): {falso}")
 
-# #437: residuais da v2. Falsos positivos (dispensariam a quarentena): classe forte diante de recurso de produto de
-# segurança, e qualificador em frase de recurso. Falsos negativos (mantêm a quarentena): a falha é do próprio
-# recurso, ou a classe aparece também fora do nome do recurso.
+# #437: residuais da v2. O erro caro é o falso POSITIVO (dispensa a quarentena de um crítico); o falso negativo só a
+# mantém. Por isso esta rodada corrige os falsos positivos e a classe fora do nome do recurso, e NÃO libera "Fixed
+# CSRF token validation" e afins: a falha do token e o conserto de interface se escrevem igual ("Fixed missing CSRF
+# token field"), e distingui-los por palavra-chave abriria mais falsos positivos que a issue fecha (revisão do #453).
 for falso in ("SQL injection protection setting", "Added SQL injection firewall rules", "Cross-site scripting filter toggle",
               "New privilege escalation detection module", "Arbitrary file upload extension list setting",
               "Unauthenticated visitors now see the vulnerability notice", "Avoid duplicate CSRF notices",
               "Added escaping toggle for XSS", "Blocked IPs list now shows XSS attempts",
               # vizinhos que a regra nova não pode liberar
               "Added object injection scanner", "New SQL injection detection rules screen", "Setting for CSRF",
-              "Added a toggle for the XSS filter", "Option to enable the privilege escalation module"):
+              "Added a toggle for the XSS filter", "Option to enable the privilege escalation module",
+              # revisão do #453: lista de classes e "vulnerability" dentro do nome do recurso
+              "Fixed layout of the XSS and CSRF filter settings", "Fixed XSS and CSRF filter settings page",
+              "Fixed the XSS or CSRF token field", "Fixed XSS, CSRF and SSRF protection setting",
+              "Fixed typo in XSS CSRF token label", "Fixed CSRF and XSS protection toggles",
+              "Fixed XSS vulnerability scanner icon", "Fixed XSS vulnerability report layout",
+              # revisão do #453: conserto de interface com "missing", "check" e "validation" não é correção de segurança
+              "Fixed missing CSRF token field in the template", "Fixed missing CSRF token field in settings page",
+              "Fixed CSRF token validation error message typo", "Fixed missing CSRF token validation message translation",
+              "Fixed the CSRF token check notice showing twice", "Fixed bug where CSRF token validation is missing a label",
+              "Fixed XSS protection toggle missing in the admin bar", "Fixed missing XSS protection setting label",
+              "Fixed the CSRF protection option not being checked by default",
+              "Fixed XSS protection not being verified in the health check", "Fixed the CSRF protection check in the setup wizard",
+              "Fix: Added CSRF protection check in the setup wizard", "Fix: SSRF protection check missing from system status",
+              "Fixed open redirect protection check", "Fixed open redirect protection missing in the settings page",
+              "Fixed missing XSS and CSRF token validation notice", "Fixed XSS filter and CSRF token missing from the report",
+              "Fixed the CSRF token not being verified in the debug log", "Fixed missing CSRF token in the AJAX request (compat)",
+              "Fixed the CSRF token field being missing in the checkout form",
+              # a classe forte só dentro do nome do recurso, com "Fixed": conserto do recurso, não da falha
+              "Fixed SQL injection protection module not loading", "Fixed crash in the privilege escalation detection screen",
+              "Fixed layout of the SQL injection firewall rules table", "Fixed object injection scanner missing from the scan list",
+              "Fixed the arbitrary file upload filter settings page layout"):
     checar(not plano.SEGURANCA.search(falso), f"falso positivo de segurança (#437): {falso}")
-for verdadeiro in ("Fixed CSRF token validation", "Fixed missing CSRF token check", "Fixed CSRF token not being verified",
+for verdadeiro in (# a classe aparece FORA do nome do recurso: a falha corrigida
                    "Fixed XSS in the XSS filter settings", "Fixed vulnerability report: XSS in widget",
-                   "Fixed CSRF protection missing on settings save", "Fixed open redirect protection",
-                   # a classe forte com verbo de correção continua valendo, mesmo diante de recurso
                    "Fixed SQL injection in the firewall rules importer", "Patched privilege escalation in the settings page",
-                   "Fixed arbitrary file upload via the extension list", "Fixed CSRF token validation bypass",
-                   "Fixed XSS in the widget title and in the XSS filter settings"):
+                   "Fixed arbitrary file upload via the extension list", "Fixed XSS in the widget title and in the XSS filter settings",
+                   # bypass, exploit ou attack: a falha é do próprio recurso
+                   "Fixed CSRF token validation bypass", "Fixed an XSS filter bypass", "Fixed CSRF protection bypass on settings save",
+                   "Fixed SQL injection firewall rules bypass", "Fixed an exploit in the privilege escalation detection module",
+                   # a classe fraca, sem recurso nenhum
+                   "Fixed open redirect in the login form"):
     checar(bool(plano.SEGURANCA.search(verdadeiro)), f"aviso de segurança real não reconhecido (#437): {verdadeiro}")
-# a decisão continua a mesma para o que já era negativo ou positivo antes (conjunto fechado do #425/#436, acima)
+# Falsos negativos conhecidos e ACEITOS (mantêm a quarentena; ficam no changelog técnico): a falha é do próprio token ou
+# da proteção, sem "bypass". Se um dia a detecção distinguir isso de conserto de interface, mova para a lista acima.
+for aceito in ("Fixed CSRF token validation", "Fixed missing CSRF token check", "Fixed CSRF token not being verified",
+               "Fixed CSRF protection missing on settings save", "Fixed open redirect protection"):
+    checar(not plano.SEGURANCA.search(aceito), f"falso negativo aceito (#437) passou a casar; confira se não abriu falsos positivos: {aceito}")
 
 # #425: pré-release colado abre seção e conta como a versão numérica; 1.2.1000 é versão, não data.
 for nome, texto, para, esperado in (
