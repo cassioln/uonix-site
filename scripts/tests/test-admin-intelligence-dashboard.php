@@ -86,7 +86,13 @@ function wp_nonce_field( $action = -1 ) { $GLOBALS['uox_nonce_actions'][] = $act
 function number_format_i18n( $number, $decimals = 0 ) { return number_format( (float) $number, (int) $decimals, ',', '.' ); }
 function wp_next_scheduled( $hook ) { return $GLOBALS['uox_cron'][ $hook ] ?? false; }
 function wp_schedule_event( $ts, $rec, $hook ) { $GLOBALS['uox_cron'][ $hook ] = $ts; return true; }
-function wp_date( $format, $ts = null ) { return gmdate( $format, null === $ts ? time() : (int) $ts ); }
+// `wp_date` real usa o fuso do site (America/Sao_Paulo em produção); o teste faz o mesmo, para a tela do
+// Radar poder ser conferida contra o Módulo 3 (#386). O fuso é de teste e se troca em $GLOBALS['uox_fuso'].
+$GLOBALS['uox_fuso'] = 'America/Sao_Paulo';
+function wp_date( $format, $ts = null ) {
+	$momento = new DateTimeImmutable( '@' . ( null === $ts ? time() : (int) $ts ) );
+	return $momento->setTimezone( new DateTimeZone( $GLOBALS['uox_fuso'] ) )->format( $format );
+}
 function wp_remote_post( $url, $args = array() ) { return array(); }
 function wp_remote_get( $url, $args = array() ) { return array(); }
 function wp_remote_retrieve_response_code( $r ) { return 0; }
@@ -592,7 +598,7 @@ $html_r = uox_render_radar( $estado_radar( array(
 	uox_dash_radar_cand( 'barra <b>roscada</b>', array( 'status' => 'not_configured' ) ),
 	uox_dash_radar_cand( 'ancoragem estrutural', array( 'status' => 'deferred' ), array( 'path' => '', 'kind' => '', 'title' => '', 'redirected_to' => '' ) ),
 ) ) );
-uox_assert( false !== strpos( $html_r, 'id="uonix-radar-title"' ) && false !== strpos( $html_r, 'de 05/07 a 02/10' ) && false !== strpos( $html_r, 'atualizado em 05/10/2026 03:00 (UTC)' ), 'Radar: título, janela e hora da lista' );
+uox_assert( false !== strpos( $html_r, 'id="uonix-radar-title"' ) && false !== strpos( $html_r, 'de 05/07 a 02/10' ) && false !== strpos( $html_r, 'atualizado em 05/10/2026 00:00' ) && false === strpos( $html_r, '(UTC)' ), 'Radar: título, janela e hora da lista, no fuso do site (#386: 03:00 UTC é 00:00 em São Paulo)' );
 uox_assert( false !== strpos( $html_r, 'Post novo' ) && false !== strpos( $html_r, 'Ancoragem predial: guia' ) && false !== strpos( $html_r, 'Intenção: informacional. Gerada por IA em 05/10' ), 'Radar: pauta nova com título, intenção e data' );
 uox_assert( false !== strpos( $html_r, 'Reforçar esta página' ) && false !== strpos( $html_r, 'Teste de arrancamento &lt;script&gt;' ) && false === strpos( $html_r, '<script>' ) && false !== strpos( $html_r, 'Aprofundar o laudo &amp; a norma.' ), 'Radar: reforço com o texto escapado' );
 uox_assert( false !== strpos( $html_r, 'barra &lt;b&gt;roscada&lt;/b&gt;' ) && false === strpos( $html_r, 'barra <b>roscada</b>' ), 'Radar: consulta escapada em todo lugar, inclusive no rótulo da caixa' );
@@ -604,8 +610,8 @@ $html_cota = uox_render_radar( $estado_radar( array(
 	uox_dash_radar_cand( 'falhas', array( 'status' => 'deferred', 'reason' => 'failures' ) ),
 	uox_dash_radar_cand( 'cota sem hora', array( 'status' => 'quota_exhausted', 'retry_at' => 'não é data' ) ),
 ) ) );
-uox_assert( 2 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã.' ) && 1 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã. A cota renova por volta de 04/10 00:00 (UTC).' ), '#384 Radar: a cota esgotada diz o motivo, e a hora só quando ela é válida' );
-uox_assert( false !== strpos( $html_cota, 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã. A cota renova por volta de 04/10 00:00 (UTC).' ), '#384 Radar: a adiada pela cota diz o motivo e a hora' );
+uox_assert( 2 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã.' ) && 1 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã. A cota renova por volta de 03/10 21:00.' ), '#384 Radar: a cota esgotada diz o motivo, e a hora (no fuso do site, #386) só quando ela é válida' );
+uox_assert( false !== strpos( $html_cota, 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã. A cota renova por volta de 03/10 21:00.' ), '#384 Radar: a adiada pela cota diz o motivo e a hora, no fuso do site (#386)' );
 uox_assert( false !== strpos( $html_cota, 'Não pedida: falhas seguidas do Gemini nesta execução. O Radar tenta de novo amanhã.' ), '#384 Radar: a adiada pelas falhas diz o motivo' );
 uox_assert( false === strpos( $html_cota, 'Pauta não gerada.' ), '#384 Radar: nenhum dos quatro cai no texto genérico' );
 uox_assert( 2 === substr_count( $html_cota, 'A cota renova por volta de' ), '#384 Radar: hora inválida no cache não vira hora no painel' );
@@ -627,6 +633,45 @@ uox_assert( false !== strpos( $html_f, 'Search Console indisponível na última 
 uox_assert( false !== strpos( uox_render_radar( array( $opcao_radar => array( 'status' => 'config_missing', 'updated_at' => '2026-10-06T03:00:00+00:00' ) ) ), 'Search Console indisponível. O Radar tenta de novo amanhã.' ), 'Radar: falha sem lista anterior' );
 uox_assert( false !== strpos( uox_render_radar( $estado_radar( array(), array( 'truncated' => true ) ) ), 'veio no limite de linhas' ), 'Radar: corte de linhas avisado' );
 uox_assert( false !== strpos( uox_render_radar( $estado_radar( array() ), array( 'uonix_radar' => 'dismiss' ) ), '1 pauta descartada.' ) && false !== strpos( uox_render_radar( $estado_radar( array() ), array( 'uonix_radar' => 'dismiss', 'uonix_radar_n' => '3' ) ), '3 pautas descartadas.' ) && false !== strpos( uox_render_radar( $estado_radar( array() ), array( 'uonix_radar' => 'restore', 'uonix_radar_n' => '2' ) ), '2 pautas restauradas.' ) && false === strpos( uox_render_radar( $estado_radar( array() ), array( 'uonix_radar' => array( 'x' ) ) ), 'descartada' ), 'Radar: aviso com o número depois de descartar ou restaurar, e marcador malformado ignorado' );
+// #386: a tela inteira usa o fuso do site; o Radar não mostra mais UTC ao lado do horário local do Módulo 3.
+$ok_fuso   = array( 'status' => 'ok', 'generated_at' => '2026-10-02T16:25:00+00:00', 'suggestion' => array( 'caminho' => 'nova', 'titulo' => 'Pauta do fuso', 'angulo' => 'Ângulo.', 'intencao' => 'informacional' ) );
+$estado_fz = $estado_radar( array( uox_dash_radar_cand( 'consulta do fuso', $ok_fuso ) ), array( 'updated_at' => '2026-10-02T16:25:00+00:00', 'list_updated_at' => '2026-10-02T16:25:00+00:00' ) );
+$html_fz   = uox_render_radar( $estado_fz );
+uox_assert( false !== strpos( $html_fz, 'atualizado em 02/10/2026 13:25' ) && false === strpos( $html_fz, '(UTC)' ), '#386: 16:25 UTC aparece como 13:25 no fuso do site, sem "(UTC)"; obteve ' . substr( $html_fz, (int) strpos( $html_fz, 'atualizado em' ), 60 ) );
+uox_assert( false !== strpos( $html_fz, 'Gerada por IA em 02/10' ), '#386: a data da pauta gerada vem do fuso do site' );
+$GLOBALS['uox_fuso'] = 'UTC';
+uox_assert( false !== strpos( uox_render_radar( $estado_fz ), 'atualizado em 02/10/2026 16:25' ), '#386: com o site em UTC, a mesma lista mostra 16:25 (o fuso vem do site, e não está fixo no código)' );
+$GLOBALS['uox_fuso'] = 'America/Sao_Paulo';
+// A virada do dia: 01:30 UTC de 03/10 ainda é 02/10 às 22:30 no fuso do site; a data muda junto.
+$estado_vd = $estado_radar( array( uox_dash_radar_cand( 'consulta da virada', array( 'status' => 'ok', 'generated_at' => '2026-10-03T01:30:00+00:00', 'suggestion' => array( 'caminho' => 'nova', 'titulo' => 'Pauta da virada', 'angulo' => 'Ângulo.', 'intencao' => 'informacional' ) ) ) ), array( 'updated_at' => '2026-10-03T01:30:00+00:00', 'list_updated_at' => '2026-10-03T01:30:00+00:00' ) );
+$html_vd   = uox_render_radar( $estado_vd );
+uox_assert( false !== strpos( $html_vd, 'atualizado em 02/10/2026 22:30' ) && false !== strpos( $html_vd, 'Gerada por IA em 02/10' ), '#386: 01:30 UTC de 03/10 é 22:30 de 02/10 no fuso do site, na hora e na data da pauta' );
+// A falha do Search Console mostra a data da lista no fuso do site.
+$html_ff = uox_render_radar( $estado_radar( array( uox_dash_radar_cand( 'consulta do fuso', $ok_fuso ) ), array( 'status' => 'gsc_failed', 'updated_at' => '2026-10-04T03:00:00+00:00', 'list_updated_at' => '2026-10-03T01:30:00+00:00' ) ) );
+uox_assert( false !== strpos( $html_ff, 'Mostrando a lista de 02/10.' ), '#386: "Mostrando a lista de" também usa o fuso do site' );
+// A hora de renovação da cota: 00:00:15 UTC de 04/10 é 21:00 de 03/10 no fuso do site.
+$html_ct = uox_render_radar( $estado_radar( array( uox_dash_radar_cand( 'cota fuso', array( 'status' => 'quota_exhausted', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ) ) ) );
+uox_assert( false !== strpos( $html_ct, 'A cota renova por volta de 03/10 21:00.' ) && false === strpos( $html_ct, '(UTC)' ), '#386: a renovação da cota (00:00 UTC) aparece como 21:00 do dia anterior, sem "(UTC)"; obteve ' . substr( $html_ct, (int) strpos( $html_ct, 'A cota renova' ), 60 ) );
+
+// #379: o aviso de restaurar não promete o que a lista cheia não entrega.
+$cheia = array();
+for ( $i = 0; $i < 11; $i++ ) {
+	$cheia[] = uox_dash_radar_cand( 'consulta ' . $i, array( 'status' => 'pending' ) );
+	$cheia[ $i ]['impressions'] = 200 - $i;
+}
+$html_cheia = uox_render_radar( $estado_radar( $cheia ), array( 'uonix_radar' => 'restore', 'uonix_radar_n' => '1' ) );
+uox_assert( false !== strpos( $html_cheia, '1 pauta restaurada. A lista só mostra as de mais impressões, e 1 pauta ficou de fora. A pauta da IA que ainda faltar é gerada na próxima execução do Radar.' ), '#379: lista cheia: o aviso diz quantas ficaram de fora, sem apontar qual; obteve ' . substr( $html_cheia, (int) strpos( $html_cheia, 'restaurad' ) - 12, 260 ) );
+$cheia13 = $cheia;
+$cheia13[] = uox_dash_radar_cand( 'consulta 11', array( 'status' => 'pending' ) );
+$cheia13[] = uox_dash_radar_cand( 'consulta 12', array( 'status' => 'pending' ) );
+$html_cheia13 = uox_render_radar( $estado_radar( $cheia13 ), array( 'uonix_radar' => 'restore', 'uonix_radar_n' => '3' ) );
+uox_assert( false !== strpos( $html_cheia13, '3 pautas restauradas. A lista só mostra as de mais impressões, e 3 pautas ficaram de fora.' ), '#379: três ficaram de fora: o aviso usa o plural' );
+$html_folga = uox_render_radar( $estado_radar( array_slice( $cheia, 0, 9 ) ), array( 'uonix_radar' => 'restore', 'uonix_radar_n' => '1' ) );
+uox_assert( false !== strpos( $html_folga, '1 pauta restaurada. A pauta da IA que ainda faltar' ) && false === strpos( $html_folga, 'A lista só mostra as de mais impressões' ), '#379: lista com folga: o aviso não fala de lista cheia' );
+$html_desc = uox_render_radar( $estado_radar( $cheia ), array( 'uonix_radar' => 'dismiss', 'uonix_radar_n' => '1' ) );
+uox_assert( false !== strpos( $html_desc, '1 pauta descartada.' ) && false === strpos( $html_desc, 'A lista só mostra as de mais impressões' ), '#379: o aviso de descartar nunca fala de lista cheia' );
+uox_assert( false === strpos( uox_render_radar( $estado_radar( $cheia ), array() ), 'A lista só mostra as de mais impressões' ), '#379: sem marcador na URL, nenhum aviso' );
+
 uox_assert( false !== strpos( uox_render_radar( array( $opcao_radar => 'lixo' ) ), 'O Radar ainda não rodou' ), 'Radar: opção malformada não quebra o painel (foco de revisão 4)' );
 $GLOBALS['uox_options'] = array();
 $_GET                   = array();

@@ -840,6 +840,15 @@ if ( ! function_exists( 'uonix_intelligence_radar_state' ) ) {
 				$visiveis[] = $normal;
 			}
 		}
+		// A restaurada volta ao estado na ordem do cron (impressões, depois o texto), e não no fim
+		// da fila: com a lista cheia, o corte em `max_candidates` tira a de menos impressões, e
+		// não a que acabou de voltar (#379).
+		usort(
+			$visiveis,
+			static function ( $a, $b ) {
+				return ( $b['impressions'] <=> $a['impressions'] ) ?: strcmp( uonix_intelligence_radar_normalize_query( $a['query'] ), uonix_intelligence_radar_normalize_query( $b['query'] ) );
+			}
+		);
 		$janela = isset( $gravado['window']['start'], $gravado['window']['end'] ) && is_string( $gravado['window']['start'] ) && is_string( $gravado['window']['end'] ) ? $gravado['window'] : array();
 
 		return array(
@@ -850,6 +859,7 @@ if ( ! function_exists( 'uonix_intelligence_radar_state' ) ) {
 			'window'          => $janela,
 			'truncated'       => ! empty( $gravado['truncated'] ),
 			'visible'         => array_slice( $visiveis, 0, (int) uonix_intelligence_radar_rules()['max_candidates'] ),
+			'overflow'        => max( 0, count( $visiveis ) - (int) uonix_intelligence_radar_rules()['max_candidates'] ),
 			'dismissed'       => $descartadas,
 		);
 	}
@@ -913,9 +923,13 @@ if ( ! function_exists( 'uonix_intelligence_radar_email_items' ) ) {
 	 * Os 180 dias impedem que uma consulta oscilando em torno do limite gere e-mail toda
 	 * semana (o problema da #297 no Módulo 5).
 	 *
+	 * `more` é quantas novas ficaram fora do e-mail, e é o que a frase "Mais N pautas novas no
+	 * painel" usa. `panel_count` é o total do painel, inclusive as já enviadas: o e-mail não o
+	 * lê, porque ligar a frase a ele prometia pautas novas que não existiam (#380).
+	 *
 	 * @param int|null  $now     Para teste; o padrão é `time()`.
 	 * @param bool|null $has_key Para teste; o padrão é a chave do wp-config.php.
-	 * @return array{items: array, panel_count: int}
+	 * @return array{items: array, more: int, panel_count: int, list_at: string, failed: bool}
 	 */
 	function uonix_intelligence_radar_email_items( $now = null, $has_key = null ) {
 		$estado    = uonix_intelligence_radar_state();
@@ -934,9 +948,18 @@ if ( ! function_exists( 'uonix_intelligence_radar_email_items' ) ) {
 			}
 		}
 
+		$limite = (int) uonix_intelligence_radar_rules()['email_limit'];
+
 		return array(
-			'items'       => array_slice( $itens, 0, (int) uonix_intelligence_radar_rules()['email_limit'] ),
+			'items'       => array_slice( $itens, 0, $limite ),
+			// Novas que não couberam no e-mail. O "Mais N" do e-mail conta só estas: o total do painel
+			// inclui as que já foram por e-mail e as que ainda esperam a pauta (#380).
+			'more'        => max( 0, count( $itens ) - $limite ),
 			'panel_count' => count( $estado['visible'] ),
+			// De quando é a lista e se a última execução a renovou: o e-mail declara o período de cada
+			// caixa, e com o Search Console fora a lista é a anterior (#381).
+			'list_at'     => $estado['list_updated_at'],
+			'failed'      => in_array( $estado['status'], array( 'gsc_failed', 'config_missing' ), true ),
 		);
 	}
 }
