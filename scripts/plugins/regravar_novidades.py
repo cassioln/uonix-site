@@ -30,7 +30,9 @@ def main(argv: list[str]) -> int:
         shutil.copy2(arquivo, copia)
     dados = json.loads(copia.read_text())
     for item in dados["itens"]:
-        url = ("https://api.wordpress.org/plugins/info/1.2/?action=plugin_information"
+        tema = item.get("tipo") == "tema"
+        url = (f"https://api.wordpress.org/{'themes' if tema else 'plugins'}/info/1.2/"
+               f"?action={'theme' if tema else 'plugin'}_information"
                f"&request[slug]={item['slug']}&request[fields][sections]=1")
         with urllib.request.urlopen(url, timeout=30) as r:  # noqa: S310 - URL fixa do wordpress.org
             info = json.load(r)

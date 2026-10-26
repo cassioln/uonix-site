@@ -164,6 +164,13 @@ MARCADORES_HOME = (
     ("megamenu: widgets nas colunas", r"\bmega-menu-item-type-widget\b"),   # incidente de 2026-10-02
     ("meta description", r"<meta name=[\"']description[\"']"),           # 1 com Rank Math, 0 sem
     ("ld+json", r"application/ld\+json"),                                # 1 com Rank Math, 0 sem
+    # Tema pai e filho (#445): medidos com o filho ativo (1) e com o
+    # twentytwentythree no lugar (0). A classe do <body> prova que o WordPress
+    # carregou o pai e o filho; o CSS global e o rodapé provam que o pai renderizou.
+    ("tema: pai carregado", r"<link[^>]*themes/kadence/assets/css/global"),
+    ("tema: classe do pai no body", r"\bwp-theme-kadence\b"),
+    ("tema: filho carregado", r"\bwp-child-theme-kadence-child\b"),
+    ("tema: rodapé", r"<footer[^>]*\bid=[\"']colophon[\"']"),
 )
 
 

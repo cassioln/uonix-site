@@ -212,7 +212,7 @@ cmd_aplicar_producao() {
   sha="$(head -1 <<<"$validado")"
   lista="$(tail -n +2 <<<"$validado")"
   dir="$(cd "$(dirname "$lock")" && pwd)"
-  echo "== lock ${sha} ($(wc -l <<<"$lista" | tr -d ' ') plugin(s)):"
+  echo "== lock ${sha} ($(wc -l <<<"$lista" | tr -d ' ') item(ns)):"
   while IFS= read -r linha; do printf '   %s\n' "$linha"; done <<<"$lista"
   if [ "$confirmacao" != "ATUALIZAR PROD ${sha}" ]; then
     echo "Erro: confirmação ausente ou errada. Para aplicar, repita com:" >&2
@@ -291,7 +291,7 @@ echo \"@@STATUS=\$(cat ${q_bk}/aplicar.status 2>/dev/null || echo ausente)\""
       {
         echo "!! INTERVENÇÃO NECESSÁRIA (job ${status}, smoke de produção ${smoke_rc})."
         echo "   Estado: atualizar.sh estado-producao --backup=${stamp}"
-        echo "   Pastas: ${bk}/plugin-<slug>.tar.gz (e descartado-<slug>); banco: ${bk}/db-prod-${stamp}.sql.gz"
+        echo "   Pastas: ${bk}/plugin-<slug>.tar.gz ou tema-<slug>.tar.gz (e descartado-<slug>); banco: ${bk}/db-prod-${stamp}.sql.gz"
       } >&2 ;;
   esac
   enviar_relatorio "$dir" "$stamp" "$final"
@@ -380,9 +380,9 @@ b=$(printf '%q' "$backup"); [ -n \"\$b\" ] || b=\$(ls -1d $(printf '%q' "$raiz")
 d=$(printf '%q' "$raiz")/\$b
 echo \"== job: \$b\"; echo \"status: \$(cat \"\$d/aplicar.status\" 2>/dev/null || echo 'ausente (rodando, ou não chegou a começar)')\"
 echo '== fim do log'; tail -n 25 \"\$d/aplicar.log\" 2>/dev/null || echo '(sem log)'
-echo '== backup'; ls -1 \"\$d\" 2>/dev/null | grep -E '^(plugin-|descartado-|restaura-|db-prod-)' || echo '(vazio)'
-echo '== versão atual dos plugins com pasta salva'
-for t in \"\$d\"/plugin-*.tar.gz; do [ -e \"\$t\" ] || continue; s=\$(basename \"\$t\" .tar.gz); s=\${s#plugin-}; printf '%s %s\\n' \"\$s\" \"\$($(printf '%q -d disable_functions= %q --path=%q' "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$LOCAWEB_DOCUMENT_ROOT") plugin get \"\$s\" --field=version 2>/dev/null)\"; done"
+echo '== backup'; ls -1 \"\$d\" 2>/dev/null | grep -E '^(plugin-|tema-|descartado-|restaura-|db-prod-)' || echo '(vazio)'
+echo '== versão atual dos plugins e temas com pasta salva'
+for t in \"\$d\"/plugin-*.tar.gz \"\$d\"/tema-*.tar.gz; do [ -e \"\$t\" ] || continue; s=\$(basename \"\$t\" .tar.gz); k=\${s%%-*}; s=\${s#*-}; [ \"\$k\" = tema ] && k=theme; printf '%s %s\\n' \"\$s\" \"\$($(printf '%q -d disable_functions= %q --path=%q' "$LOCAWEB_PHP_BIN" "$LOCAWEB_WP_BIN" "$LOCAWEB_DOCUMENT_ROOT") \$k get \"\$s\" --field=version 2>/dev/null)\"; done"
   com_vigia "${UONIX_PLUGINS_LIMITE_SSH:-150}" uonix_transport_ssh_once prod "$remoto" \
     || { echo "Erro: leitura de produção falhou (janela SSH aberta?)" >&2; uonix_transport_close_master prod; return 1; }
   uonix_transport_close_master prod

@@ -20,7 +20,8 @@ cat > "$TMP_DIR/php" <<'PHP'
 shift 3
 doc="${1#--path=}"; shift
 p="$doc/wp-content/plugins"
-case "$1 $2" in
+[ "$1" = theme ] && p="$doc/wp-content/themes"
+case "${1/theme/plugin} $2" in
   "plugin get") [ -f "$p/$3/VERSION" ] && cat "$p/$3/VERSION" || exit 1 ;;
   "plugin update")
     [ "${FAKE_FALHA_UPDATE:-}" = "$3" ] && exit 1
@@ -51,6 +52,9 @@ preparar() {
   printf '1.0\n' > "$doc/wp-content/plugins/b/VERSION"
   printf '1.0\n' > "$doc/wp-content/plugins/c/VERSION"
   printf 'original\n' > "$doc/wp-content/plugins/b/codigo.php"
+  mkdir -p "$doc/wp-content/themes/t"
+  printf '1.0\n' > "$doc/wp-content/themes/t/VERSION"
+  printf 'tema-original\n' > "$doc/wp-content/themes/t/functions.php"
 }
 
 rodar() {  # rodar <lista> [env...]
@@ -62,6 +66,7 @@ rodar() {  # rodar <lista> [env...]
 }
 
 versao() { cat "$doc/wp-content/plugins/$1/VERSION"; }
+versao_tema() { cat "$doc/wp-content/themes/$1/VERSION"; }
 LISTA=$'a 1.0 1.1 acoplada\nb 1.0 2.0 critica'
 
 # 1. verde
@@ -182,5 +187,38 @@ preparar reativa; rodar "$LISTA" UONIX_SMOKE_CMD=true FAKE_FALHA_MANUTENCAO_A_PA
 [ "$(grep -c 'AVISO: manutenção não reativou; seguindo' "$bk.log")" = 2 ] || fail "reativação falha sem os 2 avisos: $(cat "$bk.log")"
 [ "$(cat "$doc/.ativacoes")" = 3 ] || fail "deveria haver 3 ativações (inicial e uma por etapa): $(cat "$doc/.ativacoes")"
 [ ! -e "$doc/.maintenance" ] || fail "reativação falha deixou o site em manutenção"
+
+# 18. tema crítico + plugin: o tema entra pelo wp theme, o backup é tema-<slug>.tar.gz e nada vaza para plugins/
+LISTA_TEMA=$'a 1.0 1.1 acoplada plugin\nt 1.0 2.0 critica tema'
+preparar tema; rodar "$LISTA_TEMA" UONIX_SMOKE_CMD=true
+[ "$rc" = 0 ] && [ "$(versao a)" = 1.1 ] && [ "$(versao_tema t)" = 2.0 ] \
+  || fail "tema verde saiu $rc (a=$(versao a) t=$(versao_tema t)): $(cat "$bk.log")"
+[ -s "$bk/tema-t.tar.gz" ] && [ -s "$bk/plugin-a.tar.gz" ] || fail "tema: backups tema-t e plugin-a deveriam existir"
+[ ! -e "$doc/wp-content/plugins/t" ] || fail "tema: pasta do tema apareceu em plugins/"
+grep -q '  t 2.0' "$bk.log" || fail "tema: versões finais sem o tema"
+grep -q 'pastas salvas: 2' "$bk.log" || fail "tema: a contagem de pastas salvas deveria incluir o tema (2)"
+
+# 19. smoke vermelho depois do tema: o tema é restaurado de tema-t.tar.gz e a pasta nova fica em descartado-t
+preparar temasmoke
+rodar "$LISTA_TEMA" UONIX_SMOKE_CMD="! grep -qx 2.0 $doc/wp-content/themes/t/VERSION"
+[ "$rc" = 20 ] && [ "$(versao_tema t)" = 1.0 ] && [ "$(cat "$doc/wp-content/themes/t/functions.php")" = tema-original ] \
+  || fail "tema reprovado deveria sair 20 com o tema restaurado (saiu $rc, t=$(versao_tema t)): $(cat "$bk.log")"
+[ "$(cat "$bk/descartado-t/VERSION")" = 2.0 ] || fail "tema: pasta quebrada não foi guardada em descartado-t"
+[ "$(versao a)" = 1.1 ] || fail "tema: o plugin do lote, aplicado antes, deveria continuar 1.1"
+[ ! -e "$doc/.maintenance" ] || fail "tema reprovado: site ficou em manutenção"
+
+# 20. drift do tema: nada alterado
+preparar temadrift; rodar $'t 0.9 2.0 critica tema' UONIX_SMOKE_CMD=true
+[ "$rc" = 30 ] && [ "$(versao_tema t)" = 1.0 ] || fail "drift de tema saiu $rc"
+grep -q 'DRIFT t: produção=1.0 lock=0.9' "$bk.log" || fail "drift de tema sem o item divergente"
+
+# 21. tar do tema corrompido na restauração: 50, nunca 20
+preparar temartar
+rodar "$LISTA_TEMA" UONIX_SMOKE_CMD="if grep -qx 2.0 $doc/wp-content/themes/t/VERSION; then : > $bk/tema-t.tar.gz; false; else true; fi"
+[ "$rc" = 50 ] || fail "restauração do tema que falha deveria sair 50 (saiu $rc): $(cat "$bk.log")"
+
+# 22. linha sem o campo tipo (formato antigo) segue valendo como plugin
+preparar semtipo; rodar "$LISTA" UONIX_SMOKE_CMD=true
+[ "$rc" = 0 ] && [ "$(versao b)" = 2.0 ] && [ -s "$bk/plugin-b.tar.gz" ] || fail "lista sem tipo deveria valer como plugin (saiu $rc)"
 
 printf 'OK: job remoto aplica, recusa drift, restaura sem apagar e nunca deixa manutenção ligada\n'
