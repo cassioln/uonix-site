@@ -398,7 +398,7 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 | `rejected` | Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista. |
 | `no_page` | Sem página publicada para esta consulta: removida ou redirecionada. |
 | `model_missing` | Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php. |
-| `quota_exhausted` | Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária. Com o `retryDelay` do Gemini, acrescenta "A cota renova por volta de DD/MM HH:MM (UTC)." |
+| `quota_exhausted` | Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária. Com o `retryDelay` do Gemini, acrescenta "A cota renova por volta de DD/MM HH:MM." no fuso do site (`wp_date`), e com o rótulo "(UTC)" só se o fuso do site não for conhecido (#386). |
 | `deferred` | Não pedida: a cota diária do Gemini acabou nesta geração (ou: falhas seguidas do Gemini nesta geração). Nova tentativa na próxima geração diária. |
 
 No e-mail, todo estado diferente de `ok` só omite a linha.
