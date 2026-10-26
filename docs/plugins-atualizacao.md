@@ -114,7 +114,7 @@ O comando faz, nesta ordem:
 3. **Backup do banco** de produção (`backup-remote-database.sh`), sob cão de guarda.
 4. **Job remoto** (`remoto-aplicar.sh`). Ele é enviado ao servidor e roda **desacoplado da conexão** (`nohup`, com log e status em `_uonix-deploy-backups/plugins-<data>/`):
    - **preflight:** produção precisa estar nas versões "de" do lock; se divergir, sai 30 sem alterar nada;
-   - backup das pastas dos plugins e dos temas (`plugin-<slug>.tar.gz` e `tema-<slug>.tar.gz`);
+   - backup das pastas dos plugins e dos temas (`plugin-<slug>.tar.gz` e `tema-<slug>.tar.gz`); o `tar` que sai com 1 (arquivo mudou durante a leitura, comum com o site vivo) é repetido até 3 vezes, 5 s entre elas (`TAR_TENTATIVAS`, `TAR_ESPERA`), e um erro de verdade (2 ou mais) aborta na hora; o arquivo gerado precisa ser legível (`tar -tzf`);
    - modo de manutenção e atualização em **etapas**: os plugins fora da camada crítica formam um lote, e cada crítico é uma etapa sozinho; a versão instalada é conferida, e o `wp wc update` também;
    - smoke depois de cada etapa e depois da limpeza de cache.
 
