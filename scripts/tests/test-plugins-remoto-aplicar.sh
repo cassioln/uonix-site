@@ -45,8 +45,14 @@ case "${1/theme/plugin} $2" in
     v="${3#--version=}"
     printf '%s\n' "$v" > "$doc/wp-includes/version.txt"
     printf 'novo %s\n' "$v" > "$doc/index.php"; : > "$doc/wp-admin/arquivo-novo.php"
+    printf 'idioma novo %s\n' "$v" > "$doc/wp-content/languages/pt_BR.po"
+    # o WordPress apaga o .maintenance ao fim do core update (medido no container)
+    [ -z "${FAKE_NAO_APAGA_MANUTENCAO:-}" ] && rm -f "$doc/.maintenance"
+    printf 'idioma de plugin novo\n' > "$doc/wp-content/languages/plugins/a-pt_BR.po"
     [ -n "${FAKE_NUCLEO_QUEBRA:-}" ] && : > "$doc/QUEBRADO" ; true ;;
-  "core update-db") [ -n "${FAKE_FALHA_NUCLEO_DB:-}" ] && exit 1 ; true ;;
+  "core update-db")
+    [ -e "$doc/.maintenance" ] && echo "manutencao-ativa-no-update-db" >> "$doc/.updatedb-log" || echo "manutencao-DESLIGADA-no-update-db" >> "$doc/.updatedb-log"
+    [ -n "${FAKE_FALHA_NUCLEO_DB:-}" ] && exit 1 ; true ;;
   "core verify-checksums") [ -n "${FAKE_FALHA_CHECKSUMS:-}" ] && exit 1 ; true ;;
   eval*) printf '%s\n' "$2" >> "$doc/.eval-log"; case "$2" in *get_locale*) printf 'pt_BR' ;; esac ;;
   *) : ;;
@@ -62,7 +68,8 @@ preparar() {
   printf '1.0\n' > "$doc/wp-content/plugins/b/VERSION"
   printf '1.0\n' > "$doc/wp-content/plugins/c/VERSION"
   printf 'original\n' > "$doc/wp-content/plugins/b/codigo.php"
-  mkdir -p "$doc/wp-admin" "$doc/wp-includes"
+  mkdir -p "$doc/wp-admin" "$doc/wp-includes" "$doc/wp-content/languages/plugins"
+  printf 'idioma original\n' > "$doc/wp-content/languages/pt_BR.po"; printf 'idioma de plugin original\n' > "$doc/wp-content/languages/plugins/a-pt_BR.po"
   printf '7.1.3\n' > "$doc/wp-includes/version.txt"; printf 'admin\n' > "$doc/wp-admin/admin.php"
   printf 'index original\n' > "$doc/index.php"; printf 'segredo\n' > "$doc/wp-config.php"; printf 'regras\n' > "$doc/.htaccess"
   mkdir -p "$doc/wp-content/themes/t"
@@ -296,7 +303,11 @@ preparar nucleo; rodar "$LISTA_NUCLEO" UONIX_SMOKE_CMD=true
 lista_tar="$(tar -tzf "$bk/nucleo-wordpress.tar.gz")"
 grep -q '^wp-includes/version.txt' <<< "$lista_tar" || fail "núcleo: o tar deveria ter wp-includes: $lista_tar"
 grep -q '^index.php' <<< "$lista_tar" || fail "núcleo: o tar deveria ter index.php: $lista_tar"
-! grep -qE 'wp-config|\.htaccess|wp-content' <<< "$lista_tar" || fail "núcleo: o tar não pode levar wp-config, .htaccess nem wp-content: $lista_tar"
+! grep -qE 'wp-config\.php|\.htaccess|wp-content/plugins|wp-content/themes|wp-content/uploads|wp-content/languages/plugins' <<< "$lista_tar" \
+  || fail "núcleo: o tar não pode levar wp-config, .htaccess, plugins, temas, uploads nem idiomas de plugin: $lista_tar"
+grep -q '^wp-content/languages/pt_BR.po' <<< "$lista_tar" || fail "núcleo: o tar deveria levar os idiomas do núcleo: $lista_tar"
+# O WordPress apaga o .maintenance no fim do core update; o job reativa antes do update-db
+[ "$(cat "$doc/.updatedb-log")" = "manutencao-ativa-no-update-db" ] || fail "núcleo: update-db deveria rodar com a manutenção ativa: $(cat "$doc/.updatedb-log")"
 grep -q '  wordpress 7.1.4' "$bk.log" || fail "núcleo: versões finais sem o núcleo"
 # O idioma do site vai ao core update: sem --locale, um WordPress pt_BR viraria en_US
 grep -q -- '--locale=pt_BR' "$doc/.core-update-args" || fail "núcleo: core update sem --locale=pt_BR: $(cat "$doc/.core-update-args")"
@@ -316,6 +327,9 @@ rodar "$LISTA_NUCLEO" UONIX_SMOKE_CMD="! grep -qx 7.1.4 $doc/wp-includes/version
 [ "$(cat "$doc/wp-content/plugins/c/extra.txt")" = "mudado depois do backup" ] || fail "núcleo: wp-content foi tocado pela restauração"
 [ "$(cat "$bk/descartado-wordpress/wp-includes/version.txt")" = 7.1.4 ] || fail "núcleo: o estado quebrado deveria ficar em descartado-wordpress"
 [ "$(cat "$bk/descartado-wordpress/index.php")" = "novo 7.1.4" ] || fail "núcleo: index.php quebrado deveria ir para o descarte"
+[ "$(cat "$doc/wp-content/languages/pt_BR.po")" = "idioma original" ] || fail "núcleo: o idioma do núcleo não foi restaurado: $(cat "$doc/wp-content/languages/pt_BR.po")"
+[ "$(cat "$doc/wp-content/languages/plugins/a-pt_BR.po")" = "idioma de plugin novo" ] || fail "núcleo: o idioma de plugin não pode ser tocado pela restauração"
+tar -tzf "$bk/descartado-wordpress/idiomas-atuais.tar.gz" | grep -q 'languages/pt_BR.po' || fail "núcleo: os idiomas atuais deveriam ficar guardados em descartado-wordpress"
 [ "$(versao a)" = 1.1 ] || fail "núcleo: o plugin aplicado antes deveria continuar 1.1"
 [ ! -e "$doc/.maintenance" ] || fail "núcleo reprovado: site ficou em manutenção"
 
@@ -337,6 +351,27 @@ rodar "$LISTA_NUCLEO" UONIX_SMOKE_CMD="[ ! -e $doc/QUEBRADO ]" FAKE_NUCLEO_QUEBR
 [ "$rc" = 50 ] && [ "$(nucleo_ver)" = 7.1.3 ] && [ "$(versao a)" = 1.0 ] \
   || fail "vermelho persistente com núcleo deveria restaurar tudo e sair 50 (saiu $rc, núcleo=$(nucleo_ver) a=$(versao a)): $(cat "$bk.log")"
 grep -q 'restaurando TUDO' "$bk.log" || fail "núcleo: vermelho persistente deveria ir à cascata"
+
+# 28b. arquivo órfão na raiz (criado depois do backup) não é apagado; a restauração não toca em nada fora da lista
+preparar nucleoorfao
+printf 'meu\n' > "$doc/wp-arquivo-do-cliente.php"
+rodar $'wordpress 7.1.3 7.1.4 critica nucleo' UONIX_SMOKE_CMD="! grep -qx 7.1.4 $doc/wp-includes/version.txt"
+[ "$rc" = 20 ] && [ "$(cat "$doc/wp-arquivo-do-cliente.php")" = meu ] || fail "arquivo do cliente na raiz deveria sobreviver à restauração (saiu $rc)"
+
+# 28c. o `mv` que devolve a raiz falha na restauração do núcleo: 50, nunca 20
+mkdir -p "$TMP_DIR/fake-mv"
+REAL_MV="$(command -v mv)"
+cat > "$TMP_DIR/fake-mv/mv" <<MV
+#!/usr/bin/env bash
+# falha só ao devolver index.php da pasta restaura-wordpress; o resto vai para o mv de verdade
+case "\$1" in */restaura-wordpress/index.php) exit 1 ;; esac
+exec "$REAL_MV" "\$@"
+MV
+chmod +x "$TMP_DIR/fake-mv/mv"
+preparar nucleomvfalha
+rodar $'wordpress 7.1.3 7.1.4 critica nucleo' PATH="$TMP_DIR/fake-mv:$PATH" UONIX_SMOKE_CMD="! grep -qx 7.1.4 $doc/wp-includes/version.txt"
+[ "$rc" = 50 ] || fail "mv de volta que falha deveria sair 50 (saiu $rc): $(cat "$bk.log")"
+grep -q 'não pôs index.php no lugar' "$bk.log" || fail "relatório sem a falha ao devolver index.php: $(cat "$bk.log")"
 
 # 29. tar do núcleo corrompido na restauração: 50, nunca 20
 preparar nucleotar

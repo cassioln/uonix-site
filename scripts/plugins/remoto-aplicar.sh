@@ -54,9 +54,12 @@ tipo_de() {
   awk -v s="$1" '$1 == s { print ($5 == "tema" || $5 == "nucleo" ? $5 : "plugin"); exit }' <<< "$LISTA"
 }
 
-# Núcleo do WordPress (#448). Não é uma pasta: são wp-admin/, wp-includes/ e os arquivos do
-# núcleo na raiz. wp-config.php, .htaccess e wp-content/ (temas, plugins, uploads) ficam de
-# fora do backup e da restauração.
+# Núcleo do WordPress (#448). Não é uma pasta: são wp-admin/, wp-includes/, os arquivos do
+# núcleo na raiz e os arquivos de idioma do próprio núcleo em wp-content/languages (o
+# `core update --locale` os reescreve; medido: só eles, em languages/ e languages/themes/).
+# wp-config.php, .htaccess, plugins, temas, uploads e languages/plugins/ ficam de fora do
+# backup e da restauração.
+NUCLEO_IDIOMAS=wp-content/languages
 NUCLEO_RAIZ=(index.php license.txt readme.html wp-activate.php wp-blog-header.php wp-comments-post.php
   wp-config-sample.php wp-cron.php wp-links-opml.php wp-load.php wp-login.php wp-mail.php
   wp-settings.php wp-signup.php wp-trackback.php xmlrpc.php)
@@ -64,6 +67,7 @@ itens_nucleo() {
   local f
   printf '%s\n' wp-admin wp-includes
   for f in "${NUCLEO_RAIZ[@]}"; do [ -e "$f" ] && printf '%s\n' "$f"; done
+  [ -d "$NUCLEO_IDIOMAS" ] && printf '%s\n' "$NUCLEO_IDIOMAS"
   return 0
 }
 
@@ -75,6 +79,9 @@ atualizar_nucleo() {  # atualizar_nucleo <versão>: arquivos, depois banco, depo
   local para="$1" loc
   loc="$(wp eval 'echo get_locale();' 2>/dev/null)"
   wp core update --version="$para" --locale="${loc:-en_US}" --force || return 1
+  # O WordPress apaga o .maintenance ao fim do core update (medido: o site fica aberto até o
+  # update-db). Reativa antes de migrar o banco; se não der, segue e avisa.
+  wp maintenance-mode activate >/dev/null 2>&1 || echo "  AVISO: manutenção não reativou antes do update-db; seguindo"
   wp core update-db || return 1
   wp core verify-checksums || return 1
 }
@@ -103,7 +110,7 @@ salvar_pasta() {
   fi
   while :; do
     # stdin fechado, como no wp(): o laço que chama esta função lê a LISTA.
-    tar -czf "$destino" -C "$base" "${conteudo[@]}" </dev/null; rc=$?
+    tar -czf "$destino" -C "$base" --exclude="$NUCLEO_IDIOMAS/plugins" "${conteudo[@]}" </dev/null; rc=$?
     if [ "$rc" = 0 ]; then
       # Só o stdout vai para o lixo: o motivo de um arquivo ilegível fica no log do job.
       tar -tzf "$destino" </dev/null >/dev/null && return 0
@@ -187,11 +194,22 @@ restaurar_nucleo() {
   for f in "$BK/restaura-$slug"/* "$BK/restaura-$slug"/.[!.]*; do
     [ -e "$f" ] || continue
     f="$(basename "$f")"
+    [ "$f" = wp-content ] && continue   # só os idiomas, tratados abaixo; o resto de wp-content nunca é tocado
     if [ -e "$f" ]; then
       mv "$f" "$destino/$f" || { echo "  RESTAURAÇÃO FALHOU: não moveu $f"; return 1; }
     fi
     mv "$BK/restaura-$slug/$f" "$f" || { echo "  RESTAURAÇÃO FALHOU: não pôs $f no lugar"; return 1; }
   done
+  # Idiomas do núcleo: sobrescreve por cima (sem apagar nada), depois de guardar os atuais.
+  if [ -d "$BK/restaura-$slug/$NUCLEO_IDIOMAS" ]; then
+    if [ -d "$NUCLEO_IDIOMAS" ]; then
+      tar -czf "$destino/idiomas-atuais.tar.gz" -C wp-content --exclude=languages/plugins languages </dev/null \
+        || { echo "  RESTAURAÇÃO FALHOU: não guardou os idiomas atuais"; return 1; }
+    fi
+    mkdir -p "$NUCLEO_IDIOMAS" || { echo "  RESTAURAÇÃO FALHOU: sem a pasta de idiomas do núcleo"; return 1; }
+    cp -Rp "$BK/restaura-$slug/$NUCLEO_IDIOMAS/." "$NUCLEO_IDIOMAS/" \
+      || { echo "  RESTAURAÇÃO FALHOU: não devolveu os idiomas do núcleo"; return 1; }
+  fi
 }
 
 # Restaura os slugs dados, na ordem dada. Devolve 1 se algum falhar.

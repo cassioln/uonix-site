@@ -151,9 +151,12 @@ def chave_api(tipo: str, slug: str) -> str:
 
 
 def _subiu_major(de: str, para: str, tipo: str) -> bool:
-    """O destino tem major maior que a origem. Sem versão legível em um dos lados, não há major."""
+    """O destino tem major maior que a origem. Plugin e tema mantêm a regra anterior (versão
+    ilegível vale 0); no núcleo, a série x.y, e sem versão legível dos dois lados não há major."""
     a, b = maior(de, tipo), maior(para, tipo)
-    return a is not None and b is not None and b > a
+    if tipo == "nucleo":
+        return a is not None and b is not None and b > a
+    return (b or 0) > (a or 0)
 
 
 def buscar_api(slug: str, tipo: str = "plugin") -> dict | None:

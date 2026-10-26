@@ -373,12 +373,12 @@ def versao_instalada(local, tipo: str, slug: str) -> str:
 
 
 def atualizar_nucleo(local, para: str, relatorio: list[str]) -> None:
-    """Atualiza o núcleo para a versão exata do lock, migra o banco e confere os checksums.
-    Mesma sequência do job de produção (remoto-aplicar.sh)."""
+    """Atualiza o núcleo para a versão exata do lock e migra o banco, como o job de produção
+    (remoto-aplicar.sh). Os checksums ficam no smoke, que os compara com a linha de base: um
+    local já divergente por motivo alheio não pode reprovar a etapa à toa."""
     local.wp("core", "update", f"--version={para}", "--locale=" + local.locale(), "--force")
     local.wp("core", "update-db")
-    local.wp("core", "verify-checksums")
-    relatorio.append("- `wp core update-db` e `wp core verify-checksums` executados")
+    relatorio.append("- `wp core update-db` executado")
 
 
 def executar(local, plano: dict, inventario: dict, contratos: dict, verificar_contratos, saida: pathlib.Path,
