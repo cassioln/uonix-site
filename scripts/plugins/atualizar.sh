@@ -383,9 +383,10 @@ registrar_aplicacao() {
   python3 - "${dir}/aplicacao-${stamp}.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$stamp" "$sha" "$status" "$smoke" "${LOCK_APLICADO:-}" <<'PY'
 import json, sys
 arq, quando, backup, sha, status, smoke, lock = sys.argv[1:8]
-json.dump({"executado_em": quando, "backup": backup, "lock_sha12": sha, "status_job": status,
-           "smoke_producao": smoke, "lock": lock}, open(arq, "w"))
-open(arq, "a").write("\n")
+with open(arq, "w") as f:
+    json.dump({"executado_em": quando, "backup": backup, "lock_sha12": sha, "status_job": status,
+               "smoke_producao": smoke, "lock": lock}, f)
+    f.write("\n")
 PY
   echo "== registro: ${dir}/aplicacao-${stamp}.json"
 }

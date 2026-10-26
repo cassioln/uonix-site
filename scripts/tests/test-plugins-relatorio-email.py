@@ -49,9 +49,17 @@ ITENS = [
 ]
 
 
+SHA12_FIXTURE = "0f93b1dbf12d"
+
+
+def gravar_lock(pasta: pathlib.Path, dados: dict, sha12: str = SHA12_FIXTURE) -> None:
+    """Grava o lock com o sha256 cujo prefixo é o lock_sha12 do registro: sem isso o relatório o descarta (#452)."""
+    pasta.joinpath("lock.json").write_text(json.dumps({**dados, "sha256": sha12 + "0" * 52}))
+
+
 def pasta_fixture(tmp: pathlib.Path, stamp: str) -> pathlib.Path:
-    (tmp / "lock.json").write_text(json.dumps({"itens": ITENS, "resultado": "verde", "fora": [
-        {"slug": "woocommerce", "de": "11.1.2", "para": "11.2.1", "motivo": "quarentena: lançada há 6 de 7 dias (libera em 2026-10-16)"}]}))
+    gravar_lock(tmp, {"itens": ITENS, "resultado": "verde", "fora": [
+        {"slug": "woocommerce", "de": "11.1.2", "para": "11.2.1", "motivo": "quarentena: lançada há 6 de 7 dias (libera em 2026-10-16)"}]})
     (tmp / "plano.json").write_text(json.dumps({"itens": [
         {"slug": "woocommerce-products-filter", "seguranca": True, "changelog": ["Security fix <script>alert(1)</script>"],
          "novidades": ["Security fix <script>alert(1)</script>"]},
@@ -89,9 +97,26 @@ checar(rel.versoes_finais("== versões finais\n@@VERSAO a 1.0\n@@VERSAO b 2.") =
 corte = {"slug": "b", "tipo": "plugin", "de": "2", "para": "2.0.1"}
 checar(rel.situacao(corte, rel.versoes_finais("@@VERSAO b 2")) == "sem_confirmacao", "versão cortada sem @@STATUS deveria ser 'sem_confirmacao'")
 # versão com lixo é descartada (vira vazia = 'verificar'), nunca igual a de/para
-checar(rel.versoes_finais("@@VERSAO a Warning:\n@@STATUS=0\n") == {"a": ""}, "versão inválida deveria virar vazia")
+checar(rel.versoes_finais("== versões finais\n@@VERSAO a Warning:\n@@STATUS=0\n") == {"a": ""}, "versão inválida deveria virar vazia")
 # o bloco antigo só vale quando não há nenhum @@VERSAO (logs já gravados)
 checar(rel.versoes_finais("== versões finais\n  a 1.0\n@@STATUS=0\n") == {"a": "1.0"}, "log antigo deveria seguir lido pelo bloco")
+
+# 1c. revisão do #452: o stdout de um plugin no meio do log não forja versões
+forjado = ("@@VERSAO x 9.9\nsaída de plugin @@STATUS=0 dentro de uma frase\n== versões finais\n@@VERSAO a 1.0\n@@STATUS=0\n")
+checar(rel.versoes_finais(forjado) == {"a": "1.0"}, f"@@VERSAO antes do bloco final não vale: {rel.versoes_finais(forjado)}")
+checar(rel.versoes_finais("== versões finais\n@@VERSAO a 1.0\nlog @@STATUS=0 solto no meio da frase\n") == {},
+       "@@STATUS só conta sozinho na linha")
+checar(rel.versoes_finais("@@VERSAO a 1.0\n@@STATUS=0\n") == {}, "@@VERSAO sem o cabeçalho do bloco final não é do job")
+checar(rel.versoes_finais("== versões finais\n@@VERSAO a 1.0\n@@VERSAO a 9.9\n@@STATUS=0\n") == {}, "slug repetido invalida a leitura")
+checar(rel.versoes_finais("== versões finais\n@@VERSAO a 1.0\n== versões finais\n@@VERSAO a 2.0\n@@STATUS=0\n") == {"a": "2.0"},
+       "vale o último bloco")
+# lock: sem sha256 não é o que foi aplicado; JSON que não é objeto não derruba o relatório
+with tempfile.TemporaryDirectory() as t4:
+    t4 = pathlib.Path(t4)
+    (t4 / "lock.json").write_text(json.dumps({"itens": [{"slug": "a", "tipo": "plugin", "de": "1", "para": "2", "camada": "comum", "aplicacao": "lote"}]}))
+    checar(rel.ler_lock(t4, {"lock_sha12": "abcdef012345"}) == {}, "lock sem sha256 não vale quando o registro tem sha12")
+    (t4 / "lock.json").write_text("[1, 2]")
+    checar(rel.ler_lock(t4, {"lock_sha12": "x"}) == {}, "JSON que não é objeto não pode levantar exceção")
 
 # 2. situação de cada item
 checar(rel.situacao(ITENS[0], finais) == "atualizado", "versão final = para deveria ser 'atualizado'")
@@ -211,7 +236,7 @@ with tempfile.TemporaryDirectory() as t2:
              "smoke_producao": "0", "lock": str(outra / "lock-copia.json")}
     (t2 / f"aplicacao-{stamp2}.json").write_text(json.dumps(aplic))
     (t2 / f"smoke-producao-{stamp2}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
-    log2 = "@@VERSAO loco-translate 2.9.0\n@@STATUS=0\n"
+    log2 = "== versões finais\n@@VERSAO loco-translate 2.9.0\n@@STATUS=0\n"
     c = rel.montar(t2, aplic, "0", log2)
     checar([i["slug"] for i in c["itens"]] == ["loco-translate"] and c["itens"][0]["situacao"] == "atualizado",
            f"o relatório deveria ler o lock do caminho gravado no registro: {c['itens']}")
@@ -225,7 +250,7 @@ with tempfile.TemporaryDirectory() as t2:
     cx = rel.montar(t2, outro_ciclo, "0", log2)
     checar(cx["itens"] == [], f"lock com sha12 diferente do registro é de outro ciclo e não vale: {cx['itens']}")
     # compatibilidade: registro antigo (sem \"lock\") com lock.json ao lado e mesmo sha12
-    (t2 / "lock.json").write_text(json.dumps(lock_novo))
+    gravar_lock(t2, {k: v for k, v in lock_novo.items() if k != "sha256"}, sha12="abcdef012345")
     cc = rel.montar(t2, sem, "0", log2)
     checar([i["slug"] for i in cc["itens"]] == ["loco-translate"], "registro antigo deveria cair no lock.json ao lado")
 
@@ -370,7 +395,7 @@ with tempfile.TemporaryDirectory() as t:
     pasta = pasta_fixture(pathlib.Path(t), stamp)
     lock_dados = json.loads((pasta / "lock.json").read_text())
     lock_dados["fora"] += [{"slug": f"interno-{n}", "de": "1", "para": "2", "motivo": m} for n, m in enumerate(MOTIVOS_INTERNOS)]
-    (pasta / "lock.json").write_text(json.dumps(lock_dados))
+    gravar_lock(pasta, lock_dados)
     c = rel.montar(pasta, json.loads((pasta / f"aplicacao-{stamp}.json").read_text()), "0", "")
     cliente_html, cliente_txt = rel.corpo_html(c), rel.corpo_texto(c)
     for m in MOTIVOS_INTERNOS:
@@ -432,7 +457,7 @@ with tempfile.TemporaryDirectory() as t:
     pasta = pathlib.Path(t)
     itens_t = [{"slug": "kadence", "tipo": "tema", "de": "1.5.1", "para": "1.5.2", "camada": "critica", "aplicacao": "um_por_vez"},
                {"slug": "fluentform", "tipo": "plugin", "de": "6.2.15", "para": "6.2.16", "camada": "critica", "aplicacao": "um_por_vez"}]
-    (pasta / "lock.json").write_text(json.dumps({"itens": itens_t, "resultado": "verde", "fora": []}))
+    gravar_lock(pasta, {"itens": itens_t, "resultado": "verde", "fora": []}, sha12="c530cf0c854c")
     (pasta / "plano.json").write_text(json.dumps({"itens": [
         {"slug": "kadence", "tipo": "tema", "seguranca": False, "changelog": "sem as versões do intervalo", "novidades": None},
         # plugin homônimo no plano: não pode vazar para o tema
@@ -464,13 +489,13 @@ with tempfile.TemporaryDirectory() as t:
 with tempfile.TemporaryDirectory() as t:
     stamp = "plugins-20261026-190000"
     pasta = pathlib.Path(t)
-    (pasta / "lock.json").write_text(json.dumps({"itens": [
+    gravar_lock(pasta, {"itens": [
         {"slug": "wordpress", "tipo": "nucleo", "de": "7.1.3", "para": "7.1.4", "camada": "nucleo", "aplicacao": "um_por_vez"}],
-        "resultado": "verde", "fora": []}))
+        "resultado": "verde", "fora": []}, sha12="abc000000000")
     (pasta / "plano.json").write_text(json.dumps({"itens": [
         {"slug": "wordpress", "tipo": "nucleo", "seguranca": None, "changelog": "indisponível", "novidades": None}]}))
     (pasta / f"aplicacao-{stamp}.json").write_text(json.dumps(
-        {"executado_em": "2026-10-26T19:00:00Z", "backup": stamp, "lock_sha12": "abc", "status_job": "0", "smoke_producao": "0"}))
+        {"executado_em": "2026-10-26T19:00:00Z", "backup": stamp, "lock_sha12": "abc000000000", "status_job": "0", "smoke_producao": "0"}))
     (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
     c = rel.montar(pasta, json.loads((pasta / f"aplicacao-{stamp}.json").read_text()), "0", "== versões finais\n  wordpress 7.1.4\n")
     h, txt = rel.corpo_html(c), rel.corpo_texto(c)
@@ -532,7 +557,7 @@ with tempfile.TemporaryDirectory() as t:
     checar(not rel.para_cliente(sem_smoke) and any("smoke" in m for m in rel.motivos(sem_smoke)),
            "sem smoke não pode ir para o cliente")
     (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
-    (pasta / "lock.json").write_text(json.dumps({"itens": [], "fora": []}))
+    gravar_lock(pasta, {"itens": [], "fora": []})
     checar(not rel.para_cliente(rel.montar(pasta, aplicacao, "0", log_ok)), "lock vazio não pode ir para o cliente")
     pasta_fixture(pathlib.Path(t), stamp)
     (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))

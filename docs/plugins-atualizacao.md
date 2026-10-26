@@ -156,7 +156,7 @@ Se o job receber TERM, INT ou HUP, ele desliga a manutenção e grava o status 1
 
 ### Relatório por e-mail
 
-**Versões finais e lock (#430, #431).** O job imprime uma linha `@@VERSAO <slug> <versão>` por item no fim; a versão passa por regex no servidor e vira `?` se não casar (um Warning do PHP no stdout do WP-CLI não vira "versão"). O relatório lê só essas linhas, e **só se o log tiver `@@STATUS=`**, isto é, se o job terminou: numa conexão cortada, uma versão pela metade (`3.8` de `3.8.1`) não vira "mantido". Logs já gravados, no formato antigo, seguem lidos pelo bloco `== versões finais`. O registro `aplicacao-<backup>.json` guarda o caminho absoluto do lock aplicado (`lock`), e o relatório lê esse lock; um lock com `sha256` diferente do `lock_sha12` do registro é de outro ciclo e não vale. O envio tem limite total (`UONIX_RELATORIO_LIMITE`, 90 s), e o Ctrl-C do operador durante o envio não troca a saída final do `aplicar-producao`.
+**Versões finais e lock (#430, #431).** O job imprime uma linha `@@VERSAO <slug> <versão>` por item no fim; a versão passa por regex no servidor e vira `?` se não casar (um Warning do PHP no stdout do WP-CLI não vira "versão"). O relatório lê só essas linhas, **depois da última `== versões finais`** (o stdout de um plugin, antes disso, não vale), e **só se o log tiver uma linha `@@STATUS=<n>`**, isto é, se o job terminou; um slug repetido invalida a leitura inteira: numa conexão cortada, uma versão pela metade (`3.8` de `3.8.1`) não vira "mantido". Logs já gravados, no formato antigo, seguem lidos pelo bloco `== versões finais`. O registro `aplicacao-<backup>.json` guarda o caminho absoluto do lock aplicado (`lock`), e o relatório lê esse lock; um lock com `sha256` diferente do `lock_sha12` do registro é de outro ciclo e não vale. O envio tem limite total (`UONIX_RELATORIO_LIMITE`, 90 s), e o Ctrl-C do operador durante o envio não troca a saída final do `aplicar-producao`.
 
 Ao fim da aplicação, sai um e-mail de `cassio@ksio.dev`, assinado por Cassio Lima (ksiodev). O destino depende do resultado:
 
@@ -173,7 +173,7 @@ O relatório do cliente traz:
 - o que ficou para o próximo ciclo;
 - o backup.
 
-A versão "depois" é a que o WP-CLI de produção leu no fim do job (bloco `== versões finais` do log), nunca a do plano. Sem log, ela aparece como "não confirmada". A prévia HTML fica em `relatorio-<backup>.html`, ao lado do lock.
+A versão "depois" é a que o WP-CLI de produção leu no fim do job (as linhas `@@VERSAO` depois da última `== versões finais` do log), nunca a do plano. Sem log, ela aparece como "não confirmada". A prévia HTML fica em `relatorio-<backup>.html`, ao lado do lock.
 
 A configuração fica no `.env` do checkout principal:
 

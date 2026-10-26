@@ -6,9 +6,9 @@ e-mail HTML (com alternativa em texto) com o resultado: cada plugin com a
 versão de antes e a que ficou instalada, as correções de segurança do
 changelog, o smoke de produção, o backup e o que ficou fora do ciclo.
 
-A versão "depois" vem do bloco "== versões finais" do log do job, ou seja, do
-que o WP-CLI de produção leu no fim; nunca do plano. Sem log, ela aparece como
-"não confirmada".
+A versão "depois" vem das linhas "@@VERSAO <slug> <versão>" que o job grava depois da
+última linha "== versões finais", ou seja, do que o WP-CLI de produção leu no fim; nunca do
+plano. Sem log, ou sem o "@@STATUS=" de um job que terminou, ela aparece como "não confirmada".
 
 Uso:
   relatorio_email.py --dir DIR --aplicacao ARQ.json --saida-final N
@@ -154,6 +154,7 @@ def ler_json(caminho: pathlib.Path) -> dict:
 
 _VERSAO_MARCADA = re.compile(r"^@@VERSAO (\S+) (\S+)$")
 _VERSAO_VALIDA = re.compile(r"^[0-9][0-9A-Za-z.+_-]*$")
+_STATUS_FINAL = re.compile(r"^@@STATUS=\d+$", re.M)
 
 
 def versoes_finais(log: str) -> dict[str, str]:
@@ -165,12 +166,23 @@ def versoes_finais(log: str) -> dict[str, str]:
     "3.8.1") poderia parecer a versão de origem e virar um "mantido" falso. Sem @@STATUS, nenhum
     item é confirmado.
 
+    O log inclui o stdout do `plugin update` e dos hooks dos plugins, então só vale o que vem
+    DEPOIS da última linha "== versões finais" (o job a imprime no fim), o "@@STATUS=" só conta
+    sozinho numa linha, e um slug repetido invalida a leitura inteira (fail-closed).
+
     Logs antigos, sem nenhum @@VERSAO, seguem pelo bloco "== versões finais"."""
-    marcadas = [m for m in (_VERSAO_MARCADA.match(l.rstrip()) for l in log.splitlines()) if m]
+    linhas = log.splitlines()
+    inicio = max((n for n, l in enumerate(linhas) if l.startswith("== versões finais")), default=-1)
+    marcadas = [m for m in (_VERSAO_MARCADA.match(l.rstrip()) for l in linhas[inicio + 1:]) if m] if inicio >= 0 else []
     if marcadas:
-        if "@@STATUS=" not in log:
+        if not _STATUS_FINAL.search(log):
+            return {}
+        slugs = [m.group(1) for m in marcadas]
+        if len(slugs) != len(set(slugs)):
             return {}
         return {m.group(1): (m.group(2) if _VERSAO_VALIDA.match(m.group(2)) else "") for m in marcadas}
+    if any(_VERSAO_MARCADA.match(l.rstrip()) for l in linhas):
+        return {}  # @@VERSAO fora do bloco final: não é do job
     return _versoes_bloco_antigo(log)
 
 
@@ -296,11 +308,13 @@ def ler_lock(pasta: pathlib.Path, aplicacao: dict) -> dict:
     gravado = aplicacao.get("lock") or ""
     for caminho in ([pathlib.Path(gravado)] if gravado else []) + [pasta / "lock.json"]:
         dados = ler_json(caminho)
-        if not dados.get("itens"):
+        if not isinstance(dados, dict) or not dados.get("itens"):
             continue
         sha12 = str(dados.get("sha256", ""))[:12]
         esperado = str(aplicacao.get("lock_sha12", ""))
-        if esperado and sha12 and sha12 != esperado:
+        # O aplicar-producao só roda com um lock de sha256 válido (lock.py), então o do registro
+        # existe; um lock sem sha256, ou de outro ciclo, não é o que foi aplicado.
+        if esperado and sha12 != esperado:
             continue
         return dados
     return {}
