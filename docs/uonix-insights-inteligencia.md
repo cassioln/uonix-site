@@ -383,6 +383,7 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 - Cada entrada do cache é chaveada por `sha256` de consulta + caminho, e a consulta não fica em texto puro.
 - Entrada nova faz uma chamada, e o resultado substitui o anterior, inclusive quando falha. Assim, a sugestão de um título que já não existe nunca sobrevive.
 - Cada chamada grava o código HTTP da última resposta (`http`, 0 em erro de transporte) e os pedidos feitos (`attempts`).
+- **Causa do erro de transporte (#404):** com `http` 0, a entrada grava também `error`, o código e a mensagem do `WP_Error` da última tentativa (por exemplo, `http_request_failed: cURL error 28: Operation timed out…`). O texto sai saneado: uma linha, sem tag, sem endereço (`https://…` vira `[url]`), sem a chave, com teto de 160 caracteres. O nome do servidor sem o `https://` fica, porque é o que diferencia DNS de tempo esgotado. Resposta HTTP, mesmo de falha, não grava `error`. Serve para decidir o ajuste (tempo limite, nova tentativa) com dado, e não por suposição.
 - **Parada (#384):** depois de um `quota_exhausted`, ou de duas falhas seguidas (`unavailable` ou `model_missing`), nenhuma chamada começa na execução. As entradas que precisariam de uma ficam `deferred`, com o motivo em `reason` (`quota_exhausted` ou `failures`). A sugestão `ok` com a mesma entrada continua, porque não precisava de chamada.
 - O leitor recalcula a entrada. Se o título ou a descrição mudaram depois da geração, o estado é `pending`. Mudança só nas métricas não muda nada.
 - Oportunidade que saiu da lista sai do cache.
@@ -593,7 +594,7 @@ Arquivo: `mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php`. Decis
   - A página de ontem só vale para o **mesmo** caminho líder.
   - Uma página que ontem já era "não sei" fica marcada (`page_unknown`) e não vale como a de ontem: sem isso, o segundo "não sei" seguido chamava o Gemini sem página.
 - **Transporte:** é o mesmo da sugestão de título, `uonix_intelligence_ai_generate()`, com uma nova tentativa em 429 e 503, menos no 429 de cota diária.
-- **Parada (#384):** depois de um `quota_exhausted`, ou de duas falhas seguidas, nenhuma chamada começa. As restantes ficam `deferred`, com o motivo em `reason`, e a cota esgotada grava a hora da renovação em `retry_at`. O painel tem texto próprio para cada caso. Cada chamada grava `http` e `attempts`.
+- **Parada (#384):** depois de um `quota_exhausted`, ou de duas falhas seguidas, nenhuma chamada começa. As restantes ficam `deferred`, com o motivo em `reason`, e a cota esgotada grava a hora da renovação em `retry_at`. O painel tem texto próprio para cada caso. Cada chamada grava `http` e `attempts`, e o erro de transporte grava também a causa em `error` (#404), como na sugestão de título.
 
 ### O que é gravado
 

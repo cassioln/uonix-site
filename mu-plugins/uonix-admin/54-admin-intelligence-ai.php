@@ -478,6 +478,40 @@ if ( ! function_exists( 'uonix_intelligence_ai_quota_info' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_ai_transport_error' ) ) {
+	/**
+	 * A causa de um erro de transporte (`WP_Error` de `wp_remote_post`), para gravar no cache.
+	 *
+	 * O `http` 0 sozinho não separa tempo esgotado de DNS ou TLS (#404). A causa sai em uma linha,
+	 * sem tag, sem endereço, sem chave e com teto de 160 caracteres. O nome do servidor, sem
+	 * `https://`, fica: não é segredo e é o que diferencia o DNS.
+	 *
+	 * @param mixed $erro O retorno de `wp_remote_post`.
+	 * @return string Vazio quando não é um `WP_Error` ou não tem código nem mensagem.
+	 */
+	function uonix_intelligence_ai_transport_error( $erro ) {
+		if ( ! function_exists( 'is_wp_error' ) || ! is_wp_error( $erro ) ) {
+			return '';
+		}
+		$codigo   = (string) $erro->get_error_code();
+		$mensagem = (string) $erro->get_error_message();
+		$texto    = trim( $codigo . ( '' !== $codigo && '' !== $mensagem ? ': ' : '' ) . $mensagem );
+		$chave = function_exists( 'uonix_intelligence_ai_api_key' ) ? uonix_intelligence_ai_api_key() : '';
+		if ( '' !== $chave ) {
+			$texto = str_replace( $chave, '[chave]', $texto );
+		}
+		$texto = (string) preg_replace( array( '/<[^>]*>/', '#[a-z][a-z0-9+.-]*://\S+#i', '/AIza[0-9A-Za-z_-]{20,}/', '/[\x00-\x1F\x7F\s]+/u' ), array( ' ', '[url]', '[chave]', ' ' ), $texto );
+		$texto = trim( $texto );
+		if ( function_exists( 'mb_substr' ) ) {
+			$texto = mb_substr( $texto, 0, 160, 'UTF-8' );
+		} else {
+			$texto = substr( $texto, 0, 160 );
+		}
+
+		return trim( $texto );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 	/**
 	 * Transporte de um pedido ao Gemini, sem saber o que o pedido pede.
@@ -496,10 +530,11 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 	 *
 	 * @param array  $body  Corpo do `generateContent`.
 	 * @param string $model Modelo, como `uonix_intelligence_ai_model()` devolve.
-	 * @return array{status: string, http?: int, attempts?: int, retry_after?: int, text?: string}
+	 * @return array{status: string, http?: int, attempts?: int, error?: string, retry_after?: int, text?: string}
 	 *         `http` é o código da última resposta (0 em erro de transporte) e `attempts` os pedidos
-	 *         feitos; os dois só faltam em `not_configured`. `text` só com `ok`; `retry_after` só
-	 *         com `quota_exhausted`, quando o corpo diz.
+	 *         feitos; os dois só faltam em `not_configured`. `error` é a causa do erro de transporte
+	 *         da última tentativa, saneada (#404), e só existe com `http` 0. `text` só com `ok`;
+	 *         `retry_after` só com `quota_exhausted`, quando o corpo diz.
 	 */
 	function uonix_intelligence_ai_generate( array $body, $model, $pause = 2 ) {
 		$chave = uonix_intelligence_ai_api_key();
@@ -530,6 +565,10 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 			break;
 		}
 		$feito = array( 'http' => $codigo, 'attempts' => $tentativa );
+		$causa = uonix_intelligence_ai_transport_error( $resposta );
+		if ( '' !== $causa ) {
+			$feito['error'] = $causa;
+		}
 		if ( is_array( $cota ) && $cota['daily'] ) {
 			return array( 'status' => 'quota_exhausted' ) + $feito + ( $cota['retry_after'] > 0 ? array( 'retry_after' => $cota['retry_after'] ) : array() );
 		}
@@ -654,7 +693,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 			$resultado = uonix_intelligence_ai_call( $input, $pause );
 			++$chamadas;
 			$entrada = array( 'status' => $resultado['status'], 'input_hash' => $hash, 'attempted_at' => $agora, 'model' => $input['model'] );
-			$entrada += array_intersect_key( $resultado, array( 'http' => true, 'attempts' => true ) );
+			$entrada += array_intersect_key( $resultado, array( 'http' => true, 'attempts' => true, 'error' => true ) );
 			if ( '' !== $input['redirected_to'] ) {
 				$entrada['redirected_to'] = $input['redirected_to'];
 			}

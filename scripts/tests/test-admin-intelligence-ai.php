@@ -26,8 +26,10 @@ function uox_ai_assert( $condition, $message ) {
 
 class WP_Error {
 	private $code;
-	public function __construct( $code = '' ) { $this->code = $code; }
+	private $message;
+	public function __construct( $code = '', $message = '' ) { $this->code = $code; $this->message = $message; }
 	public function get_error_code() { return $this->code; }
+	public function get_error_message() { return $this->message; }
 }
 function is_wp_error( $v ) { return $v instanceof WP_Error; }
 function wp_json_encode( $v, $f = 0 ) { return json_encode( $v, $f ); }
@@ -291,6 +293,39 @@ foreach ( $casos_http as $caso => $c ) {
 	$r = uonix_intelligence_ai_call( $in, 0 );
 	uox_ai_assert( $c[1] === $r['status'] && $c[2] === count( $GLOBALS['uox_pedidos'] ), "HTTP {$caso}: status {$c[1]} com {$c[2]} pedido(s); obteve {$r['status']} com " . count( $GLOBALS['uox_pedidos'] ) );
 }
+// ---------------------------------------------------------------------------
+// 4b. Causa da falha de transporte (#404): http 0 sem a causa não deixa decidir o ajuste.
+// ---------------------------------------------------------------------------
+$corpo_404 = array( 'contents' => array( array( 'role' => 'user', 'parts' => array( array( 'text' => 'qualquer pedido' ) ) ) ) );
+$timeout_curl = 'cURL error 28: Operation timed out after 15001 milliseconds with 0 bytes received';
+$GLOBALS['uox_http']    = array( new WP_Error( 'http_request_failed', $timeout_curl ) );
+$GLOBALS['uox_pedidos'] = array();
+$et = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 );
+uox_ai_assert( 'unavailable' === $et['status'] && 0 === $et['http'] && 1 === $et['attempts'] && 'http_request_failed: ' . $timeout_curl === ( $et['error'] ?? null ), '#404: o erro de transporte devolve o código e a mensagem; obteve ' . var_export( $et, true ) );
+$GLOBALS['uox_http'] = array( uox_http( 503 ), new WP_Error( 'http_request_failed', $timeout_curl ) );
+$et2 = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 );
+uox_ai_assert( 'unavailable' === $et2['status'] && 0 === $et2['http'] && 2 === $et2['attempts'] && isset( $et2['error'] ), '#404: 503 e depois erro de transporte: a causa é a da última tentativa; obteve ' . var_export( $et2, true ) );
+$GLOBALS['uox_http'] = array( uox_http( 500 ) );
+uox_ai_assert( ! array_key_exists( 'error', uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 ) ), '#404: resposta HTTP, mesmo de falha, não grava causa de transporte' );
+$GLOBALS['uox_http'] = array( uox_gemini( 'x' ) );
+uox_ai_assert( ! array_key_exists( 'error', uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 ) ), '#404: resposta ok não grava causa' );
+$sujo = new WP_Error( 'http_request_failed', "<b>cURL</b> error 6: falha em https://generativelanguage.googleapis.com/v1beta/models/x:generateContent?key=AIzaSyA1234567890123456789012345 \n com  a chave chave-de-teste e AIzaSyA1234567890123456789012345" );
+$GLOBALS['uox_http'] = array( $sujo );
+$es = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
+uox_ai_assert( '' !== $es && false === strpos( $es, 'AIza' ) && false === strpos( $es, 'chave-de-teste' ) && false === strpos( $es, 'https://' ) && false === strpos( $es, '<' ) && false === strpos( $es, "\n" ), '#404: a causa sai sem tag, sem endereço, sem chave e em uma linha; obteve ' . var_export( $es, true ) );
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'cURL error 6: Could not resolve host: generativelanguage.googleapis.com' ) );
+uox_ai_assert( 'http_request_failed: cURL error 6: Could not resolve host: generativelanguage.googleapis.com' === ( uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '' ), '#404: o nome do servidor, que não é segredo, fica na causa (DNS)' );
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', str_repeat( 'é', 400 ) ) );
+$el = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
+uox_ai_assert( mb_strlen( $el, 'UTF-8' ) <= 160 && '' !== $el, '#404: a causa tem teto de 160 caracteres, contados em UTF-8; obteve ' . mb_strlen( $el, 'UTF-8' ) );
+// Corte no meio de um espaço: 'http_request_failed: ' tem 21 caracteres, então 138 'a' + ' ' + 'b' põem o espaço na posição 160.
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', str_repeat( 'a', 138 ) . ' b' ) );
+$eb = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
+uox_ai_assert( '' !== $eb && $eb === trim( $eb ) && 'http_request_failed: ' . str_repeat( 'a', 138 ) === $eb, '#404: o corte em 160 não deixa espaço sobrando no fim; obteve ' . var_export( $eb, true ) . ' (' . strlen( $eb ) . ')' );
+$GLOBALS['uox_http'] = array( new WP_Error( '', '' ) );
+$vazio = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 );
+uox_ai_assert( 'unavailable' === $vazio['status'] && 0 === $vazio['http'] && ! array_key_exists( 'error', $vazio ), '#404: WP_Error sem código nem mensagem não grava causa vazia; obteve ' . var_export( $vazio, true ) );
+
 $partes_com_pensamento = array( 'code' => 200, 'body' => json_encode( array( 'candidates' => array( array( 'finishReason' => 'STOP', 'content' => array( 'parts' => array( array( 'text' => 'pensando…', 'thought' => true ), array( 'text' => json_encode( $ok, JSON_UNESCAPED_UNICODE ) ) ) ) ) ) ) ) );
 $GLOBALS['uox_http'] = array( $partes_com_pensamento );
 uox_ai_assert( 'ok' === uonix_intelligence_ai_call( $in, 0 )['status'], 'Parte marcada como thought é ignorada' );
@@ -487,6 +522,17 @@ $GLOBALS['uox_http'] = array_fill( 0, 10, uox_http( 503 ) );
 uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
 $cf = get_option( uonix_intelligence_ai_option() );
 uox_ai_assert( 503 === ( $cf[ $k_n( 1 ) ]['http'] ?? null ) && 2 === ( $cf[ $k_n( 1 ) ]['attempts'] ?? null ) && 'failures' === ( $cf[ $k_n( 3 ) ]['reason'] ?? '' ) && ! isset( $cf[ $k_n( 3 ) ]['retry_at'] ), '#384: a falha grava o HTTP 503 e os dois pedidos; a adiada diz o motivo, sem hora de renovação' );
+
+// #404: o cron grava a causa do erro de transporte no cache, e só nele.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' ), uox_http( 503 ), uox_http( 503 ) );
+uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+$ct = get_option( uonix_intelligence_ai_option() );
+uox_ai_assert( 'unavailable' === ( $ct[ $k_n( 1 ) ]['status'] ?? '' ) && 0 === ( $ct[ $k_n( 1 ) ]['http'] ?? null ) && 'http_request_failed: cURL error 28: Operation timed out' === ( $ct[ $k_n( 1 ) ]['error'] ?? null ), '#404: a falha de transporte grava a causa no cache; obteve ' . var_export( $ct[ $k_n( 1 ) ] ?? null, true ) );
+uox_ai_assert( 503 === ( $ct[ $k_n( 2 ) ]['http'] ?? null ) && ! array_key_exists( 'error', $ct[ $k_n( 2 ) ] ) && ! array_key_exists( 'error', $ct[ $k_n( 3 ) ] ?? array() ), '#404: a falha com resposta HTTP e a adiada não levam a causa' );
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' ) );
+$lido = uonix_intelligence_ai_suggestion_for( $cinco[0] ?? array(), array() );
+uox_ai_assert( 'unavailable' === ( $lido['status'] ?? '' ) && ! array_key_exists( 'error', $lido ), '#404: o leitor do painel lê o estado unavailable e não expõe a causa (ela é só diagnóstico); obteve ' . var_export( $lido, true ) );
 
 // ---------------------------------------------------------------------------
 // 7. Leitor (foco de revisão 5: título editado depois da geração vira pending).

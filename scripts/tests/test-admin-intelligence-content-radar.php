@@ -461,6 +461,29 @@ uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteiriz
 $am = get_option( $opt )['candidates'][0]['ai'];
 uox_rd_assert( ! isset( $am['http'] ) && ! isset( $am['attempts'] ), '#384: HTTP e pedidos que não são inteiros não são gravados' );
 
+// #404: a causa do erro de transporte (http 0) fica gravada, para decidir o ajuste com dado.
+$GLOBALS['uox_options'] = array();
+$causa                  = 'http_request_failed: cURL error 28: Operation timed out after 15001 milliseconds with 0 bytes received';
+$roteiro                = array( array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 2, 'error' => $causa ), array( 'status' => 'unavailable', 'http' => 503, 'attempts' => 2 ), 'ok', 'ok', 'ok', 'ok' );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$ac = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( 0 === ( $ac[0]['http'] ?? null ) && 2 === ( $ac[0]['attempts'] ?? null ) && $causa === ( $ac[0]['error'] ?? null ), '#404: o erro de transporte grava http 0, os pedidos e a causa; obteve ' . var_export( $ac[0] ?? null, true ) );
+uox_rd_assert( 503 === ( $ac[1]['http'] ?? null ) && ! array_key_exists( 'error', $ac[1] ), '#404: falha com resposta HTTP não leva causa de transporte' );
+uox_rd_assert( 'failures' === ( $ac[2]['reason'] ?? '' ) && ! array_key_exists( 'error', $ac[2] ) && ! array_key_exists( 'http', $ac[2] ), '#404: a adiada diz o motivo e não herda a causa da vizinha' );
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 1, 'error' => array( 'x' ) ) );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+uox_rd_assert( ! array_key_exists( 'error', get_option( $opt )['candidates'][0]['ai'] ), '#404: causa que não é texto não é gravada' );
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 1, 'error' => str_repeat( 'é', 400 ) ) );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$longa = get_option( $opt )['candidates'][0]['ai']['error'] ?? '';
+uox_rd_assert( 160 === mb_strlen( $longa, 'UTF-8' ), '#404: a causa grava no máximo 160 caracteres, mesmo vinda de um gerador de fora; obteve ' . mb_strlen( $longa, 'UTF-8' ) );
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 1, 'error' => '' ) );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+uox_rd_assert( ! array_key_exists( 'error', get_option( $opt )['candidates'][0]['ai'] ), '#404: causa vazia não é gravada' );
+
 $GLOBALS['uox_options'] = array();
 uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => static function () { return array( 'status' => 'ok', 'text' => '{"caminho":"x"}' ); } ) ) );
 uox_rd_assert( 'rejected' === get_option( $opt )['candidates'][0]['ai']['status'], 'Resposta fora do formato vira rejected' );
