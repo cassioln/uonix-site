@@ -15,7 +15,7 @@ Recusa o lock quando:
 
 Saída padrão, quando válido: a 1ª linha é o sha256 curto (12 caracteres, usado
 na frase de confirmação); as seguintes são "slug de para camada tipo", na ordem do
-lock, com a camada crítica marcada como "critica", seguidas de "plugin" ou "tema".
+lock, com a camada crítica marcada como "critica", seguidas de "plugin", "tema" ou "nucleo".
 
 Uso: lock.py validar --lock ARQ [--max-horas N] [--agora AAAA-MM-DDTHH:MM:SS]
 Saída: 0 válido, 2 inválido.
@@ -38,7 +38,7 @@ SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 # separada por espaço, e um espaço em `para` deslocaria a camada.
 VERSAO = re.compile(r"^[0-9][0-9A-Za-z.+_-]*$")
 APLICACOES = {"lote", "um_por_vez"}
-TIPOS = {"plugin", "tema"}
+TIPOS = {"plugin", "tema", "nucleo"}
 
 
 class LockInvalido(ValueError):
@@ -82,6 +82,8 @@ def validar(lock: dict, agora: dt.datetime, max_horas: float) -> tuple[str, list
         tipo = i.get("tipo")
         if tipo not in TIPOS:
             raise LockInvalido(f"{slug}: só plugins e temas são aplicados por esta via (tipo {tipo!r})")
+        if tipo == "nucleo" and slug != "wordpress":
+            raise LockInvalido(f"{slug}: o núcleo do WordPress só pode ter o slug 'wordpress'")
         if tipo == "plugin" and slug in EXCECOES_ATIVACAO:
             raise LockInvalido(f"{slug}: o código não carrega no ensaio local; não pode ser aplicado por esta via")
         if not VERSAO.match(str(i.get("de", ""))) or not VERSAO.match(str(i.get("para", ""))):

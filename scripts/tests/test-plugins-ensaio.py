@@ -85,6 +85,27 @@ entram2 = [i["slug"] for i in pl2["itens"]]
 checar("megamenu" in entram2 and entram2[-1] == "woocommerce",
        f"--aceitar-major e --dispensar-quarentena deveriam liberar; woocommerce por último: {entram2}")
 
+# Núcleo (#448): sem API, sem quarentena; entra no plano na frente de nada e por último; major bloqueia.
+def plano_nucleo(de, para, extra=None, aceitar=frozenset()):
+    inv_n = {"plugins": extra or [], "temas": [], "nucleo": [item("wordpress", de, para)]}
+    return plano.planejar(inv_n, POLITICA, {}, HOJE, set(aceitar), set())
+
+
+checar(plano._subiu_major("", "2.0", "plugin") and not plano._subiu_major("", "2.0", "nucleo"),
+       "plugin com origem ilegível mantém o major (regra anterior); o núcleo não")
+checar(plano._subiu_major("7.1.3", "7.2", "nucleo") and not plano._subiu_major("7.1.3", "7.1.9", "nucleo")
+       and plano._subiu_major("1.9", "2.0", "plugin") and not plano._subiu_major("1.9", "1.10", "plugin"), "major por série x por número")
+pn = plano_nucleo("7.1.3", "7.1.4", extra=[item("loco-translate", "2.8.9", "2.9.0")])
+checar(pn["itens"][-1]["slug"] == "wordpress" and pn["itens"][-1]["tipo"] == "nucleo" and pn["itens"][-1]["camada"] == "nucleo",
+       f"o núcleo deveria entrar por último: {pn['itens']}")
+checar(pn["itens"][-1]["quarentena"] == "não se aplica" and pn["itens"][-1]["aplicacao"] == "um_por_vez", f"núcleo sem quarentena e um por vez: {pn['itens'][-1]}")
+pn = plano_nucleo("7.1.3", "7.2")
+checar(not pn["itens"] and "--aceitar-major=wordpress" in pn["fora"][0]["motivo"], f"major do núcleo deveria bloquear: {pn}")
+pn = plano_nucleo("7.1.3", "7.2", aceitar={"wordpress"})
+checar([i["slug"] for i in pn["itens"]] == ["wordpress"], f"--aceitar-major=wordpress deveria liberar: {pn}")
+checar(plano.chave_api("nucleo", "wordpress") == "nucleo:wordpress" and plano.buscar_api("wordpress", "nucleo") is None,
+       "o núcleo nunca consulta a API (o slug 'wordpress' dos plugins é outro projeto)")
+
 # Tema (#445): a chave da API leva o prefixo "tema:", a data vem da API de temas e não há changelog.
 def api_tema(versao, lancado):
     return {"version": versao, "last_updated": lancado, "sections": {"description": "Tema."}}
@@ -316,6 +337,10 @@ class FakeLocal:
         self.tema_ativo = "kadence-child"
         self.chamadas: list[tuple] = []
         self.quebra_em, self.falha_backup = quebra_em, falha_backup
+        self.nucleo, self.falha_update_db = "7.1.3", False
+
+    def locale(self):
+        return "pt_BR"
 
     def preparar_wpcli(self):
         return "WP-CLI fake"
@@ -328,6 +353,14 @@ class FakeLocal:
         if args[:2] == ("theme", "list"):
             return json.dumps([{"name": n, "version": v, "status": "active" if n == self.tema_ativo else "inactive"}
                                for n, v in self.temas.items()])
+        if args[0] == "core":
+            if args[1] == "version":
+                return self.nucleo + "\n"
+            if args[1] in {"download", "update"}:
+                self.nucleo = next(a.split("=", 1)[1] for a in args if a.startswith("--version="))
+            elif args[1] == "update-db" and self.falha_update_db:
+                raise RuntimeError("wp core update-db falhou (exit 1)")
+            return ""
         if args[:2] == ("theme", "activate"):
             self.tema_ativo = args[2]
             return ""
@@ -476,8 +509,41 @@ with tempfile.TemporaryDirectory() as tmp:
     checar(not any(c[:3] == ("theme", "install", "kadence-child") for c in loc.chamadas), "tema próprio não pode ser instalado do wordpress.org")
     checar(("plugin", "update", "kadence-blocks", "--version=3.7.12.1") in loc.chamadas, "update deveria usar --version exata")
 
+    # 3a'. núcleo (#448): alinha o local à versão de produção (7.1.3 -> 7.1.4), atualiza para o lock
+    # (7.1.5) por último, com --locale do site e update-db; o lock leva o núcleo na ordem do plano.
+    inv_nuc = {**inv_prod, "nucleo": [{"name": "wordpress", "version": "7.1.4", "status": "active"}]}
+    plano_nuc = {"itens": plano_exec["itens"] + [
+        {"slug": "wordpress", "tipo": "nucleo", "de": "7.1.4", "para": "7.1.5", "camada": "nucleo", "aplicacao": "um_por_vez"}],
+        "fora": []}
+    (saida / "lock.json").unlink(missing_ok=True)
+    loc = FakeLocal()
+    r = executar(loc, plano_nuc, inv_nuc, {}, contratos_ok, saida, None, {"kadence-child"})
+    lock = json.loads((saida / "lock.json").read_text()) if (saida / "lock.json").exists() else {}
+    checar(r == 0 and loc.nucleo == "7.1.5", f"núcleo verde saiu {r}, núcleo={loc.nucleo}")
+    checar(("core", "download", "--version=7.1.4", "--force", "--skip-content", "--locale=pt_BR") in loc.chamadas,
+           f"alinhamento do núcleo sem --locale e --skip-content: {[c for c in loc.chamadas if c[0] == 'core']}")
+    checar(("core", "update", "--version=7.1.5", "--locale=pt_BR", "--force") in loc.chamadas, "core update sem a versão exata do lock e o locale")
+    chamadas_core = [c[1] for c in loc.chamadas if c[0] == "core"]
+    checar(chamadas_core.index("update-db") > chamadas_core.index("update"), f"update-db deveria vir depois do core update: {chamadas_core}")
+    checar([i["slug"] for i in lock.get("itens", [])][-1:] == ["wordpress"] and lock["itens"][-1]["tipo"] == "nucleo",
+           f"o núcleo deveria ser o último item do lock: {[i['slug'] for i in lock.get('itens', [])]}")
+    ordem = [c for c in loc.chamadas if len(c) > 1 and c[1] == "update"]
+    checar(ordem[-1][0] == "core", f"o núcleo deveria ser a última atualização do ensaio: {ordem}")
+
+    # 3a''. núcleo local já na versão de produção: nada a baixar. update-db que falha: saída 20, sem lock.
+    loc = FakeLocal(); loc.nucleo = "7.1.4"
+    executar(loc, plano_nuc, inv_nuc, {}, contratos_ok, saida, None, {"kadence-child"})
+    checar(not any(c[:2] == ("core", "download") for c in loc.chamadas), "núcleo já alinhado não deveria ser baixado de novo")
+    (saida / "lock.json").unlink(missing_ok=True)
+    loc = FakeLocal(); loc.falha_update_db = True
+    r = executar(loc, plano_nuc, inv_nuc, {}, contratos_ok, saida, None, {"kadence-child"})
+    checar(r == 20 and not (saida / "lock.json").exists(), f"update-db que falha deveria sair 20 sem lock (saiu {r})")
+    # sem o item "nucleo" no inventário (leitura antiga), o ensaio ignora o núcleo em vez de falhar
+    loc = FakeLocal()
+    checar(ensaio.alinhar_nucleo(loc, inv_prod) == [] and not any(c[0] == "core" for c in loc.chamadas), "sem núcleo no inventário, nada a alinhar")
+
     # 3b. regressão no crítico: para, saída 20, sem lock.
-    (saida / "lock.json").unlink()
+    (saida / "lock.json").unlink(missing_ok=True)
     loc = FakeLocal(quebra_em=("kadence-blocks", "3.7.12.1"))
     r = executar(loc, plano_exec, inv_prod, {}, contratos_ok, saida, None, {"kadence-child"})
     checar(r == 20 and not (saida / "lock.json").exists(), f"regressão deveria sair 20 sem lock (saiu {r})")
@@ -532,6 +598,30 @@ cenarios = {
     "lista de plugins vazia": ("@@PLUGINS\n[]\n@@TEMAS\n[]\n@@FIM\n", 1),
     "saída vazia": ("", 1),
 }
+# Núcleo (#448): marcadores opcionais; a menor versão da série vence a major; saída ruim não vira inventário.
+NUC = lambda v, o: f"@@PLUGINS\n{PLUG}\n@@TEMAS\n{TEMA}\n@@NUCLEO_VERSAO\n{v}\n@@NUCLEO_ATUALIZACOES\n{o}\n@@FIM\n"
+sys.path.insert(0, str(RAIZ / "scripts/plugins"))
+import ler_saida  # noqa: E402
+
+# update_type propositalmente trocado: a série vem das versões, não do rótulo do WP-CLI
+n = ler_saida.separar(NUC("7.1.3", '[{"version":"7.1.4","update_type":"major"},{"version":"7.2","update_type":"minor"},{"version":"7.1.5","update_type":"patch"}]'))["nucleo"][0]
+checar((n["name"], n["version"], n["update"], n["update_version"]) == ("wordpress", "7.1.3", "available", "7.1.5"),
+       f"deveria escolher a menor versão da série mais nova (7.1.5): {n}")
+n = ler_saida.separar(NUC("7.1.3", '[{"version":"7.2","update_type":"major"}]'))["nucleo"][0]
+checar(n["update"] == "available" and n["update_version"] == "7.2", f"sem menor, a major é a oferta (a política a bloqueia): {n}")
+n = ler_saida.separar(NUC("7.1.3", '[{"version":"7.1.3"},{"version":"7.0.9"}]'))["nucleo"][0]
+checar(n["update"] == "none", f"oferta igual ou mais antiga que a instalada não é atualização: {n}")
+n = ler_saida.separar(NUC("7.1.3", ""))["nucleo"][0]
+checar(n["update"] == "none" and n["update_version"] == "", f"sem oferta (saída vazia do check-update): {n}")
+checar("nucleo" not in ler_saida.separar(f"@@PLUGINS\n{PLUG}\n@@TEMAS\n{TEMA}\n@@FIM\n"), "sem os marcadores do núcleo, o inventário não tem 'nucleo'")
+checar("nucleo" not in ler_saida.separar(NUC("", "[]")), "versão do núcleo vazia (core version falhou): sem 'nucleo'")
+for ruim, motivo in ((NUC("7.1.3; rm -rf /", "[]"), "versão com lixo"), (NUC("7.1.3", "{nao-json"), "JSON ruim"), (NUC("7.1.3", '{"a":1}'), "objeto no lugar de lista")):
+    try:
+        ler_saida.separar(ruim)
+        falhas.append(f"ler_saida: {motivo} deveria ser recusado")
+    except ler_saida.SaidaInvalida:
+        pass
+
 with tempfile.TemporaryDirectory() as tmp:
     for nome, (texto, esperado) in cenarios.items():
         destino = pathlib.Path(tmp) / f"{abs(hash(nome))}.json"
