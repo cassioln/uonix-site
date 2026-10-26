@@ -9,7 +9,8 @@
 # (`curriculos-recebidos/`, `wp-personal-data-exports/`) saem em qualquer
 # diretório e profundidade: nem uma cópia aninhada pode atravessar ambientes.
 # Backup (tar, de onde o rollback restaura): nenhum `cache` é excluído, e só
-# `uploads/wc-logs` e `uploads/wp-staging` saem.
+# `uploads/wc-logs` e `uploads/wp-staging` saem, ANCORADOS no começo do caminho (#439): o mesmo
+# nome dentro de um plugin é código e entra.
 #
 # Usa as funções e os arrays reais do clone, com origem e destino locais.
 set -euo pipefail
@@ -142,32 +143,64 @@ for dir in plugins languages; do
 done
 unset -f uonix_rsync_from_runner uonix_rsync_to_runner content_path write_directory_manifest verify_directory_manifest verify_payload_at_target
 
-# 2. Backup: o tar com as exclusões reais, como create_backup.
-# O ramo remoto monta as mesmas exclusões como texto, por shell_join.
-[ "$(shell_join "${BACKUP_TAR_EXCLUDES[@]}" | xargs)" = "--exclude=uploads/wc-logs --exclude=uploads/wp-staging" ] \
-  || fail "exclusões do tar remoto inesperadas: $(shell_join "${BACKUP_TAR_EXCLUDES[@]}")"
-arquivo="$TMP_DIR/backup.tar.gz"
+# 2. Backup: o tar com as exclusões reais, como create_backup (#439). A âncora tem sintaxe diferente em
+# cada tar: a função escolhe pela primeira linha de `tar --version`, e o resultado é conferido de verdade.
+GNU='tar (GNU tar) 1.35'
+BSD='bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8'
+[ "$(backup_tar_exclude_args "$GNU" | tr '\n' ' ')" = "--anchored --exclude=uploads/wc-logs --exclude=uploads/wp-staging " ] \
+  || fail "GNU tar: opções inesperadas: $(backup_tar_exclude_args "$GNU" | tr '\n' ' ')"
+[ "$(backup_tar_exclude_args "$BSD" | tr '\n' ' ')" = "--exclude=^uploads/wc-logs --exclude=^uploads/wp-staging " ] \
+  || fail "bsdtar: opções inesperadas: $(backup_tar_exclude_args "$BSD" | tr '\n' ' ')"
+[ "$(backup_tar_exclude_args "BusyBox v1.36 tar" | tr '\n' ' ')" = "--exclude=uploads/wc-logs --exclude=uploads/wp-staging " ] \
+  || fail "tar desconhecido deveria cair no padrão sem âncora (exclui a mais, nunca a menos)"
+[ "$(backup_tar_exclude_args "" | tr '\n' ' ')" = "--exclude=uploads/wc-logs --exclude=uploads/wp-staging " ] \
+  || fail "versão vazia deveria cair no padrão sem âncora"
+
 mkdir -p "$TMP_DIR/origem/uploads/wc-logs" "$TMP_DIR/origem/uploads/wp-staging" "$TMP_DIR/origem/uploads/2026"
 printf 'log\n' > "$TMP_DIR/origem/uploads/wc-logs/fatal-uploads.txt"
 printf 'stg\n' > "$TMP_DIR/origem/uploads/wp-staging/copia.txt"
 printf 'img\n' > "$TMP_DIR/origem/uploads/2026/foto.webp"
-tar -czf "$arquivo" -C "$TMP_DIR/origem" "${BACKUP_TAR_EXCLUDES[@]}" -- uploads plugins || fail 'tar do backup falhou'
+mkdir -p "$TMP_DIR/origem/plugins/com-uploads/uploads/wc-logs" "$TMP_DIR/origem/plugins/com-uploads/uploads/wp-staging"
+printf 'codigo\n' > "$TMP_DIR/origem/plugins/com-uploads/uploads/wc-logs/x.php"
+printf 'codigo\n' > "$TMP_DIR/origem/plugins/com-uploads/uploads/wp-staging/y.php"
+
+# O tar que está instalado aqui (bsdtar no Mac, GNU no CI), com as opções que a função escolhe para ele.
+tar_local=()
+while IFS= read -r opt; do tar_local+=("$opt"); done < <(backup_tar_exclude_args "$(tar --version 2>&1 | head -n 1)")
+arquivo="$TMP_DIR/backup.tar.gz"
+tar -czf "$arquivo" -C "$TMP_DIR/origem" "${tar_local[@]}" -- uploads plugins || fail 'tar do backup falhou'
 listagem="$(tar -tzf "$arquivo")"
 grep -q 'plugins/wp-staging/Backend/Main.php' <<<"$listagem" || fail 'backup do rollback perdeu o plugin wp-staging'
 grep -q 'plugins/wc-logs/fatal.txt' <<<"$listagem" || fail 'backup do rollback perdeu plugins/wc-logs (só uploads/wc-logs sai)'
 grep -q 'uploads/2026/foto.webp' <<<"$listagem" || fail 'backup do rollback perdeu mídia de uploads'
 ! grep -q '^uploads/wc-logs/' <<<"$listagem" || fail 'backup incluiu uploads/wc-logs, que deveria ser excluído'
 ! grep -q '^uploads/wp-staging/' <<<"$listagem" || fail 'backup incluiu uploads/wp-staging, que deveria ser excluído'
-# Comportamento conhecido, travado aqui para a documentação não mentir de novo:
-# sem âncora, o tar também tira `plugins/<p>/uploads/wc-logs` (issue de seguimento).
-mkdir -p "$TMP_DIR/origem/plugins/com-uploads/uploads/wc-logs"
-printf 'codigo\n' > "$TMP_DIR/origem/plugins/com-uploads/uploads/wc-logs/x.php"
-tar -czf "$arquivo" -C "$TMP_DIR/origem" "${BACKUP_TAR_EXCLUDES[@]}" -- uploads plugins || fail 'tar do backup falhou'
-! tar -tzf "$arquivo" | grep -q 'plugins/com-uploads/uploads/wc-logs/x.php' \
-  || fail 'o tar passou a ancorar: atualize o comentário de BACKUP_TAR_EXCLUDES e docs/clone-ambientes.md'
+# A âncora de verdade (#439): o mesmo caminho DENTRO de um plugin é código e entra no backup.
+grep -q 'plugins/com-uploads/uploads/wc-logs/x.php' <<<"$listagem" \
+  || fail 'o tar sem âncora tirou plugins/<p>/uploads/wc-logs, que é código de plugin'
+grep -q 'plugins/com-uploads/uploads/wp-staging/y.php' <<<"$listagem" \
+  || fail 'o tar sem âncora tirou plugins/<p>/uploads/wp-staging, que é código de plugin'
 grep -q 'fast-indexing-api/vendor/psr/cache/src/CacheItemPoolInterface.php' <<<"$listagem" \
   || fail 'backup do rollback perdeu vendor/psr/cache'
 grep -q 'google-site-kit/third-party/psr/cache/' <<<"$listagem" \
   || fail 'backup do rollback perdeu third-party/psr/cache'
+
+# O ramo remoto monta o tar com `declare -f` da mesma função e a versão do tar do SERVIDOR: o corpo é
+# conferido por texto, porque ele só roda no servidor.
+corpo_prepare="$(declare -f prepare_target_backup)"
+grep -q 'backup_tar_exclude_args' <<<"$corpo_prepare" || fail 'prepare_target_backup não usa backup_tar_exclude_args'
+! grep -q 'BACKUP_TAR_EXCLUDES' <<<"$corpo_prepare" || fail 'prepare_target_backup ainda usa a lista antiga sem âncora'
+
+# 2b. GNU tar de verdade, quando houver um contêiner Linux disponível (o Mac só tem bsdtar). No CI o tar
+# local já é GNU e foi exercitado acima; aqui o Mac confere o ramo GNU sem depender do servidor.
+if command -v podman >/dev/null 2>&1 && podman image exists public.ecr.aws/docker/library/debian:stable-slim 2>/dev/null; then
+  gnu_opts="$(backup_tar_exclude_args "$GNU" | tr '\n' ' ')"
+  saida_gnu="$(podman run --rm -v "$TMP_DIR/origem:/o:ro" public.ecr.aws/docker/library/debian:stable-slim sh -c \
+    "tar -czf /tmp/g.tgz -C /o $gnu_opts -- uploads plugins && tar -tzf /tmp/g.tgz" 2>&1)" || saida_gnu=""
+  if [ -n "$saida_gnu" ]; then
+    ! grep -q '^uploads/wc-logs/' <<<"$saida_gnu" || fail 'GNU tar: incluiu uploads/wc-logs'
+    grep -q 'plugins/com-uploads/uploads/wc-logs/x.php' <<<"$saida_gnu" || fail 'GNU tar: --anchored não preservou plugins/<p>/uploads/wc-logs'
+  fi
+fi
 
 printf 'OK: exclusões ancoradas preservam código de plugin no espelho e no backup; dados pessoais nunca atravessam\n'
