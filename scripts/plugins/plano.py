@@ -129,7 +129,7 @@ CABECALHO_PRE = re.compile(r"^[=#\[\s]*(?:v\.?\s*|version:?\s*|release\s+)?(\d+(
 DATA_COMO_VERSAO = re.compile(r"^(0?[1-9]|[12]\d|3[01])\.(0?[1-9]|1[0-2])\.(19|20)\d{2}$")
 DATA_SOLTA = re.compile(r"^\s*\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\s*$")
 RISCO = re.compile(r"breaking|\bremoved\b|deprecat|database (update|migration)|requires php|drop(ped)? support", re.I)
-ORDEM_CAMADAS = {"acoplada": 0, "comum": 1, "critica": 2}
+ORDEM_CAMADAS = {"acoplada": 0, "comum": 1, "critica": 2, "nucleo": 3}
 
 
 def versao(v: str) -> tuple[int, ...]:
@@ -142,11 +142,15 @@ def maior(v: str) -> int | None:
 
 
 def chave_api(tipo: str, slug: str) -> str:
-    """Chave do item no mapa da API: plugin e tema podem ter o mesmo slug, então o tema leva prefixo."""
-    return f"tema:{slug}" if tipo == "tema" else slug
+    """Chave do item no mapa da API: plugin, tema e núcleo podem ter o mesmo slug, então só o plugin vai sem prefixo."""
+    return slug if tipo == "plugin" else f"{tipo}:{slug}"
 
 
 def buscar_api(slug: str, tipo: str = "plugin") -> dict | None:
+    # O núcleo não está em nenhuma das duas APIs: o slug "wordpress" da API de plugins é outro
+    # projeto. Sem data de lançamento nem changelog, a camada "nucleo" não tem quarentena (#448).
+    if tipo == "nucleo":
+        return None
     # A API de temas dá versão e data (a quarentena precisa delas), mas não traz changelog:
     # `sections` só tem a descrição, então o tema segue sem changelog nem novidades (#445).
     if tipo == "tema":
@@ -221,7 +225,7 @@ def planejar(inventario: dict, politica: dict, api: dict, hoje: dt.date,
              aceitar_major: set[str], dispensar: set[str]) -> dict:
     itens, fora = [], []
     camadas = politica["camadas"]
-    for tipo, chave in (("plugin", "plugins"), ("tema", "temas")):
+    for tipo, chave in (("plugin", "plugins"), ("tema", "temas"), ("nucleo", "nucleo")):
         for item in inventario.get(chave, []):
             nome = item.get("name", "")
             status_update = item.get("update")
@@ -300,7 +304,7 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError) as erro:
         print(f"ERRO: entrada ilegível: {erro}")
         return 2
-    pendentes = [(tipo, i.get("name")) for tipo, c in (("plugin", "plugins"), ("tema", "temas"))
+    pendentes = [(tipo, i.get("name")) for tipo, c in (("plugin", "plugins"), ("tema", "temas"), ("nucleo", "nucleo"))
                  for i in inventario.get(c, []) if i.get("update") in {"available", "unavailable"}]
     if a.api_cache:
         api = json.loads(a.api_cache.read_text())

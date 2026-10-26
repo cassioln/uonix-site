@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Separa a saída da leitura de produção do atualizar.sh em JSON de plugins e
-temas, pelos marcadores @@PLUGINS, @@TEMAS e @@FIM (#393, #413).
+temas, pelos marcadores @@PLUGINS, @@TEMAS e @@FIM (#393, #413). O núcleo do WordPress
+vem em @@NUCLEO_VERSAO (a versão) e @@NUCLEO_ATUALIZACOES (o JSON de `wp core
+check-update`), ambos opcionais (#448): sem a versão, o inventário não tem "nucleo".
 
 O shell remoto pode imprimir ruído antes e depois dos marcadores (banner,
 avisos do profile); só o que está entre eles conta. Qualquer falha (marcador
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import sys
 
 
@@ -42,7 +45,39 @@ def separar(texto: str) -> dict:
         raise SaidaInvalida("lista de plugins vazia")
     if not isinstance(dados["temas"], list):
         raise SaidaInvalida("lista de temas inválida")
+    nucleo = _nucleo(partes)
+    if nucleo:
+        dados["nucleo"] = [nucleo]
     return dados
+
+
+def _nucleo(partes: dict[str, list[str]]) -> dict | None:
+    """Item do núcleo no mesmo formato de `wp plugin list`, ou None se a leitura não o trouxe.
+
+    Das atualizações, vale a menor versão da MESMA série (a menor, "minor") mais nova; só se
+    não houver nenhuma, a major mais nova (que a política bloqueia)."""
+    versao = "\n".join(partes.get("NUCLEO_VERSAO", [])).strip()
+    if not versao:
+        return None
+    if not re.fullmatch(r"\d+(?:\.\d+){1,3}", versao):
+        raise SaidaInvalida(f"versão do núcleo inválida: {versao!r}")
+    texto = "\n".join(partes.get("NUCLEO_ATUALIZACOES", [])).strip()
+    try:
+        ofertas = json.loads(texto) if texto else []
+    except ValueError as erro:
+        raise SaidaInvalida(f"JSON das atualizações do núcleo inválido: {erro}") from erro
+    if not isinstance(ofertas, list):
+        raise SaidaInvalida("atualizações do núcleo inválidas")
+
+    def chave(o: dict) -> tuple[int, ...]:
+        return tuple(int(x) for x in re.findall(r"\d+", str(o.get("version", ""))))
+
+    validas = [o for o in ofertas if isinstance(o, dict) and re.fullmatch(r"\d+(?:\.\d+){1,3}", str(o.get("version", "")))]
+    menores = [o for o in validas if o.get("update_type") == "minor"]
+    escolhida = max(menores or validas, key=chave, default=None)
+    return {"name": "wordpress", "status": "active", "version": versao,
+            "update": "available" if escolhida else "none",
+            "update_version": str(escolhida["version"]) if escolhida else "", "auto_update": "off"}
 
 
 def main(argv: list[str]) -> int:

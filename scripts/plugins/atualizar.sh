@@ -108,6 +108,8 @@ ler_producao() {
   remoto="cd $(printf '%q' "$LOCAWEB_DOCUMENT_ROOT") || exit 1
 echo '@@PLUGINS'; ${wp} plugin list --fields=${campos} --format=json 2>/dev/null || exit 3
 printf '\n@@TEMAS\n'; ${wp} theme list --fields=${campos} --format=json 2>/dev/null || exit 3
+printf '\n@@NUCLEO_VERSAO\n'; ${wp} core version 2>/dev/null || true
+printf '\n@@NUCLEO_ATUALIZACOES\n'; ${wp} core check-update --format=json 2>/dev/null || true
 printf '\n@@FIM\n'"
   # O printf com quebra de linha antes do marcador é necessário: o WP-CLI
   # imprime o JSON sem quebra final, e o marcador grudaria na última linha.

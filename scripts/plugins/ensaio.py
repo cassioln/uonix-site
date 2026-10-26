@@ -87,6 +87,10 @@ class Local:
             raise RuntimeError(f"wp {' '.join(args)} falhou (exit {r.returncode}): {r.stderr.strip()[-400:]}")
         return r.stdout
 
+    def locale(self) -> str:
+        """Locale do site (pt_BR); o WP-CLI baixa o pacote do núcleo nesse idioma."""
+        return self.wp("eval", "echo get_locale();").strip() or "en_US"
+
     def eval_json(self, php: str):
         saida = self.wp("eval", php)
         m = re.search(r"@@J(.*)@@J", saida, re.S)
@@ -226,6 +230,12 @@ def smoke(local, alvo: dict, contratos: dict) -> dict:
         ok = str(estado.get("wc_db", "")).split("-")[0] == estado["wc"]
         r["banco do WooCommerce migrado"] = {"ok": ok, "detalhe": f"plugin {estado['wc']}, banco {estado.get('wc_db')}"}
 
+    try:
+        local.wp("core", "verify-checksums")
+        r["núcleo: arquivos íntegros (checksums)"] = {"ok": True, "detalhe": "ok"}
+    except RuntimeError as erro:
+        r["núcleo: arquivos íntegros (checksums)"] = {"ok": False, "detalhe": str(erro)[-160:]}
+
     fatais = [l for l in local.log_desde(inicio).splitlines() if "PHP Fatal" in l]
     r["debug.log sem PHP Fatal novo"] = {"ok": not fatais, "detalhe": fatais[0][-200:] if fatais else "0"}
     return r
@@ -266,6 +276,7 @@ def alinhar(local, inventario: dict, ignorar: set[str] = frozenset()) -> list[st
     wordpress.org. A ATIVAÇÃO é alinhada para todos os itens instalados, senão
     o smoke do ensaio não reflete produção (#419)."""
     acoes = []
+    acoes += alinhar_nucleo(local, inventario)
     for tipo, chave in (("plugin", "plugins"), ("theme", "temas")):
         locais = {i["name"]: i for i in json.loads(local.wp(tipo, "list", "--fields=name,status,version", "--format=json"))}
         for prod in inventario.get(chave, []):
@@ -297,8 +308,29 @@ def alinhar(local, inventario: dict, ignorar: set[str] = frozenset()) -> list[st
     return acoes
 
 
+def _nucleo_prod(inventario: dict) -> str:
+    """Versão do núcleo em produção, ou "" quando a leitura não a trouxe."""
+    return next((i.get("version", "") for i in inventario.get("nucleo", []) if i.get("name") == "wordpress"), "")
+
+
+def alinhar_nucleo(local, inventario: dict) -> list[str]:
+    """Iguala os arquivos do núcleo local aos de produção (#448). O banco já vem do clone de
+    produção; só os arquivos do container podem estar noutra versão, então não há update-db."""
+    prod = _nucleo_prod(inventario)
+    if not prod:
+        return []
+    atual = local.wp("core", "version").strip()
+    if atual == prod:
+        return []
+    local.wp("core", "download", f"--version={prod}", "--force", "--skip-content", "--locale=" + local.locale())
+    return [f"núcleo: {atual} -> {prod}"]
+
+
 def verificar_alinhamento(local, inventario: dict, ignorar: set[str] = frozenset()) -> list[str]:
     divergentes = []
+    prod_nucleo = _nucleo_prod(inventario)
+    if prod_nucleo and local.wp("core", "version").strip() != prod_nucleo:
+        divergentes.append(f"núcleo local {local.wp('core', 'version').strip()} != produção {prod_nucleo}")
     for tipo, chave in (("plugin", "plugins"), ("theme", "temas")):
         locais = {i["name"]: i for i in json.loads(local.wp(tipo, "list", "--fields=name,status,version", "--format=json"))}
         for prod in inventario.get(chave, []):
@@ -333,9 +365,20 @@ def etapas(plano: dict) -> list[tuple[str, list[dict]]]:
 
 
 def versao_instalada(local, tipo: str, slug: str) -> str:
+    if tipo == "nucleo":
+        return local.wp("core", "version").strip()
     comando = "theme" if tipo == "tema" else "plugin"
     lista = json.loads(local.wp(comando, "list", "--fields=name,version", "--format=json"))
     return next((i.get("version", "") for i in lista if i.get("name") == slug), "")
+
+
+def atualizar_nucleo(local, para: str, relatorio: list[str]) -> None:
+    """Atualiza o núcleo para a versão exata do lock, migra o banco e confere os checksums.
+    Mesma sequência do job de produção (remoto-aplicar.sh)."""
+    local.wp("core", "update", f"--version={para}", "--locale=" + local.locale(), "--force")
+    local.wp("core", "update-db")
+    local.wp("core", "verify-checksums")
+    relatorio.append("- `wp core update-db` e `wp core verify-checksums` executados")
 
 
 def executar(local, plano: dict, inventario: dict, contratos: dict, verificar_contratos, saida: pathlib.Path,
@@ -394,7 +437,10 @@ def executar(local, plano: dict, inventario: dict, contratos: dict, verificar_co
         relatorio += ["", f"## {nome_etapa}"]
         try:
             for i in itens_etapa:
-                local.wp("theme" if i["tipo"] == "tema" else "plugin", "update", i["slug"], f"--version={i['para']}")
+                if i["tipo"] == "nucleo":
+                    atualizar_nucleo(local, i["para"], relatorio)
+                else:
+                    local.wp("theme" if i["tipo"] == "tema" else "plugin", "update", i["slug"], f"--version={i['para']}")
                 instalada = versao_instalada(local, i["tipo"], i["slug"])
                 if instalada != i["para"]:
                     return fim(20, f"{i['slug']}: instalado {instalada or 'nada'}, esperado {i['para']}")

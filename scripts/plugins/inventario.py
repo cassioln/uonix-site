@@ -2,9 +2,10 @@
 """Classifica o inventário de plugins e temas de produção pela política de
 ops/plugins/politica.json e imprime o que há para atualizar, por camada.
 
-Entrada: JSON com {"plugins": [...], "temas": [...]}, cada lista no formato de
-`wp plugin list --format=json` / `wp theme list --format=json` com os campos
-name, status, version, update, update_version e auto_update.
+Entrada: JSON com {"plugins": [...], "temas": [...], "nucleo": [...]}, cada lista no
+formato de `wp plugin list --format=json` / `wp theme list --format=json` com os
+campos name, status, version, update, update_version e auto_update. O "nucleo" é
+opcional e traz um item só, "wordpress" (#448).
 
 Bandeiras, que levam a saída 10:
 - versão major pendente em plugin da camada crítica (a política bloqueia);
@@ -29,7 +30,7 @@ import sys
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 POLITICA_PADRAO = RAIZ / "ops" / "plugins" / "politica.json"
 IGNORADOS = {"must-use", "dropin"}
-ORDEM = ["critica", "acoplada", "comum", "decisao_pendente", "propria"]
+ORDEM = ["critica", "acoplada", "comum", "decisao_pendente", "propria", "nucleo"]
 
 
 def maior(versao: str) -> int | None:
@@ -44,7 +45,7 @@ def relatorio(inventario: dict, politica: dict) -> tuple[list[str], int]:
     por_camada: dict[str, list[str]] = {c: [] for c in ORDEM}
     instalados: set[tuple[str, str]] = set()
 
-    for tipo, chave in (("plugin", "plugins"), ("tema", "temas")):
+    for tipo, chave in (("plugin", "plugins"), ("tema", "temas"), ("nucleo", "nucleo")):
         classificados = politica.get(chave, {})
         for item in inventario.get(chave, []):
             nome, status = item.get("name", ""), item.get("status", "")

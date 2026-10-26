@@ -25,6 +25,12 @@
       "quarentena_dias": 0,
       "major": "alerta"
     },
+    "nucleo": {
+      "descricao": "Núcleo do WordPress: um item só, aplicado por último porque migra o banco (update-db). O WordPress não publica a data de lançamento por API, então não há quarentena; o próprio WordPress aplica versões menores sozinho. Major (7.1 -> 7.2) bloqueia.",
+      "aplicacao": "um_por_vez",
+      "quarentena_dias": 0,
+      "major": "bloqueia"
+    },
     "propria": {
       "descricao": "Código versionado neste repositório; publicado pelo deploy, nunca por atualização.",
       "aplicacao": "nunca",
@@ -63,6 +69,9 @@
     "wp-crontrol": {"camada": "comum", "contrato": false, "motivo": "Ferramenta do painel para o cron."},
     "seo-by-rank-math-pro": {"camada": "decisao_pendente", "contrato": false, "motivo": "Inativo em produção."},
     "wordpress-importer": {"camada": "decisao_pendente", "contrato": false, "motivo": "Ferramenta de migração ativa em produção."}
+  },
+  "nucleo": {
+    "wordpress": {"camada": "nucleo", "contrato": false, "motivo": "Núcleo do WordPress; atualizado pela esteira com backup de wp-admin, wp-includes e da raiz."}
   },
   "temas": {
     "kadence": {"camada": "critica", "contrato": true, "motivo": "Tema pai do kadence-child."},
