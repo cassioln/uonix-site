@@ -95,7 +95,8 @@ _RECURSO_DA_CLASSE = (r"(?:filter|toggle|protection|token|scanner|scan|rules?|re
                       r"|integration|firewall|detection|module|list|notices?|attempts?)")
 _CLASSES_TODAS = r"\bxss\b|\bcsrf\b|\bssrf\b|open redirect|\bvulnerabilit(?:y|ies)\b|" + _CLASSE_FORTE_TEXTO
 _LISTA_DE_CLASSES = r"(?:(?:" + _CLASSES_TODAS + r")(?:\s*,\s*|\s+(?:and|or)\s+|\s+))+"
-_PALAVRA_DE_LIGACAO = r"(?!(?:in|on|of|for|to|via|from|when|with|through|by|at|and|or|the|a|an)\b)\w+\s+"
+_PALAVRA_DE_LIGACAO = (r"(?!(?:in|on|of|for|to|via|from|when|with|through|by|at|and|or|the|a|an"
+                       r"|affecting|within|involving|against|inside|into|across|caused|found|reported|that|which|where)\b)\w+\s+")
 _CLASSE_RECURSO = re.compile(
     r"(?P<lista>" + _LISTA_DE_CLASSES + r")(?:" + _PALAVRA_DE_LIGACAO + r")?(?P<r>" + _RECURSO_DA_CLASSE + r")\b", re.I)
 # O recurso também pode vir ANTES da classe: "Added escaping toggle for XSS", "Setting for CSRF".
@@ -103,6 +104,12 @@ _RECURSO_ANTES = re.compile(
     r"\b(?:toggle|setting|option|rule|filter|module|feature|list|notice)s?\s+(?:for|against|of)\s+(?:(?:the|a|an)\s+)?"
     r"(?P<c>(?:" + _CLASSES_TODAS + r")(?:(?:\s*,\s*|\s+(?:and|or)\s+)(?:" + _CLASSES_TODAS + r"))*)", re.I)
 _ATAQUE = re.compile(r"\b(bypass\w*|exploit\w*|attack\w*)\b", re.I)
+# Linha que ANUNCIA um recurso novo ("Added XSS filter ... to prevent CSRF"): se ela nomeia um recurso de
+# segurança, o resto da linha descreve o que o recurso faz, e não uma falha corrigida (revisão do #453).
+_ANUNCIA_RECURSO = re.compile(r"^\W*(?:add\w*|new|introduc\w*|improv\w*|enhanc\w*|support\w*)\b", re.I)
+# Changelog de terceiros: o custo das expressões de lista é quadrático no tamanho da linha (0,5 s a 5 mil
+# caracteres). Acima disto a linha é cortada; só pode perder um positivo (mantém a quarentena).
+LIMITE_DE_LINHA = 2000
 
 
 def _inicios_de_classe(regex: re.Pattern, grupo: str, linha: str) -> set[int]:
@@ -127,9 +134,19 @@ class _Seguranca:
         """Há alguma ocorrência da classe que NÃO seja o nome de um recurso (#437)? Se todas são nome de
         recurso, só vale a linha que fala em bypass, exploit ou attack ("Fixed CSRF token validation
         bypass"): a falha, então, é do próprio recurso. Vale para a classe forte e para a fraca."""
+        linha = linha[:LIMITE_DE_LINHA]
         recursos = (_inicios_de_classe(_CLASSE_RECURSO, "lista", linha)
                     | _inicios_de_classe(_RECURSO_ANTES, "c", linha))
-        if any(m.start() not in recursos for m in classe.finditer(linha)):
+        livres = [m for m in classe.finditer(linha) if m.start() not in recursos]
+        if recursos:
+            # Com um recurso na linha, a palavra genérica "vulnerable/vulnerabilities" não prova uma falha
+            # ("Added XSS filter; fixed vulnerable plugin list"), e a linha que anuncia um recurso novo
+            # descreve o recurso ("Added CSRF token to prevent CSRF"). Só XSS, CSRF etc. nomeados fora do
+            # recurso contam, e nunca numa linha que anuncia (revisão do #453).
+            livres = [m for m in livres if not m.group(0).lower().startswith("vulnerab")]
+            if _ANUNCIA_RECURSO.match(linha):
+                livres = []
+        if livres:
             return True
         return bool(recursos) and bool(_ATAQUE.search(linha))
 

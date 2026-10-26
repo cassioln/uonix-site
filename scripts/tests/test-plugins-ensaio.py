@@ -342,6 +342,29 @@ for verdadeiro in (# a classe aparece FORA do nome do recurso: a falha corrigida
                    # a classe fraca, sem recurso nenhum
                    "Fixed open redirect in the login form"):
     checar(bool(plano.SEGURANCA.search(verdadeiro)), f"aviso de segurança real não reconhecido (#437): {verdadeiro}")
+# Segunda revisão do #453: a palavra genérica "vulnerable" e a linha que anuncia um recurso novo não provam uma falha.
+for falso in ("Added XSS filter; fixed vulnerable plugin list", "Added XSS filter and fixed vulnerable code",
+              "Added vulnerability scanner and fixed vulnerable plugin list", "Vulnerability scanner: fixed vulnerable list",
+              "Added CSRF token option; fixed vulnerable plugins notice", "New XSS filter; Fixed vulnerabilities page",
+              "Added CSRF token to prevent CSRF", "Added XSS filter to avoid vulnerabilities",
+              "Added XSS protection setting to prevent vulnerabilities", "Added CSRF token field to mitigate vulnerabilities",
+              "Added XSS filter module to protect against vulnerabilities", "Added CSRF protection to prevent vulnerabilities",
+              "Added XSS filter setting to prevent vulnerability", "Prevent XSS filter vulnerability",
+              "Introduced XSS protection to prevent vulnerabilities"):
+    checar(not plano.SEGURANCA.search(falso), f"falso positivo composto (#453): {falso}")
+# ... e a preposição separa a falha do recurso: "XSS vulnerability IN token handling" é a falha, não o recurso.
+for verdadeiro in ("Fixed XSS vulnerability in token handling", "Fixed SQL injection vulnerability in options",
+                   "Fixed XSS vulnerability in the settings page", "XSS vulnerability in the plugin title",
+                   "Fixed XSS affecting settings pages", "Fixed XSS affecting list tables",
+                   "Fixed SQL injection affecting report queries", "Fixed CSRF affecting settings save",
+                   "Fixed XSS in the widget", "Fixed Cross-Site Scripting in the form", "Reflected XSS in the search box",
+                   "Authenticated Stored XSS via shortcode"):
+    checar(bool(plano.SEGURANCA.search(verdadeiro)), f"aviso de segurança real não reconhecido (#453): {verdadeiro}")
+# Linha enorme: o custo não pode ser quadrático (era 0,5 s a 5 mil caracteres).
+import time as _t
+for gigante in ("Fixed " + "xss   " * 1000, "xss " * 1250 + "settingx"):
+    _ini = _t.monotonic(); plano.SEGURANCA.search(gigante); _gasto = _t.monotonic() - _ini
+    checar(_gasto < 0.2, f"linha de {len(gigante)} caracteres levou {_gasto:.2f}s (ReDoS)")
 # Falsos negativos conhecidos e ACEITOS (mantêm a quarentena; ficam no changelog técnico): a falha é do próprio token ou
 # da proteção, sem "bypass". Se um dia a detecção distinguir isso de conserto de interface, mova para a lista acima.
 for aceito in ("Fixed CSRF token validation", "Fixed missing CSRF token check", "Fixed CSRF token not being verified",
