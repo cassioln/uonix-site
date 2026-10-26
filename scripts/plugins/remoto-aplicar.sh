@@ -27,7 +27,8 @@
 # SIGKILL não pode ser tratado: o status fica ausente e o .maintenance pode
 # ficar (o WordPress o ignora depois de 10 minutos); ver estado-producao.
 #
-# Para teste: UONIX_SMOKE_CMD substitui a checagem HTTP do site.
+# Para teste: UONIX_SMOKE_CMD substitui a checagem HTTP do site; TAR_ESPERA e
+# TAR_TENTATIVAS ajustam a repetição do tar de backup.
 set -uo pipefail
 
 DOCROOT="$1"
@@ -56,6 +57,31 @@ tar_de() { echo "$BK/$(tipo_de "$1")-$1.tar.gz"; }
 wp_item() {  # wp_item <slug> <subcomando> [args...]: wp plugin|theme <subcomando> <slug> ...
   local slug="$1" sub="$2"; shift 2
   if [ "$(tipo_de "$slug")" = tema ]; then wp theme "$sub" "$slug" "$@"; else wp plugin "$sub" "$slug" "$@"; fi
+}
+
+# Backup de uma pasta. O GNU tar sai com 1 quando um arquivo muda durante a leitura
+# ("file changed as we read it"): o site vivo escreve em cache e em metadados enquanto
+# o tar lê, e isso aborta o ciclo à toa (#447). Saída 1 repete, até TAR_TENTATIVAS vezes,
+# com TAR_ESPERA segundos entre elas; 2 ou mais é erro de verdade e para na hora.
+# Um tar que terminou em 0 ainda precisa ser legível: um backup ilegível só apareceria
+# na restauração, que é tarde demais.
+salvar_pasta() {
+  local slug="$1" destino tentativa=1 rc=0 max="${TAR_TENTATIVAS:-3}"
+  destino="$(tar_de "$slug")"
+  while :; do
+    # stdin fechado, como no wp(): o laço que chama esta função lê a LISTA.
+    tar -czf "$destino" -C "$(dirname "$(pasta_de "$slug")")" "$slug" </dev/null; rc=$?
+    if [ "$rc" = 0 ]; then
+      # Só o stdout vai para o lixo: o motivo de um arquivo ilegível fica no log do job.
+      tar -tzf "$destino" </dev/null >/dev/null && return 0
+      echo "  tar de $slug ficou ilegível"; return 1
+    fi
+    if [ "$rc" != 1 ]; then echo "  tar de $slug saiu $rc: erro, sem repetir"; return 1; fi
+    if [ "$tentativa" -ge "$max" ]; then echo "  tar de $slug: arquivo mudou durante a leitura em todas as $max tentativas"; return 1; fi
+    echo "  tar de $slug: arquivo mudou durante a leitura (tentativa $tentativa de $max); repetindo em ${TAR_ESPERA:-5}s"
+    tentativa=$((tentativa + 1))
+    sleep "${TAR_ESPERA:-5}"
+  done
 }
 
 em_manutencao=0
@@ -131,8 +157,7 @@ checar_site || { echo "ABORTADO: site já falhava antes; nada foi alterado"; exi
 
 echo "== backup das pastas de plugin e tema em $BK"
 while read -r slug _; do
-  tar -czf "$(tar_de "$slug")" -C "$(dirname "$(pasta_de "$slug")")" "$slug" \
-    || { echo "ABORTADO: tar de $slug falhou; nada foi alterado"; exit 30; }
+  salvar_pasta "$slug" || { echo "ABORTADO: tar de $slug falhou; nada foi alterado"; exit 30; }
 done <<< "$LISTA"
 echo "  pastas salvas: $(find "$BK" -maxdepth 1 \( -name 'plugin-*.tar.gz' -o -name 'tema-*.tar.gz' \) | wc -l | tr -d ' ')"
 
