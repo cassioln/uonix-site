@@ -312,12 +312,21 @@ uox_ai_assert( ! array_key_exists( 'error', uonix_intelligence_ai_generate( $cor
 $sujo = new WP_Error( 'http_request_failed', "<b>cURL</b> error 6: falha em https://generativelanguage.googleapis.com/v1beta/models/x:generateContent?key=AIzaSyA1234567890123456789012345 \n com  a chave chave-de-teste e AIzaSyA1234567890123456789012345" );
 $GLOBALS['uox_http'] = array( $sujo );
 $es = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
+uox_ai_assert( false !== strpos( $es, '[url]' ) && false !== strpos( $es, '[chave]' ), '#404: o endereço vira [url] e a chave vira [chave], como o contrato diz; obteve ' . var_export( $es, true ) );
 uox_ai_assert( '' !== $es && false === strpos( $es, 'AIza' ) && false === strpos( $es, 'chave-de-teste' ) && false === strpos( $es, 'https://' ) && false === strpos( $es, '<' ) && false === strpos( $es, "\n" ), '#404: a causa sai sem tag, sem endereço, sem chave e em uma linha; obteve ' . var_export( $es, true ) );
 $GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'cURL error 6: Could not resolve host: generativelanguage.googleapis.com' ) );
 uox_ai_assert( 'http_request_failed: cURL error 6: Could not resolve host: generativelanguage.googleapis.com' === ( uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '' ), '#404: o nome do servidor, que não é segredo, fica na causa (DNS)' );
 $GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', str_repeat( 'é', 400 ) ) );
 $el = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
 uox_ai_assert( mb_strlen( $el, 'UTF-8' ) <= 160 && '' !== $el, '#404: a causa tem teto de 160 caracteres, contados em UTF-8; obteve ' . mb_strlen( $el, 'UTF-8' ) );
+// Sobras que o ataque do autor achou: chave partida por espaço e UTF-8 inválido.
+$k_cfg = 'chave-de-teste';
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'falha ' . substr( $k_cfg, 0, 5 ) . "\n" . substr( $k_cfg, 5, 4 ) . ' ' . substr( $k_cfg, 9 ) . ' fim' ) );
+$ep = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
+uox_ai_assert( 'http_request_failed: falha [chave] fim' === $ep, '#404: a chave configurada, partida por quebra de linha ou espaço, também sai; obteve ' . var_export( $ep, true ) );
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', "cURL error 6: falha \xC3\x28 no servidor" ) );
+$eu = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';
+uox_ai_assert( false !== strpos( $eu, 'cURL error 6' ) && false !== strpos( $eu, 'no servidor' ) && 1 === preg_match( '//u', $eu ), '#404: UTF-8 inválido não apaga a causa: o resto fica e o texto gravado é UTF-8 válido; obteve ' . var_export( $eu, true ) );
 // Corte no meio de um espaço: 'http_request_failed: ' tem 21 caracteres, então 138 'a' + ' ' + 'b' põem o espaço na posição 160.
 $GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', str_repeat( 'a', 138 ) . ' b' ) );
 $eb = uonix_intelligence_ai_generate( $corpo_404, 'gemini-3.8-flash', 0 )['error'] ?? '';

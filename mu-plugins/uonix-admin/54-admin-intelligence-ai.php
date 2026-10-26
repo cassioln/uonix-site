@@ -496,11 +496,23 @@ if ( ! function_exists( 'uonix_intelligence_ai_transport_error' ) ) {
 		$codigo   = (string) $erro->get_error_code();
 		$mensagem = (string) $erro->get_error_message();
 		$texto    = trim( $codigo . ( '' !== $codigo && '' !== $mensagem ? ': ' : '' ) . $mensagem );
-		$chave = function_exists( 'uonix_intelligence_ai_api_key' ) ? uonix_intelligence_ai_api_key() : '';
-		if ( '' !== $chave ) {
-			$texto = str_replace( $chave, '[chave]', $texto );
+		// Ordem importa. UTF-8 inválido faz o `preg_replace` com /u devolver null e apagaria a causa
+		// toda; tag e controle viram espaço antes da chave, porque uma chave partida por espaço tem de
+		// ser achada; a chave sai antes do endereço, senão a troca do endereço engole só a primeira
+		// metade de uma chave partida dentro dele.
+		if ( function_exists( 'mb_scrub' ) ) {
+			$texto = mb_scrub( $texto, 'UTF-8' );
 		}
-		$texto = (string) preg_replace( array( '/<[^>]*>/', '#[a-z][a-z0-9+.-]*://\S+#i', '/AIza[0-9A-Za-z_-]{20,}/', '/[\x00-\x1F\x7F\s]+/u' ), array( ' ', '[url]', '[chave]', ' ' ), $texto );
+		$texto = (string) preg_replace( array( '/<[^>]*>/', '/[\x00-\x1F\x7F\s]+/u' ), ' ', $texto );
+		$chave = function_exists( 'uonix_intelligence_ai_api_key' ) ? (string) uonix_intelligence_ai_api_key() : '';
+		if ( '' !== $chave && 1 === preg_match( '//u', $chave ) ) {
+			$letras = preg_split( '//u', $chave, -1, PREG_SPLIT_NO_EMPTY );
+			$padrao = '/' . implode( '\\s*', array_map( static function ( $letra ) {
+				return preg_quote( $letra, '/' );
+			}, (array) $letras ) ) . '/u';
+			$texto  = (string) preg_replace( $padrao, '[chave]', $texto );
+		}
+		$texto = (string) preg_replace( array( '/AIza[0-9A-Za-z_-]{20,}/', '#[a-z][a-z0-9+.-]*://\S+#i' ), array( '[chave]', '[url]' ), $texto );
 		$texto = trim( $texto );
 		if ( function_exists( 'mb_substr' ) ) {
 			$texto = mb_substr( $texto, 0, 160, 'UTF-8' );
