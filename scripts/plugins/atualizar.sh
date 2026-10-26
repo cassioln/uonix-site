@@ -209,6 +209,8 @@ cmd_aplicar_producao() {
     esac
   done
   [ -f "$lock" ] || { echo "Erro: informe --lock=<lock.json de um ensaio verde>" >&2; return 30; }
+  # Caminho absoluto: o registro e o relatório podem rodar de outra pasta.
+  LOCK_APLICADO="$(cd "$(dirname "$lock")" && pwd)/$(basename "$lock")"
   local validado sha lista dir
   validado="$(python3 "${ROOT_DIR}/scripts/plugins/lock.py" validar --lock "$lock" --max-horas "$max_horas")" || return 30
   sha="$(head -1 <<<"$validado")"
@@ -307,11 +309,31 @@ enviar_relatorio() {
   local dir="$1" stamp="$2" final="$3" enviar=(--enviar)
   [ "${UONIX_RELATORIO_EMAIL:-1}" = 0 ] && enviar=()
   echo "== relatório por e-mail"
-  python3 "${ROOT_DIR}/scripts/plugins/relatorio_email.py" --dir "$dir" \
+  # Produção já mudou e a saída final já está decidida (#431): um servidor SMTP lento não pode
+  # segurar o comando por minutos, e um Ctrl-C na espera não pode trocar a saída final por 130.
+  # Limite total (UONIX_RELATORIO_LIMITE, 90 s) e SIGINT ignorado só durante o envio.
+  trap '' INT
+  com_vigia_total "${UONIX_RELATORIO_LIMITE:-90}" python3 "${ROOT_DIR}/scripts/plugins/relatorio_email.py" --dir "$dir" \
     --aplicacao "${dir}/aplicacao-${stamp}.json" --saida-final "$final" \
     --log "${dir}/aplicar-${stamp}.log" --previa "${dir}/relatorio-${stamp}.html" ${enviar[@]+"${enviar[@]}"} \
     || echo "   AVISO: relatório não enviado; reenvie com: atualizar.sh relatorio --aplicacao=${dir}/aplicacao-${stamp}.json" >&2
+  trap - INT
   return 0
+}
+
+# Roda um comando com limite de tempo TOTAL e o mata (TERM, depois KILL) se passar. Diferente do
+# com_vigia, que mata os ssh do projeto: aqui o alvo é o próprio processo (o relatório em Python).
+com_vigia_total() {
+  local limite="$1" pid vigia status=0
+  shift
+  "$@" &
+  pid=$!
+  ( sleep "$limite"; kill "$pid" 2>/dev/null; sleep 2; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+  vigia=$!
+  wait "$pid" || status=$?
+  kill "$vigia" 2>/dev/null || true
+  wait "$vigia" 2>/dev/null || true
+  return "$status"
 }
 
 cmd_relatorio() {
@@ -356,8 +378,15 @@ saida_final() {
 
 registrar_aplicacao() {
   local dir="$1" stamp="$2" sha="$3" status="$4" smoke="$5"
-  printf '{"executado_em": "%s", "backup": "%s", "lock_sha12": "%s", "status_job": "%s", "smoke_producao": "%s"}\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$stamp" "$sha" "$status" "$smoke" > "${dir}/aplicacao-${stamp}.json"
+  # O caminho do lock vai junto (#431): o relatório lê o lock que foi de fato aplicado, e não
+  # o "lock.json" que estiver ao lado do registro. Python faz o escape do JSON.
+  python3 - "${dir}/aplicacao-${stamp}.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$stamp" "$sha" "$status" "$smoke" "${LOCK_APLICADO:-}" <<'PY'
+import json, sys
+arq, quando, backup, sha, status, smoke, lock = sys.argv[1:8]
+json.dump({"executado_em": quando, "backup": backup, "lock_sha12": sha, "status_job": status,
+           "smoke_producao": smoke, "lock": lock}, open(arq, "w"))
+open(arq, "a").write("\n")
+PY
   echo "== registro: ${dir}/aplicacao-${stamp}.json"
 }
 

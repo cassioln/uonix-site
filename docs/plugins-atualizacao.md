@@ -156,6 +156,8 @@ Se o job receber TERM, INT ou HUP, ele desliga a manutenção e grava o status 1
 
 ### Relatório por e-mail
 
+**Versões finais e lock (#430, #431).** O job imprime uma linha `@@VERSAO <slug> <versão>` por item no fim; a versão passa por regex no servidor e vira `?` se não casar (um Warning do PHP no stdout do WP-CLI não vira "versão"). O relatório lê só essas linhas, e **só se o log tiver `@@STATUS=`**, isto é, se o job terminou: numa conexão cortada, uma versão pela metade (`3.8` de `3.8.1`) não vira "mantido". Logs já gravados, no formato antigo, seguem lidos pelo bloco `== versões finais`. O registro `aplicacao-<backup>.json` guarda o caminho absoluto do lock aplicado (`lock`), e o relatório lê esse lock; um lock com `sha256` diferente do `lock_sha12` do registro é de outro ciclo e não vale. O envio tem limite total (`UONIX_RELATORIO_LIMITE`, 90 s), e o Ctrl-C do operador durante o envio não troca a saída final do `aplicar-producao`.
+
 Ao fim da aplicação, sai um e-mail de `cassio@ksio.dev`, assinado por Cassio Lima (ksiodev). O destino depende do resultado:
 
 - **Cliente** (`RELATORIO_PARA`): só quando tudo deu certo, isto é, saída 0, todo plugin confirmado na versão nova e smoke de produção todo verde. O e-mail é pessoal e não menciona automação.
