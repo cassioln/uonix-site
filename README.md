@@ -47,6 +47,10 @@ Para o local ficar fiel ao servidor, mantenha `local/wp-content/plugins` e `loca
 
 O passo a passo para recriar o ambiente local apos apagar containers, imagens ou volumes fica em [local/README.md](local/README.md).
 
+## Atualização de plugins, tema e núcleo
+
+Plugins, o tema pai e o núcleo do WordPress de produção são atualizados pela esteira `scripts/plugins/atualizar.sh`: `inventario` (lê produção), `ensaiar` (testa no local e grava um lock) e `aplicar-producao` (aplica o lock com backup e restauração automática). Os três exigem a janela SSH da Locaweb aberta. O passo a passo, os pré-requisitos e o que fazer depois de uma queda estão em [docs/plugins-atualizacao.md](docs/plugins-atualizacao.md).
+
 ## Clone de Ambientes
 
 A ferramenta `ksio.dev > Clone de Ambientes` somente solicita o workflow manual `.github/workflows/clone-environment.yml`; ela não escreve banco ou arquivos diretamente. A ferramenta suporta os três ambientes canônicos (`prod`, `qa` e `local`); pares com `local` são executados pelo Mac como ponte privada.
