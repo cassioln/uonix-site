@@ -329,8 +329,16 @@ if [ -n "$falhou" ]; then
   fi
 fi
 
+# Versões finais, uma linha marcada por item: "@@VERSAO <slug> <versão>". A versão passa por
+# regex e vira "?" se não casar: um Warning do PHP no stdout do WP-CLI não pode virar a "versão"
+# (#430). O formato antigo ("  slug versão") não é mais impresso; o relatório só o lê em logs já
+# gravados.
 echo "== versões finais"
-while read -r slug _; do printf '  %s %s\n' "$slug" "$(versao_item "$slug")"; done <<< "$LISTA"
+while read -r slug _; do
+  v="$(versao_item "$slug" | head -n1 | tr -d '\r')"
+  [[ "$v" =~ ^[0-9][0-9A-Za-z.+_-]*$ ]] || v='?'
+  printf '@@VERSAO %s %s\n' "$slug" "$v"
+done <<< "$LISTA"
 case "$resultado" in
   0) echo "CONCLUÍDO (backup em $BK)" ;;
   20) echo "PARADO EM: $falhou; restaurado e site verde (backup em $BK)" ;;
