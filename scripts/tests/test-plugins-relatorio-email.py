@@ -49,9 +49,17 @@ ITENS = [
 ]
 
 
+SHA12_FIXTURE = "0f93b1dbf12d"
+
+
+def gravar_lock(pasta: pathlib.Path, dados: dict, sha12: str = SHA12_FIXTURE) -> None:
+    """Grava o lock com o sha256 cujo prefixo é o lock_sha12 do registro: sem isso o relatório o descarta (#452)."""
+    pasta.joinpath("lock.json").write_text(json.dumps({**dados, "sha256": sha12 + "0" * 52}))
+
+
 def pasta_fixture(tmp: pathlib.Path, stamp: str) -> pathlib.Path:
-    (tmp / "lock.json").write_text(json.dumps({"itens": ITENS, "resultado": "verde", "fora": [
-        {"slug": "woocommerce", "de": "11.1.2", "para": "11.2.1", "motivo": "quarentena: lançada há 6 de 7 dias (libera em 2026-10-16)"}]}))
+    gravar_lock(tmp, {"itens": ITENS, "resultado": "verde", "fora": [
+        {"slug": "woocommerce", "de": "11.1.2", "para": "11.2.1", "motivo": "quarentena: lançada há 6 de 7 dias (libera em 2026-10-16)"}]})
     (tmp / "plano.json").write_text(json.dumps({"itens": [
         {"slug": "woocommerce-products-filter", "seguranca": True, "changelog": ["Security fix <script>alert(1)</script>"],
          "novidades": ["Security fix <script>alert(1)</script>"]},
@@ -75,6 +83,40 @@ finais = rel.versoes_finais(LOG)
 checar(finais == {"woocommerce-products-filter": "1.4.6", "kadence-blocks": "3.7.12.1", "woo-rfq-for-woocommerce": ""},
        f"versões finais erradas: {finais}")
 checar(rel.versoes_finais("sem bloco\n") == {}, "log sem o bloco deveria dar vazio")
+
+# 1b. #430: formato novo, uma linha @@VERSAO por item
+LOG_NOVO = "== versões finais\n@@VERSAO woocommerce-products-filter 1.4.6\n@@VERSAO kadence-blocks 3.7.12.1\n@@VERSAO woo-rfq-for-woocommerce ?\nCONCLUÍDO\n@@STATUS=0\n"
+checar(rel.versoes_finais(LOG_NOVO) == {"woocommerce-products-filter": "1.4.6", "kadence-blocks": "3.7.12.1", "woo-rfq-for-woocommerce": ""},
+       f"@@VERSAO errado: {rel.versoes_finais(LOG_NOVO)}")
+# Warning do PHP no meio: as linhas marcadas seguem lidas, sem cortar o resto (o formato antigo cortava)
+ruido = "== versões finais\n@@VERSAO a 1.0\nWarning: Undefined variable $x\n@@VERSAO b 2.0\n@@STATUS=0\n"
+checar(rel.versoes_finais(ruido) == {"a": "1.0", "b": "2.0"}, f"ruído não pode cortar as linhas marcadas: {rel.versoes_finais(ruido)}")
+# sem @@STATUS (conexão cortada): nada é confirmado, nem a linha completa
+checar(rel.versoes_finais("== versões finais\n@@VERSAO a 1.0\n@@VERSAO b 2.") == {}, "sem @@STATUS nenhum item pode ser confirmado")
+# linha cortada no meio da versão com @@STATUS ausente não vira \"mantido\" falso
+corte = {"slug": "b", "tipo": "plugin", "de": "2", "para": "2.0.1"}
+checar(rel.situacao(corte, rel.versoes_finais("@@VERSAO b 2")) == "sem_confirmacao", "versão cortada sem @@STATUS deveria ser 'sem_confirmacao'")
+# versão com lixo é descartada (vira vazia = 'verificar'), nunca igual a de/para
+checar(rel.versoes_finais("== versões finais\n@@VERSAO a Warning:\n@@STATUS=0\n") == {"a": ""}, "versão inválida deveria virar vazia")
+# o bloco antigo só vale quando não há nenhum @@VERSAO (logs já gravados)
+checar(rel.versoes_finais("== versões finais\n  a 1.0\n@@STATUS=0\n") == {"a": "1.0"}, "log antigo deveria seguir lido pelo bloco")
+
+# 1c. revisão do #452: o stdout de um plugin no meio do log não forja versões
+forjado = ("@@VERSAO x 9.9\nsaída de plugin @@STATUS=0 dentro de uma frase\n== versões finais\n@@VERSAO a 1.0\n@@STATUS=0\n")
+checar(rel.versoes_finais(forjado) == {"a": "1.0"}, f"@@VERSAO antes do bloco final não vale: {rel.versoes_finais(forjado)}")
+checar(rel.versoes_finais("== versões finais\n@@VERSAO a 1.0\nlog @@STATUS=0 solto no meio da frase\n") == {},
+       "@@STATUS só conta sozinho na linha")
+checar(rel.versoes_finais("@@VERSAO a 1.0\n@@STATUS=0\n") == {}, "@@VERSAO sem o cabeçalho do bloco final não é do job")
+checar(rel.versoes_finais("== versões finais\n@@VERSAO a 1.0\n@@VERSAO a 9.9\n@@STATUS=0\n") == {}, "slug repetido invalida a leitura")
+checar(rel.versoes_finais("== versões finais\n@@VERSAO a 1.0\n== versões finais\n@@VERSAO a 2.0\n@@STATUS=0\n") == {"a": "2.0"},
+       "vale o último bloco")
+# lock: sem sha256 não é o que foi aplicado; JSON que não é objeto não derruba o relatório
+with tempfile.TemporaryDirectory() as t4:
+    t4 = pathlib.Path(t4)
+    (t4 / "lock.json").write_text(json.dumps({"itens": [{"slug": "a", "tipo": "plugin", "de": "1", "para": "2", "camada": "comum", "aplicacao": "lote"}]}))
+    checar(rel.ler_lock(t4, {"lock_sha12": "abcdef012345"}) == {}, "lock sem sha256 não vale quando o registro tem sha12")
+    (t4 / "lock.json").write_text("[1, 2]")
+    checar(rel.ler_lock(t4, {"lock_sha12": "x"}) == {}, "JSON que não é objeto não pode levantar exceção")
 
 # 2. situação de cada item
 checar(rel.situacao(ITENS[0], finais) == "atualizado", "versão final = para deveria ser 'atualizado'")
@@ -179,6 +221,72 @@ with tempfile.TemporaryDirectory() as t:
     r = subprocess.run(["bash", "-c", f'UONIX_ATUALIZAR_BIBLIOTECA=1 source "$0"; UONIX_RELATORIO_EMAIL=0 enviar_relatorio {pasta} {stamp} 0; echo "rc=$?"', script],
                        capture_output=True, text=True, env=env)
     checar("rc=0" in r.stdout and "AVISO" not in r.stderr, f"UONIX_RELATORIO_EMAIL=0 deveria só gravar a prévia: {r.stderr!r}")
+
+# 6a. #431: o relatório lê o lock gravado no registro, não o que estiver ao lado; o tempo do envio é limitado;
+# SIGINT durante o envio não troca a saída final
+with tempfile.TemporaryDirectory() as t2:
+    t2 = pathlib.Path(t2)
+    stamp2 = "plugins-20261027-100000"
+    outra = t2 / "outra-pasta"; outra.mkdir()
+    lock_novo = {"itens": [{"slug": "loco-translate", "tipo": "plugin", "de": "2.8.9", "para": "2.9.0", "camada": "comum", "aplicacao": "lote"}],
+                 "resultado": "verde", "fora": [], "sha256": "abcdef012345" + "0" * 52}
+    (outra / "lock-copia.json").write_text(json.dumps(lock_novo))
+    (t2 / "plano.json").write_text(json.dumps({"itens": []}))
+    aplic = {"executado_em": "2026-10-27T10:00:00Z", "backup": stamp2, "lock_sha12": "abcdef012345", "status_job": "0",
+             "smoke_producao": "0", "lock": str(outra / "lock-copia.json")}
+    (t2 / f"aplicacao-{stamp2}.json").write_text(json.dumps(aplic))
+    (t2 / f"smoke-producao-{stamp2}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
+    log2 = "== versões finais\n@@VERSAO loco-translate 2.9.0\n@@STATUS=0\n"
+    c = rel.montar(t2, aplic, "0", log2)
+    checar([i["slug"] for i in c["itens"]] == ["loco-translate"] and c["itens"][0]["situacao"] == "atualizado",
+           f"o relatório deveria ler o lock do caminho gravado no registro: {c['itens']}")
+    # sem o caminho gravado e sem lock.json ao lado: lock vazio, que NUNCA vira \"Concluída\" para o cliente
+    sem = dict(aplic); sem.pop("lock")
+    c0 = rel.montar(t2, sem, "0", log2)
+    checar(c0["itens"] == [] and not rel.para_cliente(c0), "sem lock legível, o relatório não pode ir ao cliente")
+    checar(any("não conseguiu ler o plano" in m for m in rel.motivos(c0)), "o motivo técnico deveria dizer que não leu o plano")
+    # lock de outro ciclo (sha12 diferente) não vale, mesmo estando no caminho gravado
+    outro_ciclo = dict(aplic, lock_sha12="ffffffffffff")
+    cx = rel.montar(t2, outro_ciclo, "0", log2)
+    checar(cx["itens"] == [], f"lock com sha12 diferente do registro é de outro ciclo e não vale: {cx['itens']}")
+    # compatibilidade: registro antigo (sem \"lock\") com lock.json ao lado e mesmo sha12
+    gravar_lock(t2, {k: v for k, v in lock_novo.items() if k != "sha256"}, sha12="abcdef012345")
+    cc = rel.montar(t2, sem, "0", log2)
+    checar([i["slug"] for i in cc["itens"]] == ["loco-translate"], "registro antigo deveria cair no lock.json ao lado")
+
+    # o registro grava o caminho absoluto do lock
+    r = subprocess.run(["bash", "-c", f'UONIX_ATUALIZAR_BIBLIOTECA=1 source "$0"; LOCK_APLICADO="/a b/c\\"d.json" registrar_aplicacao {t2} reg-teste abc 0 0 >/dev/null; cat {t2}/aplicacao-reg-teste.json', script],
+                       capture_output=True, text=True, env=env)
+    try:
+        gravado = json.loads(r.stdout)
+    except ValueError:
+        gravado = {}
+    checar(gravado.get("lock") == '/a b/c"d.json' and gravado.get("status_job") == "0", f"registro sem o lock (ou JSON inválido): {r.stdout!r} {r.stderr!r}")
+
+    # tempo total: um python que dorme é morto no limite, a saída final não muda e o AVISO aparece
+    falso = t2 / "falso"; falso.mkdir()
+    (falso / "relatorio_email.py").write_text("import time; time.sleep(30)\n")
+    cmd = (f'UONIX_ATUALIZAR_BIBLIOTECA=1 source "$0"; ROOT_DIR={falso.parent}; mkdir -p {falso.parent}/scripts/plugins; '
+           f'cp {falso}/relatorio_email.py {falso.parent}/scripts/plugins/relatorio_email.py; '
+           f'UONIX_RELATORIO_LIMITE=2 enviar_relatorio {t2} {stamp2} 0; echo "rc=$?"')
+    import time as _t
+    inicio = _t.monotonic()
+    r = subprocess.run(["bash", "-c", cmd, script], capture_output=True, text=True, env=env, timeout=25)
+    gasto = _t.monotonic() - inicio
+    checar("rc=0" in r.stdout and "AVISO: relatório não enviado" in r.stderr and gasto < 15,
+           f"envio lento deveria ser cortado no limite e só avisar (gasto={gasto:.1f}s, stdout={r.stdout!r}, stderr={r.stderr!r})")
+
+# 6a'. SIGINT durante o envio (Ctrl-C do operador na espera) não troca a saída final por 130: a função
+# termina com rc=0 e o AVISO de reenvio. O relatório falso dorme; o SIGINT vai ao grupo do bash.
+with tempfile.TemporaryDirectory() as t3:
+    t3 = pathlib.Path(t3)
+    (t3 / "scripts/plugins").mkdir(parents=True)
+    (t3 / "scripts/plugins/relatorio_email.py").write_text("import time; time.sleep(8)\n")
+    (t3 / "aplicacao-x.json").write_text("{}")
+    cmd = (f'UONIX_ATUALIZAR_BIBLIOTECA=1 source "$0"; ROOT_DIR={t3}; (sleep 1; kill -INT $$) & '
+           f'UONIX_RELATORIO_LIMITE=20 enviar_relatorio {t3} x 0; echo "rc=$?"')
+    r = subprocess.run(["bash", "-c", cmd, script], capture_output=True, text=True, env=env, timeout=40)
+    checar("rc=0" in r.stdout, f"Ctrl-C durante o envio não pode trocar a saída final (stdout={r.stdout!r} rc={r.returncode} stderr={r.stderr!r})")
 
 # 6b. as chamadas do cmd_aplicar_producao: o relatório roda nos três finais
 # depois do job, e a gravação do log não pode abortar o script sob set -e
@@ -287,7 +395,7 @@ with tempfile.TemporaryDirectory() as t:
     pasta = pasta_fixture(pathlib.Path(t), stamp)
     lock_dados = json.loads((pasta / "lock.json").read_text())
     lock_dados["fora"] += [{"slug": f"interno-{n}", "de": "1", "para": "2", "motivo": m} for n, m in enumerate(MOTIVOS_INTERNOS)]
-    (pasta / "lock.json").write_text(json.dumps(lock_dados))
+    gravar_lock(pasta, lock_dados)
     c = rel.montar(pasta, json.loads((pasta / f"aplicacao-{stamp}.json").read_text()), "0", "")
     cliente_html, cliente_txt = rel.corpo_html(c), rel.corpo_texto(c)
     for m in MOTIVOS_INTERNOS:
@@ -349,7 +457,7 @@ with tempfile.TemporaryDirectory() as t:
     pasta = pathlib.Path(t)
     itens_t = [{"slug": "kadence", "tipo": "tema", "de": "1.5.1", "para": "1.5.2", "camada": "critica", "aplicacao": "um_por_vez"},
                {"slug": "fluentform", "tipo": "plugin", "de": "6.2.15", "para": "6.2.16", "camada": "critica", "aplicacao": "um_por_vez"}]
-    (pasta / "lock.json").write_text(json.dumps({"itens": itens_t, "resultado": "verde", "fora": []}))
+    gravar_lock(pasta, {"itens": itens_t, "resultado": "verde", "fora": []}, sha12="c530cf0c854c")
     (pasta / "plano.json").write_text(json.dumps({"itens": [
         {"slug": "kadence", "tipo": "tema", "seguranca": False, "changelog": "sem as versões do intervalo", "novidades": None},
         # plugin homônimo no plano: não pode vazar para o tema
@@ -381,13 +489,13 @@ with tempfile.TemporaryDirectory() as t:
 with tempfile.TemporaryDirectory() as t:
     stamp = "plugins-20261026-190000"
     pasta = pathlib.Path(t)
-    (pasta / "lock.json").write_text(json.dumps({"itens": [
+    gravar_lock(pasta, {"itens": [
         {"slug": "wordpress", "tipo": "nucleo", "de": "7.1.3", "para": "7.1.4", "camada": "nucleo", "aplicacao": "um_por_vez"}],
-        "resultado": "verde", "fora": []}))
+        "resultado": "verde", "fora": []}, sha12="abc000000000")
     (pasta / "plano.json").write_text(json.dumps({"itens": [
         {"slug": "wordpress", "tipo": "nucleo", "seguranca": None, "changelog": "indisponível", "novidades": None}]}))
     (pasta / f"aplicacao-{stamp}.json").write_text(json.dumps(
-        {"executado_em": "2026-10-26T19:00:00Z", "backup": stamp, "lock_sha12": "abc", "status_job": "0", "smoke_producao": "0"}))
+        {"executado_em": "2026-10-26T19:00:00Z", "backup": stamp, "lock_sha12": "abc000000000", "status_job": "0", "smoke_producao": "0"}))
     (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
     c = rel.montar(pasta, json.loads((pasta / f"aplicacao-{stamp}.json").read_text()), "0", "== versões finais\n  wordpress 7.1.4\n")
     h, txt = rel.corpo_html(c), rel.corpo_texto(c)
@@ -449,7 +557,7 @@ with tempfile.TemporaryDirectory() as t:
     checar(not rel.para_cliente(sem_smoke) and any("smoke" in m for m in rel.motivos(sem_smoke)),
            "sem smoke não pode ir para o cliente")
     (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))
-    (pasta / "lock.json").write_text(json.dumps({"itens": [], "fora": []}))
+    gravar_lock(pasta, {"itens": [], "fora": []})
     checar(not rel.para_cliente(rel.montar(pasta, aplicacao, "0", log_ok)), "lock vazio não pode ir para o cliente")
     pasta_fixture(pathlib.Path(t), stamp)
     (pasta / f"smoke-producao-{stamp}.json").write_text(json.dumps({"pagina /": {"ok": True, "detalhe": "http 200"}}))

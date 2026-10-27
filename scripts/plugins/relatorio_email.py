@@ -6,9 +6,9 @@ e-mail HTML (com alternativa em texto) com o resultado: cada plugin com a
 versão de antes e a que ficou instalada, as correções de segurança do
 changelog, o smoke de produção, o backup e o que ficou fora do ciclo.
 
-A versão "depois" vem do bloco "== versões finais" do log do job, ou seja, do
-que o WP-CLI de produção leu no fim; nunca do plano. Sem log, ela aparece como
-"não confirmada".
+A versão "depois" vem das linhas "@@VERSAO <slug> <versão>" que o job grava depois da
+última linha "== versões finais", ou seja, do que o WP-CLI de produção leu no fim; nunca do
+plano. Sem log, ou sem o "@@STATUS=" de um job que terminou, ela aparece como "não confirmada".
 
 Uso:
   relatorio_email.py --dir DIR --aplicacao ARQ.json --saida-final N
@@ -152,7 +152,41 @@ def ler_json(caminho: pathlib.Path) -> dict:
         return {}
 
 
+_VERSAO_MARCADA = re.compile(r"^@@VERSAO (\S+) (\S+)$")
+_VERSAO_VALIDA = re.compile(r"^[0-9][0-9A-Za-z.+_-]*$")
+_STATUS_FINAL = re.compile(r"^@@STATUS=\d+$", re.M)
+
+
 def versoes_finais(log: str) -> dict[str, str]:
+    """As versões que ficaram instaladas, lidas do log do job remoto.
+
+    Formato novo (#430): uma linha "@@VERSAO <slug> <versão>" por item, com a versão já validada
+    pelo job ("?" quando o WP-CLI não devolveu uma versão). Só vale se o job terminou, ou seja, se
+    o log tem "@@STATUS=": numa conexão cortada, uma linha pela metade (por exemplo "3.8" de
+    "3.8.1") poderia parecer a versão de origem e virar um "mantido" falso. Sem @@STATUS, nenhum
+    item é confirmado.
+
+    O log inclui o stdout do `plugin update` e dos hooks dos plugins, então só vale o que vem
+    DEPOIS da última linha "== versões finais" (o job a imprime no fim), o "@@STATUS=" só conta
+    sozinho numa linha, e um slug repetido invalida a leitura inteira (fail-closed).
+
+    Logs antigos, sem nenhum @@VERSAO, seguem pelo bloco "== versões finais"."""
+    linhas = log.splitlines()
+    inicio = max((n for n, l in enumerate(linhas) if l.startswith("== versões finais")), default=-1)
+    marcadas = [m for m in (_VERSAO_MARCADA.match(l.rstrip()) for l in linhas[inicio + 1:]) if m] if inicio >= 0 else []
+    if marcadas:
+        if not _STATUS_FINAL.search(log):
+            return {}
+        slugs = [m.group(1) for m in marcadas]
+        if len(slugs) != len(set(slugs)):
+            return {}
+        return {m.group(1): (m.group(2) if _VERSAO_VALIDA.match(m.group(2)) else "") for m in marcadas}
+    if any(_VERSAO_MARCADA.match(l.rstrip()) for l in linhas):
+        return {}  # @@VERSAO fora do bloco final: não é do job
+    return _versoes_bloco_antigo(log)
+
+
+def _versoes_bloco_antigo(log: str) -> dict[str, str]:
     """Lê o bloco "== versões finais" do log do job remoto (o último, se houver mais de um)."""
     versoes: dict[str, str] = {}
     dentro = False
@@ -267,8 +301,27 @@ def explicacao_quarentena(ctx: dict) -> str:
             "Quando o fabricante informa que a versão corrige uma falha de segurança, ela é aplicada sem esperar esse prazo.")
 
 
+def ler_lock(pasta: pathlib.Path, aplicacao: dict) -> dict:
+    """O lock que foi aplicado (#431): o caminho gravado no registro; só se ele faltar (registros
+    antigos, ou o arquivo foi movido), o "lock.json" ao lado do registro. Um lock cujo sha12 não
+    confere com o do registro é de outro ciclo e não vale."""
+    gravado = aplicacao.get("lock") or ""
+    for caminho in ([pathlib.Path(gravado)] if gravado else []) + [pasta / "lock.json"]:
+        dados = ler_json(caminho)
+        if not isinstance(dados, dict) or not dados.get("itens"):
+            continue
+        sha12 = str(dados.get("sha256", ""))[:12]
+        esperado = str(aplicacao.get("lock_sha12", ""))
+        # O aplicar-producao só roda com um lock de sha256 válido (lock.py), então o do registro
+        # existe; um lock sem sha256, ou de outro ciclo, não é o que foi aplicado.
+        if esperado and sha12 != esperado:
+            continue
+        return dados
+    return {}
+
+
 def montar(pasta: pathlib.Path, aplicacao: dict, saida_final: str, log: str, agora: dt.datetime | None = None) -> dict:
-    lock = ler_json(pasta / "lock.json")
+    lock = ler_lock(pasta, aplicacao)
     plano = {(i.get("tipo", "plugin"), i.get("slug")): i for i in ler_json(pasta / "plano.json").get("itens", [])}
     stamp = aplicacao.get("backup", "")
     smoke = ler_json(pasta / f"smoke-producao-{stamp}.json") if stamp else {}
@@ -701,6 +754,8 @@ def logo_data_uri() -> str | None:
 
 
 def enviar(msg: EmailMessage, cfg: dict, smtp_ssl=smtplib.SMTP_SSL, smtp_local=smtplib.SMTP, para: list[str] | None = None) -> None:
+    # O timeout vale por operação (conexão, login, envio). O tempo TOTAL é limitado por quem chama:
+    # atualizar.sh roda este módulo sob com_vigia_total (UONIX_RELATORIO_LIMITE, 90 s) (#431).
     if cfg["seguranca"] == "nenhuma":
         conexao = smtp_local(cfg["host"], cfg["porta"], timeout=30)
     else:

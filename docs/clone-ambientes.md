@@ -283,9 +283,18 @@ Em `plugins`, esses nomes são código: o plugin WP Staging fica em
 `plugins/wp-staging/`, e uma exclusão global o cortaria do clone e do backup do
 rollback. Em produção, em 2026-10-16, desses diretórios só existia
 `uploads/wc-logs`. O tar do backup do destino exclui `uploads/wc-logs` e
-`uploads/wp-staging`; sem âncora, essa sequência casa em qualquer nível, então
-um `plugins/<p>/uploads/wc-logs` também ficaria fora do backup (nenhum plugin
-de produção tem isso).
+`uploads/wp-staging` **ancorados no começo do caminho** (#439): um
+`plugins/<p>/uploads/wc-logs` é código e entra no backup. A âncora tem sintaxe
+diferente em cada tar, e `backup_tar_exclude_args` escolhe pela primeira linha de
+`tar --version`: GNU tar (servidores e CI) usa `--anchored`; bsdtar (macOS) usa
+`^` no padrão. Um tar desconhecido cai no padrão sem âncora, que exclui a mais e
+nunca a menos. No remoto, a função vai ao servidor por `declare -f` e a versão do
+tar é lida lá.
+
+`scripts/sync-runtime-from-downloads.sh` (cópia de `~/Downloads` para o local)
+usa os mesmos arrays do clone (`EXCLUDED_RSYNC_ARGS`, `PLUGIN_RSYNC_EXCLUDES`,
+`UPLOADS_RSYNC_EXCLUDES`), carregados com `UONIX_CLONE_LIBRARY_ONLY=1`, e não
+mantém lista própria.
 
 Em especial, os **arquivos** em `curriculos-recebidos/` e
 `wp-personal-data-exports/` nunca atravessam ambientes pelo clone. Isso não

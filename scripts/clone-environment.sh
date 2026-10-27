@@ -90,20 +90,33 @@ UPLOADS_RSYNC_EXCLUDES=(
   --exclude='/wpvivid_staging/'
 )
 
-# Exclusões do tar dos backups do destino, de onde o rollback restaura. Sem
-# `cache`: o padrão do tar casa o nome em qualquer nível, então o rollback
-# reinstalaria plugins sem `psr/cache` (#406). O arquivo cresce só pelos
-# `cache/` aninhados, que em `plugins` são código e precisam entrar.
-# O tar roda em wp-content, então o padrão é o caminho `uploads/<nome>` (#415):
-# saem os logs do WooCommerce e o staging de uploads, e `plugins/wp-staging`
-# entra. Sem `--anchored`, que o bsdtar do Mac não tem, o padrão casa a sequência
-# `uploads/wc-logs` em QUALQUER nível: um plugin que traga `uploads/wc-logs` no
-# próprio código também perde esse trecho no backup. Nenhum plugin de produção
-# tem isso (2026-10-16); ver a issue de seguimento.
-BACKUP_TAR_EXCLUDES=(
-  --exclude='uploads/wc-logs'
-  --exclude='uploads/wp-staging'
+# Caminhos que o tar dos backups do destino (de onde o rollback restaura) deixa de fora. Sem
+# `cache`: o padrão do tar casa o nome em qualquer nível, então o rollback reinstalaria plugins
+# sem `psr/cache` (#406). O arquivo cresce só pelos `cache/` aninhados, que em `plugins` são
+# código e precisam entrar. O tar roda em wp-content, então o padrão é o caminho `uploads/<nome>`
+# (#415): saem os logs do WooCommerce e o staging de uploads, e `plugins/wp-staging` entra.
+BACKUP_TAR_EXCLUDED_PATHS=(
+  uploads/wc-logs
+  uploads/wp-staging
 )
+
+# Opções de exclusão do tar, uma por linha, ANCORADAS no começo do caminho (#439). Sem âncora, o
+# padrão casa a sequência em qualquer nível, e um plugin que traga `uploads/wc-logs` no próprio
+# código perderia esse trecho no backup. A âncora tem sintaxe diferente em cada tar (medido em
+# 2026-10-26): GNU tar (servidores, CI) usa `--anchored`; bsdtar (macOS) usa `^` no padrão e não
+# tem `--anchored`. Um tar desconhecido (busybox) cai no padrão antigo, sem âncora: exclui a
+# mais, nunca a menos. O argumento é a primeira linha de `tar --version`.
+backup_tar_exclude_args() {
+  local versao="${1:-}" caminho
+  case "$versao" in *"GNU tar"*) printf '%s\n' '--anchored' ;; esac
+  for caminho in "${BACKUP_TAR_EXCLUDED_PATHS[@]}"; do
+    case "$versao" in
+      *"GNU tar"*) printf '%s\n' "--exclude=${caminho}" ;;
+      *bsdtar*|*libarchive*) printf '%s\n' "--exclude=^${caminho}" ;;
+      *) printf '%s\n' "--exclude=${caminho}" ;;
+    esac
+  done
+}
 
 PLUGIN_RSYNC_EXCLUDES=(
   # Plugins com configuração própria por ambiente não entram em clones.
@@ -833,13 +846,17 @@ mkdir -p $(printf '%q' "$dir")
 chmod 700 $(printf '%q' "$dir")
 $(remote_db_dump_snippet "$wp_cli" "$wp_root" "${dir}/db-${env}-${STAMP}.sql.gz")
 cd $(printf '%q' "$wp_content")
+$(declare -p BACKUP_TAR_EXCLUDED_PATHS)
+$(declare -f backup_tar_exclude_args)
+tar_ex=()
+while IFS= read -r tar_opt; do tar_ex+=(\"\$tar_opt\"); done < <(backup_tar_exclude_args \"\$(tar --version 2>&1 | head -n 1)\")
 set --
 for item in $(shell_join "${backup_items[@]}"); do
   if [ -e \"\$item\" ]; then set -- \"\$@\" \"\$item\"; fi
 done
 if [ \"\$#\" -gt 0 ]; then
   tar -czf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") \
-    $(shell_join "${BACKUP_TAR_EXCLUDES[@]}") -- \"\$@\"
+    \"\${tar_ex[@]}\" -- \"\$@\"
 else
   tar -czf $(printf '%q' "${dir}/files-${env}-${STAMP}.tar.gz") --files-from=/dev/null
 fi
@@ -862,9 +879,11 @@ find $(printf '%q' "$backup_root") -mindepth 1 -maxdepth 1 -type d -printf '%T@ 
       [ -e "${LOCAL_WP_CONTENT}/${item}" ] && existing_items+=("$item")
     done
     if [ "${#existing_items[@]}" -gt 0 ]; then
+      local tar_ex=() tar_opt
+      while IFS= read -r tar_opt; do tar_ex+=("$tar_opt"); done < <(backup_tar_exclude_args "$(tar --version 2>&1 | head -n 1)")
       tar -czf "${dir}/files-${env}-${STAMP}.tar.gz" \
         -C "$LOCAL_WP_CONTENT" \
-        "${BACKUP_TAR_EXCLUDES[@]}" \
+        "${tar_ex[@]}" \
         -- "${existing_items[@]}" || return $?
     else
       tar -czf "${dir}/files-${env}-${STAMP}.tar.gz" --files-from=/dev/null || return $?

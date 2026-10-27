@@ -576,6 +576,11 @@ $ok_reforco   = array( 'status' => 'ok', 'suggestion' => array( 'caminho' => 're
 $estado_radar = static function ( array $cands, array $extra = array() ) use ( $opcao_radar ) {
 	return array( $opcao_radar => $extra + array( 'status' => 'ok', 'updated_at' => '2026-10-05T03:00:00+00:00', 'list_updated_at' => '2026-10-05T03:00:00+00:00', 'window' => array( 'start' => '2026-07-05', 'end' => '2026-10-02' ), 'truncated' => false, 'candidates' => $cands ) );
 };
+// #404: a causa do erro de transporte é diagnóstico do cache; o painel não a mostra.
+$cand_err_painel                = uox_dash_radar_cand( 'ancoragem estrutural', array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 2, 'error' => 'http_request_failed: CAUSA-SECRETA-404 cURL error 28' ) );
+$cand_ok_painel                 = uox_dash_radar_cand( 'ancoragem predial', array( 'status' => 'ok', 'generated_at' => '2026-10-05T03:00:00+00:00', 'error' => 'http_request_failed: CAUSA-SECRETA-404 de ontem', 'suggestion' => array( 'caminho' => 'nova', 'titulo' => 'Ancoragem predial: guia', 'angulo' => 'Do projeto à inspeção.', 'intencao' => 'informacional' ) ) );
+$html_err_painel                = uox_render_radar( $estado_radar( array( $cand_ok_painel, $cand_err_painel ) ) );
+uox_assert( false !== strpos( $html_err_painel, 'Ancoragem predial: guia' ) && false !== strpos( $html_err_painel, 'Pauta não gerada' ) && false === strpos( $html_err_painel, 'CAUSA-SECRETA-404' ) && false === strpos( $html_err_painel, 'cURL error' ), '#404: o painel do Radar não mostra a causa do erro de transporte, nem na candidata ok nem na que falhou' );
 $GLOBALS['uox_can']           = true;
 $GLOBALS['uox_ksio_pode']     = true;
 $GLOBALS['uox_nonce_actions'] = array();

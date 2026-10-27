@@ -22,7 +22,11 @@ doc="${1#--path=}"; shift
 p="$doc/wp-content/plugins"
 [ "$1" = theme ] && p="$doc/wp-content/themes"
 case "${1/theme/plugin} $2" in
-  "plugin get") [ -f "$p/$3/VERSION" ] && cat "$p/$3/VERSION" || exit 1 ;;
+  "plugin get")
+    # Ruído: depois da atualização (o 3º "get" do mesmo plugin, o das versões finais), o PHP imprime um Warning antes da versão.
+    n=$(( $(cat "$doc/.gets-$3" 2>/dev/null || echo 0) + 1 )); printf '%s\n' "$n" > "$doc/.gets-$3"
+    [ "${FAKE_RUIDO_VERSAO:-}" = "$3" ] && [ "$n" -ge 3 ] && printf 'Warning: Undefined variable $x in /x.php on line 1\n'
+    [ -f "$p/$3/VERSION" ] && cat "$p/$3/VERSION" || exit 1 ;;
   "plugin update")
     [ "${FAKE_FALHA_UPDATE:-}" = "$3" ] && exit 1
     [ "${FAKE_DORME:-}" = "$3" ] && sleep 6
@@ -215,7 +219,7 @@ preparar tema; rodar "$LISTA_TEMA" UONIX_SMOKE_CMD=true
   || fail "tema verde saiu $rc (a=$(versao a) t=$(versao_tema t)): $(cat "$bk.log")"
 [ -s "$bk/tema-t.tar.gz" ] && [ -s "$bk/plugin-a.tar.gz" ] || fail "tema: backups tema-t e plugin-a deveriam existir"
 [ ! -e "$doc/wp-content/plugins/t" ] || fail "tema: pasta do tema apareceu em plugins/"
-grep -q '  t 2.0' "$bk.log" || fail "tema: versões finais sem o tema"
+grep -qx '@@VERSAO t 2.0' "$bk.log" || fail "tema: versões finais sem o tema"
 grep -q 'pastas salvas: 2' "$bk.log" || fail "tema: a contagem de pastas salvas deveria incluir o tema (2)"
 
 # 19. smoke vermelho depois do tema: o tema é restaurado de tema-t.tar.gz e a pasta nova fica em descartado-t
@@ -308,7 +312,7 @@ grep -q '^index.php' <<< "$lista_tar" || fail "núcleo: o tar deveria ter index.
 grep -q '^wp-content/languages/pt_BR.po' <<< "$lista_tar" || fail "núcleo: o tar deveria levar os idiomas do núcleo: $lista_tar"
 # O WordPress apaga o .maintenance no fim do core update; o job reativa antes do update-db
 [ "$(cat "$doc/.updatedb-log")" = "manutencao-ativa-no-update-db" ] || fail "núcleo: update-db deveria rodar com a manutenção ativa: $(cat "$doc/.updatedb-log")"
-grep -q '  wordpress 7.1.4' "$bk.log" || fail "núcleo: versões finais sem o núcleo"
+grep -qx '@@VERSAO wordpress 7.1.4' "$bk.log" || fail "núcleo: versões finais sem o núcleo"
 # O idioma do site vai ao core update: sem --locale, um WordPress pt_BR viraria en_US
 grep -q -- '--locale=pt_BR' "$doc/.core-update-args" || fail "núcleo: core update sem --locale=pt_BR: $(cat "$doc/.core-update-args")"
 grep -q -- '--version=7.1.4' "$doc/.core-update-args" || fail "núcleo: core update sem a versão exata do lock"
@@ -377,5 +381,15 @@ grep -q 'não pôs index.php no lugar' "$bk.log" || fail "relatório sem a falha
 preparar nucleotar
 rodar $'wordpress 7.1.3 7.1.4 critica nucleo' UONIX_SMOKE_CMD="if grep -qx 7.1.4 $doc/wp-includes/version.txt; then : > $bk/nucleo-wordpress.tar.gz; false; else true; fi"
 [ "$rc" = 50 ] || fail "restauração do núcleo que falha deveria sair 50 (saiu $rc): $(cat "$bk.log")"
+
+# 30. versões finais (#430): uma linha @@VERSAO por item, e o ruído do PHP no stdout do WP-CLI não vira "versão"
+preparar versoes; rodar $'a 1.0 1.1 acoplada plugin\nb 1.0 2.0 critica plugin' UONIX_SMOKE_CMD=true
+[ "$rc" = 0 ] || fail "versões: job verde saiu $rc"
+grep -qx '@@VERSAO a 1.1' "$bk.log" || fail "versões: sem @@VERSAO a 1.1: $(grep VERSAO "$bk.log")"
+grep -qx '@@VERSAO b 2.0' "$bk.log" || fail "versões: sem @@VERSAO b 2.0: $(grep VERSAO "$bk.log")"
+! grep -qE '^  [a-z] [0-9]' "$bk.log" || fail "versões: o formato antigo não deveria mais ser impresso"
+preparar versoesruido; rodar $'a 1.0 1.1 acoplada plugin' UONIX_SMOKE_CMD=true FAKE_RUIDO_VERSAO=a
+grep -qx '@@VERSAO a ?' "$bk.log" || fail "versões: Warning do PHP no stdout deveria virar '?': $(grep VERSAO "$bk.log")"
+[ "$(grep -c '^@@VERSAO' "$bk.log")" = 1 ] || fail "versões: o ruído não pode gerar linha @@VERSAO extra"
 
 printf 'OK: job remoto aplica, recusa drift, restaura sem apagar e nunca deixa manutenção ligada\n'
