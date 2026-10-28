@@ -1,6 +1,58 @@
-# Atualização de plugins
+# Atualização de plugins, do tema pai e do núcleo do WordPress
 
-Plugins e o tema pai de produção são atualizados por uma esteira, e não pelo painel nem pela atualização automática do WordPress. O desenho completo, com as próximas entregas, está na issue #393. Este documento cobre o que já existe.
+Plugins, o tema pai (`kadence`) e o núcleo do WordPress de produção são atualizados por uma esteira, e não pelo painel nem pela atualização automática do WordPress. A esteira ensaia no ambiente local, trava as versões ensaiadas num lock, faz backup e aplica em produção com restauração automática se algo falhar. O desenho original está na issue #393.
+
+## Como rodar, em resumo
+
+Tudo roda no **seu Mac**, com `scripts/plugins/atualizar.sh`. Os três passos abaixo exigem a **janela SSH da Locaweb aberta** (no painel da hospedagem, em Configurações → Segurança → Habilitar, segundo a página de ajuda da Locaweb; vale 3 h). Com a janela fechada, o comando pendura e é cortado por tempo.
+
+| # | Comando | O que faz | Muda algo? |
+|---|---|---|---|
+| 1 | `atualizar.sh inventario` | Lê produção e lista o que tem atualização, por camada. | Não |
+| 2 | `atualizar.sh ensaiar` | Clona produção para o local, atualiza lá, confere o site e grava um **lock** se ficar verde. | Só o local |
+| 3 | `atualizar.sh aplicar-producao --lock=… --confirmacao=…` | Aplica em produção as versões exatas do lock. | **Produção** |
+| — | `atualizar.sh estado-producao` | Mostra manutenção, job vivo e fim do log. Use depois de qualquer queda. | Não |
+
+O ciclo, na prática:
+
+```bash
+# 1. O que há para atualizar?
+bash scripts/plugins/atualizar.sh inventario
+
+# 2. Ensaiar no local (leva alguns minutos; clona produção). Termina com "Resultado: verde" e um lock.
+bash scripts/plugins/atualizar.sh ensaiar
+
+# 3. Aplicar. O primeiro comando só valida o lock e imprime a frase de confirmação:
+bash scripts/plugins/atualizar.sh aplicar-producao --lock=tmp/plugins/ensaio-<data>/lock.json
+bash scripts/plugins/atualizar.sh aplicar-producao --lock=tmp/plugins/ensaio-<data>/lock.json --confirmacao='ATUALIZAR PROD <sha12>'
+```
+
+Ao fim da aplicação, a esteira envia o relatório por e-mail (veja "Relatório por e-mail"). O lock vale 72 h.
+
+**Se a conexão cair no meio da aplicação (saída 40): não rode de novo.** O job continua no servidor. Rode `estado-producao` e leia o resultado.
+
+### Antes de rodar
+
+- **Ambiente local no ar, só para o `ensaiar`** (o `inventario` e o `aplicar-producao` não usam o local): `podman-compose -p uonix-local -f local/compose.yml up -d`; o site fica em `http://localhost:8080`. Para recriar o local do zero, veja `local/README.md`.
+- **`.env` do checkout principal** com as variáveis de produção: `LOCAWEB_DOCUMENT_ROOT`, `LOCAWEB_ACCOUNT_ROOT`, `LOCAWEB_PHP_BIN`, `LOCAWEB_WP_BIN`, `LOCAWEB_SSH_PASSWORD_FILE` e `LOCAWEB_SSH_KNOWN_HOSTS_FILE`, além das `RELATORIO_*` do e-mail (tabela mais abaixo). O `.env` não é versionado.
+- **De onde rodar.** Os scripts de `scripts/plugins/` só existem no `master`. Se o checkout principal estiver no branch `local` e atrás do `master`, rode de uma worktree do `origin/master`; o `atualizar.sh` acha sozinho o checkout principal (pelo `git --git-common-dir`) e usa o `.env`, o `local/wp-content` e a pasta `tmp/plugins/` de lá. Para forçar outro, use `UONIX_CHECKOUT_PRINCIPAL=<caminho>`:
+
+  ```bash
+  git worktree add --detach .claude/worktrees/esteira origin/master
+  bash .claude/worktrees/esteira/scripts/plugins/atualizar.sh inventario
+  git worktree remove .claude/worktrees/esteira   # ao terminar
+  ```
+- **Python 3** (os scripts rodam no 3.9 e no 3.14; o código usa `:=`, então não serve o 3.7), `podman` (o ensaio fala com os contêineres do local) e `rsync` (o clone). O `shellcheck` só é preciso para rodar os testes.
+
+### O que a esteira cobre, e o que não cobre
+
+| Cobre | Não cobre (por decisão) |
+|---|---|
+| Plugins (camadas `critica`, `acoplada`, `comum`) | Plugins `decisao_pendente` e código próprio (`kadence-child`, mu-plugins): só por deploy |
+| O tema pai `kadence` | **Agendamento**: a janela SSH da Locaweb só abre por clique no painel, então cada ciclo é manual |
+| O núcleo do WordPress (só versão da mesma série x.y; série nova exige `--aceitar-major=wordpress`) | Plugin `fluent-smtp`: o código dele não carrega no ensaio local e precisa ser ensaiado à parte |
+
+Opções úteis do `ensaiar`: `--reusar-clone` (reaproveita o clone de até 24 h), `--aceitar-major=a,b` e `--dispensar-quarentena=a,b`. A lista completa de comandos e opções está em `bash scripts/plugins/atualizar.sh` (sem argumentos).
 
 ## Temas (#445)
 
@@ -223,8 +275,9 @@ Em 2026-10-07, um job ainda ligado à conexão morreu no meio e deixou o site em
 | `comum` | Sem dependência medida e fora dos fluxos críticos. | Em lote | — | Alerta |
 | `decisao_pendente` | Inativo ou ferramenta pontual; decidir entre remover e manter. | Nunca pela esteira | — | Não se aplica |
 | `propria` | Código deste repositório (`kadence-child`). | Só por deploy | — | Não se aplica |
+| `nucleo` | Núcleo do WordPress (item único `wordpress`). | Um por vez, sempre por último | — (a API não informa a data) | Bloqueia a série nova (7.1 → 7.2) |
 
-Todo plugin que aparece em produção precisa estar na política. Um plugin novo sem classificação vira bandeira no inventário.
+Todo plugin e todo tema que aparecem em produção precisam estar na política. Um plugin novo sem classificação vira bandeira no inventário.
 
 ## Contratos — `ops/plugins/contratos.json`
 
