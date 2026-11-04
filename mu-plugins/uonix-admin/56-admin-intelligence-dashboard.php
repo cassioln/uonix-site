@@ -265,18 +265,41 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_radar_time' ) ) {
+	/**
+	 * Um instante da tela do Radar, no fuso do site, como o Módulo 3 mostra os dele (#386).
+	 *
+	 * Sem `wp_date` o fuso do site não é conhecido: cai em UTC e, se o formato traz hora, diz "(UTC)".
+	 * Só a data (`$com_fuso` falso) nunca leva o rótulo.
+	 */
+	function uonix_intelligence_radar_time( $timestamp, $formato, $com_fuso = true ) {
+		if ( function_exists( 'wp_date' ) ) {
+			return (string) wp_date( $formato, (int) $timestamp );
+		}
+
+		return gmdate( $formato, (int) $timestamp ) . ( $com_fuso ? ' (UTC)' : '' );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_radar_flag_message' ) ) {
 	/**
 	 * Aviso depois de descartar ou restaurar, a partir dos marcadores da URL: a ação e
 	 * quantas pautas ela alcançou (o lote pode levar várias).
 	 */
-	function uonix_intelligence_radar_flag_message( $flag, $quantas = '' ) {
+	function uonix_intelligence_radar_flag_message( $flag, $quantas = '', $fora = 0 ) {
 		$n = is_string( $quantas ) && 1 === preg_match( '/^[1-9][0-9]?$/', $quantas ) ? (int) $quantas : 1;
 		if ( 'dismiss' === $flag ) {
 			return ( 1 === $n ? '1 pauta descartada.' : $n . ' pautas descartadas.' ) . ' Descartadas não voltam à lista nem ao e-mail enquanto estiverem descartadas.';
 		}
 		if ( 'restore' === $flag ) {
-			return ( 1 === $n ? '1 pauta restaurada.' : $n . ' pautas restauradas.' ) . ' A pauta da IA que ainda faltar é gerada na próxima execução do Radar.';
+			$aviso = ( 1 === $n ? '1 pauta restaurada.' : $n . ' pautas restauradas.' );
+			if ( (int) $fora > 0 ) {
+				// A lista mostra as de mais impressões. Quantas ficaram de fora é o que o estado sabe; qual
+				// delas é a restaurada, não: por isso o aviso não aponta nenhuma (#379).
+				$aviso .= ' A lista só mostra as ' . ( 1 === (int) $fora ? 'de mais impressões, e 1 pauta ficou de fora' : 'de mais impressões, e ' . (int) $fora . ' pautas ficaram de fora' ) . '.';
+			}
+
+			return $aviso . ' A pauta da IA que ainda faltar é gerada na próxima execução do Radar.';
 		}
 
 		return 'invalid' === $flag ? 'Não foi possível alterar: nenhuma das pautas está mais na lista do Radar.' : '';
@@ -394,7 +417,7 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_pauta_cell' ) ) {
 				$texto = 'Pauta não gerada. O Radar tenta de novo amanhã.';
 			}
 			if ( $cota && false !== $volta ) {
-				$texto .= ' A cota renova por volta de ' . gmdate( 'd/m H:i', $volta ) . ' (UTC).';
+				$texto .= ' A cota renova por volta de ' . uonix_intelligence_radar_time( $volta, 'd/m H:i' ) . '.';
 			}
 			echo '<em>' . esc_html( $texto ) . '</em>';
 			return;
@@ -402,7 +425,7 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_pauta_cell' ) ) {
 		$gerada = isset( $c['ai']['generated_at'] ) && is_string( $c['ai']['generated_at'] ) ? strtotime( $c['ai']['generated_at'] ) : false;
 		echo '<p>' . esc_html( 'reforcar' === $pauta['caminho'] ? 'Reforçar esta página' : 'Post novo' ) . '<br><strong>' . esc_html( $pauta['titulo'] ) . '</strong></p>';
 		echo '<p>' . esc_html( $pauta['angulo'] ) . '</p>';
-		echo '<p class="description">' . esc_html( 'Intenção: ' . $pauta['intencao'] . '. Gerada por IA' . ( false !== $gerada ? ' em ' . gmdate( 'd/m', $gerada ) : '' ) . ' — revise antes de usar.' ) . '</p>';
+		echo '<p class="description">' . esc_html( 'Intenção: ' . $pauta['intencao'] . '. Gerada por IA' . ( false !== $gerada ? ' em ' . uonix_intelligence_radar_time( $gerada, 'd/m', false ) : '' ) . ' — revise antes de usar.' ) . '</p>';
 	}
 }
 
@@ -421,11 +444,11 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_section' ) ) {
 		$estado  = uonix_intelligence_radar_state();
 		$regras  = uonix_intelligence_radar_rules();
 		$curador = function_exists( 'uonix_intelligence_radar_can_curate' ) && uonix_intelligence_radar_can_curate();
-		$quando  = static function ( $iso, $formato ) {
+		$quando  = static function ( $iso, $formato, $com_fuso = true ) {
 			$momento = is_string( $iso ) && '' !== $iso ? strtotime( $iso ) : false;
-			return false === $momento ? '' : gmdate( $formato, $momento );
+			return false === $momento ? '' : uonix_intelligence_radar_time( $momento, $formato, $com_fuso );
 		};
-		$aviso  = uonix_intelligence_radar_flag_message( uonix_intelligence_query_flag( 'uonix_radar' ), uonix_intelligence_query_flag( 'uonix_radar_n' ) );
+		$aviso  = uonix_intelligence_radar_flag_message( uonix_intelligence_query_flag( 'uonix_radar' ), uonix_intelligence_query_flag( 'uonix_radar_n' ), $estado['overflow'] );
 		$falhou = in_array( $estado['status'], array( 'gsc_failed', 'config_missing' ), true );
 		$regra  = sprintf( 'posição depois da %d.ª e pelo menos %d impressões em %d dias', (int) $regras['min_position'], (int) $regras['min_impressions'], (int) $regras['window_days'] );
 		?>
@@ -434,7 +457,7 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_section' ) ) {
 				<h2 id="uonix-radar-title">Radar de Pautas</h2>
 				<p><?php echo esc_html( 'Consultas que se repetem na busca, mas em que o site aparece mal: ' . $regra . '. Buscas com aspas, com operadores ou pela marca ficam de fora. Para cada uma, a IA sugere um post novo ou o reforço da página que já aparece.' ); ?></p>
 				<?php if ( '' !== $estado['list_updated_at'] ) : ?>
-					<p class="description"><?php echo esc_html( 'Fonte: Search Console · ' . (int) $regras['window_days'] . ' dias, de ' . uonix_intelligence_radar_window_label( $estado['window'] ) . ' · atualizado em ' . $quando( $estado['list_updated_at'], 'd/m/Y H:i' ) . ' (UTC)' ); ?></p>
+					<p class="description"><?php echo esc_html( 'Fonte: Search Console · ' . (int) $regras['window_days'] . ' dias, de ' . uonix_intelligence_radar_window_label( $estado['window'] ) . ' · atualizado em ' . $quando( $estado['list_updated_at'], 'd/m/Y H:i' ) ); ?></p>
 				<?php endif; ?>
 			</div>
 		</div>
@@ -445,7 +468,7 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_section' ) ) {
 			<div class="notice notice-info inline"><p>O Radar ainda não rodou. Ele roda uma vez por dia.</p></div>
 		<?php else : ?>
 			<?php if ( $falhou ) : ?>
-				<div class="notice notice-warning inline"><p><?php echo esc_html( '' !== $estado['list_updated_at'] ? 'Search Console indisponível na última execução. Mostrando a lista de ' . $quando( $estado['list_updated_at'], 'd/m' ) . '.' : 'Search Console indisponível. O Radar tenta de novo amanhã.' ); ?></p></div>
+				<div class="notice notice-warning inline"><p><?php echo esc_html( '' !== $estado['list_updated_at'] ? 'Search Console indisponível na última execução. Mostrando a lista de ' . $quando( $estado['list_updated_at'], 'd/m', false ) . '.' : 'Search Console indisponível. O Radar tenta de novo amanhã.' ); ?></p></div>
 			<?php endif; ?>
 			<?php if ( $estado['truncated'] ) : ?>
 				<div class="notice notice-warning inline"><p>A resposta do Search Console veio no limite de linhas. Pode faltar consulta.</p></div>

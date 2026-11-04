@@ -636,6 +636,51 @@ foreach ( array(
 }
 uox_rd_assert( null === uonix_intelligence_radar_suggestion( 'lixo' ) && null === uonix_intelligence_radar_suggestion( array() ), 'Candidata que não é array não tem sugestão' );
 
+// #379: pauta restaurada com a lista cheia aparece na hora, no lugar da de menos impressões.
+$cand_379 = static function ( $consulta, $imp ) {
+	return array( 'key' => uonix_intelligence_radar_query_key( $consulta ), 'query' => $consulta, 'impressions' => $imp, 'clicks' => 0, 'position' => 40.0, 'page' => array( 'path' => '', 'kind' => '', 'title' => '', 'redirected_to' => '' ), 'ai' => array( 'status' => 'pending' ) );
+};
+$lista_379 = array();
+for ( $i = 0; $i < 10; $i++ ) {
+	$lista_379[] = $cand_379( "consulta visivel {$i}", 100 - $i );
+}
+$lista_379[] = $cand_379( 'consulta grande', 500 );
+$lista_379[] = $cand_379( 'consulta empatada b', 91 );
+$lista_379[] = $cand_379( 'consulta empatada a', 91 );
+$GLOBALS['uox_options'] = array(
+	uonix_intelligence_radar_option()           => array( 'status' => 'ok', 'updated_at' => '2026-10-05T03:00:00+00:00', 'list_updated_at' => '2026-10-05T03:00:00+00:00', 'window' => array(), 'truncated' => false, 'candidates' => $lista_379 ),
+	uonix_intelligence_radar_dismissed_option() => array( uonix_intelligence_radar_query_key( 'consulta grande' ) => '2026-10-04T00:00:00+00:00', uonix_intelligence_radar_query_key( 'consulta empatada b' ) => '2026-10-04T00:00:00+00:00', uonix_intelligence_radar_query_key( 'consulta empatada a' ) => '2026-10-04T00:00:00+00:00' ),
+);
+$antes_379 = uonix_intelligence_radar_state();
+uox_rd_assert( 10 === count( $antes_379['visible'] ) && 3 === count( $antes_379['dismissed'] ) && 0 === $antes_379['overflow'], '#379: com 10 visíveis e 3 descartadas, o estado mostra 10 e 3, e nada ficou de fora' );
+$GLOBALS['uox_options'][ uonix_intelligence_radar_dismissed_option() ] = array( uonix_intelligence_radar_query_key( 'consulta empatada b' ) => '2026-10-04T00:00:00+00:00', uonix_intelligence_radar_query_key( 'consulta empatada a' ) => '2026-10-04T00:00:00+00:00' );
+$depois_379 = uonix_intelligence_radar_state();
+$q_379      = array_column( $depois_379['visible'], 'query' );
+uox_rd_assert( 10 === count( $q_379 ) && 'consulta grande' === $q_379[0], '#379: a restaurada, com mais impressões, aparece em primeiro, sem esperar o cron; obteve ' . implode( ' | ', $q_379 ) );
+uox_rd_assert( ! in_array( 'consulta visivel 9', $q_379, true ) && in_array( 'consulta visivel 8', $q_379, true ), '#379: sai da lista a de menos impressões, não uma qualquer' );
+uox_rd_assert( 2 === count( $depois_379['dismissed'] ) && 1 === $depois_379['overflow'], '#379: a que saiu por falta de lugar não vai parar em "Descartadas", e o estado diz que 1 ficou de fora' );
+$GLOBALS['uox_options'][ uonix_intelligence_radar_dismissed_option() ] = array();
+$estado_379 = uonix_intelligence_radar_state();
+uox_rd_assert( 3 === $estado_379['overflow'], '#379: com as 3 restauradas, 13 candidatas e 10 vagas: 3 ficam de fora; obteve ' . $estado_379['overflow'] );
+$todas_379 = array_column( $estado_379['visible'], 'query' );
+uox_rd_assert( array( 'consulta grande', 'consulta visivel 0', 'consulta visivel 1', 'consulta visivel 2', 'consulta visivel 3', 'consulta visivel 4', 'consulta visivel 5', 'consulta visivel 6', 'consulta visivel 7', 'consulta visivel 8' ) === $todas_379, '#379: a ordem é por impressões, e o empate vai para a ordem alfabética; obteve ' . implode( ' | ', $todas_379 ) );
+$GLOBALS['uox_options'] = array();
+
+// #379: o desempate também decide, quando o empate atravessa o corte de 10: 9 distintas, e a 10.ª vaga
+// disputada por uma visível (guardada antes) e uma restaurada (guardada depois), com as mesmas impressões.
+$lista_emp = array();
+for ( $i = 0; $i < 10; $i++ ) {
+	$lista_emp[] = $cand_379( "consulta visivel {$i}", 100 - $i );
+}
+$lista_emp[] = $cand_379( 'aaa restaurada', 91 );
+$GLOBALS['uox_options'] = array(
+	uonix_intelligence_radar_option()           => array( 'status' => 'ok', 'updated_at' => '2026-10-05T03:00:00+00:00', 'list_updated_at' => '2026-10-05T03:00:00+00:00', 'window' => array(), 'truncated' => false, 'candidates' => $lista_emp ),
+	uonix_intelligence_radar_dismissed_option() => array(),
+);
+$q_emp = array_column( uonix_intelligence_radar_state()['visible'], 'query' );
+uox_rd_assert( 10 === count( $q_emp ) && in_array( 'aaa restaurada', $q_emp, true ) && ! in_array( 'consulta visivel 9', $q_emp, true ), '#379: empate no corte: com as mesmas impressões, vale a ordem alfabética, como no cron; obteve ' . implode( ' | ', $q_emp ) );
+$GLOBALS['uox_options'] = array();
+
 // ---------------------------------------------------------------------------
 // 10. Novidade do e-mail.
 // ---------------------------------------------------------------------------
@@ -644,9 +689,12 @@ $quando  = strtotime( '2026-10-05T12:00:00+00:00' );
 uonix_intelligence_radar_run( $base );
 $e1 = uonix_intelligence_radar_email_items( $quando );
 uox_rd_assert( array( 'ancoragem predial', 'teste de arrancamento', 'pontos de ancoragem predial' ) === array_column( $e1['items'], 'query' ) && 6 === $e1['panel_count'], 'E-mail: as 3 primeiras novas, e o total do painel' );
+uox_rd_assert( 3 === $e1['more'], '#380: 6 novas e 3 no e-mail: sobram 3 novas fora dele; obteve ' . var_export( $e1['more'], true ) );
 uonix_intelligence_radar_mark_emailed( array_column( $e1['items'], 'key' ), $quando );
 uox_rd_assert( false === $GLOBALS['uox_autoload'][ $emailed ] && false === strpos( serialize( get_option( $emailed ) ), 'ancoragem' ), 'Registro de envio sem autoload e sem texto de consulta' );
 uox_rd_assert( array( 'teste de ancoragem', 'ancoragem predial nova', 'barra roscada inox fabricante' ) === array_column( uonix_intelligence_radar_email_items( $quando )['items'], 'query' ), 'Já enviadas não voltam: vêm as próximas' );
+$e1b = uonix_intelligence_radar_email_items( $quando );
+uox_rd_assert( 6 === $e1b['panel_count'] && 0 === $e1b['more'], '#380: depois de 3 enviadas, as outras 3 vão no e-mail e nada novo sobra: o painel continua com 6, mas "more" é 0; obteve ' . var_export( $e1b, true ) );
 uox_rd_assert( 'teste de ancoragem' === uonix_intelligence_radar_email_items( $quando + 180 * DAY_IN_SECONDS )['items'][0]['query'], 'Com 180 dias, ainda contam como enviadas' );
 uox_rd_assert( 'ancoragem predial' === uonix_intelligence_radar_email_items( $quando + 181 * DAY_IN_SECONDS )['items'][0]['query'], 'Com 181 dias, voltam a contar como novas' );
 uonix_intelligence_radar_mark_emailed( array(), $quando + 181 * DAY_IN_SECONDS );
@@ -662,11 +710,13 @@ uox_rd_assert( array() === uonix_intelligence_radar_email_items( $quando )['item
 $GLOBALS['uox_options'] = array();
 uonix_intelligence_radar_run( array_merge( $base, array( 'has_key' => false ) ) );
 uox_rd_assert( 3 === count( uonix_intelligence_radar_email_items( $quando, false )['items'] ) && array() === uonix_intelligence_radar_email_items( $quando, true )['items'], 'Sem chave do Gemini, vão as candidatas sem pauta; com chave, elas esperam a pauta' );
+uox_rd_assert( 3 === uonix_intelligence_radar_email_items( $quando, false )['more'] && 0 === uonix_intelligence_radar_email_items( $quando, true )['more'], '#380: candidata que espera a pauta não conta como nova fora do e-mail' );
 $GLOBALS['uox_options'] = array();
 uonix_intelligence_radar_run( $base );
 update_option( uonix_intelligence_radar_dismissed_option(), array( $kA => '2026-10-05T10:00:00+00:00' ), false );
 $e4 = uonix_intelligence_radar_email_items( $quando );
 uox_rd_assert( 'teste de arrancamento' === $e4['items'][0]['query'] && 5 === $e4['panel_count'], 'Descartada não vai ao e-mail nem conta no painel' );
+uox_rd_assert( 2 === $e4['more'], '#380: descartada não conta como nova: 5 visíveis, 3 no e-mail, 2 sobram; obteve ' . var_export( $e4['more'], true ) );
 
 // ---------------------------------------------------------------------------
 // 11. Descartar e restaurar.

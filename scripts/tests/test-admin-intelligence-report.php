@@ -586,7 +586,68 @@ uox_assert( false !== strpos( $html_radar, 'Pautas novas para o blog' ), 'Com pa
 uox_assert( 3 === substr_count( $html_radar, 'Pauta &lt;' ) && false === strpos( $html_radar, 'Pauta <' ), 'No máximo 3 pautas, com o título escapado' );
 uox_assert( false !== strpos( $html_radar, 'Reforçar: Norma de Ancoragem Predial' ) && false !== strpos( $html_radar, 'Post novo' ), 'O caminho aparece: reforço com o título da página, ou post novo' );
 uox_assert( false !== strpos( $html_radar, 'Ângulo &amp; ancoragem predial.' ) && false !== strpos( $html_radar, 'Consulta: ancoragem predial · posição 59,1 · 106 impressões em 90 dias' ), 'Ângulo e números aparecem, escapados' );
-uox_assert( false !== strpos( $html_radar, 'Mais 1 pauta no painel.' ), 'Diz quantas ficaram no painel' );
+uox_assert( false !== strpos( $html_radar, 'Mais 1 pauta nova no painel.' ), 'Diz quantas pautas NOVAS ficaram fora do e-mail' );
+
+// #380: 6 visíveis, 3 já enviadas e 3 no e-mail: não sobra pauta nova, então a frase não aparece.
+$cands_380 = array();
+foreach ( array( 'ancoragem a1', 'ancoragem a2', 'ancoragem a3', 'ancoragem a4', 'ancoragem a5', 'ancoragem a6' ) as $q_380 ) {
+	$cands_380[] = uox_radar_cand( $q_380 );
+}
+$GLOBALS['uox_options'] = uox_radar_opcoes( $cands_380 );
+update_option( uonix_intelligence_radar_emailed_option(), array( $cands_380[0]['key'] => gmdate( 'c' ), $cands_380[1]['key'] => gmdate( 'c' ), $cands_380[2]['key'] => gmdate( 'c' ) ), false );
+$html_380 = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) );
+uox_assert( false !== strpos( $html_380, 'Pautas novas para o blog' ) && 3 === substr_count( $html_380, 'Consulta: ancoragem a' ) && false === strpos( $html_380, 'Mais ' . 3 . ' pautas' ) && false === strpos( $html_380, 'no painel.' ), '#380: 3 já enviadas e 3 no e-mail: o e-mail não promete pautas novas que não existem' );
+// 7 novas, nenhuma enviada: 3 no e-mail e 4 novas fora, no plural.
+$cands_380b = array();
+foreach ( array( 'ancoragem b1', 'ancoragem b2', 'ancoragem b3', 'ancoragem b4', 'ancoragem b5', 'ancoragem b6', 'ancoragem b7' ) as $q_380 ) {
+	$cands_380b[] = uox_radar_cand( $q_380 );
+}
+$GLOBALS['uox_options'] = uox_radar_opcoes( $cands_380b );
+$html_380b = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) );
+uox_assert( false !== strpos( $html_380b, 'Mais 4 pautas novas no painel.' ), '#380: 7 novas e 3 no e-mail: "Mais 4 pautas novas no painel."' );
+// Pauta que ainda espera a IA está no painel, mas não é "nova": não entra na conta.
+$cands_380c   = array_slice( $cands_380b, 0, 4 );
+$cands_380c[] = uox_radar_cand( 'ancoragem c5', 'nova', 'unavailable' );
+$cands_380c[] = uox_radar_cand( 'ancoragem c6', 'nova', 'unavailable' );
+$GLOBALS['uox_options'] = uox_radar_opcoes( $cands_380c );
+$html_380c = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) );
+uox_assert( false !== strpos( $html_380c, 'Mais 1 pauta nova no painel.' ) && false === strpos( $html_380c, 'Mais 3' ) && false === strpos( $html_380c, 'Mais 2' ), '#380: as duas sem pauta da IA não entram: sobra 1 nova' );
+// #381: a linha de fonte data a lista; se o Search Console falhou, o e-mail diz que a lista é a anterior.
+$GLOBALS['uox_options'] = uox_radar_opcoes( array( uox_radar_cand( 'ancoragem predial' ) ) );
+$html_381 = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) );
+uox_assert( false !== strpos( $html_381, 'Fonte: Search Console, 90 dias · lista de 05/10/2026 03:00 (UTC)' ) && false === strpos( $html_381, 'não conseguiu ler o Search Console' ), '#381: execução ok: a fonte traz a data da lista, sem aviso' );
+foreach ( array( 'gsc_failed', 'config_missing' ) as $falha_381 ) {
+	$op_381                                          = $GLOBALS['uox_options'][ uonix_intelligence_radar_option() ];
+	$op_381['status']                                = $falha_381;
+	$op_381['updated_at']                            = '2026-10-06T03:00:00+00:00';
+	$GLOBALS['uox_options'][ uonix_intelligence_radar_option() ] = $op_381;
+	$html_381f                                       = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) );
+	uox_assert( false !== strpos( $html_381f, 'lista de 05/10/2026 03:00 (UTC)' ) && false !== strpos( $html_381f, 'A última execução do Radar não conseguiu ler o Search Console: esta é a lista anterior.' ), "#381: {$falha_381}: a fonte diz de quando é a lista e avisa que a última execução falhou" );
+	uox_assert( false !== strpos( $html_381f, 'Consulta: ancoragem predial' ), "#381: {$falha_381}: as pautas da lista anterior continuam no e-mail" );
+}
+// Data da lista ilegível: a linha não inventa uma data e não quebra.
+$GLOBALS['uox_options'][ uonix_intelligence_radar_option() ]['list_updated_at'] = 'lixo';
+$html_381l = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) );
+uox_assert( false !== strpos( $html_381l, 'Pautas novas para o blog' ) && false === strpos( $html_381l, 'lista de ' ) && false !== strpos( $html_381l, 'Fonte: Search Console, 90 dias' ), '#381: data ilegível: sem data inventada' );
+$GLOBALS['uox_options'] = uox_radar_opcoes( array( uox_radar_cand( 'ancoragem predial', 'reforcar' ), uox_radar_cand( 'teste de ancoragem' ), uox_radar_cand( 'ancoragem estrutural' ), uox_radar_cand( 'barra roscada' ) ) );
+
+// #380: "more" malformado nunca vira frase: só inteiro positivo conta.
+foreach ( array( 'array' => array( 1 ), 'texto' => '3', 'decimal' => 2.5, 'negativo' => -2, 'nulo' => null, 'verdadeiro' => true ) as $nome_m => $ruim_m ) {
+	$h_m = uonix_intelligence_report_radar_html( array( 'content_radar' => array( 'items' => array( uox_radar_cand( 'ancoragem e1' ) ), 'more' => $ruim_m ), 'panel_url' => 'https://uonix.com.br/p' ) );
+	uox_assert( false !== strpos( $h_m, 'Consulta: ancoragem e1' ) && false === strpos( $h_m, 'no painel.' ), "#380: more {$nome_m}: o bloco sai sem a frase" );
+}
+// #381: sem a chave "list_at" (ou com ela malformada), o e-mail não inventa uma data: o bloco sai sem "lista de".
+foreach ( array( 'ausente' => null, 'array' => array( '2026-10-05' ), 'vazia' => '', 'inteiro' => 12345 ) as $nome_l => $ruim_l ) {
+	$ctx_l = array( 'items' => array( uox_radar_cand( 'ancoragem e2' ) ), 'more' => 0, 'failed' => false );
+	if ( 'ausente' !== $nome_l ) {
+		$ctx_l['list_at'] = $ruim_l;
+	}
+	$h_l = uonix_intelligence_report_radar_html( array( 'content_radar' => $ctx_l, 'panel_url' => '' ) );
+	uox_assert( false !== strpos( $h_l, 'Fonte: Search Console, 90 dias' ) && false === strpos( $h_l, 'lista de ' ), "#381: list_at {$nome_l}: sem data inventada" );
+}
+// Contexto montado à mão, sem "more": a frase não aparece (não inventa).
+uox_assert( false === strpos( uonix_intelligence_report_radar_html( array( 'content_radar' => array( 'items' => array( uox_radar_cand( 'ancoragem d1' ) ), 'panel_count' => 9 ), 'panel_url' => 'https://uonix.com.br/p' ) ), 'no painel.' ), '#380: sem o campo "more", o e-mail não deduz a frase do total do painel' );
+$GLOBALS['uox_options'] = uox_radar_opcoes( array( uox_radar_cand( 'ancoragem predial', 'reforcar' ), uox_radar_cand( 'teste de ancoragem' ), uox_radar_cand( 'ancoragem estrutural' ), uox_radar_cand( 'barra roscada' ) ) );
 uox_assert( strpos( $html_radar, 'Pautas novas para o blog' ) > strpos( $html_radar, 'Oportunidades de busca a um passo do topo' ), 'O bloco vem depois das oportunidades' );
 $GLOBALS['uox_options'] = uox_radar_opcoes( array( uox_radar_cand( 'ancoragem predial', 'nova', 'unavailable' ) ) );
 uox_assert( false === strpos( uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) ), 'Pautas novas' ), 'Sem pauta pronta, o bloco não aparece' );

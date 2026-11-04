@@ -398,7 +398,7 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 | `rejected` | Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista. |
 | `no_page` | Sem página publicada para esta consulta: removida ou redirecionada. |
 | `model_missing` | Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php. |
-| `quota_exhausted` | Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária. Com o `retryDelay` do Gemini, acrescenta "A cota renova por volta de DD/MM HH:MM (UTC)." |
+| `quota_exhausted` | Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária. Com o `retryDelay` do Gemini, acrescenta "A cota renova por volta de DD/MM HH:MM." no fuso do site (`wp_date`), e com o rótulo "(UTC)" só se o fuso do site não for conhecido (#386). |
 | `deferred` | Não pedida: a cota diária do Gemini acabou nesta geração (ou: falhas seguidas do Gemini nesta geração). Nova tentativa na próxima geração diária. |
 
 No e-mail, todo estado diferente de `ok` só omite a linha.
@@ -613,12 +613,15 @@ São três opções, sem autoload e protegidas no clone:
 
 - **E-mail:** o bloco "Pautas novas para o blog" vem depois das oportunidades e só aparece quando há pauta nova.
   - Pauta nova quer dizer: visível, com pauta `ok` e não enviada nos últimos 180 dias. Sem a chave do Gemini, vão as candidatas sem pauta.
-  - Vão no máximo 3, com "Mais N no painel".
+  - Vão no máximo 3. Se sobrarem novas, o bloco fecha com "Mais N pautas novas no painel", e N conta só as novas que não couberam. As já enviadas, as descartadas e as que ainda esperam a pauta da IA não entram na conta (#380). Sem novas sobrando, a frase não aparece.
+  - A linha de fonte do bloco diz de quando é a lista ("lista de DD/MM/AAAA HH:MM (UTC)"). Se a última execução não conseguiu ler o Search Console (`gsc_failed` ou `config_missing`), uma segunda linha avisa que a lista é a anterior (#381). O resto do e-mail continua em UTC, e o bloco segue essa convenção.
   - Os 180 dias impedem que uma consulta oscilando em torno do limite gere e-mail toda semana (#297).
 - **Quem marca uma pauta como enviada** é só `uonix_intelligence_send_scheduled_report()`, o envio semanal agendado, e só quando o e-mail sai. O "Enviar Teste Agora" mostra o mesmo bloco e não gasta a novidade.
 - **Painel:** a seção "Radar de Pautas" fica no fim da aba "Oportunidades SEO".
   - A tabela mostra consulta, posição, impressões, a página que aparece hoje (com o 301 e o link "Editar") e a pauta.
   - Há mensagens para cada estado: ainda não rodou, sem candidata, Search Console indisponível, corte de linhas, sem chave e pauta não gerada.
+  - **Horários no fuso do site** (`wp_date`), como o Módulo 3 mostra os dele, e sem o rótulo "(UTC)": "atualizado em", "Gerada por IA em", "Mostrando a lista de" e a hora de renovação da cota (#386). Sem `wp_date`, cai em UTC e o rótulo volta.
+  - **A lista cheia mostra as `max_candidates` de mais impressões.** Uma restaurada com menos impressões que as 10 da lista fica de fora até abrir vaga. O aviso de restaurar diz quantas candidatas ficaram de fora naquele momento (`overflow` do estado), sem apontar qual: o estado sabe quantas, e não se a restaurada é uma delas (#379). A ordem do estado é a do cron (impressões, depois o texto), e a restaurada entra no lugar certo na hora.
   - **"Descartar" e "Restaurar"** valem para quem vê a Central, com `edit_posts` e `uonix_ksio_can_access_tool( 'analytics' )`. O descarte vale na hora, e as descartadas ficam numa tabela recolhida enquanto ainda passarem na regra.
   - **Em lote** (pedido do Cassio em 2026-10-02): cada tabela é um formulário, com uma caixa por linha, "selecionar todas" e "Descartar selecionadas" ou "Restaurar selecionadas". O botão de uma linha vale só para ela, mesmo com outras caixas marcadas.
   - **Limites e segurança:** no máximo 20 chaves por pedido. O nonce é por ação, porque um formulário serve várias pautas, e cada chave continua conferida contra as candidatas gravadas. O aviso diz quantas foram.
