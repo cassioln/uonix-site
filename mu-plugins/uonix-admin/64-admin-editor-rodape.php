@@ -46,6 +46,7 @@ function uonix_admin_editor_rodape_ativo() {
  * @return bool
  */
 function uonix_admin_editor_rodape_area_do_rodape( $id ) {
+	// O mesmo conjunto (footer1 a footer6) está em 61-admin-widgets-rodape-fundo-escuro.php: se um mudar, o outro também.
 	return is_string( $id ) && 1 === preg_match( '/^footer[1-6]$/', $id );
 }
 
