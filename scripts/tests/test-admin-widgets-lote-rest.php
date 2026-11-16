@@ -7,7 +7,8 @@
  * uonix/v1/lote atende o mesmo lote do núcleo por outro caminho.
  *
  * O teste falha se a rota não for registrada com os argumentos do lote do
- * núcleo, se não delegar a serve_batch_request_v1, se aceitar quem não tem
+ * núcleo, se não delegar a serve_batch_request_v1, se continuar servindo o lote
+ * depois de o batch/v1 ser removido por um filtro (#365), se aceitar quem não tem
  * edit_theme_options ou negar quem tem, se o caminho contiver batch/v1, se o
  * script carregar fora de widgets.php (nas telas testadas), ou se o módulo não
  * for carregado pelo loader.
@@ -28,6 +29,24 @@ set_error_handler(
 );
 
 class WP_REST_Request {}
+
+class WP_Error {
+	private $codigo;
+	private $dados;
+
+	public function __construct( $codigo = '', $mensagem = '', $dados = '' ) {
+		$this->codigo = $codigo;
+		$this->dados  = $dados;
+	}
+
+	public function get_error_code() {
+		return $this->codigo;
+	}
+
+	public function get_error_data() {
+		return $this->dados;
+	}
+}
 
 class Uox_Servidor_Falso {
 	public $rotas = array();
@@ -135,6 +154,23 @@ uox_wl_assert( ! isset( $def['allow_batch'] ), 'a rota de lote não pode aceitar
 $req = new WP_REST_Request();
 uox_wl_assert( isset( $def['callback'] ) && 'resposta-do-lote' === call_user_func( $def['callback'], $req ), 'callback não devolve a resposta do núcleo' );
 uox_wl_assert( $req === $GLOBALS['uox_test_servidor']->recebido, 'callback não repassa a mesma requisição ao núcleo' );
+
+// #365: a rota é registrada uma vez, em rest_api_init. Se um filtro `rest_endpoints`
+// posterior remover o /batch/v1 de propósito, desligando o lote, ela não pode continuar
+// servindo o mesmo lote por outro caminho: responde 404 e não delega.
+foreach ( array( 'removido' => array(), 'sem manipuladores' => array( '/batch/v1' => array() ) ) as $rotulo => $rotas_depois ) {
+	$GLOBALS['uox_test_servidor']->rotas    = $rotas_depois;
+	$GLOBALS['uox_test_servidor']->recebido = null;
+	$sem_lote = call_user_func( $def['callback'], new WP_REST_Request() );
+	uox_wl_assert( $sem_lote instanceof WP_Error, "batch/v1 {$rotulo}: o callback deveria devolver WP_Error, não servir o lote" );
+	uox_wl_assert( $sem_lote instanceof WP_Error && 'rest_no_route' === $sem_lote->get_error_code(), "batch/v1 {$rotulo}: o código deveria ser rest_no_route" );
+	uox_wl_assert( $sem_lote instanceof WP_Error && 404 === ( $sem_lote->get_error_data()['status'] ?? null ), "batch/v1 {$rotulo}: o status deveria ser 404" );
+	uox_wl_assert( null === $GLOBALS['uox_test_servidor']->recebido, "batch/v1 {$rotulo}: não deveria ter delegado ao lote do núcleo" );
+}
+// Com o batch/v1 de volta, volta a servir.
+$GLOBALS['uox_test_servidor']->rotas    = array( '/batch/v1' => array( array( 'methods' => array( 'POST' => true ), 'args' => $args_nucleo ) ) );
+$GLOBALS['uox_test_servidor']->recebido = null;
+uox_wl_assert( 'resposta-do-lote' === call_user_func( $def['callback'], new WP_REST_Request() ), 'com o batch/v1 presente o callback deveria voltar a servir o lote' );
 
 // Script: só em Aparência > Widgets.
 foreach ( array( 'index.php', 'customize.php', 'post.php', 'nav-menus.php', 'appearance_page_widgets-extra', 'widgets.php.bak', '' ) as $tela ) {
