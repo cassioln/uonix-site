@@ -56,7 +56,7 @@ function uonix_admin_widgets_lote_permissao() {
  * A rota é registrada em `rest_api_init`, antes de qualquer filtro `rest_endpoints`
  * posterior. Se um plugin desligar o `/batch/v1` de propósito depois disso, esta rota
  * não pode continuar servindo o mesmo lote por outro caminho: a existência do
- * `/batch/v1` é conferida a cada chamada, e sem ele a resposta é 404 (#365).
+ * `/batch/v1` é conferida a cada chamada, e sem um manipulador que aceite POST a resposta é 404 (#365).
  *
  * @param WP_REST_Request $request Requisição do lote.
  * @return WP_REST_Response|WP_Error
@@ -65,7 +65,17 @@ function uonix_admin_widgets_lote_servir( WP_REST_Request $request ) {
 	$servidor = rest_get_server();
 	$rotas    = $servidor->get_routes();
 
-	if ( empty( $rotas['/batch/v1'] ) ) {
+	// Existência E método: um filtro que deixasse o /batch/v1 só com GET o desligaria para
+	// POST (404 no caminho direto) enquanto esta rota seguiria servindo o lote.
+	$aceita_post = false;
+	foreach ( (array) ( $rotas['/batch/v1'] ?? array() ) as $manipulador ) {
+		if ( is_array( $manipulador ) && ! empty( $manipulador['methods']['POST'] ) ) {
+			$aceita_post = true;
+			break;
+		}
+	}
+
+	if ( ! $aceita_post ) {
 		return new WP_Error( 'rest_no_route', 'Nenhuma rota correspondeu à URL e ao método de requisição.', array( 'status' => 404 ) );
 	}
 

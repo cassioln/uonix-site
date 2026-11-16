@@ -92,6 +92,10 @@ test('sem wp.apiFetch, não quebra nem registra nada', () => {
 // ---------------------------------------------------------------------------------------
 const ROOT = 'https://exemplo.test/wp-json/';
 
+// O ?_locale=user é acrescentado pelo middleware de locale do núcleo (api-fetch.js, userLocaleMiddleware):
+// uma versão que mude isso não deve derrubar um teste que trata do desvio. Compara-se a URL sem query.
+const sem_query = (url) => String(url).split('?')[0];
+
 function carregarComNucleo({ registrarDesvio = true, desvioAntesDoRoot = false } = {}) {
   const chamadas = [];
   const fetchFalso = async (url, init) => {
@@ -130,7 +134,8 @@ test('com o api-fetch real, POST /batch/v1 sai para /uonix/v1/lote com a URL fin
   const { apiFetch, chamadas } = carregarComNucleo();
   await apiFetch({ path: '/batch/v1?_locale=user', method: 'POST', data: { requests: [{ path: '/wp/v2/widgets/block-1' }] } });
   assert.equal(chamadas.length, 1);
-  assert.equal(chamadas[0].url, `${ROOT}uonix/v1/lote?_locale=user`);
+  assert.equal(sem_query(chamadas[0].url), `${ROOT}uonix/v1/lote`);
+  assert.equal(new URL(chamadas[0].url).searchParams.get('_locale'), 'user', 'o middleware de locale do núcleo preserva a query que o desvio não toca');
   assert.equal(chamadas[0].metodo, 'POST');
   assert.ok(!chamadas[0].url.includes('batch/v1'), 'nenhuma requisição pode conter batch/v1: o nginx da Locaweb devolve 403');
 });
@@ -140,17 +145,17 @@ test('com o api-fetch real, o que não é POST /batch/v1 segue para o próprio c
   await apiFetch({ path: '/wp/v2/widgets', method: 'POST', data: {} });
   await apiFetch({ path: '/wp/v2/widgets' });
   // O núcleo acrescenta ?_locale=user a toda requisição (middleware de locale): é a URL real.
-  assert.deepEqual(chamadas.map((c) => c.url), [`${ROOT}wp/v2/widgets?_locale=user`, `${ROOT}wp/v2/widgets?_locale=user`]);
+  assert.deepEqual(chamadas.map((c) => sem_query(c.url)), [`${ROOT}wp/v2/widgets`, `${ROOT}wp/v2/widgets`]);
 });
 
 test('sem o desvio, o api-fetch real manda o POST para batch/v1 (controle: o desvio é quem muda a URL)', async () => {
   const { apiFetch, chamadas } = carregarComNucleo({ registrarDesvio: false });
   await apiFetch({ path: '/batch/v1', method: 'POST', data: {} });
-  assert.equal(chamadas[0].url, `${ROOT}batch/v1?_locale=user`);
+  assert.equal(sem_query(chamadas[0].url), `${ROOT}batch/v1`);
 });
 
-test('registrado ANTES do rootURL, o desvio não age: recebe url e não path (a ordem importa)', async () => {
+test('registrado ANTES do rootURL, o desvio muda o path mas não o destino (a ordem importa)', async () => {
   const { apiFetch, chamadas } = carregarComNucleo({ desvioAntesDoRoot: true });
   await apiFetch({ path: '/batch/v1', method: 'POST', data: {} });
-  assert.equal(chamadas[0].url, `${ROOT}batch/v1?_locale=user`, 'registrado antes do rootURL, ele roda depois e perde o `path`: a ordem de registro é o que faz o desvio funcionar');
+  assert.equal(sem_query(chamadas[0].url), `${ROOT}batch/v1`, 'registrado antes do rootURL, ele roda depois dele: o rootURL já calculou `url` a partir de /batch/v1, e o fetch usa `url || path`, então reescrever `path` depois não muda o destino. A ordem de registro é o que faz o desvio funcionar');
 });
