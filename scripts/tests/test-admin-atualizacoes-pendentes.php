@@ -14,6 +14,12 @@ require_once __DIR__ . '/fixtures/atualizacoes-sistemicas-stubs.php';
 
 $failures = 0;
 
+set_error_handler(
+	static function ( $nivel, $mensagem, $arquivo, $linha ) {
+		throw new ErrorException( $mensagem, 0, $nivel, $arquivo, $linha );
+	}
+);
+
 function uox_atualizacoes_assert( $condition, $message ) {
 	global $failures;
 	if ( ! $condition ) {
@@ -88,6 +94,18 @@ function uox_atualizacoes_assert_aviso( $html, $contexto ) {
 		false !== $pos_aviso && false !== $pos_painel && $pos_aviso > $pos_painel && false !== strpos( substr( $html, $pos_aviso ), '</div>' ),
 		"{$contexto}: o aviso deve ficar no rodapé, depois dos painéis e dentro do bloco"
 	);
+}
+
+// Monta plugins instalados e pendentes: arquivo => [Name, Version, nova].
+function uox_atualizacoes_define_plugins( array $plugins ) {
+	$resposta   = array();
+	$instalados = array();
+	foreach ( $plugins as $arquivo => $dados ) {
+		$resposta[ $arquivo ]   = (object) array( 'new_version' => $dados['nova'] );
+		$instalados[ $arquivo ] = array( 'Name' => $dados['Name'], 'Version' => $dados['Version'] );
+	}
+	$GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array( 'response' => $resposta );
+	$GLOBALS['uox_test_plugins']                           = $instalados;
 }
 
 // Gera N plugins com salto de patch (gravidade baixa).
@@ -342,6 +360,120 @@ uox_atualizacoes_assert(
 );
 uox_atualizacoes_assert( 7 === uox_atualizacoes_assert_informativo( $paginado, 'paginado' ), 'paginado: 3 abas + 2 botões de paginação em 2 painéis' );
 uox_atualizacoes_assert_aviso( $paginado, 'paginado' );
+
+// Stubs que só o card de manutenção usa.
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( $capability ) {
+		return true;
+	}
+}
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( $chave ) {
+		return strtolower( (string) preg_replace( '/[^a-z0-9_\\-]/i', '', (string) $chave ) );
+	}
+}
+if ( ! function_exists( 'wp_unslash' ) ) {
+	function wp_unslash( $valor ) {
+		return $valor;
+	}
+}
+if ( ! function_exists( 'esc_url' ) ) {
+	function esc_url( $url ) {
+		return (string) $url;
+	}
+}
+if ( ! function_exists( 'admin_url' ) ) {
+	function admin_url( $caminho = '' ) {
+		return 'https://exemplo.test/wp-admin/' . $caminho;
+	}
+}
+if ( ! function_exists( 'wp_nonce_field' ) ) {
+	function wp_nonce_field( $acao ) {
+		echo '<input type="hidden" name="_wpnonce" value="x">';
+	}
+}
+if ( ! function_exists( 'uox_cache_flush_throttle_seconds' ) ) {
+	function uox_cache_flush_throttle_seconds() {
+		return 0;
+	}
+}
+if ( ! function_exists( 'uox_cache_flush_remaining_seconds' ) ) {
+	function uox_cache_flush_remaining_seconds() {
+		return 0;
+	}
+}
+
+// Isolamento dos casos de #339, #340 e #342: nenhum plugin, tema ou núcleo pendente herdado.
+$GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array( 'response' => array() );
+$GLOBALS['uox_test_site_transients']['update_themes']  = (object) array( 'response' => array() );
+$GLOBALS['uox_test_plugins']                           = array();
+$GLOBALS['uox_test_themes']                            = array();
+unset( $GLOBALS['uox_test_site_transients']['update_core'] );
+
+// #340: só `upgrade` é pendência do núcleo. `development` e `autoupdate` não pedem
+// ação do editor, e como o núcleo sai sempre "Crítica" um falso positivo seria alarme.
+foreach ( array( 'development', 'autoupdate' ) as $resposta_nucleo ) {
+	$GLOBALS['uox_test_site_transients']['update_core'] = (object) array(
+		'updates' => array( (object) array( 'response' => $resposta_nucleo, 'current' => '6.8.1' ) ),
+	);
+	uox_atualizacoes_assert( 0 === count( uox_get_atualizacoes_pendentes()['core'] ), "núcleo com response \"{$resposta_nucleo}\" não deve virar pendência" );
+	uox_atualizacoes_assert( '' === uox_atualizacoes_render(), "núcleo com response \"{$resposta_nucleo}\": o bloco não deve ser renderizado" );
+}
+// Propriedades ausentes não geram Warning: o handler acima o transformaria em exceção.
+$GLOBALS['uox_test_site_transients']['update_core'] = (object) array( 'updates' => array( (object) array( 'current' => '6.8.2' ) ) );
+uox_atualizacoes_assert( 0 === count( uox_get_atualizacoes_pendentes()['core'] ), 'updates[0] sem response não deve virar pendência nem gerar Warning' );
+$GLOBALS['uox_test_site_transients']['update_core'] = (object) array( 'updates' => array( (object) array( 'response' => 'upgrade' ) ) );
+uox_atualizacoes_assert( 0 === count( uox_get_atualizacoes_pendentes()['core'] ), 'updates[0] "upgrade" sem current não deve virar pendência nem gerar Warning' );
+$GLOBALS['uox_test_site_transients']['update_core'] = (object) array( 'updates' => array( (object) array( 'response' => 'upgrade', 'current' => '' ) ) );
+uox_atualizacoes_assert( 0 === count( uox_get_atualizacoes_pendentes()['core'] ), 'updates[0] "upgrade" com current vazio não deve virar pendência' );
+unset( $GLOBALS['uox_test_site_transients']['update_core'] );
+
+// #339: versão que não segue X.Y.Z (data, hash, "?") não tem gravidade calculável.
+uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( '20260101', '20260301' ), 'versão por data deve ser desconhecida, não alta' );
+uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( '?', '1.2.3' ), 'versão atual "?" deve ser desconhecida' );
+uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( '1.2.3', '?' ), 'versão nova "?" deve ser desconhecida' );
+uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( '', '1.2.3' ), 'versão atual vazia deve ser desconhecida' );
+uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( '1.2.3', 'abc' ), 'versão nova sem número deve ser desconhecida' );
+// Formatos válidos continuam como antes, inclusive com sufixo de pré-release e 1 ou 4 partes.
+uox_atualizacoes_assert( 'baixa' === uox_get_gravidade_atualizacao( '1.2.3', '1.2.4-beta1' ), 'sufixo de pré-release não torna a versão desconhecida' );
+uox_atualizacoes_assert( 'alta' === uox_get_gravidade_atualizacao( '2', '3' ), 'versão de uma parte é válida' );
+uox_atualizacoes_assert( 'baixa' === uox_get_gravidade_atualizacao( '1.2.3.4', '1.2.3.5' ), 'versão de quatro partes é válida' );
+// Fronteira do formato de data: major com até 4 dígitos é versão (100.0, 2026.1.1 CalVer de
+// ano, 1234); com 5 ou mais é data. Sem estes limites, trocar o corte passaria despercebido.
+uox_atualizacoes_assert( 'alta' === uox_get_gravidade_atualizacao( '99.0', '100.0' ), 'major de 3 dígitos (100.0) é versão, não data' );
+uox_atualizacoes_assert( 'alta' === uox_get_gravidade_atualizacao( '999.0', '1000.0' ), 'major de 4 dígitos (1000.0) é versão, não data' );
+uox_atualizacoes_assert( 'media' === uox_get_gravidade_atualizacao( '2026.1.1', '2026.2.0' ), 'CalVer de ano (2026.x) tem gravidade calculada' );
+uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( '12345', '12346' ), 'major de 5 dígitos já é data' );
+uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( '2026010100', '2026020100' ), 'data com hora (10 dígitos) é desconhecida' );
+// #342: downgrade de major não é "baixa" por acidente de comparação.
+uox_atualizacoes_assert( 'baixa' === uox_get_gravidade_atualizacao( '2.0.0', '1.9.0' ), 'downgrade de major é baixa (não "média" por menor maior)' );
+uox_atualizacoes_assert( 'baixa' === uox_get_gravidade_atualizacao( '3.5.0', '2.9.0' ), 'downgrade de major com minor maior na nova continua baixa' );
+
+// #339: plugin instalado com versão por data sai "Desconhecida" na lista, sem Warning,
+// e depois dos itens com gravidade calculada.
+uox_atualizacoes_define_plugins(
+	array(
+		'data/data.php' => array( 'Name' => 'Plugin Por Data', 'Version' => '20260101', 'nova' => '20260301' ),
+		'ok/ok.php'     => array( 'Name' => 'Plugin Normal', 'Version' => '1.0.0', 'nova' => '1.0.1' ),
+	)
+);
+$desconhecido = uox_get_atualizacoes_pendentes();
+uox_atualizacoes_assert( 'desconhecida' === ( $desconhecido['plugins'][1]['gravidade'] ?? '' ) && 'Plugin Por Data' === ( $desconhecido['plugins'][1]['nome'] ?? '' ), 'plugin com versão por data fica por último, com gravidade desconhecida' );
+$html_desc = uox_atualizacoes_render();
+uox_atualizacoes_assert( false !== strpos( $html_desc, 'Desconhecida' ), 'o rótulo "Desconhecida" deve aparecer na lista' );
+uox_atualizacoes_assert( false === strpos( $html_desc, '>Alta<' ), 'versão por data não pode sair "Alta"' );
+$GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array( 'response' => array() );
+$GLOBALS['uox_test_plugins']                           = array();
+
+// #342: o card de manutenção liga a lista. Sem a chamada em uox_render_manutencao_cache(),
+// o bloco existiria mas nunca apareceria no dashboard.
+uox_atualizacoes_define_plugins( array( 'ligado/ligado.php' => array( 'Name' => 'Plugin Ligado', 'Version' => '1.0.0', 'nova' => '1.0.1' ) ) );
+ob_start();
+uox_render_manutencao_cache();
+$card = (string) ob_get_clean();
+uox_atualizacoes_assert( false !== strpos( $card, 'id="uox-atualizacoes-sistemicas"' ) && false !== strpos( $card, 'Plugin Ligado' ), 'o card de manutenção deve renderizar a lista de atualizações' );
+$GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array( 'response' => array() );
+$GLOBALS['uox_test_plugins']                           = array();
 
 if ( 0 !== $failures ) {
 	exit( 1 );

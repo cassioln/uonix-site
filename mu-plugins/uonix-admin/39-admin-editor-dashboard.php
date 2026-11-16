@@ -1275,8 +1275,23 @@ function uox_render_manutencao_cache()
 // Classifica a gravidade de plugins/temas comparando major/minor: o
 // WordPress não informa "quantas versões atrasadas", só a atual e a mais
 // nova disponível. O núcleo não passa por aqui — ver uox_get_atualizacoes_pendentes().
+// Devolve 'desconhecida' quando uma das versões não segue o padrão X.Y.Z.
 function uox_get_gravidade_atualizacao($versao_atual, $versao_nova)
 {
+    // Sem distância calculável, a gravidade é "desconhecida" (#339):
+    //  - "?", vazio ou texto sem número na frente: intval() daria 0 e o item sairia
+    //    "Alta" sem motivo;
+    //  - major com 5 ou mais dígitos (20260101, 2026010100): é data, não major de
+    //    semver, e a diferença entre duas datas não é um salto de versão. CalVer de
+    //    ano (2026.1.1) e majors reais (14.2, 100.0) seguem calculados.
+    // Sufixo de pré-release (1.2.4-beta1) é aceito: o prefixo numérico basta para
+    // comparar major e minor.
+    $padrao = '/^\d{1,4}(\.\d+)*(?![\d])/';
+
+    if (1 !== preg_match($padrao, (string) $versao_atual) || 1 !== preg_match($padrao, (string) $versao_nova)) {
+        return 'desconhecida';
+    }
+
     $atual = array_pad(array_map('intval', explode('.', (string) $versao_atual)), 3, 0);
     $nova = array_pad(array_map('intval', explode('.', (string) $versao_nova)), 3, 0);
 
@@ -1318,11 +1333,19 @@ function uox_get_atualizacoes_pendentes()
     global $wp_version;
     $core_updates = get_site_transient('update_core');
 
-    if (!empty($core_updates->updates[0]) && 'latest' !== $core_updates->updates[0]->response) {
+    // Só `upgrade` pede ação do administrador. `development` (versão de
+    // desenvolvimento), `autoupdate` (o próprio WordPress aplica) e `latest` não
+    // são pendência (#340): como o núcleo sai sempre "Crítica", um falso positivo
+    // viraria alarme. As propriedades podem faltar no transient; `?? ''` evita Warning.
+    $nucleo = $core_updates->updates[0] ?? null;
+    $resposta_nucleo = is_object($nucleo) ? (string) ($nucleo->response ?? '') : '';
+    $versao_nucleo = is_object($nucleo) ? (string) ($nucleo->current ?? '') : '';
+
+    if ('upgrade' === $resposta_nucleo && '' !== $versao_nucleo) {
         $grupos['core'][] = array(
             'nome' => 'WordPress (núcleo)',
             'versao_atual' => $wp_version,
-            'versao_nova' => $core_updates->updates[0]->current,
+            'versao_nova' => $versao_nucleo,
             'gravidade' => 'critica',
         );
     }
@@ -1411,6 +1434,7 @@ function uox_render_lista_atualizacoes_pendentes()
         'alta' => array('bg' => '#fee2e2', 'cor' => '#b91c1c', 'label' => 'Alta'),
         'media' => array('bg' => '#fef3c7', 'cor' => '#92400e', 'label' => 'Média'),
         'baixa' => array('bg' => '#dbeafe', 'cor' => '#1e40af', 'label' => 'Baixa'),
+        'desconhecida' => array('bg' => '#f1f5f9', 'cor' => '#475569', 'label' => 'Desconhecida'),
     );
 
     $rotulos_categoria = array(
