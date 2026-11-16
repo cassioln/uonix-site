@@ -17,11 +17,12 @@
  * conhecidos. PHP_BIN escolhe o PHP usado para gerar os cenários.
  */
 
-import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { abrirChrome } from './fixtures/lib-chrome-devtools.mjs';
 
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const gerador = path.join(raiz, 'scripts/tests/fixtures/atualizacoes-sistemicas-cenario.php');
@@ -33,56 +34,6 @@ function checar(condicao, mensagem, detalhe) {
   if (!condicao) {
     falhas += 1;
     console.error(`FAIL: ${mensagem}${detalhe === undefined ? '' : ` — ${JSON.stringify(detalhe)}`}`);
-  }
-}
-
-function acharChrome() {
-  const candidatos = [
-    process.env.CHROME_BIN,
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  ].filter(Boolean);
-  return candidatos.find((candidato) => existsSync(candidato));
-}
-
-// Cliente mínimo do protocolo DevTools sobre o WebSocket de uma página.
-class DevTools {
-  constructor(ws) {
-    this.ws = ws;
-    this.proximoId = 0;
-    this.pendentes = new Map();
-    this.ouvintes = new Map();
-    ws.addEventListener('message', (evento) => {
-      const mensagem = JSON.parse(evento.data);
-      if (mensagem.id && this.pendentes.has(mensagem.id)) {
-        const { resolver, rejeitar } = this.pendentes.get(mensagem.id);
-        this.pendentes.delete(mensagem.id);
-        if (mensagem.error) {
-          rejeitar(new Error(mensagem.error.message));
-        } else {
-          resolver(mensagem.result);
-        }
-      } else if (mensagem.method) {
-        const lista = this.ouvintes.get(mensagem.method) || [];
-        this.ouvintes.set(mensagem.method, []);
-        lista.forEach((ouvinte) => ouvinte(mensagem.params));
-      }
-    });
-  }
-
-  enviar(method, params = {}) {
-    const id = ++this.proximoId;
-    this.ws.send(JSON.stringify({ id, method, params }));
-    return new Promise((resolver, rejeitar) => this.pendentes.set(id, { resolver, rejeitar }));
-  }
-
-  umaVez(method) {
-    return new Promise((resolver) => {
-      this.ouvintes.set(method, [...(this.ouvintes.get(method) || []), resolver]);
-    });
   }
 }
 
@@ -167,115 +118,26 @@ function checarLayoutEstavel(passos, cenario) {
   checar(pontasErradas.length === 0, `${cenario}: "Anterior"/"Próxima" desabilitam só nas pontas e o status acompanha a página`, pontasErradas);
 }
 
-const chromeBin = acharChrome();
-if (!chromeBin) {
-  console.error('FAIL: Chrome não encontrado — defina CHROME_BIN (o teste não pula sem navegador)');
+let navegador;
+// Registrado logo depois do spawn: vale mesmo se travar dentro de abrirChrome.
+let encerrar = () => {};
+const limite = setTimeout(() => {
+  console.error('FAIL: teste de navegador passou de 120s');
+  encerrar();
   process.exit(1);
-}
+}, 120000);
 
-const tmp = mkdtempSync(path.join(tmpdir(), 'uox-atualizacoes-'));
-const perfil = path.join(tmp, 'perfil');
-const cenarios = {};
 try {
+  navegador = await abrirChrome('uox-atualizacoes-', (funcao) => {
+    encerrar = funcao;
+  });
+  const { dt, tmp, versao } = navegador;
+
+  const cenarios = {};
   for (const nome of ['vazio', 'sete', 'paginado', 'fechado', 'longo', 'longo-p2', 'so-plugins']) {
     cenarios[nome] = path.join(tmp, `${nome}.html`);
     writeFileSync(cenarios[nome], execFileSync(php, [gerador, nome]));
   }
-} catch (erro) {
-  rmSync(tmp, { recursive: true, force: true });
-  console.error(`FAIL: não foi possível gerar os cenários com o PHP: ${erro.message}`);
-  process.exit(1);
-}
-
-const argumentos = [
-  '--headless=new',
-  '--disable-gpu',
-  '--no-first-run',
-  '--no-default-browser-check',
-  '--disable-extensions',
-  // Nenhuma chamada de serviço do Google por conta própria: só file:// e 127.0.0.1.
-  '--disable-background-networking',
-  '--disable-component-update',
-  '--disable-sync',
-  '--remote-debugging-port=0',
-  `--user-data-dir=${perfil}`,
-  '--window-size=1200,1600',
-  'about:blank',
-];
-// No runner Linux o sandbox do Chrome esbarra no AppArmor de namespaces.
-if (process.platform === 'linux') {
-  argumentos.unshift('--no-sandbox');
-}
-
-// Grupo de processos próprio: os filhos do Chrome (renderer, GPU, crashpad) saem
-// junto quando for preciso matá-lo, em vez de seguirem gravando no perfil.
-const chrome = spawn(chromeBin, argumentos, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
-
-function matarChrome() {
-  try {
-    process.kill(-chrome.pid, 'SIGKILL');
-  } catch {
-    chrome.kill('SIGKILL');
-  }
-}
-
-// No Linux, filhos do Chrome ainda podem estar soltando o perfil por alguns
-// instantes (ENOTEMPTY no runner). Limpeza que falha é aviso, não reprovação.
-function limparTmp() {
-  try {
-    rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  } catch (erro) {
-    console.warn(`AVISO: não foi possível remover ${tmp}: ${erro.code || erro.message}`);
-  }
-}
-const limite = setTimeout(() => {
-  console.error('FAIL: teste de navegador passou de 120s');
-  matarChrome();
-  // Sem o finally: dá ao Chrome um instante para soltar o perfil antes de apagá-lo.
-  setTimeout(() => {
-    limparTmp();
-    process.exit(1);
-  }, 1000);
-}, 120000);
-
-let ws;
-let enderecoNavegador;
-
-try {
-  enderecoNavegador = await new Promise((resolver, rejeitar) => {
-    let saida = '';
-    chrome.stderr.on('data', (pedaco) => {
-      saida += pedaco;
-      const achado = saida.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (achado) {
-        resolver(achado[1]);
-      }
-    });
-    chrome.on('exit', (codigo) => rejeitar(new Error(`Chrome saiu (código ${codigo}): ${saida.slice(-800)}`)));
-  });
-
-  const porta = new URL(enderecoNavegador).port;
-  const versao = await (await fetch(`http://127.0.0.1:${porta}/json/version`)).json();
-  // A aba inicial pode ainda não estar listada logo que o DevTools abre.
-  let pagina;
-  for (let tentativa = 0; tentativa < 50 && !pagina; tentativa += 1) {
-    const alvos = await (await fetch(`http://127.0.0.1:${porta}/json/list`)).json();
-    pagina = alvos.find((alvo) => alvo.type === 'page');
-    if (!pagina) {
-      await new Promise((resolver) => setTimeout(resolver, 100));
-    }
-  }
-  if (!pagina) {
-    throw new Error('o Chrome não listou nenhuma página em 5s');
-  }
-
-  ws = new WebSocket(pagina.webSocketDebuggerUrl);
-  await new Promise((resolver, rejeitar) => {
-    ws.addEventListener('open', resolver, { once: true });
-    ws.addEventListener('error', rejeitar, { once: true });
-  });
-  const dt = new DevTools(ws);
-  await dt.enviar('Page.enable');
   await dt.enviar('Emulation.setDeviceMetricsOverride', { width: 1200, height: 1600, deviceScaleFactor: 1, mobile: false });
 
   const abrir = async (nome) => {
@@ -410,41 +272,16 @@ try {
   checarLayoutEstavel(so.passos, 'so-plugins');
 
   if (falhas === 0) {
-    console.log(`PASS: atualizações sistêmicas no navegador (${versao.Browser})`);
+    console.log(`PASS: atualizações sistêmicas no navegador (${versao})`);
   }
 } catch (erro) {
   falhas += 1;
   console.error(`FAIL: ${erro.stack || erro}`);
 } finally {
   clearTimeout(limite);
-  if (ws) {
-    ws.close();
+  if (navegador) {
+    await navegador.fechar();
   }
-  // O perfil só sai depois que o Chrome soltar os arquivos dele: primeiro pede
-  // para fechar (Browser.close, que encerra os filhos em ordem); se não sair em
-  // 5s, mata o grupo inteiro.
-  const saiu = () => chrome.exitCode !== null || chrome.signalCode !== null;
-  if (!saiu()) {
-    const saida = new Promise((resolver) => chrome.once('exit', resolver));
-    if (enderecoNavegador) {
-      try {
-        const navegador = new WebSocket(enderecoNavegador);
-        await new Promise((resolver, rejeitar) => {
-          navegador.addEventListener('open', resolver, { once: true });
-          navegador.addEventListener('error', rejeitar, { once: true });
-        });
-        navegador.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
-      } catch {
-        // Sem DevTools, cai no SIGKILL abaixo.
-      }
-    }
-    const tempo = await Promise.race([saida.then(() => 'saiu'), new Promise((r) => setTimeout(() => r('tempo'), 5000))]);
-    if ('tempo' === tempo) {
-      matarChrome();
-      await Promise.race([saida, new Promise((r) => setTimeout(r, 2000))]);
-    }
-  }
-  limparTmp();
 }
 
 process.exit(falhas === 0 ? 0 : 1);

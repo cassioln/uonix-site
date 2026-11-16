@@ -8,6 +8,13 @@ const repositoryRoot = path.resolve(import.meta.dirname, '..', '..');
 const scriptPath = path.join(repositoryRoot, 'mu-plugins', 'uonix-admin', 'assets', 'js', 'admin-widgets-lote.js');
 const source = await readFile(scriptPath, 'utf8');
 
+// #365: o api-fetch.js REAL do núcleo (cópia em fixtures/wp-core, ver o LEIA-ME de lá), não um stub.
+const nucleoDir = path.join(repositoryRoot, 'scripts', 'tests', 'fixtures', 'wp-core');
+const pacotesNucleo = {};
+for (const pacote of ['hooks', 'private-apis', 'url', 'i18n', 'api-fetch']) {
+  pacotesNucleo[pacote] = await readFile(path.join(nucleoDir, `${pacote}.js`), 'utf8');
+}
+
 function carregar(wp) {
   const middlewares = [];
   const janela = { wp };
@@ -70,4 +77,85 @@ test('não mexe no que não é POST para /batch/v1', () => {
 test('sem wp.apiFetch, não quebra nem registra nada', () => {
   assert.doesNotThrow(() => carregar(undefined));
   assert.doesNotThrow(() => carregar({}));
+});
+
+
+// ---------------------------------------------------------------------------------------
+// #365: ordem do middleware contra o api-fetch.js real do WordPress.
+//
+// O desvio recebe `path` (relativo) e não `url`, e por isso tem de rodar ANTES do middleware
+// de rootURL, que transforma `path` em `url`. O núcleo registra middlewares com `unshift` e
+// executa com `reduceRight`, então o último registrado roda primeiro. Aqui o api-fetch real é
+// carregado num vm, com o rootURL e o nonce registrados como o WordPress registra
+// (wp_add_inline_script do wp-api-fetch), e o desvio é registrado DEPOIS, como o
+// admin_enqueue_scripts faz. A URL que chega ao fetch é a final.
+// ---------------------------------------------------------------------------------------
+const ROOT = 'https://exemplo.test/wp-json/';
+
+// O ?_locale=user é acrescentado pelo middleware de locale do núcleo (api-fetch.js, userLocaleMiddleware):
+// uma versão que mude isso não deve derrubar um teste que trata do desvio. Compara-se a URL sem query.
+const sem_query = (url) => String(url).split('?')[0];
+
+function carregarComNucleo({ registrarDesvio = true, desvioAntesDoRoot = false } = {}) {
+  const chamadas = [];
+  const fetchFalso = async (url, init) => {
+    chamadas.push({ url: String(url), metodo: init && init.method, corpo: init && init.body });
+    return new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  const janela = {};
+  const contexto = vm.createContext({
+    window: janela, globalThis: undefined, Object, String, RegExp, JSON, Promise, Array, Error, Symbol, Map, Set, WeakMap,
+    Response, URL, URLSearchParams, setTimeout, clearTimeout, console, encodeURIComponent, decodeURIComponent, Math, Number,
+    Boolean, parseInt, parseFloat, isNaN, Date, TypeError, RangeError, SyntaxError, structuredClone,
+  });
+  contexto.globalThis = contexto;
+  contexto.fetch = fetchFalso;
+  contexto.navigator = { onLine: true };
+  contexto.wp = undefined;
+  contexto.window = contexto;
+  for (const pacote of ['hooks', 'private-apis', 'url', 'i18n', 'api-fetch']) {
+    vm.runInContext(pacotesNucleo[pacote], contexto, { filename: `wp-core/${pacote}.js` });
+  }
+  const apiFetch = contexto.wp.apiFetch;
+  const registrar = () => vm.runInContext(source, contexto, { filename: 'admin-widgets-lote.js' });
+  if (desvioAntesDoRoot) {
+    registrar();
+  }
+  // Como o núcleo, na ordem do script-loader: rootURL, depois nonce.
+  apiFetch.use(apiFetch.createRootURLMiddleware(ROOT));
+  apiFetch.use(apiFetch.createNonceMiddleware('nonce-teste'));
+  if (registrarDesvio && !desvioAntesDoRoot) {
+    registrar();
+  }
+  return { apiFetch, chamadas };
+}
+
+test('com o api-fetch real, POST /batch/v1 sai para /uonix/v1/lote com a URL final', async () => {
+  const { apiFetch, chamadas } = carregarComNucleo();
+  await apiFetch({ path: '/batch/v1?_locale=user', method: 'POST', data: { requests: [{ path: '/wp/v2/widgets/block-1' }] } });
+  assert.equal(chamadas.length, 1);
+  assert.equal(sem_query(chamadas[0].url), `${ROOT}uonix/v1/lote`);
+  assert.equal(new URL(chamadas[0].url).searchParams.get('_locale'), 'user', 'o middleware de locale do núcleo preserva a query que o desvio não toca');
+  assert.equal(chamadas[0].metodo, 'POST');
+  assert.ok(!chamadas[0].url.includes('batch/v1'), 'nenhuma requisição pode conter batch/v1: o nginx da Locaweb devolve 403');
+});
+
+test('com o api-fetch real, o que não é POST /batch/v1 segue para o próprio caminho', async () => {
+  const { apiFetch, chamadas } = carregarComNucleo();
+  await apiFetch({ path: '/wp/v2/widgets', method: 'POST', data: {} });
+  await apiFetch({ path: '/wp/v2/widgets' });
+  // O núcleo acrescenta ?_locale=user a toda requisição (middleware de locale): é a URL real.
+  assert.deepEqual(chamadas.map((c) => sem_query(c.url)), [`${ROOT}wp/v2/widgets`, `${ROOT}wp/v2/widgets`]);
+});
+
+test('sem o desvio, o api-fetch real manda o POST para batch/v1 (controle: o desvio é quem muda a URL)', async () => {
+  const { apiFetch, chamadas } = carregarComNucleo({ registrarDesvio: false });
+  await apiFetch({ path: '/batch/v1', method: 'POST', data: {} });
+  assert.equal(sem_query(chamadas[0].url), `${ROOT}batch/v1`);
+});
+
+test('registrado ANTES do rootURL, o desvio muda o path mas não o destino (a ordem importa)', async () => {
+  const { apiFetch, chamadas } = carregarComNucleo({ desvioAntesDoRoot: true });
+  await apiFetch({ path: '/batch/v1', method: 'POST', data: {} });
+  assert.equal(sem_query(chamadas[0].url), `${ROOT}batch/v1`, 'registrado antes do rootURL, ele roda depois dele: o rootURL já calculou `url` a partir de /batch/v1, e o fetch usa `url || path`, então reescrever `path` depois não muda o destino. A ordem de registro é o que faz o desvio funcionar');
 });
