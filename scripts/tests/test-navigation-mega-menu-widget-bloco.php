@@ -8,8 +8,13 @@
  * passa `content` indefinido ao parser e a carga de todos os widgets aborta.
  *
  * O teste falha se a leitura de `widget_block` não completar `content` vazio
- * nessas instâncias, se mexer em instâncias que já têm `content`, ou se tocar
- * em valores que não são instâncias.
+ * nessas instâncias, se mexer em instâncias que já têm `content` string, se
+ * tocar em valores que não são instâncias, se o módulo sair da lista do
+ * `module.php` (executado, não lido como texto) ou se qualquer Warning do PHP
+ * escapar da função (#354, #355).
+ *
+ * `content` que não é string (null, número, array) também quebra o `parse()` do
+ * editor: o filtro o normaliza (#355).
  */
 
 declare( strict_types=1 );
@@ -26,6 +31,12 @@ require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-navigation/50-mega-menu-
 
 $failures = 0;
 
+set_error_handler(
+	static function ( $nivel, $mensagem, $arquivo, $linha ) {
+		throw new ErrorException( $mensagem, 0, $nivel, $arquivo, $linha );
+	}
+);
+
 function uox_wb_assert( $condition, $message ) {
 	global $failures;
 	if ( ! $condition ) {
@@ -33,6 +44,10 @@ function uox_wb_assert( $condition, $message ) {
 		fwrite( STDERR, "FAIL: {$message}\n" );
 	}
 }
+
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-navigation/module.php' );
+uox_wb_assert( in_array( '50-mega-menu-widget-bloco.php', $carregados, true ), 'o módulo 50 não está na lista que o module.php de navegação carrega: o editor de widgets voltaria a abrir vazio' );
 
 $registrado = $GLOBALS['uox_test_filters']['option_widget_block'][0] ?? null;
 uox_wb_assert( null !== $registrado, 'filtro option_widget_block não registrado' );
@@ -69,6 +84,33 @@ uox_wb_assert( $opcao[87] === $saida[87], 'block-87: instância com content não
 uox_wb_assert( $opcao[156] === $saida[156], 'block-156: content vazio existente não deveria mudar' );
 uox_wb_assert( 1 === $saida['_multiwidget'], '_multiwidget não deveria mudar' );
 uox_wb_assert( array_keys( $opcao ) === array_keys( $saida ), 'ordem ou conjunto de chaves da opção mudou' );
+
+// #355: `content` que existe mas não é string também quebra o parse() do editor.
+$nao_string = uonix_navigation_widget_block_content_padrao(
+	array(
+		10             => array( 'content' => null ),
+		11             => array( 'content' => 123 ),
+		12             => array( 'content' => array( 'x' => 1 ) ),
+		13             => array( 'content' => 1.5 ),
+		14             => array( 'content' => true ),
+		15             => array( 'content' => false ),
+		'_multiwidget' => 1,
+	)
+);
+uox_wb_assert( '' === $nao_string[10]['content'], 'content null deveria virar string vazia' );
+uox_wb_assert( '123' === $nao_string[11]['content'], 'content numérico inteiro deveria virar a string do número' );
+uox_wb_assert( '' === $nao_string[12]['content'], 'content array deveria virar string vazia' );
+uox_wb_assert( '1.5' === $nao_string[13]['content'], 'content float deveria virar a string do número' );
+uox_wb_assert( '1' === $nao_string[14]['content'], 'content true deveria virar "1", como a conversão do PHP' );
+uox_wb_assert( '' === $nao_string[15]['content'], 'content false deveria virar string vazia' );
+foreach ( array( 10, 11, 12, 13, 14, 15 ) as $n ) {
+	uox_wb_assert( is_string( $nao_string[ $n ]['content'] ), "block-{$n}: content deveria ser string" );
+}
+uox_wb_assert( 1 === $nao_string['_multiwidget'], '_multiwidget não deveria mudar com content não-string ao lado' );
+
+// A chave extra do Max Mega Menu sobrevive à normalização.
+$com_extra = uonix_navigation_widget_block_content_padrao( array( 20 => array( 'content' => null, 'mega_menu_columns' => 2 ) ) );
+uox_wb_assert( 2 === $com_extra[20]['mega_menu_columns'], 'a chave do Max Mega Menu foi alterada ao normalizar content' );
 
 uox_wb_assert( false === uonix_navigation_widget_block_content_padrao( false ), 'opção inexistente (false) deveria passar intacta' );
 uox_wb_assert( 'x' === uonix_navigation_widget_block_content_padrao( 'x' ), 'valor que não é array deveria passar intacto' );
