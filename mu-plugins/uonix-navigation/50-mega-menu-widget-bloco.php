@@ -13,7 +13,16 @@
  * ambientes).
  *
  * Na leitura da opção, toda instância sem `content` recebe o mesmo `content`
- * vazio que o núcleo já assume ao renderizar.
+ * vazio que o núcleo já assume ao renderizar. `content` que existe mas não é
+ * string (null, array) quebra o parser do mesmo jeito: `WP_Widget_Block::update`
+ * grava `$new_instance['content']` sem valor padrão para quem tem
+ * `unfiltered_html` (#355). Escalar vira a string do próprio valor; null, array,
+ * objeto e float não finito (NAN, INF) viram vazio.
+ *
+ * O filtro age na leitura, mas o valor normalizado pode ir para o banco: quando o
+ * núcleo regrava a opção (`WP_Widget::update_callback` a partir de `get_settings()`,
+ * que já passou por aqui), um `content` array ou objeto é descartado de vez. Sem
+ * consequência prática, porque esse valor quebraria o editor de qualquer jeito.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -21,7 +30,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Completa `content` vazio nas instâncias de widget de bloco que não o têm.
+ * Garante `content` string nas instâncias de widget de bloco.
  *
  * @param mixed $instances Valor da opção `widget_block`.
  * @return mixed
@@ -32,8 +41,17 @@ function uonix_navigation_widget_block_content_padrao( $instances ) {
 	}
 
 	foreach ( $instances as $number => $instance ) {
-		if ( is_array( $instance ) && ! array_key_exists( 'content', $instance ) ) {
+		if ( ! is_array( $instance ) ) {
+			continue;
+		}
+
+		if ( ! array_key_exists( 'content', $instance ) ) {
 			$instances[ $number ]['content'] = '';
+		} elseif ( ! is_string( $instance['content'] ) ) {
+			$valor = $instance['content'];
+			// NAN gera Warning ao virar string no PHP 8.5, e float não finito não tem
+			// texto útil: vira vazio, como null, array e objeto.
+			$instances[ $number ]['content'] = is_scalar( $valor ) && ! ( is_float( $valor ) && ! is_finite( $valor ) ) ? (string) $valor : '';
 		}
 	}
 
