@@ -27,6 +27,25 @@ export function acharChrome() {
   return candidatos.find((candidato) => existsSync(candidato));
 }
 
+// Nunca liberar o chamador para limpar dados enquanto o processo ainda vive.
+// Se nem SIGKILL produzir saída, o watchdog externo encerra o ensaio sem lock;
+// não transformar esse caso em fechamento bem-sucedido por expiração de prazo.
+export async function aguardarSaidaChrome(chrome, matar, toleranciaMs = 5000) {
+  if (chrome.exitCode !== null || chrome.signalCode !== null) return;
+  let timer;
+  const saida = new Promise(resolver => chrome.once('exit', resolver));
+  try {
+    const terminou = await Promise.race([
+      saida.then(() => true),
+      new Promise(resolver => { timer = setTimeout(() => resolver(false), toleranciaMs); }),
+    ]);
+    if (!terminou) {
+      matar();
+      await saida;
+    }
+  } finally { clearTimeout(timer); }
+}
+
 // Cliente mínimo do protocolo DevTools sobre o WebSocket de uma página.
 class DevTools {
   constructor(ws) {
@@ -135,7 +154,7 @@ export async function abrirChrome(prefixo, aoIniciar = () => {}) {
     }
     const saiu = () => chrome.exitCode !== null || chrome.signalCode !== null;
     if (!saiu()) {
-      const saida = new Promise((resolver) => chrome.once('exit', resolver));
+
       if (enderecoNavegador) {
         try {
           const navegador = new WebSocket(enderecoNavegador);
@@ -150,11 +169,7 @@ export async function abrirChrome(prefixo, aoIniciar = () => {}) {
           // Sem DevTools, cai no SIGKILL abaixo.
         }
       }
-      const tempo = await Promise.race([saida.then(() => 'saiu'), new Promise((r) => setTimeout(() => r('tempo'), 5000))]);
-      if ('tempo' === tempo) {
-        matar();
-        await Promise.race([saida, new Promise((r) => setTimeout(r, 2000))]);
-      }
+      await aguardarSaidaChrome(chrome, matar);
     }
     limparTmp();
   };

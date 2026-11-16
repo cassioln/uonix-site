@@ -8,14 +8,15 @@ por plano.py, e só grava o lock de versões quando tudo fica verde:
 2. alinhamento: versões e ativação do local iguais às de produção, porque o
    clone exclui alguns plugins e preserva a lista de ativos do destino;
 3. backup do banco local por mariadb-dump, validado;
-4. smoke ANTES, como linha de base;
+4. smoke ANTES, como linha de base, e jornada vital real obrigatória;
 5. atualização na ordem do plano: lote (acoplada e comum) e, depois, a camada
    crítica um por vez; `wp wc update` depois do woocommerce; contratos
-   estáticos do que mudou e smoke depois de cada etapa;
+   estáticos do que mudou, smoke e jornada vital depois de cada etapa;
 6. lock e relatório.
 
-Só reprova o que era verde na linha de base e ficou vermelho (regressão). O que
-já falhava antes aparece no relatório como pré-existente.
+O smoke HTTP reprova regressões; vermelhos anteriores aparecem como pré-existentes.
+A jornada vital de cotação/lead/notificação reprova qualquer falha, inclusive
+na linha de base. Ausência de prova ou limpeza incompleta também bloqueia o lock.
 
 O WP-CLI roda dentro do container do site (mesmo PHP que serve as páginas), a
 partir de um phar conferido pelo sha512 publicado.
@@ -381,15 +382,94 @@ def atualizar_nucleo(local, para: str, relatorio: list[str]) -> None:
     relatorio.append("- `wp core update-db` executado")
 
 
+def ambiente_jornada() -> dict[str, str]:
+    """Só configuração de execução local; não propagar o .env de produção."""
+    permitidas = {"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE",
+                  "CHROME_BIN", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "CONTAINERS_CONF",
+                  "CONTAINER_HOST", "CONTAINER_CONNECTION", "DOCKER_HOST"}
+    return {chave: valor for chave, valor in os.environ.items() if chave in permitidas}
+
+
+def jornada_cotacao(local, alvo: dict, saida: pathlib.Path, etapa: str) -> dict:
+    """Jornada real isolada; o runner nunca recebe credenciais de produção."""
+    if not alvo.get("produto"):
+        raise Falha("jornada sem produto obrigatório")
+    destino = saida / f"jornada-{etapa}"
+    destino.mkdir(parents=True, exist_ok=True)
+    comando = ["node", str(RAIZ / "scripts/plugins/jornada.mjs"),
+               "--base-url", local.base, "--mailpit-url", os.environ.get("UONIX_MAILPIT_URL", "http://localhost:8025"),
+               "--container", local.app, "--produto-id", str(alvo["produto"]),
+               "--saida", str(destino)]
+    with subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                          env=ambiente_jornada()) as processo:
+        try:
+            processo.communicate(timeout=240)
+        except subprocess.TimeoutExpired:
+            processo.terminate()
+            try:
+                processo.communicate(timeout=15)
+            except subprocess.TimeoutExpired:
+                processo.kill()
+                processo.communicate()
+            raise Falha("jornada excedeu o limite; conferir a limpeza antes de repetir") from None
+    try:
+        resultado = json.loads((destino / "relatorio.json").read_text())
+    except (OSError, ValueError):
+        raise Falha("jornada não produziu evidência estruturada; Node/Chrome disponíveis?") from None
+    if not isinstance(resultado, dict):
+        raise Falha("jornada devolveu evidência malformada")
+    if processo.returncode != 0:
+        resultado["ok"] = False
+    return resultado
+
+
+def jornada_aprovada(resultado: dict) -> bool:
+    """Não confiar apenas no exit code ou em um campo ok solto."""
+    return (isinstance(resultado, dict) and resultado.get("versao") == 1
+            and resultado.get("ok") is True and resultado.get("limpeza") is True
+            and bool(re.fullmatch(r"uonix-jornada-[a-f0-9]{32}", str(resultado.get("run_id", ""))))
+            and isinstance(resultado.get("notificacoes_habilitadas"), list)
+            and bool(resultado["notificacoes_habilitadas"])
+            and all(n in ("new_rfq", "customer_rfq") for n in resultado["notificacoes_habilitadas"])
+            and isinstance(resultado.get("checks"), dict)
+            and all(resultado["checks"].get(chave) is True for chave in ("cotacao", "lead", "notificacoes")))
+
+
 def executar(local, plano: dict, inventario: dict, contratos: dict, verificar_contratos, saida: pathlib.Path,
              clonar=None, proprios: set[str] = frozenset(), invalidar_clone=None) -> int:
     relatorio = [f"# Ensaio local — {dt.datetime.now().isoformat(timespec='seconds')}", ""]
+    notificacoes_base = None
 
     def fim(codigo: int, motivo: str) -> int:
         relatorio.extend(["", f"**Resultado: {motivo}** (saída {codigo})"])
         (saida / "relatorio.md").write_text("\n".join(relatorio) + "\n")
         print("\n".join(relatorio))
         return codigo
+
+    def verificar_jornada(etapa: str) -> bool:
+        nonlocal notificacoes_base
+        try:
+            resultado = jornada_cotacao(local, alvo, saida, etapa)
+        except Exception as erro:  # dependência/erro operacional também fecha o gate
+            resultado = {"ok": False, "detalhe": f"jornada indisponível ({type(erro).__name__})"}
+        if not isinstance(resultado, dict):
+            resultado = {"ok": False, "detalhe": "evidência da jornada malformada"}
+        aprovado = jornada_aprovada(resultado)
+        if aprovado:
+            notificacoes = frozenset(resultado["notificacoes_habilitadas"])
+            if notificacoes_base is None:
+                notificacoes_base = notificacoes
+            elif notificacoes != notificacoes_base:
+                aprovado = False
+                resultado["ok"] = False
+                resultado["detalhe"] = "configuração de notificações RFQ mudou depois da linha de base"
+        arquivo = f"jornada-{etapa}.json"
+        (saida / arquivo).write_text(json.dumps(resultado, ensure_ascii=False, indent=1) + "\n")
+        relatorio.append(f"- jornada vital ({etapa}): {'ok' if aprovado else 'REPROVADA'}; evidência: {arquivo}")
+        if not aprovado:
+            (saida / "jornada-falha.json").write_text(json.dumps(resultado, ensure_ascii=False, indent=1) + "\n")
+            relatorio.append(f"  - {resultado.get('detalhe', 'evidência incompleta')}")
+        return aprovado
 
     # Item cujo código não carrega no local não pode ir ao lock: o smoke nunca o
     # exercitaria. Hoje é o fluent-smtp, inativo no local por política e ativo
@@ -427,13 +507,15 @@ def executar(local, plano: dict, inventario: dict, contratos: dict, verificar_co
     relatorio += [f"- pré-existente: {v}" for v in vermelhos_base]
     (saida / "smoke-antes.json").write_text(json.dumps(base, ensure_ascii=False, indent=1))
 
-    # A partir daqui o banco local muda (migrações). Um --reusar-clone depois
-    # deste ponto testaria a migração sobre um banco já migrado, então o clone
-    # deixa de ser reutilizável antes da primeira atualização.
+    # A própria jornada cria registros. Invalidar o clone antes dela, inclusive
+    # quando a baseline vital reprovar, e não só antes das migrações.
     if invalidar_clone:
         invalidar_clone()
 
-    for nome_etapa, itens_etapa in etapas(plano):
+    if not verificar_jornada("antes"):
+        return fim(20, "jornada vital reprovada na linha de base")
+
+    for numero_etapa, (nome_etapa, itens_etapa) in enumerate(etapas(plano), 1):
         relatorio += ["", f"## {nome_etapa}"]
         try:
             for i in itens_etapa:
@@ -464,6 +546,9 @@ def executar(local, plano: dict, inventario: dict, contratos: dict, verificar_co
             relatorio += [f"  - REGRESSÃO {r}" for r in regressoes]
             (saida / "smoke-falha.json").write_text(json.dumps(atual, ensure_ascii=False, indent=1))
             return fim(20, f"regressão depois de {nome_etapa}")
+
+        if not verificar_jornada(f"etapa-{numero_etapa}"):
+            return fim(20, f"jornada vital reprovada depois de {nome_etapa}")
 
     try:
         php_local = local.wp("eval", "echo PHP_VERSION;").strip()

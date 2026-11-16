@@ -7,6 +7,7 @@ import contextlib
 import datetime as dt
 import io
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -410,6 +411,8 @@ class FakeLocal:
         self.chamadas: list[tuple] = []
         self.quebra_em, self.falha_backup = quebra_em, falha_backup
         self.nucleo, self.falha_update_db = "7.1.3", False
+        self.falha_jornada: str | None = None
+        self.mudar_notificacoes = False
 
     def locale(self):
         return "pt_BR"
@@ -540,7 +543,19 @@ def smoke_fake(local, alvo, contratos):
             "pagina /x": {"ok": False, "detalhe": "http 404"}}  # pré-existente: não pode reprovar
 
 
+def jornada_fake(local, alvo, saida, etapa):
+    local.chamadas.append(("JORNADA", etapa))
+    ok = getattr(local, "falha_jornada", None) != etapa
+    resultado = {"versao": 1, "ok": ok, "checks": {"cotacao": ok, "lead": ok, "notificacoes": ok},
+                 "limpeza": True, "run_id": "uonix-jornada-" + "a" * 32, "detalhe": "fixture da jornada"}
+    resultado["notificacoes_habilitadas"] = (["new_rfq"] if local.mudar_notificacoes and etapa != "antes"
+                                            else ["new_rfq", "customer_rfq"])
+    (saida / f"jornada-{etapa}.json").write_text(json.dumps(resultado))
+    return resultado
+
+
 ensaio.smoke = smoke_fake
+ensaio.jornada_cotacao = jornada_fake
 _executar = ensaio.executar
 
 
@@ -801,6 +816,75 @@ with tempfile.TemporaryDirectory() as tmp:
     checar(rc == 0 and not marcador.exists(), "main() deveria passar a invalidação que apaga o marcador do clone")
     checar({"kadence-child", "seo-by-rank-math-pro", "wordpress-importer"} <= chamado.get("proprios", set()),
            f"main() deveria ignorar no alinhamento por versão as camadas com aplicacao 'nunca': {chamado.get('proprios')}")
+
+# Jornada vital: vermelho na baseline bloqueia antes de qualquer atualização,
+# mesmo quando o smoke HTTP é apenas um vermelho pré-existente tolerado.
+with tempfile.TemporaryDirectory() as tmp:
+    saida = pathlib.Path(tmp)
+    loc = FakeLocal()
+    loc.falha_jornada = "antes"
+    invalidar = lambda: loc.chamadas.append(("INVALIDAR-CLONE",))
+    r = executar(loc, plano_exec, inv_prod, {}, contratos_ok, saida, None, {"kadence-child"}, invalidar)
+    checar(r == 20, f"jornada vital vermelha na baseline deveria sair 20, não {r}")
+    checar(not (saida / "lock.json").exists(), "jornada vital vermelha na baseline não pode gerar lock")
+    checar(not any(c[:2] == ("plugin", "update") for c in loc.chamadas),
+           "jornada vital vermelha na baseline não pode atualizar plugins")
+    if ("JORNADA", "antes") in loc.chamadas:
+        checar(loc.chamadas.index(("INVALIDAR-CLONE",)) < loc.chamadas.index(("JORNADA", "antes")),
+               "clone precisa ser invalidado antes da jornada que escreve no banco")
+
+with tempfile.TemporaryDirectory() as tmp:
+    saida = pathlib.Path(tmp)
+    loc = FakeLocal()
+    loc.mudar_notificacoes = True
+    r = executar(loc, plano_exec, inv_prod, {}, contratos_ok, saida, None, {"kadence-child"})
+    checar(r == 20 and not (saida / "lock.json").exists(),
+           "desabilitar uma notificação depois da baseline precisa reprovar, não reduzir a exigência")
+
+for fase in (None, "etapa-1", "etapa-2"):
+    with tempfile.TemporaryDirectory() as tmp:
+        saida = pathlib.Path(tmp)
+        loc = FakeLocal()
+        loc.falha_jornada = fase
+        r = executar(loc, plano_exec, inv_prod, {}, contratos_ok, saida, None, {"kadence-child"})
+        esperado = ["antes", "etapa-1"] if fase == "etapa-1" else ["antes", "etapa-1", "etapa-2"]
+        checar([c[1] for c in loc.chamadas if c[0] == "JORNADA"] == esperado,
+               f"ordem/cobertura da jornada por etapa incorreta, falha={fase}: {loc.chamadas}")
+        checar(r == (0 if fase is None else 20), f"saída errada da jornada por etapa: {fase}, {r}")
+        checar((saida / "lock.json").exists() == (fase is None), f"lock indevido depois da fase {fase}")
+        if fase == "etapa-1":
+            checar(not any(c[:3] == ("plugin", "update", "kadence-blocks") for c in loc.chamadas),
+                   "falha vital no lote precisa parar antes da etapa crítica")
+
+valido = {"versao": 1, "ok": True, "checks": {"cotacao": True, "lead": True, "notificacoes": True},
+          "limpeza": True, "run_id": "uonix-jornada-" + "b" * 32,
+          "notificacoes_habilitadas": ["new_rfq", "customer_rfq"], "detalhe": "fixture"}
+original_jornada = ensaio.jornada_cotacao
+try:
+    for valor in (None, [], True, "verde", {"ok": True}, {**valido, "limpeza": False},
+                  {**valido, "checks": {"cotacao": True, "lead": True}}, {**valido, "ok": "true"}):
+        ensaio.jornada_cotacao = lambda *args, valor=valor: valor
+        with tempfile.TemporaryDirectory() as tmp:
+            saida = pathlib.Path(tmp)
+            try:
+                r = executar(FakeLocal(), plano_exec, inv_prod, {}, contratos_ok, saida, None, {"kadence-child"})
+            except Exception as erro:
+                r = f"exceção {type(erro).__name__}"
+            checar(r == 20 and not (saida / "lock.json").exists(),
+                   f"prova incompleta/malformada deveria encerrar em 20, não {r}: {valor}")
+finally:
+    ensaio.jornada_cotacao = original_jornada
+
+try:
+    with contextlib.ExitStack() as pilha:
+        from unittest.mock import patch
+        pilha.enter_context(patch.dict(os.environ, {"LOCAWEB_SSH_PASSWORD": "fixture-nao-real", "RELATORIO_SMTP_SENHA": "fixture-nao-real", "PATH": "/fixture/bin"}))
+        env_jornada = ensaio.ambiente_jornada()
+        checar("LOCAWEB_SSH_PASSWORD" not in env_jornada and "RELATORIO_SMTP_SENHA" not in env_jornada,
+               "a jornada local não pode herdar credenciais carregadas pela esteira")
+        checar(env_jornada.get("PATH") == "/fixture/bin", "jornada precisa preservar PATH para Node/Podman/Chrome")
+except AttributeError:
+    checar(False, "ambiente restrito da jornada ainda não implementado")
 
 if falhas:
     print("FAIL:")

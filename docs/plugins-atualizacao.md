@@ -43,6 +43,7 @@ Ao fim da aplicação, a esteira envia o relatório por e-mail (veja "Relatório
   git worktree remove .claude/worktrees/esteira   # ao terminar
   ```
 - **Python 3** (os scripts rodam no 3.9 e no 3.14; o código usa `:=`, então não serve o 3.7), `podman` (o ensaio fala com os contêineres do local) e `rsync` (o clone). O `shellcheck` só é preciso para rodar os testes.
+- **Jornada vital do ensaio:** Node 22+, Chrome/Chromium e Mailpit em `http://localhost:8025`. Ausência de qualquer dependência bloqueia o lock; não pula o teste. Veja [Jornada vital local](plugins-jornada-vital.md) para o contrato, isolamento, evidências e limites.
 
 ### O que a esteira cobre, e o que não cobre
 
@@ -119,22 +120,22 @@ O comando faz, nesta ordem:
    - "security" diante de recurso ("security settings page", "Security: new settings tab") não conta;
    - classe **forte** (SQL/object injection, privilege escalation, arbitrary file…, cross-site scripting/request forgery por extenso) e CVE contam sozinhos;
    - classe **fraca** (XSS, CSRF, SSRF, open redirect, vulnerability) conta com verbo de correção ("Fixed", "prevent", "sanitize", "escape", "protect against"…), qualificador de aviso ("Stored XSS", "Authenticated … Cross-Site Scripting", "Potential XSS") ou na forma "XSS vulnerability", e não diante de nome de recurso ("XSS filter toggle", "CSRF token"), salvo se a linha falar em bypass, exploit ou attack. A data e o changelog vêm da API do wordpress.org.
-3. **Clone `prod → local`.** Com `--reusar-clone`, reaproveita um clone desta esteira de menos de 24 h que **nenhum ensaio tocou** (`tmp/plugins/ultimo-clone.json`). O marcador é apagado antes da primeira atualização: depois dela o banco local já está migrado, e um novo ensaio sobre ele não testaria a migração a partir do estado de produção.
+3. **Clone `prod → local`.** Com `--reusar-clone`, reaproveita um clone desta esteira de menos de 24 h que **nenhum ensaio tocou** (`tmp/plugins/ultimo-clone.json`). O marcador é apagado antes da primeira jornada vital, que já cria registros; depois das atualizações o banco local também pode estar migrado. Um novo ensaio precisa partir novamente do estado de produção.
 4. **Alinhamento:** versões e ativação do local iguais às de produção. O clone exclui alguns plugins e preserva a lista de ativos do destino. Plugins das camadas `decisao_pendente` e `propria` não são alinhados por versão. Um item **ativo em produção e ausente no local** reprova o ensaio (saída 30), mesmo nessas camadas: o smoke rodaria sem ele, por exemplo com outro tema. O `fluent-smtp` fica inativo no local, que usa o Mailpit. Por isso ele **nunca entra no lock**: o código dele não carrega no ensaio e precisa ser ensaiado à parte.
 5. **Backup** do banco local por `mariadb-dump`, validado pelo número de tabelas e pela linha `Dump completed`.
-6. **Smoke antes**, como linha de base. Depois, a atualização para as **versões exatas** do plano:
+6. **Smoke antes**, como linha de base, e **jornada vital real obrigatória**: navegador conclui uma cotação e confere orçamento persistido, lead Form 4 e notificações no Mailpit. Qualquer falha vital, inclusive pré-existente, reprova sem lock. Depois, a atualização para as **versões exatas** do plano:
    - lote (acoplada e comum) primeiro;
    - a camada crítica um por vez, com o WooCommerce por último;
    - `wp wc update` depois do WooCommerce;
-   - contratos estáticos do que mudou e smoke depois de cada etapa.
+   - contratos estáticos do que mudou, smoke e jornada vital depois de cada etapa concluída; falha vital, dependência ausente, prova incompleta ou limpeza incompleta bloqueiam o lock.
 7. **Lock** (`lock.json`), gravado **só quando tudo fica verde**, com as versões que a entrega 3 vai aplicar em produção.
 
-Tudo fica em `tmp/plugins/ensaio-<data>/`: inventário, plano, backup, smokes, relatório e lock.
+Tudo fica em `tmp/plugins/ensaio-<data>/`: inventário, plano, backup, smokes, relatório e lock. A jornada acrescenta `jornada-antes.json`, `jornada-etapa-N.json` e subpastas homônimas com `relatorio.json` e `cotacao.png`; falhas também geram `jornada-falha.json`. Só os dados sintéticos exclusivos do teste são removidos; não se limpa o banco ou a caixa Mailpit globalmente.
 
 | Saída | Significado |
 |---|---|
 | `0` | Verde, com o lock gravado, ou nada a ensaiar. |
-| `20` | Regressão: um check verde na linha de base ficou vermelho ou sumiu. Também sai assim com contrato quebrado, atualização que falhou ou instalou versão diferente da do plano, ou erro durante uma etapa (por exemplo, um plugin que derruba o WordPress). O relatório diz em qual etapa. |
+| `20` | Regressão: um check verde na linha de base ficou vermelho ou sumiu. Também sai assim com jornada vital reprovada (mesmo na baseline), prova/limpeza incompleta, contrato quebrado, atualização que falhou ou instalou versão diferente da do plano, ou erro durante uma etapa. O relatório diz em qual etapa. |
 | `30` | Falha de preparação: clone, alinhamento, backup ou WP-CLI. Nada foi atualizado. |
 
 Opções: `--aceitar-major=a,b`, `--dispensar-quarentena=a,b`, `--reusar-clone`, `--entrada=<inventário salvo>`.
@@ -148,6 +149,7 @@ A lista sai de `ensaio.py`, na função `smoke()`:
 - **SEO:** `meta description` e `ld+json`.
 - **Tema:** o CSS global do `kadence`, a classe `wp-theme-kadence` e a `wp-child-theme-kadence-child` no `<body>`, e o rodapé `#colophon`. Medidos com o `kadence-child` ativo (1 de cada) e com o `twentytwentythree` no lugar (0 de cada).
 - **Cotação:** adicionar um produto pela Store API.
+- **Gate vital separado do smoke:** finalizar a cotação pelo navegador real, conferir orçamento, Form 4 e notificações capturadas. Falha anterior não é tolerada aqui. A captura no Mailpit não comprova entrega SMTP de produção, antispam real ou integrações CRM/newsletter; veja [contrato e limites](plugins-jornada-vital.md).
 - **Contratos em execução:** post type `servicos` e rotas da Store API.
 - **WooCommerce:** banco migrado.
 - **Log:** nenhum `PHP Fatal` novo no `debug.log`.
