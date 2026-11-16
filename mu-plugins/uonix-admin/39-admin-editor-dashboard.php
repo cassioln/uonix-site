@@ -1272,28 +1272,50 @@ function uox_render_manutencao_cache()
     uox_render_lista_atualizacoes_pendentes();
 }
 
+// Partes numéricas (major, minor, patch) de uma versão que segue o contrato de
+// uox_get_gravidade_atualizacao(), ou null se ela não o segue.
+function uox_partes_numericas_da_versao($versao)
+{
+    // Só texto ou número finito: array, objeto, null e NAN não são versão, e
+    // (string) de array ou NAN geraria Warning.
+    if (!is_string($versao) && !is_int($versao) && !(is_float($versao) && is_finite($versao))) {
+        return null;
+    }
+
+    $versao = trim((string) $versao);
+
+    // Âncora no fim: sem ela o regex olhava só o prefixo, e "3f2a9c1" (hash) ou
+    // "2026-01-15" (data) passavam como versão 3 e 2026 (#467). Cada ponto separa um
+    // segmento, então não há backtracking ambíguo; o limite de 32 segmentos evita que uma
+    // string enorme esgote a pilha do PCRE e devolva erro.
+    if (1 !== preg_match('/^(\d{1,4}(?:\.\d+){0,31})(?:[-+][A-Za-z][0-9A-Za-z.+-]*)?$/D', $versao, $partes)) {
+        return null;
+    }
+
+    return array_pad(array_map('intval', explode('.', $partes[1])), 3, 0);
+}
+
 // Classifica a gravidade de plugins/temas comparando major/minor: o
 // WordPress não informa "quantas versões atrasadas", só a atual e a mais
 // nova disponível. O núcleo não passa por aqui — ver uox_get_atualizacoes_pendentes().
-// Devolve 'desconhecida' quando uma das versões não segue o padrão X.Y.Z.
+//
+// Contrato da versão (#339, #467): só tem distância calculável a versão INTEIRA no formato
+// número(.número)*, com major de 1 a 4 dígitos e até 32 segmentos, e um sufixo opcional que
+// começa por "-" ou "+" e uma letra (1.2.4-beta1, 2.0.0-rc.1, 1.2.3+build5). Espaço nas
+// pontas é aparado. Qualquer outra coisa devolve 'desconhecida':
+//  - "?", vazia, "v1.2.3", texto sem número, hash (3f2a9c1) e data com traço (2026-01-15);
+//  - data compacta, com major de 5 ou mais dígitos (20260101): a diferença entre duas datas
+//    não é um salto de versão. CalVer de ano (2026.1.1) e majors reais (14.2, 100.0) seguem
+//    calculados.
+// Sem o contrato, intval() daria 0 e o item sairia "Alta" sem motivo.
 function uox_get_gravidade_atualizacao($versao_atual, $versao_nova)
 {
-    // Sem distância calculável, a gravidade é "desconhecida" (#339):
-    //  - "?", vazio ou texto sem número na frente: intval() daria 0 e o item sairia
-    //    "Alta" sem motivo;
-    //  - major com 5 ou mais dígitos (20260101, 2026010100): é data, não major de
-    //    semver, e a diferença entre duas datas não é um salto de versão. CalVer de
-    //    ano (2026.1.1) e majors reais (14.2, 100.0) seguem calculados.
-    // Sufixo de pré-release (1.2.4-beta1) é aceito: o prefixo numérico basta para
-    // comparar major e minor.
-    $padrao = '/^\d{1,4}(\.\d+)*(?![\d])/';
+    $atual = uox_partes_numericas_da_versao($versao_atual);
+    $nova = uox_partes_numericas_da_versao($versao_nova);
 
-    if (1 !== preg_match($padrao, (string) $versao_atual) || 1 !== preg_match($padrao, (string) $versao_nova)) {
+    if (null === $atual || null === $nova) {
         return 'desconhecida';
     }
-
-    $atual = array_pad(array_map('intval', explode('.', (string) $versao_atual)), 3, 0);
-    $nova = array_pad(array_map('intval', explode('.', (string) $versao_nova)), 3, 0);
 
     if ($nova[0] > $atual[0]) {
         return 'alta';
@@ -1336,12 +1358,40 @@ function uox_get_atualizacoes_pendentes()
     // Só `upgrade` pede ação do administrador. `development` (versão de
     // desenvolvimento), `autoupdate` (o próprio WordPress aplica) e `latest` não
     // são pendência (#340): como o núcleo sai sempre "Crítica", um falso positivo
-    // viraria alarme. As propriedades podem faltar no transient; `?? ''` evita Warning.
-    $nucleo = $core_updates->updates[0] ?? null;
-    $resposta_nucleo = is_object($nucleo) ? (string) ($nucleo->response ?? '') : '';
-    $versao_nucleo = is_object($nucleo) ? (string) ($nucleo->current ?? '') : '';
+    // viraria alarme.
+    //
+    // Varre TODAS as ofertas, não só a primeira (#468): com `autoupdate` antes de
+    // `upgrade`, ler só `updates[0]` escondia uma atualização real. Vale a maior oferta
+    // `upgrade` e só se passar da versão instalada: "7.1.4 → 7.1.4" em Crítica seria
+    // alarme falso. Qualquer forma inesperada do transient (não objeto, `updates` que não
+    // é array, oferta que não é objeto, `current` que não é texto) é ignorada, sem Warning.
+    $ofertas = is_object($core_updates) && isset($core_updates->updates) && is_array($core_updates->updates)
+        ? $core_updates->updates
+        : array();
+    $versao_nucleo = '';
 
-    if ('upgrade' === $resposta_nucleo && '' !== $versao_nucleo) {
+    foreach ($ofertas as $oferta) {
+        if (!is_object($oferta)) {
+            continue;
+        }
+
+        $resposta_oferta = $oferta->response ?? '';
+        $versao_oferta = $oferta->current ?? '';
+
+        if ('upgrade' !== $resposta_oferta || !is_string($versao_oferta) || '' === $versao_oferta) {
+            continue;
+        }
+
+        if (!version_compare($versao_oferta, (string) $wp_version, '>')) {
+            continue;
+        }
+
+        if ('' === $versao_nucleo || version_compare($versao_oferta, $versao_nucleo, '>')) {
+            $versao_nucleo = $versao_oferta;
+        }
+    }
+
+    if ('' !== $versao_nucleo) {
         $grupos['core'][] = array(
             'nome' => 'WordPress (núcleo)',
             'versao_atual' => $wp_version,
@@ -1362,8 +1412,8 @@ function uox_get_atualizacoes_pendentes()
 
         foreach ($plugin_updates->response as $arquivo_plugin => $dados) {
             // O transient só é refeito pelo cron: um plugin apagado fora do
-            // WordPress (deploy, SSH) continuaria aparecendo como "? → x.y.z",
-            // com gravidade "Alta" (intval('?') = 0). Não instalado, não lista.
+            // WordPress (deploy, SSH) continuaria aparecendo como "? → x.y.z", um item
+            // sem versão atual que não existe mais no site. Não instalado, não lista.
             if (!isset($instalados[$arquivo_plugin])) {
                 continue;
             }
