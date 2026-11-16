@@ -52,6 +52,9 @@ jobs:
       - name: Test e-mail policy
         run: php scripts/tests/test-email-policy.php
 
+      - name: Test local journey isolation guards
+        run: php scripts/tests/test-plugins-jornada.php
+
       - name: Test social links use https
         run: php scripts/tests/test-social-links-https.php
 
@@ -557,3 +560,7 @@ jobs:
         # Mesmo modelo: HTML real do PHP (classes e script do 67), clique de mouse
         # do Chrome e posição do submenu medida no layout (issue #392).
         run: node scripts/tests/test-admin-editor-menus-navegador.mjs
+
+      - name: Test quote journey contracts and browser fixture
+        # Fixture local, sem WordPress, Mailpit, Podman ou dados de produção.
+        run: node scripts/tests/test-plugins-jornada.mjs
