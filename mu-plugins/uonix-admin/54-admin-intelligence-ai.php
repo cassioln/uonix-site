@@ -457,8 +457,14 @@ if ( ! function_exists( 'uonix_intelligence_ai_quota_info' ) ) {
 	 * `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limite 20, `retryDelay` de 27223s.
 	 * Detalhe malformado é ignorado.
 	 *
+	 * Só o primeiro caso prova que a cota é diária. O segundo é inferência (uma cota por hora também
+	 * passaria de `quota_wait`), e `source` diz qual dos dois valeu, para o painel não afirmar
+	 * "diária" sem prova (#403).
+	 *
 	 * @param mixed $corpo Corpo cru da resposta.
-	 * @return array{daily: bool, retry_after: int} `retry_after` em segundos, 0 quando o corpo não diz.
+	 * @return array{daily: bool, retry_after: int, source: string} `retry_after` em segundos, 0 quando o
+	 *         corpo não diz. `source` é `quota_id_daily` (o `quotaId` diz PerDay), `retry_delay` (só a
+	 *         espera passou de `quota_wait`) ou vazio (não é cota que não volta).
 	 */
 	function uonix_intelligence_ai_quota_info( $corpo ) {
 		$dados    = is_string( $corpo ) ? json_decode( $corpo, true ) : null;
@@ -479,7 +485,27 @@ if ( ! function_exists( 'uonix_intelligence_ai_quota_info' ) ) {
 			}
 		}
 
-		return array( 'daily' => $diaria || $espera > (int) uonix_intelligence_ai_limits()['quota_wait'], 'retry_after' => $espera );
+		$longa = $espera > (int) uonix_intelligence_ai_limits()['quota_wait'];
+
+		return array(
+			'daily'       => $diaria || $longa,
+			'retry_after' => $espera,
+			'source'      => $diaria ? 'quota_id_daily' : ( $longa ? 'retry_delay' : '' ),
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_ai_quota_source' ) ) {
+	/**
+	 * A origem gravada da classificação de uma cota esgotada (#403): `quota_id_daily` ou
+	 * `retry_delay`. Qualquer outro valor, de um cache antigo ou malformado, vira vazio, e o texto
+	 * do painel fica no neutro.
+	 *
+	 * @param mixed $valor O que veio do transporte ou do cache.
+	 * @return string `quota_id_daily`, `retry_delay` ou vazio.
+	 */
+	function uonix_intelligence_ai_quota_source( $valor ) {
+		return in_array( $valor, array( 'quota_id_daily', 'retry_delay' ), true ) ? $valor : '';
 	}
 }
 
@@ -566,11 +592,12 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 	 *
 	 * @param array  $body  Corpo do `generateContent`.
 	 * @param string $model Modelo, como `uonix_intelligence_ai_model()` devolve.
-	 * @return array{status: string, http?: int, attempts?: int, error?: string, retry_after?: int, text?: string}
+	 * @return array{status: string, http?: int, attempts?: int, error?: string, retry_after?: int, quota_source?: string, text?: string}
 	 *         `http` é o código da última resposta (0 em erro de transporte) e `attempts` os pedidos
 	 *         feitos; os dois só faltam em `not_configured`. `error` é a causa do erro de transporte
 	 *         da última tentativa, saneada (#404), e só existe com `http` 0. `text` só com `ok`;
-	 *         `retry_after` só com `quota_exhausted`, quando o corpo diz.
+	 *         `retry_after` só com `quota_exhausted`, quando o corpo diz, e `quota_source` só com
+	 *         `quota_exhausted`, sempre (`quota_id_daily` ou `retry_delay`, #403).
 	 */
 	function uonix_intelligence_ai_generate( array $body, $model, $pause = 2 ) {
 		$chave = uonix_intelligence_ai_api_key();
@@ -606,7 +633,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 			$feito['error'] = $causa;
 		}
 		if ( is_array( $cota ) && $cota['daily'] ) {
-			return array( 'status' => 'quota_exhausted' ) + $feito + ( $cota['retry_after'] > 0 ? array( 'retry_after' => $cota['retry_after'] ) : array() );
+			return array( 'status' => 'quota_exhausted' ) + $feito + ( $cota['retry_after'] > 0 ? array( 'retry_after' => $cota['retry_after'] ) : array() ) + array( 'quota_source' => $cota['source'] );
 		}
 		if ( 404 === $codigo ) {
 			return array( 'status' => 'model_missing' ) + $feito;
@@ -739,6 +766,12 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 			}
 			if ( 'quota_exhausted' === $resultado['status'] ) {
 				$parada = array( 'reason' => 'quota_exhausted' );
+				// De onde veio a classificação (#403): as adiadas herdam, para o painel dizer a mesma coisa.
+				$origem = uonix_intelligence_ai_quota_source( isset( $resultado['quota_source'] ) ? $resultado['quota_source'] : null );
+				if ( '' !== $origem ) {
+					$entrada['quota_source'] = $origem;
+					$parada['quota_source']  = $origem;
+				}
 				if ( ! empty( $resultado['retry_after'] ) && false !== strtotime( $agora ) ) {
 					$entrada['retry_at'] = gmdate( 'c', strtotime( $agora ) + (int) $resultado['retry_after'] );
 					$parada['retry_at']  = $entrada['retry_at'];
@@ -803,6 +836,12 @@ if ( ! function_exists( 'uonix_intelligence_ai_suggestion_for' ) ) {
 					$detalhe[ $campo ] = $entrada[ $campo ];
 				}
 			}
+			// A origem da classificação da cota (#403): só um dos dois valores conhecidos sai do cache.
+			$origem = $conhecido ? uonix_intelligence_ai_quota_source( isset( $entrada['quota_source'] ) ? $entrada['quota_source'] : null ) : '';
+			if ( '' !== $origem ) {
+				$detalhe['quota_source'] = $origem;
+			}
+
 			return array( 'status' => $conhecido ? $status : 'pending' ) + $detalhe + $pagina;
 		}
 		$sugestao = $entrada['suggestion'] ?? null;
@@ -842,30 +881,39 @@ if ( ! function_exists( 'uonix_intelligence_ai_state_message' ) ) {
 	 * Texto para o operador de cada estado sem sugestão. Estado desconhecido cai em
 	 * "aguardando", que é honesto: nada foi gerado para esta entrada.
 	 *
-	 * @param array $detalhe `reason` e `retry_at`, como `uonix_intelligence_ai_suggestion_for()`
-	 *                       devolve. A hora da renovação só entra na cota (#384).
+	 * @param array $detalhe `reason`, `retry_at` e `quota_source`, como
+	 *                       `uonix_intelligence_ai_suggestion_for()` devolve. A hora da renovação só
+	 *                       entra na cota (#384), e só enquanto ainda está no futuro (#403).
+	 *                       "Diária" só aparece com a prova, `quota_source` igual a `quota_id_daily`:
+	 *                       sem ela (cota inferida do `retryDelay`, ou entrada gravada antes da #403),
+	 *                       o texto fala só em "cota".
+	 * @param int|null $now Para teste; o padrão é `time()`.
 	 */
-	function uonix_intelligence_ai_state_message( $status, $detalhe = array() ) {
-		$mapa = array(
+	function uonix_intelligence_ai_state_message( $status, $detalhe = array(), $now = null ) {
+		$detalhe = is_array( $detalhe ) ? $detalhe : array();
+		$motivo  = isset( $detalhe['reason'] ) ? $detalhe['reason'] : '';
+		$diaria  = isset( $detalhe['quota_source'] ) && 'quota_id_daily' === $detalhe['quota_source'];
+		$mapa    = array(
 			'not_configured'  => 'IA não configurada: defina UONIX_GEMINI_API_KEY no wp-config.php.',
 			'pending'         => 'Aguardando a próxima geração diária.',
 			'unavailable'     => 'O Gemini não respondeu. Nova tentativa na próxima geração diária.',
 			'rejected'        => 'Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista.',
 			'no_page'         => 'Sem página publicada para esta consulta: removida ou redirecionada.',
 			'model_missing'   => 'Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php.',
-			'quota_exhausted' => 'Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária.',
+			'quota_exhausted' => $diaria ? 'Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária.' : 'Cota do Gemini esgotada. Nova tentativa na próxima geração diária.',
 			'deferred'        => 'Não pedida nesta geração. Nova tentativa na próxima geração diária.',
 		);
-		$detalhe = is_array( $detalhe ) ? $detalhe : array();
-		$motivo  = isset( $detalhe['reason'] ) ? $detalhe['reason'] : '';
 		if ( 'deferred' === $status && 'quota_exhausted' === $motivo ) {
-			$mapa['deferred'] = 'Não pedida: a cota diária do Gemini acabou nesta geração. Nova tentativa na próxima geração diária.';
+			$mapa['deferred'] = $diaria ? 'Não pedida: a cota diária do Gemini acabou nesta geração. Nova tentativa na próxima geração diária.' : 'Não pedida: a cota do Gemini acabou nesta geração. Nova tentativa na próxima geração diária.';
 		} elseif ( 'deferred' === $status && 'failures' === $motivo ) {
 			$mapa['deferred'] = 'Não pedida: falhas seguidas do Gemini nesta geração. Nova tentativa na próxima geração diária.';
 		}
 		$texto = isset( $mapa[ $status ] ) ? $mapa[ $status ] : $mapa['pending'];
 		$volta = isset( $detalhe['retry_at'] ) && is_string( $detalhe['retry_at'] ) ? strtotime( $detalhe['retry_at'] ) : false;
-		if ( false !== $volta && ( 'quota_exhausted' === $status || ( 'deferred' === $status && 'quota_exhausted' === $motivo ) ) ) {
+		$agora = is_int( $now ) ? $now : time();
+		// Uma renovação que já passou não é anunciada: se o cron seguinte não rodou, o texto seguiria
+		// prometendo a cota para uma hora vencida (#403).
+		if ( false !== $volta && $volta > $agora && ( 'quota_exhausted' === $status || ( 'deferred' === $status && 'quota_exhausted' === $motivo ) ) ) {
 			$texto .= ' A cota renova por volta de ' . uonix_intelligence_site_time( $volta, 'd/m H:i' ) . '.';
 		}
 

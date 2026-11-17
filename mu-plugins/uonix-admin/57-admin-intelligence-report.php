@@ -648,7 +648,11 @@ if ( ! function_exists( 'uonix_intelligence_report_radar_html' ) ) {
 		// Só as novas que não couberam: o total do painel inclui as já enviadas (#380).
 		$a_mais = isset( $radar['more'] ) && is_int( $radar['more'] ) ? $radar['more'] : 0;
 		if ( $a_mais > 0 ) {
-			$frase = 'Mais ' . $a_mais . ( 1 === $a_mais ? ' pauta nova' : ' pautas novas' ) . ' no painel.';
+			// Sem a chave do Gemini as candidatas saem sem pauta: o texto não promete pauta (#459).
+			$sem_chave = ! empty( $radar['without_key'] );
+			$frase     = $sem_chave
+				? 'Mais ' . $a_mais . ( 1 === $a_mais ? ' consulta nova' : ' consultas novas' ) . ' no painel.'
+				: 'Mais ' . $a_mais . ( 1 === $a_mais ? ' pauta nova' : ' pautas novas' ) . ' no painel.';
 			$html .= '<div style="padding-top:10px;font-size:12px;color:#334155;">';
 			$html .= '' !== $painel ? '<a href="' . esc_url( $painel ) . '" style="color:#0e3780;">' . esc_html( $frase ) . '</a>' : esc_html( $frase );
 			$html .= '</div>';

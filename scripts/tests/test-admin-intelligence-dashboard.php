@@ -119,7 +119,7 @@ function uonix_ksio_can_configure_insights() {
 // importa que o painel exiba cada estado e escape o texto.
 $GLOBALS['uox_ia'] = array();
 function uonix_intelligence_ai_suggestion_for( $row ) { return $GLOBALS['uox_ia'][ $row['query'] ?? '' ] ?? array( 'status' => 'pending' ); }
-function uonix_intelligence_ai_state_message( $status, $detalhe = array() ) { return 'ESTADO-IA:' . $status . ( isset( $detalhe['retry_at'] ) ? '@' . $detalhe['retry_at'] : '' ); }
+function uonix_intelligence_ai_state_message( $status, $detalhe = array(), $now = null ) { return 'ESTADO-IA:' . $status . ( isset( $detalhe['retry_at'] ) ? '@' . $detalhe['retry_at'] : '' ); }
 function uonix_intelligence_ai_page_post_id( $path ) { return '/produtos/olhal/' === $path ? 10 : 0; }
 function home_url( $p = '' ) { return 'https://uonix.com.br' . $p; }
 function get_edit_post_link( $id ) { return 'https://uonix.com.br/wp-admin/post.php?post=' . (int) $id . '&action=edit'; }
@@ -229,6 +229,11 @@ foreach ( range( 1, 7 ) as $i ) {
 }
 $html_sete = uox_render_intelligence( 'intelligence', uox_snapshot( $sete ) );
 uox_assert( 5 === substr_count( $html_sete, '<td><strong>consulta ' ) && false !== strpos( $html_sete, '<td><strong>consulta 5</strong>' ) && false === strpos( $html_sete, '<td><strong>consulta 6</strong>' ), '#291: com 7 oportunidades o painel lista panel_limit (5); obteve ' . substr_count( $html_sete, '<td><strong>consulta ' ) );
+// #371: a caixa "Oportunidades encontradas" mostra o TOTAL (`matched`), e não as linhas já cortadas
+// em panel_limit. Com 7, ela diz 7 e explica que a tabela mostra as 5 de maior volume.
+uox_assert( 1 === preg_match( '#uonix-kpi-title">Oportunidades encontradas</div>\s*<div class="uonix-kpi-value">7</div>#', $html_sete ), '#371: com 7 oportunidades a caixa diz 7, e não 5' );
+uox_assert( false !== strpos( $html_sete, 'a tabela mostra as 5 de maior volume' ), '#371: acima do limite, a caixa diz que a tabela mostra as 5 de maior volume' );
+uox_assert( false === strpos( $html, 'a tabela mostra as' ), '#371: com poucas oportunidades (1), a caixa não fala em corte' );
 $html_sem_mapa = uox_render_intelligence( 'intelligence', uox_snapshot( array( uox_q( 'olhal inox', 6.0, 50, .0 ) ) ) );
 uox_assert( false !== strpos( $html_sem_mapa, 'Aguardando a próxima sincronização' ), 'Snapshot sem query_pages: Página Alvo aguardando a sincronização' );
 $GLOBALS['uox_ia'] = array();
@@ -380,6 +385,12 @@ $cfg_cron = (string) ob_get_clean();
 uox_assert( false === strpos( $cfg_cron, 'Não agendado' ), 'Com cron registrado, o painel mostra o próximo disparo real' );
 uox_assert( false !== strpos( $cfg_cron, '<time datetime=' ), 'Próximo disparo é exibido como horário legível por máquina' );
 
+// #316: sem o 50 carregado a licença conta como inativa, então o próximo disparo diz que o envio está pausado.
+$GLOBALS['uox_cron']['uonix_intelligence_weekly_report'] = time() + 3600;
+ob_start();
+uonix_intelligence_render_settings_panel( 'settings' );
+uox_assert( false !== strpos( (string) ob_get_clean(), '(envio pausado pela licença)' ), '#316: sem o módulo da licença carregado, o próximo disparo diz que o envio está pausado' );
+
 // Administrador que não é o dono lê a aba como o editor: sem formulário nenhum.
 $GLOBALS['uox_can']  = true;
 $GLOBALS['uox_dono'] = false;
@@ -429,6 +440,14 @@ function uox_render_settings() {
 	uonix_intelligence_render_settings_panel( 'settings' );
 	return (string) ob_get_clean();
 }
+
+// #316: com o módulo da licença carregado, a linha do próximo disparo depende do estado da licença.
+$GLOBALS['uox_dono'] = true;
+$GLOBALS['uox_cron']['uonix_intelligence_weekly_report'] = time() + 3600;
+$GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => array( 'status' => 'suspended', 'valid_until' => '' ) );
+uox_assert( false !== strpos( uox_render_settings(), '(envio pausado pela licença)' ), '#316: com a licença suspensa, o próximo disparo diz que o envio está pausado' );
+$GLOBALS['uox_options'] = array( 'uonix_intelligence_license' => array( 'status' => 'trial', 'valid_until' => '2099-10-31' ) );
+uox_assert( false === strpos( uox_render_settings(), '(envio pausado pela licença)' ), '#316: com a licença ativa, a linha não fala em pausa' );
 
 $GLOBALS['uox_options']       = array( 'uonix_intelligence_license' => array( 'status' => 'trial', 'valid_until' => '2099-10-31' ) );
 $GLOBALS['uox_nonce_actions'] = array();
@@ -557,11 +576,19 @@ $GLOBALS['uox_dono'] = true;
 // ---------------------------------------------------------------------------
 // Módulo 8: seção "Radar de Pautas", no fim da aba de oportunidades.
 // ---------------------------------------------------------------------------
-function uox_render_radar( array $opcoes, array $get = array() ) {
+function uox_render_radar( array $opcoes, array $get = array(), $agora = null ) {
 	$GLOBALS['uox_options'] = $opcoes;
 	$_GET                   = $get;
 	ob_start();
-	uonix_intelligence_render_radar_section();
+	uonix_intelligence_render_radar_section( $agora );
+	return (string) ob_get_clean();
+}
+// 2026-10-03T12:00:00Z: antes da renovação da cota dos fixtures (04/10 00:00:15 UTC).
+const UOX_ANTES_DA_RENOVACAO = 1791028800;
+// A célula da pauta com o relógio fixo (#403): a hora da renovação só aparece enquanto é futura.
+function uox_pauta_cell( array $ai, $agora = null ) {
+	ob_start();
+	uonix_intelligence_render_radar_pauta_cell( array( 'ai' => $ai ), $agora );
 	return (string) ob_get_clean();
 }
 function uox_dash_radar_cand( $consulta, array $ai, array $pagina = array() ) {
@@ -605,16 +632,55 @@ uox_assert( false !== strpos( $html_r, 'barra &lt;b&gt;roscada&lt;/b&gt;' ) && f
 uox_assert( false !== strpos( $html_r, 'Sem a chave do Gemini: a candidata aparece sem pauta.' ) && false !== strpos( $html_r, 'Pauta não gerada. O Radar tenta de novo amanhã.' ), 'Radar: mensagem de cada estado da pauta' );
 // #384: a cota esgotada tem texto próprio, com a hora da renovação; a adiada diz por que parou.
 $html_cota = uox_render_radar( $estado_radar( array(
-	uox_dash_radar_cand( 'cota um', array( 'status' => 'quota_exhausted', 'http' => 429, 'retry_at' => '2026-10-04T00:00:15+00:00' ) ),
-	uox_dash_radar_cand( 'cota dois', array( 'status' => 'deferred', 'reason' => 'quota_exhausted', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ),
+	uox_dash_radar_cand( 'cota um', array( 'status' => 'quota_exhausted', 'http' => 429, 'quota_source' => 'quota_id_daily', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ),
+	uox_dash_radar_cand( 'cota dois', array( 'status' => 'deferred', 'reason' => 'quota_exhausted', 'quota_source' => 'quota_id_daily', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ),
 	uox_dash_radar_cand( 'falhas', array( 'status' => 'deferred', 'reason' => 'failures' ) ),
-	uox_dash_radar_cand( 'cota sem hora', array( 'status' => 'quota_exhausted', 'retry_at' => 'não é data' ) ),
-) ) );
+	uox_dash_radar_cand( 'cota sem hora', array( 'status' => 'quota_exhausted', 'quota_source' => 'quota_id_daily', 'retry_at' => 'não é data' ) ),
+) ), array(), UOX_ANTES_DA_RENOVACAO );
 uox_assert( 2 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã.' ) && 1 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã. A cota renova por volta de 03/10 21:00.' ), '#384 Radar: a cota esgotada diz o motivo, e a hora (no fuso do site, #386) só quando ela é válida' );
 uox_assert( false !== strpos( $html_cota, 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã. A cota renova por volta de 03/10 21:00.' ), '#384 Radar: a adiada pela cota diz o motivo e a hora, no fuso do site (#386)' );
 uox_assert( false !== strpos( $html_cota, 'Não pedida: falhas seguidas do Gemini nesta execução. O Radar tenta de novo amanhã.' ), '#384 Radar: a adiada pelas falhas diz o motivo' );
 uox_assert( false === strpos( $html_cota, 'Pauta não gerada.' ), '#384 Radar: nenhum dos quatro cai no texto genérico' );
 uox_assert( 2 === substr_count( $html_cota, 'A cota renova por volta de' ), '#384 Radar: hora inválida no cache não vira hora no painel' );
+
+// #403 (B2): "diária" só com a prova do `quotaId`. A cota inferida do `retryDelay`, a entrada gravada
+// antes da #403 (sem origem) e a origem malformada ficam no texto neutro, e a hora continua valendo.
+$volta_cota = array( 'retry_at' => '2026-10-04T00:00:15+00:00' );
+$t_prova    = uox_pauta_cell( array( 'status' => 'quota_exhausted', 'quota_source' => 'quota_id_daily' ) + $volta_cota, UOX_ANTES_DA_RENOVACAO );
+uox_assert( 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã. A cota renova por volta de 03/10 21:00.' === strip_tags( $t_prova ), '#403 Radar: com a prova do quotaId, "diária"; obteve ' . $t_prova );
+foreach ( array( 'retry_delay' => array( 'quota_source' => 'retry_delay' ), 'sem origem' => array(), 'origem malformada' => array( 'quota_source' => array( 'quota_id_daily' ) ), 'origem desconhecida' => array( 'quota_source' => 'qualquer' ), 'origem vazia' => array( 'quota_source' => '' ) ) as $rotulo => $origem ) {
+	$t_neutro = uox_pauta_cell( array( 'status' => 'quota_exhausted' ) + $origem + $volta_cota, UOX_ANTES_DA_RENOVACAO );
+	uox_assert( 'Cota do Gemini esgotada. O Radar tenta de novo amanhã. A cota renova por volta de 03/10 21:00.' === strip_tags( $t_neutro ) && false === strpos( $t_neutro, 'diária' ), "#403 Radar: {$rotulo}: sem prova, o texto é neutro e a hora fica; obteve " . $t_neutro );
+	$t_adiada_neutra = uox_pauta_cell( array( 'status' => 'deferred', 'reason' => 'quota_exhausted' ) + $origem + $volta_cota, UOX_ANTES_DA_RENOVACAO );
+	uox_assert( 'Não pedida: a cota do Gemini acabou nesta execução. O Radar tenta de novo amanhã. A cota renova por volta de 03/10 21:00.' === strip_tags( $t_adiada_neutra ) && false === strpos( $t_adiada_neutra, 'diária' ), "#403 Radar: {$rotulo}: a adiada também é neutra; obteve " . $t_adiada_neutra );
+}
+$t_adiada_prova = uox_pauta_cell( array( 'status' => 'deferred', 'reason' => 'quota_exhausted', 'quota_source' => 'quota_id_daily' ) + $volta_cota, UOX_ANTES_DA_RENOVACAO );
+uox_assert( 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã. A cota renova por volta de 03/10 21:00.' === strip_tags( $t_adiada_prova ), '#403 Radar: a adiada com a prova diz "diária"; obteve ' . $t_adiada_prova );
+uox_assert( 'Pauta não gerada. O Radar tenta de novo amanhã.' === strip_tags( uox_pauta_cell( array( 'status' => 'unavailable', 'quota_source' => 'quota_id_daily' ) + $volta_cota, UOX_ANTES_DA_RENOVACAO ) ), '#403 Radar: a origem e a hora só valem na cota' );
+
+// #403 (B4): depois da hora, o painel não anuncia uma renovação que já passou; na hora exata, também não.
+$depois_da_renovacao = 1791115200; // 2026-10-04T12:00:00Z
+$na_hora             = strtotime( '2026-10-04T00:00:15+00:00' );
+foreach ( array( 'diária' => array( 'quota_source' => 'quota_id_daily' ), 'inferida' => array( 'quota_source' => 'retry_delay' ), 'sem origem' => array() ) as $rotulo => $origem ) {
+	foreach ( array( 'depois' => $depois_da_renovacao, 'na hora exata' => $na_hora ) as $quando => $t_agora ) {
+		$t_v1 = uox_pauta_cell( array( 'status' => 'quota_exhausted' ) + $origem + $volta_cota, $t_agora );
+		$t_v2 = uox_pauta_cell( array( 'status' => 'deferred', 'reason' => 'quota_exhausted' ) + $origem + $volta_cota, $t_agora );
+		uox_assert( false === strpos( $t_v1, 'renova' ) && false === strpos( $t_v1, '03/10' ) && false === strpos( $t_v2, 'renova' ) && false === strpos( $t_v2, '03/10' ), "#403 Radar: cota {$rotulo}, {$quando} da renovação: a hora sai; obteve " . $t_v1 . ' / ' . $t_v2 );
+	}
+}
+$t_vencida = uox_pauta_cell( array( 'status' => 'quota_exhausted', 'quota_source' => 'quota_id_daily' ) + $volta_cota, $depois_da_renovacao );
+uox_assert( 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã.' === strip_tags( $t_vencida ), '#403 Radar: vencida, só a hora sai do texto; obteve ' . $t_vencida );
+// Sem o parâmetro, vale o relógio do sistema: uma renovação a 1 h daqui aparece, e uma de ontem não.
+$t_futura  = uox_pauta_cell( array( 'status' => 'quota_exhausted', 'quota_source' => 'quota_id_daily', 'retry_at' => gmdate( 'c', time() + 3600 ) ) );
+$t_passada = uox_pauta_cell( array( 'status' => 'quota_exhausted', 'quota_source' => 'quota_id_daily', 'retry_at' => gmdate( 'c', time() - 86400 ) ) );
+uox_assert( false !== strpos( $t_futura, 'A cota renova por volta de' ) && false === strpos( $t_passada, 'renova' ), '#403 Radar: sem o parâmetro, vale o relógio do sistema' );
+uox_assert( false !== strpos( uox_pauta_cell( array( 'status' => 'quota_exhausted', 'retry_at' => gmdate( 'c', time() + 3600 ) ), 'amanhã' ), 'A cota renova por volta de' ), '#403 Radar: relógio que não é inteiro cai no do sistema' );
+// A seção inteira repassa o relógio à célula: com o instante depois da renovação, nenhuma linha anuncia a hora.
+$html_vencida = uox_render_radar( $estado_radar( array(
+	uox_dash_radar_cand( 'cota um', array( 'status' => 'quota_exhausted', 'quota_source' => 'quota_id_daily', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ),
+	uox_dash_radar_cand( 'cota dois', array( 'status' => 'deferred', 'reason' => 'quota_exhausted', 'quota_source' => 'retry_delay', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ),
+) ), array(), $depois_da_renovacao );
+uox_assert( false !== strpos( $html_vencida, 'Cota diária do Gemini esgotada.' ) && false !== strpos( $html_vencida, 'Não pedida: a cota do Gemini acabou' ) && false === strpos( $html_vencida, 'renova' ), '#403 Radar: a seção repassa o relógio, e nenhuma linha anuncia uma renovação vencida' );
 uox_assert( false !== strpos( $html_r, 'Endereço antigo /teste-de-arrancamento redireciona para cá.' ) && false !== strpos( $html_r, 'post.php?post=15&action=edit' ), 'Radar: 301 mostra o destino e leva ao editor dele' );
 uox_assert( false !== strpos( $html_r, 'Sem página do site para esta consulta.' ), 'Radar: sem página líder' );
 uox_assert( 1 === substr_count( $html_r, 'value="uonix_intelligence_radar_dismiss"' ) && 4 === substr_count( $html_r, 'name="uonix_radar_keys[]"' ) && 4 === substr_count( $html_r, 'name="uonix_radar_key"' ) && false !== strpos( $html_r, 'Descartar selecionadas' ) && false !== strpos( $html_r, 'id="uonix-radar-select-all"' ) && in_array( 'uonix_intelligence_radar_dismiss', $GLOBALS['uox_nonce_actions'], true ), 'Radar: um formulário, uma caixa por linha, selecionar todas, Descartar selecionadas e o Descartar de cada linha' );
@@ -650,7 +716,7 @@ uox_assert( false !== strpos( $html_vd, 'atualizado em 02/10/2026 22:30' ) && fa
 $html_ff = uox_render_radar( $estado_radar( array( uox_dash_radar_cand( 'consulta do fuso', $ok_fuso ) ), array( 'status' => 'gsc_failed', 'updated_at' => '2026-10-04T03:00:00+00:00', 'list_updated_at' => '2026-10-03T01:30:00+00:00' ) ) );
 uox_assert( false !== strpos( $html_ff, 'Mostrando a lista de 02/10.' ), '#386: "Mostrando a lista de" também usa o fuso do site' );
 // A hora de renovação da cota: 00:00:15 UTC de 04/10 é 21:00 de 03/10 no fuso do site.
-$html_ct = uox_render_radar( $estado_radar( array( uox_dash_radar_cand( 'cota fuso', array( 'status' => 'quota_exhausted', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ) ) ) );
+$html_ct = uox_render_radar( $estado_radar( array( uox_dash_radar_cand( 'cota fuso', array( 'status' => 'quota_exhausted', 'quota_source' => 'quota_id_daily', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ) ) ), array(), UOX_ANTES_DA_RENOVACAO );
 uox_assert( false !== strpos( $html_ct, 'A cota renova por volta de 03/10 21:00.' ) && false === strpos( $html_ct, '(UTC)' ), '#386: a renovação da cota (00:00 UTC) aparece como 21:00 do dia anterior, sem "(UTC)"; obteve ' . substr( $html_ct, (int) strpos( $html_ct, 'A cota renova' ), 60 ) );
 
 // #379: o aviso de restaurar não promete o que a lista cheia não entrega.

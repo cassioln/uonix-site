@@ -11,6 +11,8 @@ define( 'ABSPATH', __DIR__ );
 define( 'HOUR_IN_SECONDS', 3600 );
 define( 'DAY_IN_SECONDS', 86400 );
 define( 'UONIX_ENV', 'local' );
+// Chave de teste do Gemini: o e-mail do Radar muda de texto sem ela (#459). Os casos sem chave passam `false` a `email_items()`.
+define( 'UONIX_GEMINI_API_KEY', 'chave-de-teste' );
 
 $failures = 0;
 $GLOBALS['uox_options'] = array();
@@ -158,6 +160,7 @@ function uonix_ksio_can_configure_insights() {
 $GLOBALS['uox_ia'] = array();
 function uonix_intelligence_ai_suggestion_for( $row ) { return $GLOBALS['uox_ia'][ $row['query'] ?? '' ] ?? array( 'status' => 'pending' ); }
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
+require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/54-admin-intelligence-ai.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
 require_once dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/57-admin-intelligence-report.php';
@@ -612,6 +615,20 @@ $cands_380c[] = uox_radar_cand( 'ancoragem c6', 'nova', 'unavailable' );
 $GLOBALS['uox_options'] = uox_radar_opcoes( $cands_380c );
 $html_380c = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) );
 uox_assert( false !== strpos( $html_380c, 'Mais 1 pauta nova no painel.' ) && false === strpos( $html_380c, 'Mais 3' ) && false === strpos( $html_380c, 'Mais 2' ), '#380: as duas sem pauta da IA não entram: sobra 1 nova' );
+// #459: sem a chave do Gemini as candidatas vão ao e-mail sem pauta, e o "Mais N" não pode
+// chamá-las de "pautas": a frase passa a falar em consultas.
+$cands_459 = array();
+foreach ( array( 'ancoragem d1', 'ancoragem d2', 'ancoragem d3', 'ancoragem d4', 'ancoragem d5' ) as $q_459 ) {
+	$cands_459[] = uox_radar_cand( $q_459, 'nova', 'not_configured' );
+}
+$GLOBALS['uox_options'] = uox_radar_opcoes( $cands_459 );
+$ctx_459 = uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null, 'content_radar' => uonix_intelligence_radar_email_items( null, false ) ) );
+$html_459 = uonix_intelligence_report_html( $ctx_459 );
+uox_assert( false !== strpos( $html_459, 'Mais 2 consultas novas no painel.' ) && false === strpos( $html_459, 'Mais 2 pautas novas' ), '#459: sem a chave do Gemini, o "Mais N" fala em consultas novas, e não em pautas' );
+uox_assert( true === ( uonix_intelligence_radar_email_items( null, false )['without_key'] ?? null ) && false === ( uonix_intelligence_radar_email_items( null, true )['without_key'] ?? null ), '#459: o radar diz ao e-mail se a chave do Gemini falta' );
+$GLOBALS['uox_options'] = uox_radar_opcoes( array_slice( $cands_380b, 0, 5 ) );
+$html_459b = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null, 'content_radar' => uonix_intelligence_radar_email_items( null, true ) ) ) );
+uox_assert( false !== strpos( $html_459b, 'Mais 2 pautas novas no painel.' ), '#459: com a chave, o "Mais N" continua falando em pautas novas' );
 // #381: a linha de fonte data a lista; se o Search Console falhou, o e-mail diz que a lista é a anterior.
 $GLOBALS['uox_options'] = uox_radar_opcoes( array( uox_radar_cand( 'ancoragem predial' ) ) );
 $html_381 = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null ) ) );

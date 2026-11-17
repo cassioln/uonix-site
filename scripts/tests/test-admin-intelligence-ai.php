@@ -467,18 +467,19 @@ function uox_429( $quota_id, $retry = null, $code = 429 ) {
 }
 $dia    = 'GenerateRequestsPerDayPerProjectPerModel-FreeTier';
 $minuto = 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier';
-// status, pedidos, http, retry_after (null = sem a chave).
+// status, pedidos, http, retry_after (null = sem a chave) e, só na cota, de onde veio a classificação (#403):
+// `quota_id_daily` (o `quotaId` diz PerDay: prova) ou `retry_delay` (só a espera passou de 60 s: inferência).
 $casos_cota = array(
-	'cota diária, como medido'                  => array( array( uox_429( $dia, '27223s' ) ), 'quota_exhausted', 1, 429, 27223 ),
-	'cota diária com fração de segundo'         => array( array( uox_429( $dia, '85528.734s' ) ), 'quota_exhausted', 1, 429, 85528 ),
-	'cota diária sem RetryInfo'                 => array( array( uox_429( $dia ) ), 'quota_exhausted', 1, 429, null ),
-	'cota de id desconhecido, espera de 2 h'    => array( array( uox_429( 'OutraCota', '7200s' ) ), 'quota_exhausted', 1, 429, 7200 ),
-	'sem QuotaFailure, espera de 61 s'          => array( array( uox_429( null, '61s' ) ), 'quota_exhausted', 1, 429, 61 ),
+	'cota diária, como medido'                  => array( array( uox_429( $dia, '27223s' ) ), 'quota_exhausted', 1, 429, 27223, 'quota_id_daily' ),
+	'cota diária com fração de segundo'         => array( array( uox_429( $dia, '85528.734s' ) ), 'quota_exhausted', 1, 429, 85528, 'quota_id_daily' ),
+	'cota diária sem RetryInfo'                 => array( array( uox_429( $dia ) ), 'quota_exhausted', 1, 429, null, 'quota_id_daily' ),
+	'cota de id desconhecido, espera de 2 h'    => array( array( uox_429( 'OutraCota', '7200s' ) ), 'quota_exhausted', 1, 429, 7200, 'retry_delay' ),
+	'sem QuotaFailure, espera de 61 s'          => array( array( uox_429( null, '61s' ) ), 'quota_exhausted', 1, 429, 61, 'retry_delay' ),
 	'sem QuotaFailure, espera de 60 s'          => array( array( uox_429( null, '60s' ), uox_gemini( 'ok' ) ), 'ok', 2, 200, null ),
 	'cota por minuto e depois 200'              => array( array( uox_429( $minuto, '26s' ), uox_gemini( 'ok' ) ), 'ok', 2, 200, null ),
 	'cota por minuto duas vezes'                => array( array( uox_429( $minuto, '26s' ), uox_429( $minuto, '24s' ) ), 'unavailable', 2, 429, null ),
-	'503 e depois a cota diária'                => array( array( uox_http( 503 ), uox_429( $dia, '27223s' ) ), 'quota_exhausted', 2, 429, 27223 ),
-	'cota por minuto e depois a diária'         => array( array( uox_429( $minuto, '26s' ), uox_429( $dia, '27000s' ) ), 'quota_exhausted', 2, 429, 27000 ),
+	'503 e depois a cota diária'                => array( array( uox_http( 503 ), uox_429( $dia, '27223s' ) ), 'quota_exhausted', 2, 429, 27223, 'quota_id_daily' ),
+	'cota por minuto e depois a diária'         => array( array( uox_429( $minuto, '26s' ), uox_429( $dia, '27000s' ) ), 'quota_exhausted', 2, 429, 27000, 'quota_id_daily' ),
 	'503 com corpo de cota diária não é cota'   => array( array( uox_429( $dia, '27223s', 503 ), uox_http( 503 ) ), 'unavailable', 2, 503, null ),
 	'retryDelay malformado é ignorado'          => array( array( uox_429( $minuto, 'muito' ), uox_429( $minuto, '-90000s' ) ), 'unavailable', 2, 429, null ),
 	'503 duas vezes'                            => array( array( uox_http( 503 ), uox_http( 503 ) ), 'unavailable', 2, 503, null ),
@@ -489,8 +490,8 @@ foreach ( $casos_cota as $caso => $c ) {
 	$GLOBALS['uox_pedidos'] = array();
 	$r = uonix_intelligence_ai_generate( $corpo_livre, 'gemini-3.8-flash', 0 );
 	uox_ai_assert(
-		$c[1] === $r['status'] && $c[2] === count( $GLOBALS['uox_pedidos'] ) && $c[3] === ( $r['http'] ?? null ) && $c[2] === ( $r['attempts'] ?? null ) && $c[4] === ( $r['retry_after'] ?? null ),
-		"generate {$caso}: status {$c[1]}, {$c[2]} pedido(s), HTTP {$c[3]}, retry_after " . var_export( $c[4], true ) . '; obteve ' . var_export( $r, true ) . ' com ' . count( $GLOBALS['uox_pedidos'] ) . ' pedido(s)'
+		$c[1] === $r['status'] && $c[2] === count( $GLOBALS['uox_pedidos'] ) && $c[3] === ( $r['http'] ?? null ) && $c[2] === ( $r['attempts'] ?? null ) && $c[4] === ( $r['retry_after'] ?? null ) && ( $c[5] ?? null ) === ( $r['quota_source'] ?? null ),
+		"generate {$caso}: status {$c[1]}, {$c[2]} pedido(s), HTTP {$c[3]}, retry_after " . var_export( $c[4], true ) . ', quota_source ' . var_export( $c[5] ?? null, true ) . '; obteve ' . var_export( $r, true ) . ' com ' . count( $GLOBALS['uox_pedidos'] ) . ' pedido(s)'
 	);
 }
 $corpo_estranho = array( 'code' => 429, 'body' => json_encode( array( 'error' => array( 'details' => array( 'texto', array( '@type' => 'type.googleapis.com/google.rpc.QuotaFailure', 'violations' => 'x' ), array( '@type' => 'type.googleapis.com/google.rpc.QuotaFailure', 'violations' => array( 'y', array( 'quotaId' => array( 'PerDay' ) ) ) ), array( '@type' => 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay' => array( 9 ) ) ) ) ) ) );
@@ -504,7 +505,10 @@ uox_ai_assert( 'unavailable' === uonix_intelligence_ai_generate( $corpo_livre, '
 $GLOBALS['uox_http']    = array( uox_429( $dia, '27223s' ) );
 $GLOBALS['uox_pedidos'] = array();
 $rc = uonix_intelligence_ai_call( $in, 0 );
-uox_ai_assert( array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1, 'retry_after' => 27223 ) === $rc, 'A chamada do Módulo 3 repassa o status de cota, o HTTP e a espera; obteve ' . var_export( $rc, true ) );
+uox_ai_assert( array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1, 'retry_after' => 27223, 'quota_source' => 'quota_id_daily' ) === $rc, 'A chamada do Módulo 3 repassa o status de cota, o HTTP, a espera e a origem da classificação (#403); obteve ' . var_export( $rc, true ) );
+$GLOBALS['uox_http']    = array( uox_429( null, '7200s' ) );
+$rc2 = uonix_intelligence_ai_call( $in, 0 );
+uox_ai_assert( 'retry_delay' === ( $rc2['quota_source'] ?? null ), '#403: a chamada do Módulo 3 repassa retry_delay quando só a espera classificou a cota; obteve ' . var_export( $rc2, true ) );
 $GLOBALS['uox_http'] = array( uox_gemini( $ok ) );
 $rc_ok = uonix_intelligence_ai_call( $in, 0 );
 uox_ai_assert( 'ok' === $rc_ok['status'] && 200 === ( $rc_ok['http'] ?? null ) && 1 === ( $rc_ok['attempts'] ?? null ), 'A chamada do Módulo 3 repassa o HTTP também no ok' );
@@ -567,8 +571,10 @@ uox_ai_assert( 2 === $rq['called'] && 2 === count( $GLOBALS['uox_pedidos'] ), '#
 uox_ai_assert( 'ok' === $cq[ $k_n( 1 ) ]['status'] && 200 === ( $cq[ $k_n( 1 ) ]['http'] ?? null ) && 1 === ( $cq[ $k_n( 1 ) ]['attempts'] ?? null ), '#384: a entrada ok grava o HTTP 200 e os pedidos' );
 $e_cota = $cq[ $k_n( 2 ) ];
 uox_ai_assert( 'quota_exhausted' === $e_cota['status'] && 429 === ( $e_cota['http'] ?? null ) && gmdate( 'c', strtotime( $e_cota['attempted_at'] ) + 27223 ) === ( $e_cota['retry_at'] ?? null ) && 64 === strlen( $e_cota['input_hash'] ?? '' ), '#384: a entrada da cota grava o HTTP 429 e a hora da renovação; obteve ' . var_export( $e_cota, true ) );
+uox_ai_assert( 'quota_id_daily' === ( $e_cota['quota_source'] ?? null ), '#403: a entrada da cota grava de onde veio a classificação (o quotaId diário); obteve ' . var_export( $e_cota, true ) );
 foreach ( array( 3, 4, 5 ) as $n ) {
 	$e = $cq[ $k_n( $n ) ];
+	uox_ai_assert( 'quota_id_daily' === ( $e['quota_source'] ?? null ), "#403: a consulta {$n}, adiada pela cota, herda a origem da classificação; obteve " . var_export( $e, true ) );
 	uox_ai_assert( 'deferred' === $e['status'] && 'quota_exhausted' === ( $e['reason'] ?? '' ) && $e_cota['retry_at'] === ( $e['retry_at'] ?? null ) && ! isset( $e['http'] ) && ! isset( $e['suggestion'] ) && 64 === strlen( $e['input_hash'] ?? '' ), "#384: a consulta {$n}, depois da cota, fica deferred sem pedido; obteve " . var_export( $e, true ) );
 }
 // No dia seguinte, a cota renovou: as adiadas são chamadas, e a ok continua sem chamada.
@@ -581,6 +587,23 @@ $GLOBALS['uox_http'] = array( uox_429( $dia, '27223s' ) );
 $rq3 = uonix_intelligence_ai_run( uox_analise( array( uox_linha( 'consulta nova' ), $cinco[0], $cinco[1] ) ), 0 );
 $cq3 = get_option( uonix_intelligence_ai_option() );
 uox_ai_assert( 1 === $rq3['called'] && 'quota_exhausted' === $cq3[ uonix_intelligence_ai_entry_key( 'consulta nova', '/produtos/olhal-inox/' ) ]['status'] && 'ok' === $cq3[ $k_n( 1 ) ]['status'] && 'ok' === $cq3[ $k_n( 2 ) ]['status'], '#384: depois da cota, a sugestão ok com a mesma entrada continua, sem chamada' );
+
+// #403 (B2): a cota que só o `retryDelay` classificou (sem `quotaId` diário) não é provada diária. A origem
+// gravada é outra, e as adiadas a herdam.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http']    = array( uox_429( null, '7200s' ), uox_gemini( $ok ), uox_gemini( $ok ) );
+$GLOBALS['uox_pedidos'] = array();
+$ri = uonix_intelligence_ai_run( uox_analise( array_slice( $cinco, 0, 3 ) ), 0 );
+$ci = get_option( uonix_intelligence_ai_option() );
+uox_ai_assert( 1 === $ri['called'] && 'quota_exhausted' === $ci[ $k_n( 1 ) ]['status'] && 'retry_delay' === ( $ci[ $k_n( 1 ) ]['quota_source'] ?? null ), '#403: cota classificada só pelo retryDelay grava a origem retry_delay; obteve ' . var_export( $ci[ $k_n( 1 ) ], true ) );
+foreach ( array( 2, 3 ) as $n ) {
+	uox_ai_assert( 'deferred' === $ci[ $k_n( $n ) ]['status'] && 'retry_delay' === ( $ci[ $k_n( $n ) ]['quota_source'] ?? null ), "#403: a consulta {$n}, adiada pela cota inferida, herda retry_delay; obteve " . var_export( $ci[ $k_n( $n ) ], true ) );
+}
+// Uma falha comum não grava origem nenhuma.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http']    = array( uox_http( 503 ), uox_http( 503 ) );
+uonix_intelligence_ai_run( uox_analise( array_slice( $cinco, 0, 1 ) ), 0 );
+uox_ai_assert( ! isset( get_option( uonix_intelligence_ai_option() )[ $k_n( 1 ) ]['quota_source'] ), '#403: só a cota grava a origem' );
 
 // Duas falhas seguidas também param a execução: na medição de 2026-10-03, cada falha com
 // nova tentativa gastava dois pedidos da cota diária.
@@ -667,11 +690,23 @@ $ld = uonix_intelligence_ai_suggestion_for( uox_linha( 'segunda' ) );
 $cr = get_option( uonix_intelligence_ai_option() );
 uox_ai_assert( 'quota_exhausted' === $lq['status'] && $cr[ $k_ok ]['retry_at'] === ( $lq['retry_at'] ?? null ) && 10 === ( $lq['object']['id'] ?? 0 ), '#384: leitor devolve quota_exhausted com a hora da renovação e a página; obteve ' . var_export( $lq, true ) );
 uox_ai_assert( 'deferred' === $ld['status'] && 'quota_exhausted' === ( $ld['reason'] ?? '' ) && $lq['retry_at'] === ( $ld['retry_at'] ?? null ), '#384: leitor devolve a adiada com o motivo e a hora; obteve ' . var_export( $ld, true ) );
-$cr[ $k_ok ]['retry_at'] = array( 'x' );
-$cr[ $k_ok ]['reason']   = 7;
+uox_ai_assert( 'quota_id_daily' === ( $lq['quota_source'] ?? null ) && 'quota_id_daily' === ( $ld['quota_source'] ?? null ), '#403: leitor devolve a origem da classificação, na cota e na adiada; obteve ' . var_export( array( $lq, $ld ), true ) );
+$cr[ $k_ok ]['retry_at']     = array( 'x' );
+$cr[ $k_ok ]['reason']       = 7;
+$cr[ $k_ok ]['quota_source'] = array( 'x' );
 update_option( uonix_intelligence_ai_option(), $cr, false );
 $lm = uonix_intelligence_ai_suggestion_for( uox_linha() );
-uox_ai_assert( 'quota_exhausted' === $lm['status'] && ! isset( $lm['retry_at'] ) && ! isset( $lm['reason'] ), '#384: hora e motivo malformados no cache não saem do leitor' );
+uox_ai_assert( 'quota_exhausted' === $lm['status'] && ! isset( $lm['retry_at'] ) && ! isset( $lm['reason'] ) && ! isset( $lm['quota_source'] ), '#384: hora, motivo e origem malformados no cache não saem do leitor' );
+// Só os dois valores exatos saem do cache: `true` (que `==` a qualquer string), número, outra caixa e espaço não.
+foreach ( array( true, 1, 'qualquer', 'QUOTA_ID_DAILY', ' quota_id_daily', 'quota_id_daily ' ) as $malformada ) {
+	$cr[ $k_ok ]['quota_source'] = $malformada;
+	update_option( uonix_intelligence_ai_option(), $cr, false );
+	uox_ai_assert( ! isset( uonix_intelligence_ai_suggestion_for( uox_linha() )['quota_source'] ), '#403: origem fora dos dois valores conhecidos não sai do leitor: ' . var_export( $malformada, true ) );
+}
+$cr[ $k_ok ]['quota_source'] = 'retry_delay';
+update_option( uonix_intelligence_ai_option(), $cr, false );
+uox_ai_assert( 'retry_delay' === ( uonix_intelligence_ai_suggestion_for( uox_linha() )['quota_source'] ?? null ), '#403: retry_delay sai do leitor como está' );
+uox_ai_assert( '' === uonix_intelligence_ai_quota_source( null ) && '' === uonix_intelligence_ai_quota_source( true ) && '' === uonix_intelligence_ai_quota_source( array( 'quota_id_daily' ) ) && 'quota_id_daily' === uonix_intelligence_ai_quota_source( 'quota_id_daily' ) && 'retry_delay' === uonix_intelligence_ai_quota_source( 'retry_delay' ), '#403: o validador da origem aceita só os dois valores, em string exata' );
 
 // Textos de estado: um texto próprio por estado, e nenhum vazio.
 $textos = array();
@@ -681,14 +716,20 @@ foreach ( array( 'not_configured', 'pending', 'unavailable', 'rejected', 'no_pag
 }
 uox_ai_assert( count( $textos ) === count( array_unique( $textos ) ), 'Cada estado tem um texto diferente' );
 uox_ai_assert( false !== strpos( $textos['model_missing'], 'UONIX_GEMINI_MODEL' ) && false !== strpos( $textos['not_configured'], 'UONIX_GEMINI_API_KEY' ), 'Os textos de configuração nomeiam a constante' );
-$t_cota = uonix_intelligence_ai_state_message( 'quota_exhausted', array( 'retry_at' => '2026-10-04T00:00:15+00:00' ) );
+// #403: a hora da renovação só entra enquanto está no futuro, e "diária" só com a prova (o `quotaId`).
+// O relógio é um parâmetro, como no restante da Central (`$now`).
+$antes  = 1791028800; // 2026-10-03T12:00:00Z, antes da renovação.
+$depois = 1791115200; // 2026-10-04T12:00:00Z, depois dela.
+$volta  = array( 'retry_at' => '2026-10-04T00:00:15+00:00' );
+$prova  = $volta + array( 'quota_source' => 'quota_id_daily' );
+$t_cota = uonix_intelligence_ai_state_message( 'quota_exhausted', $prova, $antes );
 uox_ai_assert( 0 === strpos( $t_cota, 'Cota diária do Gemini esgotada.' ) && false !== strpos( $t_cota, 'A cota renova por volta de 04/10 00:00 (UTC).' ), '#384: a cota esgotada diz o motivo e a hora da renovação; obteve ' . $t_cota );
 // #386: com `wp_date` (o fuso do site), a hora da renovação sai no fuso do site e sem "(UTC)"; sem ele, cai em UTC e diz.
 uox_ai_assert( false !== strpos( $t_cota, '04/10 00:00 (UTC).' ), '#386: sem wp_date (teste), a hora cai em UTC e o rótulo avisa' );
 $sub_fuso = static function ( $tz ) {
 	$codigo = 'define( "ABSPATH", "/" ); function wp_date( $f, $t = null ) { return ( new DateTimeImmutable( "@" . (int) $t ) )->setTimezone( new DateTimeZone( getenv( "UOX_TZ" ) ) )->format( $f ); } '
 		. 'function add_action( ...$a ) {} function add_filter( ...$a ) {} require getenv( "UOX_F" ); '
-		. 'echo uonix_intelligence_ai_state_message( "quota_exhausted", array( "retry_at" => "2026-10-04T00:00:15+00:00" ) ), "|", uonix_intelligence_ai_state_message( "deferred", array( "reason" => "quota_exhausted", "retry_at" => "2026-10-04T00:00:15+00:00" ) );';
+		. 'echo uonix_intelligence_ai_state_message( "quota_exhausted", array( "retry_at" => "2026-10-04T00:00:15+00:00" ), 1791028800 ), "|", uonix_intelligence_ai_state_message( "deferred", array( "reason" => "quota_exhausted", "retry_at" => "2026-10-04T00:00:15+00:00" ), 1791028800 );';
 	$proc = proc_open( array( PHP_BINARY, '-n', '-r', $codigo ), array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes, null, array( 'UOX_TZ' => $tz, 'UOX_F' => dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/54-admin-intelligence-ai.php', 'PATH' => (string) getenv( 'PATH' ) ) );
 	$saida = is_resource( $proc ) ? stream_get_contents( $pipes[1] ) : '';
 	if ( is_resource( $proc ) ) {
@@ -704,10 +745,40 @@ $com_utc = $sub_fuso( 'UTC' );
 uox_ai_assert( 2 === substr_count( $com_sp, 'A cota renova por volta de 03/10 21:00.' ) && false === strpos( $com_sp, '(UTC)' ), '#386: Módulo 3, com o fuso do site: 00:00 UTC é 21:00 do dia anterior, sem "(UTC)", na cota esgotada e na adiada; obteve ' . $com_sp );
 uox_ai_assert( 2 === substr_count( $com_utc, 'A cota renova por volta de 04/10 00:00.' ), '#386: Módulo 3, com o site em UTC: 00:00, sem rótulo; o fuso vem do site e não está fixo no código; obteve ' . $com_utc );
 uox_ai_assert( false === strpos( $textos['quota_exhausted'], 'renova' ) && false === strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', array( 'retry_at' => 'não é data' ) ), 'renova' ), '#384: sem hora válida, a mensagem não inventa uma' );
-$t_adiada_cota = uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'quota_exhausted', 'retry_at' => '2026-10-04T00:00:15+00:00' ) );
+$t_adiada_cota = uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'quota_exhausted', 'quota_source' => 'quota_id_daily' ) + $volta, $antes );
 $t_adiada_falh = uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'failures' ) );
 uox_ai_assert( false !== strpos( $t_adiada_cota, 'cota diária do Gemini acabou' ) && false !== strpos( $t_adiada_cota, '04/10 00:00 (UTC)' ) && false !== strpos( $t_adiada_falh, 'falhas seguidas do Gemini' ) && $t_adiada_falh !== $textos['deferred'] && $t_adiada_cota !== $textos['deferred'], '#384: a adiada diz por que parou: cota ou falhas seguidas; obteve ' . $t_adiada_cota . ' / ' . $t_adiada_falh );
 uox_ai_assert( uonix_intelligence_ai_state_message( 'unavailable', array( 'retry_at' => '2026-10-04T00:00:15+00:00' ) ) === $textos['unavailable'], '#384: a hora da renovação só aparece na cota' );
+
+// #403 (B2): "diária" só quando o `quotaId` provou. Cota inferida só do `retryDelay`, origem
+// ausente (entrada gravada antes da #403) ou malformada: texto neutro, e a hora segue valendo.
+$inferida = array( 'quota_source' => 'retry_delay' ) + $volta;
+$t_inf    = uonix_intelligence_ai_state_message( 'quota_exhausted', $inferida, $antes );
+uox_ai_assert( 0 === strpos( $t_inf, 'Cota do Gemini esgotada. Nova tentativa na próxima geração diária.' ) && false !== strpos( $t_inf, 'A cota renova por volta de 04/10 00:00 (UTC).' ) && false === strpos( $t_inf, 'Cota diária' ), '#403: cota inferida do retryDelay não é chamada de diária, e a hora fica; obteve ' . $t_inf );
+foreach ( array( 'sem origem' => $volta, 'origem malformada' => array( 'quota_source' => array( 'quota_id_daily' ) ) + $volta, 'origem desconhecida' => array( 'quota_source' => 'qualquer' ) + $volta, 'origem vazia' => array( 'quota_source' => '' ) + $volta ) as $rotulo => $d ) {
+	$t = uonix_intelligence_ai_state_message( 'quota_exhausted', $d, $antes );
+	uox_ai_assert( 0 === strpos( $t, 'Cota do Gemini esgotada.' ) && false === strpos( $t, 'Cota diária' ), "#403: {$rotulo}: sem prova, o texto é neutro; obteve " . $t );
+}
+$t_adiada_inf = uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'quota_exhausted' ) + $inferida, $antes );
+$t_adiada_sem = uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'quota_exhausted' ) + $volta, $antes );
+uox_ai_assert( 0 === strpos( $t_adiada_inf, 'Não pedida: a cota do Gemini acabou nesta geração.' ) && false === strpos( $t_adiada_inf, 'diária do Gemini' ) && false !== strpos( $t_adiada_inf, '04/10 00:00 (UTC)' ) && $t_adiada_inf === $t_adiada_sem && $t_adiada_inf !== $t_adiada_cota, '#403: a adiada por cota inferida, ou sem origem, também é neutra; obteve ' . $t_adiada_inf . ' / ' . $t_adiada_sem );
+
+// #403 (B4): depois da hora, a mensagem não promete uma renovação que já passou. Na hora exata, também não.
+foreach ( array( 'diária' => $prova, 'inferida' => $inferida, 'sem origem' => $volta ) as $rotulo => $d ) {
+	foreach ( array( 'depois' => $depois, 'na hora exata' => strtotime( '2026-10-04T00:00:15+00:00' ) ) as $quando => $agora_t ) {
+		$t_cota_vencida = uonix_intelligence_ai_state_message( 'quota_exhausted', $d, $agora_t );
+		$t_adia_vencida = uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'quota_exhausted' ) + $d, $agora_t );
+		uox_ai_assert( false === strpos( $t_cota_vencida, 'renova' ) && false === strpos( $t_cota_vencida, '04/10' ) && false === strpos( $t_adia_vencida, 'renova' ) && false === strpos( $t_adia_vencida, '04/10' ), "#403: cota {$rotulo}, {$quando} da renovação: a hora sai; obteve " . $t_cota_vencida . ' / ' . $t_adia_vencida );
+	}
+}
+// Vencida, a mensagem continua dizendo o que houve e quando tenta de novo.
+$t_vencida = uonix_intelligence_ai_state_message( 'quota_exhausted', $prova, $depois );
+uox_ai_assert( 'Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária.' === $t_vencida, '#403: vencida, só a hora sai do texto; obteve ' . $t_vencida );
+// Sem o parâmetro, o relógio é o do sistema: uma renovação a 1 h daqui aparece, e uma de ontem não.
+$daqui_1h = array( 'quota_source' => 'quota_id_daily', 'retry_at' => gmdate( 'c', time() + 3600 ) );
+$de_ontem = array( 'quota_source' => 'quota_id_daily', 'retry_at' => gmdate( 'c', time() - 86400 ) );
+uox_ai_assert( false !== strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', $daqui_1h ), 'A cota renova por volta de' ) && false === strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', $de_ontem ), 'renova' ), '#403: sem o parâmetro, vale o relógio do sistema' );
+uox_ai_assert( false !== strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', $daqui_1h, 'amanhã' ), 'A cota renova por volta de' ) && false === strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', $de_ontem, 'amanhã' ), 'renova' ), '#403: relógio que não é inteiro cai no do sistema' );
 
 // ---------------------------------------------------------------------------
 // 8. Agendamento, e sem a chave (processo separado: a constante não se redefine).

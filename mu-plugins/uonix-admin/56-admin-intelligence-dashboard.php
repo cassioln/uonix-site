@@ -181,8 +181,18 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 				<div class="uonix-kpi-grid">
 					<div class="uonix-kpi-card">
 						<div class="uonix-kpi-title">Oportunidades encontradas</div>
-						<div class="uonix-kpi-value"><?php echo esc_html( (string) count( $rows ) ); ?></div>
-						<div class="uonix-kpi-sub"><?php echo esc_html( sprintf( 'de %d consultas analisadas', isset( $analysis['universe'] ) ? (int) $analysis['universe'] : 0 ) ); ?></div>
+						<?php
+						// O total vem de `matched` (antes do corte em `panel_limit`); `count( $rows )` já vem
+						// cortado, e a caixa dizia 5 com 12 oportunidades (#371).
+						$total_opp = isset( $analysis['matched'] ) ? max( (int) $analysis['matched'], count( $rows ) ) : count( $rows );
+						$limite_p  = isset( $rules['panel_limit'] ) ? (int) $rules['panel_limit'] : count( $rows );
+						$sub_opp   = sprintf( 'de %d consultas analisadas', isset( $analysis['universe'] ) ? (int) $analysis['universe'] : 0 );
+						if ( $total_opp > count( $rows ) && $limite_p > 0 ) {
+							$sub_opp .= sprintf( ' · a tabela mostra as %d de maior volume', count( $rows ) );
+						}
+						?>
+						<div class="uonix-kpi-value"><?php echo esc_html( (string) $total_opp ); ?></div>
+						<div class="uonix-kpi-sub"><?php echo esc_html( $sub_opp ); ?></div>
 					</div>
 				</div>
 
@@ -396,27 +406,36 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_pauta_cell' ) ) {
 	/**
 	 * A pauta da IA, ou o motivo de não haver uma. A cota esgotada e a parada por falhas
 	 * seguidas têm texto próprio, com a hora da renovação que o cron gravou (#384).
+	 *
+	 * "Diária" só aparece com a prova do `quotaId` (`quota_source` igual a `quota_id_daily`); sem ela
+	 * o texto fala só em "cota". A hora só entra enquanto ainda é futura (#403).
+	 *
+	 * @param array    $c   A candidata, como `uonix_intelligence_radar_state()` a devolve.
+	 * @param int|null $now Para teste; o padrão é `time()`.
 	 */
-	function uonix_intelligence_render_radar_pauta_cell( array $c ) {
+	function uonix_intelligence_render_radar_pauta_cell( array $c, $now = null ) {
 		$pauta = uonix_intelligence_radar_suggestion( $c );
 		if ( null === $pauta ) {
 			$ai     = isset( $c['ai'] ) && is_array( $c['ai'] ) ? $c['ai'] : array();
 			$status = isset( $ai['status'] ) && is_string( $ai['status'] ) ? $ai['status'] : '';
 			$motivo = isset( $ai['reason'] ) && is_string( $ai['reason'] ) ? $ai['reason'] : '';
 			$volta  = isset( $ai['retry_at'] ) && is_string( $ai['retry_at'] ) ? strtotime( $ai['retry_at'] ) : false;
+			$agora  = is_int( $now ) ? $now : time();
 			$cota   = 'quota_exhausted' === $status || ( 'deferred' === $status && 'quota_exhausted' === $motivo );
+			$diaria = isset( $ai['quota_source'] ) && 'quota_id_daily' === $ai['quota_source'];
 			if ( 'not_configured' === $status ) {
 				$texto = 'Sem a chave do Gemini: a candidata aparece sem pauta.';
 			} elseif ( 'quota_exhausted' === $status ) {
-				$texto = 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã.';
+				$texto = $diaria ? 'Cota diária do Gemini esgotada. O Radar tenta de novo amanhã.' : 'Cota do Gemini esgotada. O Radar tenta de novo amanhã.';
 			} elseif ( $cota ) {
-				$texto = 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã.';
+				$texto = $diaria ? 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã.' : 'Não pedida: a cota do Gemini acabou nesta execução. O Radar tenta de novo amanhã.';
 			} elseif ( 'deferred' === $status && 'failures' === $motivo ) {
 				$texto = 'Não pedida: falhas seguidas do Gemini nesta execução. O Radar tenta de novo amanhã.';
 			} else {
 				$texto = 'Pauta não gerada. O Radar tenta de novo amanhã.';
 			}
-			if ( $cota && false !== $volta ) {
+			// Uma renovação que já passou não é anunciada (#403).
+			if ( $cota && false !== $volta && $volta > $agora ) {
 				$texto .= ' A cota renova por volta de ' . uonix_intelligence_radar_time( $volta, 'd/m H:i' ) . '.';
 			}
 			echo '<em>' . esc_html( $texto ) . '</em>';
@@ -436,8 +455,10 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_section' ) ) {
 	 * Só lê o que o cron do 63 gravou (`uonix_intelligence_radar_state()`): nenhuma chamada
 	 * ao Search Console nem ao Gemini. Os botões postam para os handlers do 63, que fazem a
 	 * própria guarda; aqui eles só aparecem para quem pode usá-los.
+	 *
+	 * @param int|null $now Para teste; o padrão é `time()`. Vai até a célula da pauta (#403).
 	 */
-	function uonix_intelligence_render_radar_section() {
+	function uonix_intelligence_render_radar_section( $now = null ) {
 		if ( ! function_exists( 'uonix_intelligence_radar_state' ) ) {
 			return;
 		}
@@ -506,7 +527,7 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_section' ) ) {
 								<td><?php echo esc_html( uonix_intelligence_number( $c['position'], 1 ) ); ?></td>
 								<td><?php echo esc_html( uonix_intelligence_number( $c['impressions'], 0 ) ); ?></td>
 								<td><?php uonix_intelligence_render_radar_page_cell( $c['page'] ); ?></td>
-								<td><?php uonix_intelligence_render_radar_pauta_cell( $c ); ?></td>
+								<td><?php uonix_intelligence_render_radar_pauta_cell( $c, $now ); ?></td>
 								<?php if ( $curador ) : ?>
 									<td><?php uonix_intelligence_render_radar_row_button( $c['key'], 'Descartar' ); ?></td>
 								<?php endif; ?>
@@ -885,6 +906,14 @@ if ( ! function_exists( 'uonix_intelligence_render_settings_panel' ) ) {
 					<td>
 						<?php if ( is_int( $proximo ) && $proximo > 0 ) : ?>
 							<time datetime="<?php echo esc_attr( gmdate( 'c', $proximo ) ); ?>"><?php echo esc_html( function_exists( 'wp_date' ) ? wp_date( 'd/m/Y H:i', $proximo ) : gmdate( 'd/m/Y H:i', $proximo ) ); ?></time>
+							<?php
+							// Com a licença inativa o agendamento continua, e só o envio devolve `license_inactive`
+							// (decisão da #312). Sem o 50 carregado, a licença conta como inativa (#316).
+							$envio_pausado = ! function_exists( 'uonix_intelligence_license_state' ) || empty( uonix_intelligence_license_state()['sending'] );
+							?>
+							<?php if ( $envio_pausado ) : ?>
+								<em>(envio pausado pela licença)</em>
+							<?php endif; ?>
 						<?php else : ?>
 							<em>Não agendado.</em>
 						<?php endif; ?>
