@@ -37,11 +37,27 @@ set_error_handler(
 			return false;
 		}
 		++$failures;
-		fwrite( STDERR, "FAIL: erro de PHP ({$nivel}): {$mensagem} em " . basename( (string) $arquivo ) . ":{$linha}\n" );
+		// A sonda de vida (logo abaixo) conta o erro sem imprimir uma linha "FAIL:" numa suíte verde.
+		if ( empty( $GLOBALS['uox_sonda_do_guarda'] ) ) {
+			fwrite( STDERR, "FAIL: erro de PHP ({$nivel}): {$mensagem} em " . basename( (string) $arquivo ) . ":{$linha}\n" );
+		}
 
 		return true;
 	}
 );
+// Sonda de vida do guarda (#317): um erro de PHP de verdade tem de ser CONTADO por ele. Sem isto, tirar o `error_reporting( E_ALL )`
+// (com o INI do runner em 0), fazer o handler devolver `false` ou não incrementar `$failures` deixava as seis suítes verdes.
+// A sonda dispara um E_USER_NOTICE, confere que `$failures` subiu em um, e desfaz a contagem para a suíte seguir.
+$uox_antes_da_sonda = $failures;
+@trigger_error( '', E_USER_NOTICE );
+uox_assert( $failures === $uox_antes_da_sonda, 'sonda do guarda: o `@` suprime, e o handler respeita (a contagem não muda)' );
+$uox_antes_da_sonda = $failures;
+$GLOBALS['uox_sonda_do_guarda'] = true;
+trigger_error( 'sonda do guarda #317', E_USER_NOTICE );
+$GLOBALS['uox_sonda_do_guarda'] = false;
+$uox_contou = ( $failures === $uox_antes_da_sonda + 1 );
+$failures = $uox_antes_da_sonda;
+uox_assert( $uox_contou, 'sonda do guarda: o handler de erros de PHP CONTA um erro de verdade (E_USER_NOTICE)' );
 
 class Uox_Redirect_Exception extends RuntimeException {
 	public $url;
@@ -568,6 +584,15 @@ $_GET = array(
 );
 $lic_array = uox_render_settings();
 restore_error_handler();
+// O handler local acima engole tudo. Sem o `restore_error_handler()`, ele seguiria ativo até o fim da suíte e nenhum erro
+// de PHP depois dele seria contado. A sonda de vida (#317) repete aqui, depois do restore, para o restore ser provado.
+$uox_antes_da_sonda = $failures;
+$GLOBALS['uox_sonda_do_guarda'] = true;
+trigger_error( 'sonda do guarda #317, depois do restore', E_USER_NOTICE );
+$GLOBALS['uox_sonda_do_guarda'] = false;
+$uox_contou = ( $failures === $uox_antes_da_sonda + 1 );
+$failures   = $uox_antes_da_sonda;
+uox_assert( $uox_contou, 'sonda do guarda: depois do `restore_error_handler()`, o handler do topo volta a CONTAR erros de PHP' );
 uox_assert( array() === $uox_erros_php, 'Marcador em array na URL não emite aviso do PHP: ' . implode( ' | ', $uox_erros_php ) );
 uox_assert( false === strpos( $lic_array, 'Licença do painel salva.' ) && false === strpos( $lic_array, 'formato AAAA-MM-DD' ), 'Marcador de licença em array não escolhe aviso' );
 uox_assert( false === strpos( $lic_array, 'Relatório de teste enviado' ) && false === strpos( $lic_array, 'Nenhum destinatário cadastrado, então' ), 'Marcador de envio de teste em array não vale como sucesso nem escolhe motivo' );

@@ -728,7 +728,7 @@ A tabela vale para as constantes e, com as diferenças listadas depois dela, par
 
 O último caso cobre erro de digitação no **valor**: `suspenso`, `Active` ou `31/12/2026` pausam. A data é validada de ida e volta, então `2026-02-30` é inválida em vez de virar 2 de março.
 
-**Constante definida como `null` não é constante ausente (#315).** `define( 'KSIODEV_INTELLIGENCE_STATUS', null )`, que o `wp config set --raw` e uma edição à mão produzem, é valor que a regra não reconhece: pausa, com `invalid` e a camada `configured`. Só a constante **não definida** (`defined()` falso) é "sem controle". Quem separa as duas é `uonix_intelligence_license_constant_value()`, que entrega `null` à regra só para a constante ausente. A regra pura `evaluate( null, null )` segue lendo `null` como "ausente", porque a camada do painel depende disso (opção ausente é sem controle).
+**Constante definida como `null` não é constante ausente (#315).** `define( 'KSIODEV_INTELLIGENCE_STATUS', null )`, que o `wp config set --raw` e uma edição à mão produzem, é valor que a regra não reconhece: pausa, com `invalid` e a camada `configured`. Só a constante **não definida** (`defined()` falso) é "sem controle", e na constante **"sem data-limite" é só `KSIODEV_INTELLIGENCE_VALID_UNTIL` não definida**: `null` e `''` pausam com `invalid`. O caso que muda de comportamento é `STATUS` `active` com `VALID_UNTIL` definida como `null`, que alguém pode ler como "sem data-limite": antes enviava, e agora pausa (medido em 646 estados, comparando o código de antes e o de agora: as únicas diferenças são constantes definidas como `null`). Quem separa as duas é `uonix_intelligence_license_constant_value()`, que entrega `null` à regra só para a constante ausente. A regra pura `evaluate( null, null )` segue lendo `null` como "ausente", porque a camada do painel depende disso (opção ausente é sem controle).
 
 Erro no **nome** da constante não é detectado. `KSIODEV_INTELIGENCE_STATUS` deixa a constante certa ausente, e ausente é o padrão: o envio segue. Por isso a conferência da *Operação* é obrigatória.
 
@@ -750,7 +750,7 @@ Erro no **nome** da constante não é detectado. `KSIODEV_INTELIGENCE_STATUS` de
 - `source`: `constant`, `panel` ou `''`, quando nenhuma camada está configurada;
 - `constant` e `panel`: o que cada camada diz sozinha.
 
-**Estado montado à mão (#314).** Os textos (`message`, `summary`, `layer_summary`, `date_label`) leem `reason`, `status` e `valid_until` por `uonix_intelligence_license_text_key()`: chave ausente, ou de tipo que não é texto (array, número, `null`), vale `''`, sem aviso de PHP. O estado do `uonix_intelligence_license_state()` sempre tem as cinco chaves como texto, então isto só protege um chamador futuro. Estado que não é array conta como pausado e inválido. Sem data, o aviso de vencida diz "venceu" (e a camada, "Vencida"), sem inventar o dia nem deixar "em ," na frase.
+**Estado montado à mão (#314).** Os textos (`message`, `summary`, `layer_summary`, `date_label`) leem `reason`, `status` e `valid_until` por `uonix_intelligence_license_text_key()`: chave ausente, ou de tipo que não é texto (array, número, `null`), vale `''`, sem aviso de PHP. O estado do `uonix_intelligence_license_state()` sempre tem `status`, `valid_until` e `reason` como texto (`configured` e `sending` são bool), então isto só protege um chamador futuro. Estado que não é array conta como pausado e inválido. Sem data, o aviso de vencida diz "venceu" (e a camada, "Vencida"), sem inventar o dia nem deixar "em ," na frase.
 
 ### Gravação da licença do painel
 

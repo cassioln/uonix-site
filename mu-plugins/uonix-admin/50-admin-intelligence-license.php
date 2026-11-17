@@ -248,7 +248,7 @@ if ( ! function_exists( 'uonix_intelligence_license_date_label' ) ) {
 if ( ! function_exists( 'uonix_intelligence_license_text_key' ) ) {
 	/**
 	 * Uma chave de texto de um estado montado à mão: ausente, ou de tipo que não é texto, vira vazio (#314).
-	 * O estado de `uonix_intelligence_license_state()` sempre tem as cinco chaves como texto; esta proteção
+	 * O estado de `uonix_intelligence_license_state()` sempre tem `status`, `valid_until` e `reason` como texto (`configured` e `sending` são bool); esta proteção
 	 * é para um chamador futuro que monte o estado sem elas.
 	 *
 	 * @param mixed  $estado Estado ou camada.

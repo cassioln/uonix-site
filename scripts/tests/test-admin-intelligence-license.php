@@ -33,11 +33,27 @@ set_error_handler(
 			return false;
 		}
 		++$failures;
-		fwrite( STDERR, "FAIL: erro de PHP ({$nivel}): {$mensagem} em " . basename( (string) $arquivo ) . ":{$linha}\n" );
+		// A sonda de vida (logo abaixo) conta o erro sem imprimir uma linha "FAIL:" numa suíte verde.
+		if ( empty( $GLOBALS['uox_sonda_do_guarda'] ) ) {
+			fwrite( STDERR, "FAIL: erro de PHP ({$nivel}): {$mensagem} em " . basename( (string) $arquivo ) . ":{$linha}\n" );
+		}
 
 		return true;
 	}
 );
+// Sonda de vida do guarda (#317): um erro de PHP de verdade tem de ser CONTADO por ele. Sem isto, tirar o `error_reporting( E_ALL )`
+// (com o INI do runner em 0), fazer o handler devolver `false` ou não incrementar `$failures` deixava as seis suítes verdes.
+// A sonda dispara um E_USER_NOTICE, confere que `$failures` subiu em um, e desfaz a contagem para a suíte seguir.
+$uox_antes_da_sonda = $failures;
+@trigger_error( '', E_USER_NOTICE );
+uox_assert( $failures === $uox_antes_da_sonda, 'sonda do guarda: o `@` suprime, e o handler respeita (a contagem não muda)' );
+$uox_antes_da_sonda = $failures;
+$GLOBALS['uox_sonda_do_guarda'] = true;
+trigger_error( 'sonda do guarda #317', E_USER_NOTICE );
+$GLOBALS['uox_sonda_do_guarda'] = false;
+$uox_contou = ( $failures === $uox_antes_da_sonda + 1 );
+$failures = $uox_antes_da_sonda;
+uox_assert( $uox_contou, 'sonda do guarda: o handler de erros de PHP CONTA um erro de verdade (E_USER_NOTICE)' );
 
 // Registra todo hook, para conferir que o arquivo registra só os dois da licença.
 $GLOBALS['uox_hooks']   = array();
@@ -267,6 +283,22 @@ uox_assert( false === strpos( $res_status_array, 'Cortesia' ) && false === strpo
 uox_assert( '' !== uonix_intelligence_license_summary( array() ) && '' !== uonix_intelligence_license_summary( null ), '#314: resumo de estado vazio ou nulo existe (conta como pausado)' );
 // `date_label` direto: texto que não é data devolve o texto, e o que não é texto devolve vazio.
 uox_assert( '30/09/2026' === uonix_intelligence_license_date_label( '2026-09-30' ) && 'x' === uonix_intelligence_license_date_label( 'x' ) && '' === uonix_intelligence_license_date_label( array( 'x' ) ) && '' === uonix_intelligence_license_date_label( null ), '#314: `date_label` aceita data, devolve o texto que não é data e devolve vazio para o que não é texto' );
+// Valores ESCALARES que não são texto (inteiro, decimal, booleano) e objeto com `__toString`: o `text_key` os trata como vazio. Com
+// `is_scalar` no lugar de `is_string`, `valid_until` inteiro imprimia "até ." (o defeito do #314 voltava). O `(string)` direto
+// também aceitaria o objeto. Valor que não é texto não é data, nem motivo, nem status.
+$stringavel = new class() { public function __toString() { return 'expired'; } };
+foreach ( array( 'inteiro' => 20260930, 'decimal' => 1.5, 'verdadeiro' => true, 'falso' => false, 'objeto com __toString' => $stringavel ) as $rotulo_e => $valor_e ) {
+	$r_sum = uonix_intelligence_license_summary( array( 'sending' => true, 'configured' => true, 'status' => 'active', 'valid_until' => $valor_e ) );
+	uox_assert( 'Contratada (active), sem data-limite. O envio está ativo.' === $r_sum, "#314: valid_until {$rotulo_e} vira vazio no resumo, sem \"até .\"; obteve " . $r_sum );
+	$r_msg = uonix_intelligence_license_message( array( 'reason' => 'expired', 'valid_until' => $valor_e ) );
+	uox_assert( 0 === strpos( $r_msg, 'A licença da Central de Inteligência venceu, e o envio automático' ), "#314: valid_until {$rotulo_e} na mensagem de vencida diz só \"venceu\"; obteve " . $r_msg );
+	$r_mot = uonix_intelligence_license_message( array( 'reason' => $valor_e ) );
+	uox_assert( false !== strpos( $r_mot, 'não é válida' ), "#314: reason {$rotulo_e} cai em configuração inválida, e não é lido como o motivo; obteve " . $r_mot );
+	$r_sta = uonix_intelligence_license_summary( array( 'sending' => true, 'configured' => true, 'status' => $valor_e, 'valid_until' => '' ) );
+	uox_assert( false === strpos( $r_sta, 'Cortesia' ), "#314: status {$rotulo_e} não vira cortesia; obteve " . $r_sta );
+	$r_lay = uonix_intelligence_license_layer_summary( array( 'configured' => true, 'sending' => false, 'reason' => 'expired', 'valid_until' => $valor_e ) );
+	uox_assert( 'Vencida. Pausa o envio.' === $r_lay, "#314: valid_until {$rotulo_e} na camada vencida diz só \"Vencida.\"; obteve " . $r_lay );
+}
 // Estado que é TEXTO, ou objeto: não se indexa como array. 'lixo'['reason'] seria um erro, e 'lixo'[0] daria 'l'.
 foreach ( array( 'texto' => 'reason', 'texto com o nome da chave' => 'valid_until', 'objeto com a chave' => new ArrayObject( array( 'reason' => 'expired', 'valid_until' => '2026-09-01', 'sending' => false ) ) ) as $rotulo_t => $estado_t ) {
 	$msg_t = uonix_intelligence_license_message( $estado_t );
