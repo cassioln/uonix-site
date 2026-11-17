@@ -6,6 +6,10 @@
  * linha comentada (`// '50-...php',`) de uma ativa: o módulo deixa de carregar e o
  * teste segue verde (#354 e #362).
  *
+ * É o ÚNICO jeito aceito de conferir o loader: `test-loader-modulos-completo.php`
+ * reprova qualquer teste que leia um module.php com file_get_contents() (#435), e
+ * reprova também um NN-*.php que exista no diretório e não esteja no loader.
+ *
  * Define `uonix_mu_require_files()` como um gravador, que guarda os nomes dos
  * arquivos e não carrega nenhum. Só o PHP decide o que está ativo: comentário,
  * `if (false)` ou código morto não contam. Como o loader real

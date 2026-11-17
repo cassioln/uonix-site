@@ -327,8 +327,9 @@ if (false === $fragment_ver_at) {
 }
 
 // ---- O módulo precisa estar registrado no loader e na CI -----------------
-$loader = file_get_contents($root . '/mu-plugins/uonix-woocommerce/module.php');
-if (false === strpos((string) $loader, '32-rfq-stable-asset-version.php')) {
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo($root . '/mu-plugins/uonix-woocommerce/module.php');
+if (!in_array('32-rfq-stable-asset-version.php', $carregados, true)) {
     uonix_test_fail('módulo não está registrado em mu-plugins/uonix-woocommerce/module.php');
 }
 $workflow = file_get_contents($root . '/.github/workflows/validate.yml');

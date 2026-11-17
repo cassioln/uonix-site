@@ -250,8 +250,9 @@ verifica( 'scheduled' === uonix_rewrite_guard_check( $AGORA ), 'registro malform
 // ---------------------------------------------------------------------------
 // 9. O carregador do módulo precisa incluir o arquivo, senão nada disso roda.
 // ---------------------------------------------------------------------------
-$modulo = (string) file_get_contents( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-content/module.php' );
-verifica( false !== strpos( $modulo, "'50-seo-regras-reescrita-rank-math.php'" ), 'module.php do uonix-content carrega a guarda' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-content/module.php' );
+verifica( in_array( '50-seo-regras-reescrita-rank-math.php', $carregados, true ), 'module.php do uonix-content carrega a guarda' );
 
 @unlink( $logTeste );
 

@@ -45,8 +45,9 @@ function uox_pwc_assert( $condition, $message ) {
 	}
 }
 
-$loader = (string) file_get_contents( $raiz . '/mu-plugins/uonix-admin/module.php' );
-uox_pwc_assert( false !== strpos( $loader, "'69-admin-personalizador-widgets-classicos.php'" ), 'module.php deve carregar 69-admin-personalizador-widgets-classicos.php' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( $raiz . '/mu-plugins/uonix-admin/module.php' );
+uox_pwc_assert( in_array( '69-admin-personalizador-widgets-classicos.php', $carregados, true ), 'module.php deve carregar 69-admin-personalizador-widgets-classicos.php' );
 
 $registrado = $GLOBALS['uox_test_filters']['use_widgets_block_editor'][0] ?? null;
 uox_pwc_assert( null !== $registrado && 'uonix_admin_personalizador_widgets_classicos' === $registrado[0], 'filtro use_widgets_block_editor não registrado' );

@@ -501,10 +501,13 @@ short_layout_assert_same( 1, count( $GLOBALS['short_layout_removed'] ), 'render 
 short_layout_assert_same( array(), $GLOBALS['short_layout_actions']['save_post'] ?? array(), 'módulo não cria salvamento paralelo no WordPress' );
 short_layout_assert_same( array(), $GLOBALS['short_layout_actions']['woocommerce_process_product_meta'] ?? array(), 'módulo não cria salvamento paralelo no WooCommerce' );
 
-$loader = file_get_contents( $repo_root . '/mu-plugins/uonix-woocommerce/module.php' );
-short_layout_assert_contains( "'24-admin-resumo-editor-estavel.php'", $loader, 'fallback defensivo continua no loader' );
-short_layout_assert_contains( "'25-admin-resumo-fixo.php'", $loader, 'loader inclui o novo módulo' );
-short_layout_assert_before( "'24-admin-resumo-editor-estavel.php'", "'25-admin-resumo-fixo.php'", $loader, 'layout fixo carrega depois do fallback TinyMCE' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( $repo_root . '/mu-plugins/uonix-woocommerce/module.php' );
+$posicao_24 = array_search( '24-admin-resumo-editor-estavel.php', $carregados, true );
+$posicao_25 = array_search( '25-admin-resumo-fixo.php', $carregados, true );
+short_layout_assert_same( true, false !== $posicao_24, 'fallback defensivo continua no loader' );
+short_layout_assert_same( true, false !== $posicao_25, 'loader inclui o novo módulo' );
+short_layout_assert_same( true, false !== $posicao_24 && false !== $posicao_25 && $posicao_24 < $posicao_25, 'layout fixo carrega depois do fallback TinyMCE' );
 
 printf(
 	"PASS: breve descrição fixa acima da descrição principal (%d asserções).\n",

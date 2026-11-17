@@ -9,9 +9,9 @@ $rootDir = dirname(__DIR__, 2);
 // 1. VALIDAÇÃO ESTRUTURAL
 // ==============================================================================
 
-$moduleForms = file_get_contents($rootDir . '/mu-plugins/uonix-forms/module.php');
-if (strpos($moduleForms, '49-forms-global-autofill.php') === false) {
-    echo "ERRO: 49-forms-global-autofill.php não está registrado em module.php\n";
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+if (!in_array('49-forms-global-autofill.php', uox_loader_arquivos_do_modulo($rootDir . '/mu-plugins/uonix-forms/module.php'), true)) {
+    echo "ERRO: 49-forms-global-autofill.php não é carregado pelo module.php (linha comentada ou ausente)\n";
     exit(1);
 }
 

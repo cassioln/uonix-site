@@ -91,8 +91,9 @@ $admin  = array( 'edit_pages', 'manage_options' );
 $adopt  = 'https://dash.goadopt.io/org/uonix/disclaimers';
 
 // Loader.
-$loader = (string) file_get_contents( $raiz . '/mu-plugins/uonix-admin/module.php' );
-uox_pl_assert( false !== strpos( $loader, "'65-admin-editor-politicas-lgpd.php'" ), 'module.php deve carregar 65-admin-editor-politicas-lgpd.php' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( $raiz . '/mu-plugins/uonix-admin/module.php' );
+uox_pl_assert( in_array( '65-admin-editor-politicas-lgpd.php', $carregados, true ), 'module.php deve carregar 65-admin-editor-politicas-lgpd.php' );
 
 // Ids conferidos pelo endereço público: 3 privacidade, 11343 cookies, 11344 termos.
 uox_pl_assert(

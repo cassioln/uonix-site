@@ -24,11 +24,12 @@ function mobile_indicator_assert(bool $condition, string $message): void {
 
 mobile_indicator_assert(is_file($module_path), 'Módulo global do indicador mobile existe');
 $module = is_file($module_path) ? (string) file_get_contents($module_path) : '';
-$loader = is_file($loader_path) ? (string) file_get_contents($loader_path) : '';
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = is_file($loader_path) ? uox_loader_arquivos_do_modulo($loader_path) : array();
 $workflow = is_file($workflow_path) ? (string) file_get_contents($workflow_path) : '';
 
 mobile_indicator_assert(
-    false !== strpos($loader, "'49-mobile-menu-indicator.php'"),
+    in_array('49-mobile-menu-indicator.php', $carregados, true),
     'Loader de navegação registra o módulo do indicador mobile'
 );
 mobile_indicator_assert(

@@ -52,9 +52,11 @@ $GLOBALS['uox_test_users'] = array(
 );
 
 // Loader: 66 entra, 60 (seções do rodapé no Personalizador) saiu.
-$loader = (string) file_get_contents( $raiz . '/mu-plugins/uonix-admin/module.php' );
-uox_sp_assert( false !== strpos( $loader, "'66-admin-editor-sem-personalizador.php'" ), 'module.php deve carregar 66-admin-editor-sem-personalizador.php' );
-uox_sp_assert( false === strpos( $loader, '60-admin-customizer-widgets-rodape.php' ), 'module.php não deve mais carregar o 60' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( $raiz . '/mu-plugins/uonix-admin/module.php' );
+uox_sp_assert( in_array( '66-admin-editor-sem-personalizador.php', $carregados, true ), 'module.php deve carregar 66-admin-editor-sem-personalizador.php' );
+// O 60 foi substituído pelo 66 e o arquivo não existe mais: a lista só o traria de volta se ele reaparecesse no disco E no loader.
+uox_sp_assert( ! in_array( '60-admin-customizer-widgets-rodape.php', $carregados, true ), 'module.php não deve mais carregar o 60' );
 uox_sp_assert( ! file_exists( $raiz . '/mu-plugins/uonix-admin/60-admin-customizer-widgets-rodape.php' ), 'arquivo 60 deveria ter sido removido' );
 
 $registrado = $GLOBALS['uox_test_filters']['map_meta_cap'][0] ?? null;

@@ -201,9 +201,9 @@ function uonix_login_apply_authenticate_chain( $username, $password, $resolved_u
 }
 
 /* O loader precisa incluir o módulo, ou todo o resto do teste seria órfão. */
-$admin_module_source = file_get_contents( $admin_module_file );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
 uonix_login_assert(
-	false !== strpos( $admin_module_source, "'51-login-turnstile.php'" ),
+	in_array( '51-login-turnstile.php', uox_loader_arquivos_do_modulo( $admin_module_file ), true ),
 	'uonix-admin/module.php carrega o módulo de Turnstile do login'
 );
 

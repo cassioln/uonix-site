@@ -108,8 +108,9 @@ $registered = array_column( $GLOBALS['uonix_test_filters'], 0 );
 uonix_rest_assert_same( true, in_array( 'rest_endpoints', $registered, true ), 'registra o filtro rest_endpoints' );
 
 // E o carregador do módulo precisa incluir o arquivo, senão nada disso roda.
-$module = file_get_contents( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-security/module.php' );
-uonix_rest_assert_same( true, false !== strpos( $module, '07-rest-user-enumeration.php' ), 'module.php carrega o arquivo novo' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-security/module.php' );
+uonix_rest_assert_same( true, in_array( '07-rest-user-enumeration.php', $carregados, true ), 'module.php carrega o arquivo novo' );
 
 if ( 0 !== $failures ) {
 	fwrite( STDERR, sprintf( "%d falha(s).\n", $failures ) );

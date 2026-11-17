@@ -103,8 +103,9 @@ $editor = array( 'edit_posts', 'edit_pages', 'edit_theme_options' );
 $admin  = array( 'edit_posts', 'edit_pages', 'edit_theme_options', 'manage_options' );
 
 // Loader.
-$loader = (string) file_get_contents( $raiz . '/mu-plugins/uonix-admin/module.php' );
-uox_mk_assert( false !== strpos( $loader, "'68-admin-editor-marketing.php'" ), 'module.php deve carregar 68-admin-editor-marketing.php' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( $raiz . '/mu-plugins/uonix-admin/module.php' );
+uox_mk_assert( in_array( '68-admin-editor-marketing.php', $carregados, true ), 'module.php deve carregar 68-admin-editor-marketing.php' );
 
 // Administrador não ganha o menu.
 $GLOBALS['uox_test_caps'] = $admin;

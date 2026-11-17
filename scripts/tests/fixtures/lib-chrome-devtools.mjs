@@ -7,6 +7,15 @@
  * perfil tolerante ao ENOTEMPTY do runner Linux. Sem Chrome, quem chama falha;
  * não pula. CHROME_BIN aponta para um Chrome fora dos caminhos conhecidos.
  *
+ * Sinais (#471): o Chrome sobe em grupo de processos próprio (`detached`), então o Ctrl-C do
+ * terminal (SIGINT) e o SIGTERM de um runner que mata o job por tempo não o alcançam. Enquanto
+ * algum Chrome aberto por esta lib estiver vivo, SIGINT e SIGTERM encerram TODOS eles (mata o
+ * grupo, apaga o diretório temporário) e terminam o processo com 130 e 143. O tratamento sai
+ * quando o último Chrome fecha em `fechar()`. Quem registrar um tratamento próprio desses sinais
+ * depois de abrir o Chrome não chega a rodá-lo: o da lib termina o processo antes. A limpeza do
+ * chamador entra em `process.on('exit')`, que `process.exit` ainda executa. SIGHUP (terminal
+ * fechado) não é tratado: só SIGINT e SIGTERM, que são os que o issue #471 mediu e reproduziu.
+ *
  * Não é teste (prefixo lib-): o guarda de cobertura do CI não o exige.
  */
 
@@ -84,6 +93,37 @@ class DevTools {
   }
 }
 
+// Encerramentos síncronos dos Chromes vivos deste processo, e os tratadores de sinal que os
+// executam. Um registro só, e não um tratador por abertura: com dois Chromes, o primeiro tratador
+// chamaria `process.exit` e o segundo nunca rodaria, deixando aquele Chrome órfão (#471).
+const CODIGOS_DE_SINAL = { SIGINT: 130, SIGTERM: 143 };
+const encerramentosAtivos = new Set();
+const tratadoresDeSinal = new Map();
+
+function aoReceberSinal(sinal) {
+  for (const encerrar of encerramentosAtivos) encerrar();
+  process.exit(CODIGOS_DE_SINAL[sinal]);
+}
+
+function registrarEncerramento(encerrar) {
+  encerramentosAtivos.add(encerrar);
+  if (tratadoresDeSinal.size === 0) {
+    for (const sinal of Object.keys(CODIGOS_DE_SINAL)) {
+      const tratador = () => aoReceberSinal(sinal);
+      process.on(sinal, tratador);
+      tratadoresDeSinal.set(sinal, tratador);
+    }
+  }
+}
+
+function removerEncerramento(encerrar) {
+  encerramentosAtivos.delete(encerrar);
+  if (encerramentosAtivos.size === 0) {
+    for (const [sinal, tratador] of tratadoresDeSinal) process.removeListener(sinal, tratador);
+    tratadoresDeSinal.clear();
+  }
+}
+
 /**
  * Abre o Chrome e devolve a página controlada.
  *
@@ -141,10 +181,13 @@ export async function abrirChrome(prefixo, aoIniciar = () => {}) {
     }
   };
 
-  aoIniciar(() => {
+  const encerrarSincrono = () => {
     matar();
     limparTmp();
-  });
+  };
+
+  aoIniciar(encerrarSincrono);
+  registrarEncerramento(encerrarSincrono);
 
   let ws;
   let enderecoNavegador;
@@ -172,6 +215,7 @@ export async function abrirChrome(prefixo, aoIniciar = () => {}) {
       await aguardarSaidaChrome(chrome, matar);
     }
     limparTmp();
+    removerEncerramento(encerrarSincrono);
   };
 
   try {

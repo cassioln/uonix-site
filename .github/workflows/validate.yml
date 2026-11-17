@@ -70,6 +70,10 @@ jobs:
       - name: Test REST user enumeration
         run: php scripts/tests/test-rest-user-enumeration.php
 
+      - name: Test every module file is loaded by its module.php
+        # Executa cada module.php (não lê o texto): uma linha comentada ou um arquivo esquecido reprova (#435).
+        run: php scripts/tests/test-loader-modulos-completo.php
+
       - name: Test analytics policy
         run: php scripts/tests/test-analytics-policy.php
 
@@ -560,6 +564,11 @@ jobs:
         # Mesmo modelo: HTML real do PHP (classes e script do 67), clique de mouse
         # do Chrome e posição do submenu medida no layout (issue #392).
         run: node scripts/tests/test-admin-editor-menus-navegador.mjs
+
+      - name: Test Chrome is not orphaned by SIGINT or SIGTERM
+        # Abre o Chrome pela lib num node filho e o mata com o sinal: não pode sobrar
+        # processo nem diretório temporário (issue #471).
+        run: node scripts/tests/test-chrome-devtools-sinais.mjs
 
       - name: Test quote journey contracts and browser fixture
         # Fixture local, sem WordPress, Mailpit, Podman ou dados de produção.
