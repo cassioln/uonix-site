@@ -756,6 +756,67 @@ uox_assert( false !== strpos( $html_ff, 'Mostrando a lista de 02/10.' ), '#386: 
 $html_ct = uox_render_radar( $estado_radar( array( uox_dash_radar_cand( 'cota fuso', array( 'status' => 'quota_exhausted', 'quota_source' => 'quota_id_daily', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ) ) ), array(), UOX_ANTES_DA_RENOVACAO );
 uox_assert( false !== strpos( $html_ct, 'A cota renova por volta de 03/10 21:00.' ) && false === strpos( $html_ct, '(UTC)' ), '#386: a renovação da cota (00:00 UTC) aparece como 21:00 do dia anterior, sem "(UTC)"; obteve ' . substr( $html_ct, (int) strpos( $html_ct, 'A cota renova' ), 60 ) );
 
+// #456: o ramo SEM `wp_date` do 56. A suíte define `wp_date` no escopo global, então o fallback só se alcança em
+// subprocesso, com o 56 carregado sozinho (ele só declara funções, todas guardadas por `function_exists`). Sem o fuso
+// do site, a hora cai em UTC e diz "(UTC)"; quem formata só a data passa `$com_fuso` falso e não leva o rótulo.
+$sub_sem_wp_date = static function ( $chamadas ) {
+	$codigo = 'define( "ABSPATH", "/" ); require getenv( "UOX_F" ); echo json_encode( array_map( static function ( $c ) { return uonix_intelligence_radar_time( ...$c ); }, json_decode( getenv( "UOX_C" ), true ) ) );';
+	// O PHP do subprocesso roda com outro fuso (`date.timezone`): se o fallback usasse `date()` em vez de `gmdate()`, a
+	// hora sairia em São Paulo e o rótulo "(UTC)" mentiria. Com `-n` o padrão seria UTC, e os dois seriam iguais.
+	$proc   = proc_open( array( PHP_BINARY, '-n', '-d', 'date.timezone=America/Sao_Paulo', '-r', $codigo ), array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes, null, array( 'UOX_F' => dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php', 'UOX_C' => (string) json_encode( $chamadas ), 'PATH' => (string) getenv( 'PATH' ) ) );
+	$saida  = is_resource( $proc ) ? stream_get_contents( $pipes[1] ) : '';
+	if ( is_resource( $proc ) ) {
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		proc_close( $proc );
+	}
+
+	return json_decode( (string) $saida, true );
+};
+// 2026-10-04T00:00:15Z: a hora e a data em UTC.
+$sem_fuso = $sub_sem_wp_date( array(
+	array( 1791072015, 'd/m H:i' ),
+	array( 1791072015, 'd/m/Y H:i' ),
+	array( 1791072015, 'd/m', false ),
+	array( 1791072015, 'd/m H:i', false ),
+	array( 1791072015, 'd/m', true ),
+) );
+uox_assert( array( '04/10 00:00 (UTC)', '04/10/2026 00:00 (UTC)', '04/10', '04/10 00:00', '04/10 (UTC)' ) === $sem_fuso, '#456: sem wp_date, a hora cai em UTC e diz "(UTC)"; a data sem hora (`$com_fuso` falso) não leva o rótulo, e `$com_fuso` é o que decide, não o formato; obteve ' . var_export( $sem_fuso, true ) );
+// O contraste: com `wp_date` (o escopo desta suíte), nunca há rótulo, com ou sem `$com_fuso`.
+uox_assert( '03/10 21:00' === uonix_intelligence_radar_time( 1791072015, 'd/m H:i' ) && '03/10' === uonix_intelligence_radar_time( 1791072015, 'd/m', false ) && '03/10' === uonix_intelligence_radar_time( 1791072015, 'd/m', true ), '#456: com `wp_date`, o fuso do site vale e nenhum rótulo aparece' );
+
+// #457: são dois helpers de fuso de propósito (o 56 trata o 54 como opcional), então o que os mantém iguais é um teste, e
+// não um comentário. Os dois rodam no MESMO processo, com os módulos reais, e a hora tem de sair igual: com `wp_date` em
+// dois fusos do site e sem `wp_date` (o fallback em UTC, com o rótulo). A diferença documentada é só o `$com_fuso` do 56.
+$sub_irmaos = static function ( $com_wp_date, $fuso ) {
+	$codigo = 'define( "ABSPATH", "/" ); '
+		. ( $com_wp_date ? 'function wp_date( $f, $t = null ) { return ( new DateTimeImmutable( "@" . (int) $t ) )->setTimezone( new DateTimeZone( getenv( "UOX_TZ" ) ) )->format( $f ); } ' : '' )
+		. 'function add_action( ...$a ) {} function add_filter( ...$a ) {} require getenv( "UOX_54" ); require getenv( "UOX_56" ); '
+		. '$s = array(); foreach ( array( 1791072015, 1791028800, 1767225600, 1782864000 ) as $t ) { foreach ( array( "d/m H:i", "d/m/Y H:i", "H:i" ) as $f ) { $s[] = array( uonix_intelligence_site_time( $t, $f ), uonix_intelligence_radar_time( $t, $f ) ); } } echo json_encode( $s );';
+	$raiz = dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/';
+	$proc = proc_open( array( PHP_BINARY, '-n', '-d', 'date.timezone=America/Sao_Paulo', '-r', $codigo ), array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes, null, array( 'UOX_TZ' => $fuso, 'UOX_54' => $raiz . '54-admin-intelligence-ai.php', 'UOX_56' => $raiz . '56-admin-intelligence-dashboard.php', 'PATH' => (string) getenv( 'PATH' ) ) );
+	$saida = is_resource( $proc ) ? stream_get_contents( $pipes[1] ) : '';
+	if ( is_resource( $proc ) ) {
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		proc_close( $proc );
+	}
+
+	return json_decode( (string) $saida, true );
+};
+foreach ( array( 'wp_date em São Paulo' => array( true, 'America/Sao_Paulo' ), 'wp_date em UTC' => array( true, 'UTC' ), 'sem wp_date (UTC com rótulo)' => array( false, 'UTC' ) ) as $rotulo_i => $cfg ) {
+	$pares_i = $sub_irmaos( $cfg[0], $cfg[1] );
+	$iguais  = is_array( $pares_i ) && 12 === count( $pares_i );
+	foreach ( (array) $pares_i as $par_i ) {
+		$iguais = $iguais && is_array( $par_i ) && 2 === count( $par_i ) && is_string( $par_i[0] ) && '' !== $par_i[0] && $par_i[0] === $par_i[1];
+	}
+	uox_assert( $iguais, "#457: os dois helpers de fuso dizem a mesma coisa ({$rotulo_i}); obteve " . var_export( $pares_i, true ) );
+}
+$exemplo_i = $sub_irmaos( true, 'America/Sao_Paulo' );
+uox_assert( is_array( $exemplo_i ) && '03/10 21:00' === ( $exemplo_i[0][0] ?? null ) && '03/10/2026 21:00' === ( $exemplo_i[1][0] ?? null ), '#457: o teste dos irmãos mede de verdade (00:00:15 UTC de 04/10 é 21:00 de 03/10 em São Paulo); obteve ' . var_export( $exemplo_i[0] ?? null, true ) );
+$exemplo_u = $sub_irmaos( false, 'UTC' );
+uox_assert( is_array( $exemplo_u ) && '04/10 00:00 (UTC)' === ( $exemplo_u[0][0] ?? null ) && '04/10 00:00 (UTC)' === ( $exemplo_u[0][1] ?? null ), '#457: sem wp_date, os dois dizem UTC com o rótulo; obteve ' . var_export( $exemplo_u[0] ?? null, true ) );
+
 // #379: o aviso de restaurar não promete o que a lista cheia não entrega.
 $cheia = array();
 for ( $i = 0; $i < 11; $i++ ) {

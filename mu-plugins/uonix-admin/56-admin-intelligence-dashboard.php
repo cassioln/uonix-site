@@ -298,6 +298,16 @@ if ( ! function_exists( 'uonix_intelligence_radar_time' ) ) {
 	 *
 	 * Sem `wp_date` o fuso do site não é conhecido: cai em UTC e, se o formato traz hora, diz "(UTC)".
 	 * Só a data (`$com_fuso` falso) nunca leva o rótulo.
+	 *
+	 * É irmão de `uonix_intelligence_site_time()` (54), e os dois existem de propósito (#457): este módulo
+	 * trata o 54 como opcional (toda chamada a ele é guardada por `function_exists`), então chamar o
+	 * helper de lá daria ao painel uma dependência dura. O que os mantém iguais é o teste
+	 * `scripts/tests/test-admin-intelligence-dashboard.php`, que carrega os dois no mesmo processo e
+	 * compara a saída. A única diferença é o `$com_fuso`.
+	 *
+	 * @param int  $timestamp Instante.
+	 * @param string $formato Formato de `date()`.
+	 * @param bool $com_fuso  Falso: sem `wp_date`, a hora cai em UTC mas não leva o rótulo "(UTC)".
 	 */
 	function uonix_intelligence_radar_time( $timestamp, $formato, $com_fuso = true ) {
 		if ( function_exists( 'wp_date' ) ) {
