@@ -730,9 +730,14 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 						$parada['retry_at'] = $ai['retry_at'];
 					}
 				} elseif ( in_array( $ai['status'], array( 'unavailable', 'model_missing' ), true ) ) {
-					++$seguidas;
-					if ( $seguidas >= $teto ) {
-						$parada = array( 'reason' => 'failures' );
+					// Timeout (`cURL error 28`) é transitório: não conta na sequência que para o
+					// cron, porque dois deles seguidos adiavam o dia inteiro (#404, medido em 2026-11-17).
+					$timeout = isset( $ai['error'] ) && is_string( $ai['error'] ) && false !== strpos( $ai['error'], 'cURL error 28' );
+					if ( ! $timeout ) {
+						++$seguidas;
+						if ( $seguidas >= $teto ) {
+							$parada = array( 'reason' => 'failures' );
+						}
 					}
 				} else {
 					$seguidas = 0;

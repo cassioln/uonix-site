@@ -181,7 +181,7 @@ uox_ai_assert( 'chave-de-teste' === uonix_intelligence_ai_api_key(), 'A chave é
 uox_ai_assert( 'gemini-3.8-flash' === uonix_intelligence_ai_model(), 'Sem UONIX_GEMINI_MODEL, o modelo é o fixo gemini-3.8-flash' );
 uox_ai_assert( 'uonix_intelligence_ai_suggestions' === uonix_intelligence_ai_option() && 'uonix_intelligence_ai_daily' === uonix_intelligence_ai_hook(), 'Nomes da opção e do hook seguem o contrato' );
 $lim = uonix_intelligence_ai_limits();
-uox_ai_assert( 60 === $lim['title'] && 155 === $lim['description'] && 5 === $lim['per_run'] && 15 === $lim['timeout'] && 1024 === $lim['max_output_tokens'], 'Limites seguem a especificação' );
+uox_ai_assert( 60 === $lim['title'] && 155 === $lim['description'] && 5 === $lim['per_run'] && 30 === $lim['timeout'] && 1024 === $lim['max_output_tokens'], 'Limites seguem a especificação' );
 
 // ---------------------------------------------------------------------------
 // 2. Página líder → post publicado (foco de revisão 1: 404, 301 e rascunho viram 0).
@@ -273,7 +273,7 @@ $pedido = $GLOBALS['uox_pedidos'][0] ?? array();
 uox_ai_assert( 'ok' === $r['status'] && $ok['title'] === $r['suggestion']['title'], 'Resposta 200 válida vira ok' );
 uox_ai_assert( 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent' === ( $pedido['url'] ?? '' ), 'URL do modelo fixo, sem a chave' );
 uox_ai_assert( false === strpos( $pedido['url'] ?? '', 'chave-de-teste' ) && 'chave-de-teste' === ( $pedido['args']['headers']['x-goog-api-key'] ?? '' ), 'A chave vai no cabeçalho x-goog-api-key, nunca na URL' );
-uox_ai_assert( 15 === ( $pedido['args']['timeout'] ?? 0 ), 'Timeout de 15 s' );
+uox_ai_assert( 30 === ( $pedido['args']['timeout'] ?? 0 ), 'Timeout de 30 s: medido em produção em 2026-11-17, as falhas eram todas cURL error 28 a 15 s (#404)' );
 
 $casos_http = array(
 	'503 e depois 200 (uma nova tentativa)' => array( array( uox_http( 503 ), uox_gemini( $ok ) ), 'ok', 2 ),
@@ -429,7 +429,7 @@ $GLOBALS['uox_http']    = array( uox_gemini( 'x' ) );
 $GLOBALS['uox_pedidos'] = array();
 uonix_intelligence_ai_generate( $corpo_livre, 'gemini-9-flash', 0 );
 $pg = $GLOBALS['uox_pedidos'][0] ?? array();
-uox_ai_assert( 'https://generativelanguage.googleapis.com/v1beta/models/gemini-9-flash:generateContent' === ( $pg['url'] ?? '' ) && 'chave-de-teste' === ( $pg['args']['headers']['x-goog-api-key'] ?? '' ) && 15 === ( $pg['args']['timeout'] ?? 0 ), 'generate usa o modelo recebido, a chave no cabeçalho e o timeout de 15 s' );
+uox_ai_assert( 'https://generativelanguage.googleapis.com/v1beta/models/gemini-9-flash:generateContent' === ( $pg['url'] ?? '' ) && 'chave-de-teste' === ( $pg['args']['headers']['x-goog-api-key'] ?? '' ) && 30 === ( $pg['args']['timeout'] ?? 0 ), 'generate usa o modelo recebido, a chave no cabeçalho e o timeout de 30 s' );
 $casos_generate = array(
 	'503 e depois 200'   => array( array( uox_http( 503 ), uox_gemini( 'ok' ) ), 'ok', 2 ),
 	'429 duas vezes'     => array( array( uox_http( 429 ), uox_http( 429 ) ), 'unavailable', 2 ),

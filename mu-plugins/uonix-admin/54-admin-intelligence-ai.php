@@ -42,7 +42,10 @@ if ( ! function_exists( 'uonix_intelligence_ai_limits' ) ) {
 		// `quota_wait`: `retryDelay` de 429, em segundos, acima do qual a cota não volta nesta
 		// execução. 60 s é o tamanho de uma janela por minuto; a cota por minuto não foi medida (#384).
 		// `failure_streak`: falhas seguidas que param o cron (#384).
-		return array( 'title' => 60, 'description' => 155, 'per_run' => 5, 'timeout' => 15, 'max_output_tokens' => 1024, 'max_hops' => 3, 'head_max' => 10, 'quota_wait' => 60, 'failure_streak' => 2 );
+		// `timeout` em 30 s: medido em produção em 2026-11-17, as falhas gravadas eram todas
+		// `cURL error 28` a 15 s. Três chamadas cabem no `ai_budget` do Radar (150 s) com folga
+		// até o `timeout 290` do crontab: 2 × 30 s + 2 s de pausa por candidata, pior caso 186 s.
+		return array( 'title' => 60, 'description' => 155, 'per_run' => 5, 'timeout' => 30, 'max_output_tokens' => 1024, 'max_hops' => 3, 'head_max' => 10, 'quota_wait' => 60, 'failure_streak' => 2 );
 	}
 }
 
