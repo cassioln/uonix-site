@@ -12,8 +12,10 @@
  * algum Chrome aberto por esta lib estiver vivo, SIGINT e SIGTERM encerram TODOS eles (mata o
  * grupo, apaga o diretório temporário) e terminam o processo com 130 e 143. O tratamento sai
  * quando o último Chrome fecha em `fechar()`. Quem registrar um tratamento próprio desses sinais
- * depois de abrir o Chrome não chega a rodá-lo: o da lib termina o processo antes. A limpeza do
- * chamador entra em `process.on('exit')`, que `process.exit` ainda executa. SIGHUP (terminal
+ * depois de abrir o Chrome não chega a rodá-lo: o da lib termina o processo antes. O INVERSO também vale: um tratador do
+ * chamador registrado ANTES de abrir o Chrome, que termine o processo, roda primeiro, e o da lib não chega a encerrar o Chrome
+ * (quem faz isso deve usar o `encerrarSincrono` que o `aoIniciar` recebe). A limpeza do chamador entra em `process.on('exit')`,
+ * que `process.exit` ainda executa. SIGHUP (terminal
  * fechado) não é tratado: só SIGINT e SIGTERM, que são os que o issue #471 mediu e reproduziu.
  *
  * Não é teste (prefixo lib-): o guarda de cobertura do CI não o exige.
@@ -34,6 +36,42 @@ export function acharChrome() {
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   ].filter(Boolean);
   return candidatos.find((candidato) => existsSync(candidato));
+}
+
+const ERROS_DE_CORRIDA = new Set(['ENOTEMPTY', 'EBUSY', 'EEXIST', 'EPERM']);
+
+function dormirSincrono(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Remove um diretório que o Chrome pode ainda estar gravando, repetindo a remoção POR INTEIRO.
+ *
+ * O `rmSync(..., { maxRetries })` do Node só repete o `rmdir`, e nunca relista o diretório. Um arquivo criado DEPOIS da listagem
+ * (o `Local State` que o Chrome ainda grava ao morrer, quando o sinal chega enquanto ele sobe) faz o `rmdir` falhar com ENOTEMPTY em
+ * todas as repetições. Medido em 2026-11-17, em 50 sinais durante a subida do Chrome: 3 falhas na versão anterior desta lib e 5 na
+ * seguinte, cada uma esperando ~11 s dentro do tratador de sinal e deixando `perfil/Local State` para trás. Aqui cada passada refaz a
+ * listagem inteira, e só os erros de corrida (ENOTEMPTY, EBUSY, EEXIST, EPERM) são repetidos: um EACCES não passa sozinho.
+ * Depois da mudança, em 3.120 sinais durante a subida do Chrome sobraram 2 diretórios (0,06%), sem nenhum processo vivo, e um deles
+ * era só o esqueleto vazio `perfil/`, que não consegui reproduzir. A garantia é "não deixa processo, e raramente um diretório".
+ *
+ * @param {string} diretorio
+ * @param {{passadas?: number, intervaloMs?: number, remover?: Function, dormir?: Function}} [opcoes]
+ * @returns {{ok: boolean, passadas: number, erro?: Error}}
+ */
+export function removerDiretorio(diretorio, { passadas = 100, intervaloMs = 50, remover = rmSync, dormir = dormirSincrono } = {}) {
+  let ultimo;
+  for (let passada = 1; passada <= passadas; passada += 1) {
+    try {
+      remover(diretorio, { recursive: true, force: true });
+      return { ok: true, passadas: passada };
+    } catch (erro) {
+      ultimo = erro;
+      if (!ERROS_DE_CORRIDA.has(erro && erro.code)) return { ok: false, passadas: passada, erro };
+      if (passada < passadas) dormir(intervaloMs);
+    }
+  }
+  return { ok: false, passadas, erro: ultimo };
 }
 
 // Nunca liberar o chamador para limpar dados enquanto o processo ainda vive.
@@ -172,12 +210,12 @@ export async function abrirChrome(prefixo, aoIniciar = () => {}) {
       chrome.kill('SIGKILL');
     }
   };
-  // Filhos do Chrome ainda podem estar soltando o perfil (ENOTEMPTY no runner).
+  // Filhos do Chrome ainda podem estar soltando o perfil (ENOTEMPTY no runner). A remoção é repetida por inteiro, relistando
+  // (ver `removerDiretorio`): no máximo 100 passadas de 50 ms, cerca de 5 s no pior caso, em vez dos ~11 s do `maxRetries`.
   const limparTmp = () => {
-    try {
-      rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-    } catch (erro) {
-      console.warn(`AVISO: não foi possível remover ${tmp}: ${erro.code || erro.message}`);
+    const resultado = removerDiretorio(tmp);
+    if (!resultado.ok) {
+      console.warn(`AVISO: não foi possível remover ${tmp}: ${resultado.erro.code || resultado.erro.message}`);
     }
   };
 
@@ -186,7 +224,8 @@ export async function abrirChrome(prefixo, aoIniciar = () => {}) {
     limparTmp();
   };
 
-  aoIniciar(encerrarSincrono);
+  // O registro vem ANTES do `aoIniciar` do chamador, que roda dentro do `try` abaixo: se ele lançar, o `catch` chama `fechar()`,
+  // que encerra o Chrome já lançado e remove o registro (antes, um `aoIniciar` que lançava deixava o Chrome órfão).
   registrarEncerramento(encerrarSincrono);
 
   let ws;
@@ -219,6 +258,7 @@ export async function abrirChrome(prefixo, aoIniciar = () => {}) {
   };
 
   try {
+    aoIniciar(encerrarSincrono);
     enderecoNavegador = await new Promise((resolver, rejeitar) => {
       let saida = '';
       chrome.stderr.on('data', (pedaco) => {

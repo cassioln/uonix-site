@@ -66,6 +66,29 @@ function uox_lc_orfaos( $dir_modulo, array $carregados ) {
 	return array_values( array_diff( $no_disco, $carregados ) );
 }
 
+/**
+ * Órfãos de um módulo depois de descontar as exceções declaradas.
+ *
+ * @param string   $dir_modulo Diretório do módulo.
+ * @param string[] $carregados Lista devolvida pelo loader executado.
+ * @param array    $excecoes   Arquivos que ficam fora de propósito, com o motivo.
+ * @return string[]
+ */
+function uox_lc_orfaos_com_excecoes( $dir_modulo, array $carregados, array $excecoes ) {
+	return array_values( array_diff( uox_lc_orfaos( $dir_modulo, $carregados ), array_keys( $excecoes ) ) );
+}
+
+/**
+ * Exceções que o loader JÁ carrega: a exceção deixou de ser necessária e precisa sair da lista.
+ *
+ * @param string[] $carregados Lista devolvida pelo loader executado.
+ * @param array    $excecoes   Arquivos declarados como fora do loader.
+ * @return string[]
+ */
+function uox_lc_excecoes_ja_carregadas( array $carregados, array $excecoes ) {
+	return array_values( array_intersect( array_keys( $excecoes ), $carregados ) );
+}
+
 // ---------------------------------------------------------------------------
 // 1. Todo NN-*.php de cada módulo é carregado pelo module.php EXECUTADO.
 // ---------------------------------------------------------------------------
@@ -91,14 +114,19 @@ foreach ( $modulos as $module_php ) {
 		continue;
 	}
 
-	$orfaos = uox_lc_orfaos( $dir, $carregados );
-	$orfaos = array_values( array_diff( $orfaos, array_keys( $excecoes[ $nome ] ?? array() ) ) );
+	// Entrada pendurada: o loader lista um arquivo que não existe (ou não é legível). O loader real só registra
+	// `error_log` e segue, então em produção vira ruído por requisição, e o gravador do helper o descarta: sem esta
+	// checagem, recolocar uma entrada de um arquivo removido (o 60, por exemplo) passava sem ninguém ver (#483, revisão).
+	$ausentes = uox_loader_entradas_ausentes();
+	uox_lc_assert( array() === $ausentes, "{$nome}/module.php lista arquivo que não existe: " . implode( ', ', $ausentes ) );
+
+	$orfaos = uox_lc_orfaos_com_excecoes( $dir, $carregados, $excecoes[ $nome ] ?? array() );
 	uox_lc_assert( array() === $orfaos, "{$nome}/module.php não carrega: " . implode( ', ', $orfaos ) . ' (linha comentada ou esquecida?)' );
 
 	uox_lc_assert( count( $carregados ) === count( array_unique( $carregados ) ), "{$nome}/module.php lista algum arquivo duas vezes" );
 
-	foreach ( array_keys( $excecoes[ $nome ] ?? array() ) as $excecao ) {
-		uox_lc_assert( ! in_array( $excecao, $carregados, true ), "exceção {$nome}/{$excecao} já é carregada pelo loader: remova da lista de exceções" );
+	foreach ( uox_lc_excecoes_ja_carregadas( $carregados, $excecoes[ $nome ] ?? array() ) as $excecao ) {
+		uox_lc_assert( false, "exceção {$nome}/{$excecao} já é carregada pelo loader: remova da lista de exceções" );
 	}
 }
 
@@ -176,6 +204,30 @@ uox_lc_assert(
 	array( 'test-texto-direto.php', 'test-texto-multilinha.php', 'test-texto-variavel.php' ) === uox_lc_leitores_de_texto( $tmp . '/testes' ),
 	'controle: o detector acusa a leitura direta, por variável e multilinha, e não acusa o teste executado, a leitura de outro arquivo nem o caminho entregue ao helper'
 );
+
+// Entrada pendurada: o helper a grava à parte, e o guarda a acusa. O loader completo e o que só tem arquivos reais não acusam.
+file_put_contents( $tmp . '/mod/module-fantasma.php', "<?php\nuonix_mu_require_files( __DIR__, array( '01-a.php', '99-nao-existe.php' ), 'x' );\n" );
+uox_loader_arquivos_do_modulo( $tmp . '/mod/module-ok.php' );
+uox_lc_assert( array() === uox_loader_entradas_ausentes(), 'controle: o loader completo não tem entrada pendurada' );
+$com_fantasma = uox_loader_arquivos_do_modulo( $tmp . '/mod/module-fantasma.php' );
+uox_lc_assert( array( '01-a.php' ) === $com_fantasma, 'controle: a lista carregada só traz o arquivo legível' );
+uox_lc_assert( array( '99-nao-existe.php' ) === uox_loader_entradas_ausentes(), 'controle: a entrada pendurada é devolvida à parte' );
+// A lista de ausentes é zerada a cada execução: a de um módulo não vaza para o seguinte.
+uox_loader_arquivos_do_modulo( $tmp . '/mod/module-ok.php' );
+uox_lc_assert( array() === uox_loader_entradas_ausentes(), 'controle: as ausentes de um module.php não vazam para o próximo' );
+
+// Duplicata: o mesmo arquivo duas vezes no loader. É inócua em runtime (`require_once`), mas é sinal de linha repetida por engano.
+file_put_contents( $tmp . '/mod/module-duplicado.php', "<?php\nuonix_mu_require_files( __DIR__, array( '01-a.php', '02-b.php', '01-a.php' ), 'x' );\n" );
+$dup = uox_loader_arquivos_do_modulo( $tmp . '/mod/module-duplicado.php' );
+uox_lc_assert( count( $dup ) !== count( array_unique( $dup ) ), 'controle: a lista com duplicata tem repetição (é o que a asserção de duplicata do guarda enxerga)' );
+uox_lc_assert( count( $ok ) === count( array_unique( $ok ) ), 'controle: a lista sem duplicata não tem repetição' );
+
+// Exceção declarada: um arquivo que existe, tem nome NN-*.php e DE PROPÓSITO fica fora do loader não é órfão; e uma exceção que o
+// loader JÁ carrega reprova (senão ela apodrece em silêncio). Os dois lados, sobre um módulo sintético.
+$excecao_fora   = uox_lc_orfaos_com_excecoes( $tmp . '/mod', $comentado, array( '02-b.php' => 'fica fora de propósito' ) );
+$excecao_dentro = uox_lc_excecoes_ja_carregadas( $ok, array( '02-b.php' => 'fica fora de propósito' ) );
+uox_lc_assert( array() === $excecao_fora, 'controle: a exceção declarada e fora do loader não é órfã' );
+uox_lc_assert( array( '02-b.php' ) === $excecao_dentro, 'controle: a exceção que o loader já carrega é acusada' );
 
 array_map( 'unlink', glob( $tmp . '/mod/*.php' ) ?: array() );
 array_map( 'unlink', glob( $tmp . '/testes/*.php' ) ?: array() );
