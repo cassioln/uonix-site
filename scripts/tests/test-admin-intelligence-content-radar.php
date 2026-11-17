@@ -205,6 +205,19 @@ uox_rd_assert( 106 === $por['ancoragem predial']['impressions'] && 59.1 === $por
 uox_rd_assert( array( 'key', 'query', 'impressions', 'clicks', 'position', 'page_path' ) === array_keys( $sel['visible'][0] ), 'Candidata tem só os campos do contrato' );
 uox_rd_assert( false === strpos( serialize( $sel ), 'joao@example.com' ) && false === strpos( serialize( $sel ), '99999' ) && false === strpos( serialize( $sel ), '<b>' ), 'E-mail, telefone e HTML de consulta nunca chegam à seleção (#253, foco de revisão 1)' );
 uox_rd_assert( array() === $sel['dismissed'], 'Sem descartes, nada em dismissed' );
+// A checagem de marcação do Radar é MAIS ESTRITA que a do 53 e NÃO é redundante (revisão do PR #485): `<` e `>` soltos passam no 53,
+// que só recusa `<` seguido de letra, `/`, `!` ou `?`, e saem aqui. Quem apagar a do Radar achando que o 53 já cobre deixa entrar
+// `carga > 12 kn` como candidata.
+foreach ( array( 'carga > 12 kn ancoragem', 'resistência a < 5 kn ancoragem', 'viga a < b e c > d ancoragem' ) as $solta ) {
+	uox_rd_assert( $solta === uonix_analytics_metrics_sanitize_query( $solta ), "#382: o 53 deixa passar `<`/`>` solto: {$solta}" );
+}
+$estrita = uonix_intelligence_radar_select( array(
+	uox_rd_linha( 'carga > 12 kn ancoragem', 20, 40.0 ),
+	uox_rd_linha( 'resistência a < 5 kn ancoragem', 20, 40.0 ),
+	uox_rd_linha( 'viga a < b e c > d ancoragem', 20, 40.0 ),
+	uox_rd_linha( 'ancoragem predial comum', 20, 40.0 ),
+), array() );
+uox_rd_assert( array( 'ancoragem predial comum' ) === array_column( $estrita['visible'], 'query' ), '#382: a checagem do Radar recusa `<` e `>` soltos que o 53 deixa passar (não é redundante); obteve ' . var_export( array_column( $estrita['visible'], 'query' ), true ) );
 
 $dup = uonix_intelligence_radar_select( array( uox_rd_linha( 'ancoragem prédial', 40, 30.0 ), uox_rd_linha( 'ancoragem  predial', 30, 31.0 ) ), array() );
 uox_rd_assert( 1 === count( $dup['visible'] ) && 'ancoragem prédial' === $dup['visible'][0]['query'], 'Duas grafias da mesma consulta viram UMA candidata, a de mais impressões (foco de revisão 2)' );

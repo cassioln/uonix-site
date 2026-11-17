@@ -132,15 +132,25 @@ if ( ! function_exists( 'uonix_analytics_metrics_sanitize_query' ) ) {
 	 *
 	 * Depois de estabilizar, a consulta que AINDA tem marcação ou entidade é recusada inteira (devolve
 	 * ''), e não limpa de novo: o que sobrou foi escrito para virar tag, e limpá-lo deixaria um texto
-	 * que ninguém buscou. É a mesma regra que o Radar (63) já aplicava depois do saneamento.
+	 * que ninguém buscou. O Radar (63) tem uma checagem PRÓPRIA, mais estrita (recusa qualquer `<` ou `>`
+	 * solto, e só reconhece entidade nomeada sem dígito) e que não é redundante com esta: `carga > 12 kn`
+	 * passa aqui e o Radar a recusa.
 	 *
 	 * "Marcação" é o que o tokenizador HTML lê como tag: `<` seguido de letra, `/`, `!` ou `?`, ou uma
 	 * entidade `&nome;` / `&#n;` / `&#xh;` que sobrou. `a < 5`, `carga > 12` e `viga a < b e c > d` não
 	 * são tag e passam. Um `<` colado numa letra (`a<b`, `a <= b`) já é cortado pelo `wp_strip_all_tags`
 	 * ANTES de tudo isto, como sempre foi (vira `a`): a #382 não muda esse comportamento. `ancoragem
 	 * &amp;amp;amp;amp; linha` (4 níveis, texto legítimo) agora passa como
-	 * `ancoragem & linha`: com 3 voltas era recusada por sobrar entidade. O custo aceito: o `AT&T;`, com
-	 * `&nome;` que não é entidade conhecida, é recusado.
+	 * `ancoragem & linha` (com 3 voltas sobrava entidade, e quem a recusava era o Radar). O custo aceito:
+	 * o `AT&T;`, com `&nome;` que não é entidade conhecida, é recusado.
+	 *
+	 * O que a #382 NÃO fecha, medido em 2026-11-17: um caractere de controle entre o `<` e a letra
+	 * (`%3C%00b%3E`, `%3C%01b%3E`) sai como `<` + controle + `b>`, que o regex não casa e o tokenizador
+	 * HTML5 lê como texto. Se um consumidor futuro REMOVER os controles (como o `wp_kses_no_null` faz
+	 * com 0x00 a 0x08, 0x0B, 0x0C e 0x0E a 0x1F), a tag aparece. Hoje nenhum consumidor reprocessa a
+	 * consulta (painel e e-mail usam `esc_html`, o Gemini recebe `wp_json_encode`), e a #487 tem o
+	 * endurecimento. O `%` seguido de dois hexadecimais que não formam UTF-8 (`100%desconto`) já gerava
+	 * texto inválido antes: está na #488.
 	 *
 	 * @param mixed $query Texto cru da Search Console.
 	 * @return string Texto sanitizado, ou '' se a consulta deve sair.

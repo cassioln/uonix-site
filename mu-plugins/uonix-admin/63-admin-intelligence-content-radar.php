@@ -209,9 +209,11 @@ if ( ! function_exists( 'uonix_intelligence_radar_select' ) ) {
 			}
 			$bruta = $linha['keys'][0];
 			$texto = uonix_analytics_metrics_sanitize_query( $bruta );
-			// O saneamento do 53 tira as tags ANTES de decodificar entidades e `%XX`: um
-			// `&amp;lt;b&amp;gt;` sai dele como `<b>` ou `&lt;b&gt;`. Sobrou sinal de HTML ou
-			// entidade, a consulta sai inteira (MÉDIO 1 da revisão do PR #378).
+			// O saneamento do 53 decodifica até estabilizar e recusa a marcação que sobra (#382), mas esta
+			// checagem NÃO é redundante com a dele: ela é mais estrita (recusa qualquer `<` ou `>` solto, e
+			// só vê entidade nomeada sem dígito), e `carga > 12 kn` passa no 53 e sai aqui. Antes da #382, o
+			// 53 tirava as tags ANTES de decodificar, e um `&amp;lt;b&amp;gt;` saía dele como `<b>` ou
+			// `&lt;b&gt;` (MÉDIO 1 da revisão do PR #378). Sobrou sinal de HTML ou entidade, a consulta sai.
 			if ( '' === $texto || 1 === preg_match( '/[<>]|&(#[0-9]+|#x[0-9a-f]+|[a-z]+);/i', $texto ) ) {
 				continue;
 			}

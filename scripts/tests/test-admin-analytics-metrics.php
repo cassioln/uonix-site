@@ -601,6 +601,10 @@ if ( function_exists( 'uonix_analytics_metrics_sanitize_query' ) ) {
 		'&lt;<b></b>script&gt;'                  => 'tag literal vazia que parte uma tag codificada',
 		'%26lt;a%26gt;contato@empresa.test'      => 'e-mail dentro de HTML codificado',
 		'laudo %3C/b%3E fim'                     => 'tag de FECHAMENTO só codificada (a classe `/` da marcação)',
+		'%3CB%3Ex%3C/B%3E'                       => 'tag em CAIXA ALTA só codificada: a flag `i` do ramo da tag',
+		'&LT;B&GT;x'                             => 'entidade em caixa alta (`&LT;`) de tag em caixa alta',
+		'&lt;SCRIPT&gt;x'                        => 'tag SCRIPT em caixa alta e entidade',
+		'%3CIMG src=x%3E'                        => 'tag IMG em caixa alta só codificada',
 		'laudo &lt;/b&gt; fim'                   => 'tag de fechamento em entidade',
 		'laudo %3C!-- c --%3E fim'               => 'comentário só codificado (a classe `!`)',
 		'laudo &lt;?php x ?&gt; fim'             => 'instrução de processamento em entidade (a classe `?`)',
@@ -650,6 +654,11 @@ if ( function_exists( 'uonix_analytics_metrics_sanitize_query' ) ) {
 		'a%252520b'                        => 'a b',
 		'caf%25C3%25A9'                    => 'café',
 		'a &apos;b&apos; c'                => "a 'b' c",
+		'ancoragem+telhado'                => 'ancoragem+telhado',
+		'c++'                              => 'c++',
+		'%2B'                              => '+',
+		'a%20'                             => 'a',
+		'%20ancoragem%20'                  => 'ancoragem',
 		'a&Tab;b'                          => "a\tb",
 		'linha de vida'                    => 'linha de vida',
 		'%41%42'                           => 'AB',
@@ -657,6 +666,9 @@ if ( function_exists( 'uonix_analytics_metrics_sanitize_query' ) ) {
 	foreach ( $legitimas as $entrada => $esperada ) {
 		uonix_metrics_assert( $esperada === uonix_analytics_metrics_sanitize_query( $entrada ), "#382: consulta legítima preservada: {$entrada}; obteve " . var_export( uonix_analytics_metrics_sanitize_query( $entrada ), true ) );
 	}
+	// O trim vale DEPOIS de decodificar: `%20` sozinho vira vazio (e é recusado), e não um espaço que passaria como consulta.
+	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( '%20' ), '#382: `%20` sozinho decodifica para espaço e o trim o deixa vazio: recusada' );
+	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( '%20%20' ), '#382: dois `%20` sozinhos: recusada' );
 	// Uma entidade sem sentido que sobra depois de decodificar é recusada (`AT&T;` não é entidade conhecida do HTML5, mas tem a forma).
 	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'AT&T;' ), '#382: `&nome;` que sobra depois das voltas é recusado, mesmo sem ser entidade conhecida' );
 	// O teto de 120 vale DEPOIS de decodificar: 121 `%41` são 363 caracteres crus e 121 `A` decodificados.
