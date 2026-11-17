@@ -1115,6 +1115,17 @@ $GLOBALS['uox_status'] = array(
 	'/s2'                                   => uox_301( '/servico/ensaios-de-arrancamento/' ),
 	'/velho-raiz'                           => uox_301( 'https://uonix.com.br/' ),
 	'/'                                     => uox_200(),
+	// #304 no 54: destino ou nó do meio com indisponibilidade passageira (o nó pode redirecionar de novo quando voltar).
+	'/fim-503'                              => uox_301( '/fora-503' ),
+	'/fora-503'                             => array( 'state' => 'unknown', 'code' => 503, 'location' => '' ),
+	'/meio-503'                             => uox_301( '/m1' ),
+	'/m1'                                   => uox_301( '/m2' ),
+	'/m2'                                   => array( 'state' => 'unknown', 'code' => 503, 'location' => '' ),
+	'/fim-500'                              => uox_301( '/fora-500' ),
+	'/fora-500'                             => array( 'state' => 'unknown', 'code' => 500, 'location' => '' ),
+	'/fim-403'                              => uox_301( '/fora-403' ),
+	'/fora-403'                             => array( 'state' => 'unknown', 'code' => 403, 'location' => '' ),
+	'/fim-200-sem-pagina'                   => uox_301( '/sem-post/' ),
 );
 uox_ai_assert( '/servico/ensaios-de-arrancamento/' === uonix_intelligence_ai_follow_redirect( '/teste-de-arrancamento' ), '#343: 301 do próprio domínio para um post publicado leva à página real' );
 uox_ai_assert( '/servico/projeto-andaime-fachadeiro/' === uonix_intelligence_ai_follow_redirect( '/projeto-de-andaime-fachadeiro' ), '#343: Location relativo também vale' );
@@ -1131,6 +1142,28 @@ foreach ( array( '/fora' => 'fora do domínio', '/longa' => 'cadeia de 4 saltos'
 }
 // Sem resposta não é "não leva a página": é "não sei" (MÉDIO 1 da revisão do PR #373).
 uox_ai_assert( null === uonix_intelligence_ai_follow_redirect( '/sem-status' ), '#343: sem resposta devolve null (não sei), e não vazio' );
+// #304 no 54: indisponibilidade passageira (408, 429, 502, 503, 504) é "não sei", como o código 0. Antes devolvia '' (não leva a
+// página), e o cron gravava `no_page` por cima de uma sugestão válida, e regerá-la gasta cota do Gemini (20 por dia).
+foreach ( array( 408, 429, 502, 503, 504 ) as $passageiro ) {
+	$GLOBALS['uox_status']['/fora-503'] = array( 'state' => 'unknown', 'code' => $passageiro, 'location' => '' );
+	$GLOBALS['uox_status']['/m2']       = array( 'state' => 'unknown', 'code' => $passageiro, 'location' => '' );
+	uox_ai_assert( null === uonix_intelligence_ai_follow_redirect( '/fim-503' ), "#304: {$passageiro} no destino é \"não sei\" (null), e não \"não leva a página\"" );
+	uox_ai_assert( null === uonix_intelligence_ai_follow_redirect( '/meio-503' ), "#304: {$passageiro} no meio da cadeia também é \"não sei\" (null)" );
+}
+$GLOBALS['uox_status']['/fora-503'] = array( 'state' => 'unknown', 'code' => 503, 'location' => '' );
+$GLOBALS['uox_status']['/m2']       = array( 'state' => 'unknown', 'code' => 503, 'location' => '' );
+// 500 e os demais 4xx são resposta do endereço: não leva a página (''), como antes.
+uox_ai_assert( '' === uonix_intelligence_ai_follow_redirect( '/fim-500' ) && '' === uonix_intelligence_ai_follow_redirect( '/fim-403' ), '#304: 500 e 403 são resposta do endereço: não leva a página (vazio), e não "não sei"' );
+// O cron: com "não sei" e uma sugestão anterior, ela é MANTIDA (não vira no_page, e não gasta cota).
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http']    = array( uox_gemini( $ok ) );
+$linha_503 = uox_linha( 'consulta do 503', '/fim-503' );
+$chave_503 = uonix_intelligence_ai_entry_key( 'consulta do 503', '/fim-503' );
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'][ $chave_503 ] = array( 'status' => 'ok', 'input_hash' => str_repeat( 'd', 64 ), 'attempted_at' => '2026-11-16T04:45:00+00:00', 'suggestion' => array( 'title' => 'Título válido de ontem', 'description' => 'Descrição válida de ontem.', 'differentiators_used' => array() ), 'generated_at' => '2026-11-16T04:45:00+00:00' );
+$GLOBALS['uox_pedidos'] = array();
+uonix_intelligence_ai_run( uox_analise( array( $linha_503 ) ), 0 );
+$depois_503 = get_option( uonix_intelligence_ai_option() )[ $chave_503 ] ?? array();
+uox_ai_assert( 'ok' === ( $depois_503['status'] ?? '' ) && 'Título válido de ontem' === ( $depois_503['suggestion']['title'] ?? '' ) && 0 === count( $GLOBALS['uox_pedidos'] ), '#304: com 503 no destino do redirect, a sugestão válida de ontem é mantida, sem pedido ao Gemini; obteve ' . var_export( $depois_503['status'] ?? null, true ) . ' com ' . count( $GLOBALS['uox_pedidos'] ) . ' pedido(s)' );
 // Orçamento de HEADs (BAIXO 1 da revisão do PR #373): esgotado, a resposta é "não sei".
 $orcamento = 2;
 uox_ai_assert( null === uonix_intelligence_ai_follow_redirect( '/tres-saltos', $orcamento ) && 0 === $orcamento, '#343: a cadeia que precisa de mais HEADs que o orçamento devolve null e zera o orçamento' );

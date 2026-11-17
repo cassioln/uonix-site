@@ -359,6 +359,131 @@ $convCmp  = uonix_intelligence_executive_conversion_box( array_merge( uox_leads(
 uox_assert( ! empty( $convCmp['comparable'] ), 'com histórico completo a conversão é comparável' );
 uox_assert( 'up' === $convCmp['direction'], '9 contra 1 com visitas iguais é aumento detectável' );
 
+// #303: lacuna de coleta do GA4 DENTRO de uma janela comparada. `history_covers()` só olha a borda (existe dado antes do
+// início da janela?), e uma lacuna no meio passava: dia ausente vale zero visitas, e quando a coleta PARA o dia ausente é
+// zero MEDIÇÃO, e a divisão infla. Medido em produção (2026-09-11 a 2026-11-16): 4 dias sem linha em 67, nenhum com zero
+// sessões e nenhum seguido de outro; maior sequência = 1. Com a taxa de dia de semana (11,9 sessões) e de fim de semana
+// (3,3), P(existir 3 dias seguidos sem visita numa janela de 28 dias, site no ar) = 7,6e-08, e 2 seguidos = 5,4e-03.
+// N = 3: com N = 2 o falso alarme seria de 1 em 184 janelas; com N = 3, de 1 em 13 milhões. A conta está no docblock.
+$ga4Lacuna = static function ( $de, $ate, $ausentes ) {
+	$linhas = array_values( array_filter( uox_ga4_rows( $de, $ate, 10 ), static function ( $l ) use ( $ausentes ) {
+		$dia = substr( $l['date'], 0, 4 ) . '-' . substr( $l['date'], 4, 2 ) . '-' . substr( $l['date'], 6, 2 );
+		return ! in_array( $dia, $ausentes, true );
+	} ) );
+	return uonix_intelligence_executive_ga4_per_day( $linhas );
+};
+$dias = static function ( $inicio, $quantos ) use ( $fusoUtc ) {
+	$saida = array();
+	$c     = new DateTimeImmutable( $inicio, $fusoUtc );
+	for ( $i = 0; $i < $quantos; $i++ ) { $saida[] = $c->format( 'Y-m-d' ); $c = $c->modify( '+1 day' ); }
+	return $saida;
+};
+$leadsLacuna = array_merge( uox_leads( '2026-09-01', 9 ), uox_leads( '2026-08-05', 1 ) );
+// A janela anterior de 4 semanas (prev_month) e a atual (month), para saber onde pôr a lacuna.
+$mesAnt = $W['prev_month'];
+$mesAtu = $W['month'];
+// Controle: série completa, comparável (é o `$convCmp` acima).
+$semLacuna = uonix_intelligence_executive_conversion_box( $leadsLacuna, $ga4Longo, $W, $ALFA );
+uox_assert( ! empty( $semLacuna['comparable'] ) && 'ga4_collection_gap' !== ( $semLacuna['note'] ?? '' ), '#303 controle: sem lacuna a conversão segue comparável' );
+foreach ( array( 'anterior' => $mesAnt, 'atual' => $mesAtu ) as $onde => $janela ) {
+	// Lacuna de 3 dias seguidos no MEIO da janela: recusa, com o motivo.
+	$meio   = ( new DateTimeImmutable( $janela['start'], $fusoUtc ) )->modify( '+10 days' )->format( 'Y-m-d' );
+	$g3     = $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( $meio, 3 ) );
+	$c3     = uonix_intelligence_executive_conversion_box( $leadsLacuna, $g3, $W, $ALFA );
+	uox_assert( 3 === ( $c3['gap_days'] ?? null ), "#303: a caixa de conversão guarda a maior sequência de dias ausentes ({$onde}); obteve " . var_export( $c3['gap_days'] ?? null, true ) );
+	uox_assert( empty( $c3['comparable'] ) && 'ga4_collection_gap' === ( $c3['note'] ?? '' ) && null === $c3['prev_rate'], "#303: 3 dias seguidos ausentes no meio da janela {$onde}: recusa com ga4_collection_gap e sem taxa anterior; obteve " . json_encode( array( $c3['note'] ?? null, $c3['prev_rate'] ?? 'x' ) ) );
+	uox_assert( 40 !== $c3['sessions'] && $c3['sessions'] > 0 && isset( $c3['rate'] ), "#303: a taxa ATUAL segue sendo mostrada, só a comparação é recusada ({$onde})" );
+	// 2 dias seguidos: abaixo do limiar, e a comparação segue (cada dia ausente vale zero, como antes).
+	$g2     = $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( $meio, 2 ) );
+	$c2     = uonix_intelligence_executive_conversion_box( $leadsLacuna, $g2, $W, $ALFA );
+	uox_assert( ! empty( $c2['comparable'] ) && 'ga4_collection_gap' !== ( $c2['note'] ?? '' ), "#303: 2 dias seguidos ausentes na janela {$onde} ficam abaixo do limiar: segue comparável" );
+	// 2 + 2 separados por um dia com dado: NÃO é uma sequência de 4, e não recusa.
+	$g22    = $ga4Lacuna( '2026-07-20', '2026-09-27', array_merge( $dias( $meio, 2 ), $dias( ( new DateTimeImmutable( $meio, $fusoUtc ) )->modify( '+3 days' )->format( 'Y-m-d' ), 2 ) ) );
+	$c22    = uonix_intelligence_executive_conversion_box( $leadsLacuna, $g22, $W, $ALFA );
+	uox_assert( ! empty( $c22['comparable'] ), "#303: 2 + 2 dias ausentes separados por um dia com dado na janela {$onde} não formam sequência de 3: segue comparável" );
+	// Lacuna enorme: recusa também.
+	$g9     = $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( $meio, 9 ) );
+	$c9     = uonix_intelligence_executive_conversion_box( $leadsLacuna, $g9, $W, $ALFA );
+	uox_assert( 'ga4_collection_gap' === ( $c9['note'] ?? '' ) && 9 === ( $c9['gap_days'] ?? null ), "#303: 9 dias seguidos ausentes na janela {$onde}: recusa, e a caixa diz 9" );
+	// Duas janelas com lacunas diferentes (uma de 3 e outra de 9): a caixa guarda a MAIOR das duas.
+	uox_assert( null === ( $semLacuna['gap_days'] ?? null ), "#303 controle: sem lacuna a caixa não guarda comprimento" );
+}
+// O CENÁRIO DA ISSUE, de ponta a ponta: uma lacuna de 16 dias dentro da janela anterior de 4 semanas. Os orçamentos da janela
+// contam todos, as visitas dos 16 dias sem coleta somam zero, e a taxa anterior inflava (a issue mediu "até 3,3%" quando a
+// taxa real era 1,4%). Com a lacuna, a comparação é recusada e a taxa anterior inflada NÃO aparece. Sem a lacuna (série
+// completa), a mesma conta dá a taxa certa, e o teste confere que a lacuna era a causa da distorção.
+$leads16 = array_merge( uox_leads( '2026-09-01', 4 ), uox_leads( '2026-08-05', 4 ) );
+$g16     = $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( ( new DateTimeImmutable( $mesAnt['start'], $fusoUtc ) )->modify( '+5 days' )->format( 'Y-m-d' ), 16 ) );
+$c16     = uonix_intelligence_executive_conversion_box( $leads16, $g16, $W, $ALFA );
+$completo = uonix_intelligence_executive_conversion_box( $leads16, $ga4Longo, $W, $ALFA );
+uox_assert( ! empty( $completo['comparable'] ) && null !== $completo['prev_rate'], '#303 issue: a série completa dá a taxa anterior certa' );
+$inflada = $completo['prev_rate'] * $completo['sessions'] > 0 ? ( 4 / ( $completo['sessions'] > 0 ? ( ( 28 - 16 ) * 10 ) : 1 ) ) : 0;
+uox_assert( $inflada > $completo['prev_rate'] * 1.5, '#303 issue: tirar 16 dos 28 dias de visitas infla a taxa anterior em mais de 50% (a distorção que a issue mediu)' );
+uox_assert( empty( $c16['comparable'] ) && 'ga4_collection_gap' === $c16['note'] && null === $c16['prev_rate'], '#303 issue: com a lacuna de 16 dias, a taxa anterior inflada NÃO é exibida; obteve ' . json_encode( array( $c16['note'] ?? null, $c16['prev_rate'] ?? 'x' ) ) );
+
+// A fronteira da janela: 3 dias ausentes ENCOSTADOS na borda (início e fim) contam, porque ainda estão dentro dela.
+$borda_ini = $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( $mesAnt['start'], 3 ) );
+$borda_fim = $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( ( new DateTimeImmutable( $mesAnt['end'], $fusoUtc ) )->modify( '-2 days' )->format( 'Y-m-d' ), 3 ) );
+uox_assert( 'ga4_collection_gap' === ( uonix_intelligence_executive_conversion_box( $leadsLacuna, $borda_ini, $W, $ALFA )['note'] ?? '' ), '#303: 3 dias ausentes colados no INÍCIO da janela anterior contam' );
+uox_assert( 'ga4_collection_gap' === ( uonix_intelligence_executive_conversion_box( $leadsLacuna, $borda_fim, $W, $ALFA )['note'] ?? '' ), '#303: 3 dias ausentes colados no FIM da janela anterior contam' );
+// Fora das janelas comparadas, a lacuna não importa: 3 dias ausentes ANTES do início da janela anterior não recusam.
+$fora = $ga4Lacuna( '2026-07-10', '2026-09-27', $dias( '2026-07-12', 3 ) );
+uox_assert( ! empty( uonix_intelligence_executive_conversion_box( $leadsLacuna, $fora, $W, $ALFA )['comparable'] ), '#303: lacuna ANTES da janela anterior não recusa a comparação (não está dentro de nenhuma janela comparada)' );
+// A caixa de visitas usa a mesma regra, com as semanas.
+$wk_ant  = $W['prev_week'];
+$wk_atu  = $W['week'];
+foreach ( array( 'anterior' => $wk_ant, 'atual' => $wk_atu ) as $onde => $janela ) {
+	$ini_l = ( new DateTimeImmutable( $janela['start'], $fusoUtc ) )->modify( '+1 day' )->format( 'Y-m-d' );
+	$gv    = $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( $ini_l, 3 ) );
+	$v3    = uonix_intelligence_executive_visits_box( $gv, $W );
+	uox_assert( empty( $v3['comparable'] ) && 'ga4_collection_gap' === ( $v3['note'] ?? '' ) && null === $v3['delta_percent'], "#303: visitas, 3 dias seguidos ausentes na semana {$onde}: recusa com ga4_collection_gap" );
+	uox_assert( isset( $v3['current'] ) && $v3['current'] >= 0, "#303: visitas, a contagem ATUAL segue sendo mostrada ({$onde})" );
+	uox_assert( null === $v3['previous'] && false === $v3['comparable'], "#303: visitas, com lacuna na semana {$onde} a semana anterior não é exibida como número, e a caixa não é comparável; obteve " . var_export( $v3['previous'], true ) );
+	uox_assert( 3 === ( $v3['gap_days'] ?? null ), "#303: a caixa de visitas guarda a maior sequência de dias ausentes ({$onde}); obteve " . var_export( $v3['gap_days'] ?? null, true ) );
+	$v2    = uonix_intelligence_executive_visits_box( $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( $ini_l, 2 ) ), $W );
+	uox_assert( 'ga4_collection_gap' !== ( $v2['note'] ?? '' ), "#303: visitas, 2 dias ausentes na semana {$onde}: abaixo do limiar" );
+}
+// A janela anterior INTEIRA sem linha, com dado ANTES dela (o GA4 existia e parou, ou nunca devolveu linha naquele período): a nota
+// era `previous_empty` ("período anterior sem visitas registradas", que afirma que não houve visita) e passou a ser
+// `ga4_collection_gap` (que diz só quantos dias seguidos faltaram). O GA4 não devolve linha de zero por padrão, então
+// `previous_empty` só é alcançável com linhas explícitas de zero sessões (o que o GA4 não manda): este caso fixa a mudança.
+$ant_toda = $dias( $mesAnt['start'], 28 );
+$g_ant_toda = $ga4Lacuna( '2026-07-20', '2026-09-27', $ant_toda );
+$c_ant_toda = uonix_intelligence_executive_conversion_box( $leadsLacuna, $g_ant_toda, $W, $ALFA );
+uox_assert( 'ga4_collection_gap' === ( $c_ant_toda['note'] ?? '' ) && 28 === ( $c_ant_toda['gap_days'] ?? null ) && null === $c_ant_toda['prev_rate'], '#303: conversão com a janela anterior inteira ausente (e dado antes dela): recusa, com 28 dias, e não "previous_empty"; obteve ' . json_encode( array( $c_ant_toda['note'] ?? null, $c_ant_toda['gap_days'] ?? null ) ) );
+$v_ant_toda = uonix_intelligence_executive_visits_box( $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( $wk_ant['start'], 7 ) ), $W );
+uox_assert( 'ga4_collection_gap' === ( $v_ant_toda['note'] ?? '' ) && 7 === ( $v_ant_toda['gap_days'] ?? null ) && null === $v_ant_toda['previous'], '#303: visitas com a semana anterior inteira ausente: recusa, com 7 dias, e a semana anterior não é exibida como zero; obteve ' . json_encode( array( $v_ant_toda['note'] ?? null, $v_ant_toda['gap_days'] ?? null, $v_ant_toda['previous'] ?? 'x' ) ) );
+// `previous_empty` segue existindo para o que o GA4 PODE mandar: linhas explícitas de zero sessões na janela anterior toda.
+$ga4Zeros = uonix_intelligence_executive_ga4_per_day( array_merge(
+	uox_ga4_rows( '2026-07-20', (string) $mesAnt['end'], 0 ),
+	uox_ga4_rows( ( new DateTimeImmutable( $mesAnt['end'], $fusoUtc ) )->modify( '+1 day' )->format( 'Y-m-d' ), '2026-09-27', 10 )
+) );
+$c_zeros = uonix_intelligence_executive_conversion_box( $leadsLacuna, $ga4Zeros, $W, $ALFA );
+uox_assert( 'previous_empty' === ( $c_zeros['note'] ?? '' ) && null === ( $c_zeros['gap_days'] ?? null ), '#303: linhas explícitas de zero (o GA4 mediu zero) na janela anterior toda seguem dando previous_empty, sem lacuna; obteve ' . json_encode( array( $c_zeros['note'] ?? null, $c_zeros['gap_days'] ?? null ) ) );
+
+// O MESMO N protege as duas janelas de forma desigual (#303): 3 dias são 43% da semana de visitas e 11% das 4 semanas da conversão.
+// Com 2 dias úteis ausentes, a semana de visitas CAI ~36% e o e-mail mostra isso como variação real (abaixo do limiar, passa);
+// as 4 semanas de conversão se distorcem ~8%. Isto fixa o que a regra deixa passar, em vez de deixar só o contrato dizer.
+$dois_na_semana = $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( ( new DateTimeImmutable( $wk_atu['start'], $fusoUtc ) )->modify( '+1 day' )->format( 'Y-m-d' ), 2 ) );
+$v_dois = uonix_intelligence_executive_visits_box( $dois_na_semana, $W );
+uox_assert( 'ga4_collection_gap' !== ( $v_dois['note'] ?? '' ) && null === ( $v_dois['gap_days'] ?? null ) && null !== $v_dois['delta_percent'] && $v_dois['delta_percent'] < -20.0, '#303 (limite conhecido): 2 dias úteis ausentes na semana de visitas PASSAM, e a variação sai distorcida (queda de ' . round( (float) $v_dois['delta_percent'], 1 ) . '%): documentado, não escondido' );
+
+// `collection_gap_days` com entrada que não é uma série: não há lacuna a afirmar (0), e os chamadores já recusam a caixa antes.
+uox_assert( 0 === uonix_intelligence_executive_collection_gap_days( null, $mesAnt ) && 0 === uonix_intelligence_executive_collection_gap_days( array(), $mesAnt ) && 0 === uonix_intelligence_executive_collection_gap_days( array( 'per_day' => 'x' ), $mesAnt ) && 0 === uonix_intelligence_executive_collection_gap_days( new WP_Error( 'x' ), $mesAnt ), '#303: sem série do GA4, não há lacuna a afirmar' );
+uox_assert( 0 === uonix_intelligence_executive_collection_gap_days( $ga4Longo ), '#303: sem janela nenhuma para olhar, não há lacuna' );
+// Abaixo do limiar o resultado é 0 (e não 2): zero é "sem lacuna", e o número só aparece quando há recusa. Das duas janelas, vale a maior.
+$g2j = $ga4Lacuna( '2026-07-20', '2026-09-27', array_merge( $dias( $mesAnt['start'], 2 ), $dias( ( new DateTimeImmutable( $mesAtu['start'], $fusoUtc ) )->modify( '+5 days' )->format( 'Y-m-d' ), 5 ) ) );
+uox_assert( 0 === uonix_intelligence_executive_collection_gap_days( $ga4Lacuna( '2026-07-20', '2026-09-27', $dias( $mesAnt['start'], 2 ) ), $mesAnt, $mesAtu ), '#303: 2 dias ausentes ficam abaixo do limiar: 0, e não 2' );
+uox_assert( 5 === uonix_intelligence_executive_collection_gap_days( $g2j, $mesAnt, $mesAtu ), '#303: com uma lacuna de 2 numa janela e de 5 na outra, vale a maior (5)' );
+// A função pura que mede a maior sequência de dias ausentes dentro de uma janela.
+$serie = array( '2026-09-01' => 5, '2026-09-02' => 5, '2026-09-06' => 5, '2026-09-07' => 5 );   // 03, 04 e 05 ausentes (3 seguidos)
+uox_assert( 3 === uonix_intelligence_executive_longest_missing_run( $serie, array( 'start' => '2026-09-01', 'end' => '2026-09-07' ) ), '#303: a maior sequência de dias ausentes, no meio, é 3' );
+uox_assert( 0 === uonix_intelligence_executive_longest_missing_run( array( '2026-09-01' => 5, '2026-09-02' => 5, '2026-09-03' => 5 ), array( 'start' => '2026-09-01', 'end' => '2026-09-03' ) ), '#303: série completa: nenhuma ausência' );
+uox_assert( 3 === uonix_intelligence_executive_longest_missing_run( array(), array( 'start' => '2026-09-01', 'end' => '2026-09-03' ) ), '#303: série vazia na janela de 3 dias: sequência de 3' );
+uox_assert( 2 === uonix_intelligence_executive_longest_missing_run( array( '2026-09-03' => 5 ), array( 'start' => '2026-09-01', 'end' => '2026-09-05' ) ), '#303: ausentes colados nas duas bordas contam por segmento, sem somar os dois lados' );
+uox_assert( 0 === uonix_intelligence_executive_longest_missing_run( array( '2026-09-01' => 0 ), array( 'start' => '2026-09-01', 'end' => '2026-09-01' ) ), '#303: dia COM linha e zero sessões não é ausente (o GA4 mediu zero)' );
+uox_assert( 0 === uonix_intelligence_executive_longest_missing_run( array(), array( 'start' => '2026-09-05', 'end' => '2026-09-01' ) ) && 0 === uonix_intelligence_executive_longest_missing_run( array(), array() ), '#303: janela invertida ou vazia: 0' );
+
 // O DOBRO de orçamentos e o DOBRO de visitas: a taxa é a mesma dos dois lados.
 //
 // O volume é alto de propósito. A primeira versão deste fixture usava 8 contra 4, e a
@@ -657,6 +782,76 @@ uox_assert( array( 0, 0 ) === array_column( $semLoc['rows'], 'merged' ), 'destin
 $com500 = uonix_intelligence_executive_top_pages( uox_linhas( array( '/a' => 300, '/quebrada' => 10 ) ), $janelaPag, static function ( $p ) { return '/a' === $p ? array( 'state' => 'redirect', 'code' => 301, 'location' => '/quebrada' ) : array( 'state' => 'unknown', 'code' => 500, 'location' => '' ); }, $rotulo );
 uox_assert( array( '/quebrada' ) === array_column( $com500['rows'], 'path' ) && 310.0 === $com500['rows'][0]['impressions'] && 'unknown' === $com500['rows'][0]['state'], 'destino que responde 500 recebe a soma e sai como não verificado; obteve ' . json_encode( $com500['rows'] ) );
 
+// #304: nem todo 4xx/5xx é resposta DO ENDEREÇO. 408, 429, 502, 503 e 504 são indisponibilidade passageira (timeout, limite
+// de taxa, proxy sem aplicação): o nó pode redirecionar de novo quando voltar, e tratá-lo como fim parte a cadeia em duas
+// linhas, o mesmo sintoma do código 0. Cenário da issue: `/a` (300) -> `/b` -> `/c` (50), e `/b` responde o código dado.
+// Esses cinco são "sem resposta": nada é somado a `/b`, e `/a` fica como não verificado. 500 e os outros 4xx/5xx seguem
+// sendo fim conhecido (o servidor respondeu ali), e 404/410 seguem not_found.
+$cadeia304 = static function ( $codigo_b ) {
+	return static function ( $p ) use ( $codigo_b ) {
+		if ( '/a' === $p ) {
+			return array( 'state' => 'redirect', 'code' => 301, 'location' => '/b' );
+		}
+		if ( '/b' === $p ) {
+			return array( 'state' => 'unknown', 'code' => $codigo_b, 'location' => '' );
+		}
+		return array( 'state' => 'ok', 'code' => 200, 'location' => '' );
+	};
+};
+foreach ( array( 408, 429, 502, 503, 504 ) as $passageiro ) {
+	$r304 = uonix_intelligence_executive_top_pages( uox_linhas( array( '/a' => 300, '/c' => 50 ) ), $janelaPag, $cadeia304( $passageiro ), $rotulo, 10, 10 );
+	$por304 = array();
+	foreach ( $r304['rows'] as $l ) {
+		$por304[ $l['path'] ] = $l;
+	}
+	uox_assert( isset( $por304['/a'], $por304['/c'] ) && ! isset( $por304['/b'] ), "#304: com {$passageiro} no nó do meio, a cadeia não vira uma linha em /b; obteve " . json_encode( array_column( $r304['rows'], 'path' ) ) );
+	uox_assert( isset( $por304['/a'] ) && 300.0 === $por304['/a']['impressions'] && 0 === $por304['/a']['merged'] && 'unknown' === $por304['/a']['state'], "#304: com {$passageiro} no nó do meio, /a fica com as próprias impressões, sem soma e como não verificado; obteve " . json_encode( $por304['/a'] ?? null ) );
+	uox_assert( isset( $por304['/c'] ) && 50.0 === $por304['/c']['impressions'] && 0 === $por304['/c']['merged'], "#304: com {$passageiro}, /c não recebe as 300 impressões de /a" );
+}
+// O controle: 500 e outros 4xx/5xx que SÃO resposta do endereço seguem fim conhecido (a soma acontece), como antes.
+foreach ( array( 500, 501, 400, 401, 403, 405, 409, 418, 451 ) as $resposta304 ) {
+	$r304b = uonix_intelligence_executive_top_pages( uox_linhas( array( '/a' => 300, '/c' => 50 ) ), $janelaPag, $cadeia304( $resposta304 ), $rotulo, 10, 10 );
+	$b304  = null;
+	foreach ( $r304b['rows'] as $l ) {
+		if ( '/b' === $l['path'] ) {
+			$b304 = $l;
+		}
+	}
+	uox_assert( null !== $b304 && 300.0 === $b304['impressions'] && 1 === $b304['merged'] && 'unknown' === $b304['state'], "#304: {$resposta304} é resposta do endereço: /b é o fim conhecido e recebe as 300 impressões; obteve " . json_encode( $b304 ) );
+}
+// 404 e 410 seguem not_found, e 2xx segue ok, no mesmo cenário.
+foreach ( array( 404 => 'not_found', 410 => 'not_found' ) as $cod304 => $estado304 ) {
+	$r304c = uonix_intelligence_executive_top_pages( uox_linhas( array( '/a' => 300, '/c' => 50 ) ), $janelaPag, static function ( $p ) use ( $cod304, $estado304 ) { return '/a' === $p ? array( 'state' => 'redirect', 'code' => 301, 'location' => '/b' ) : ( '/b' === $p ? array( 'state' => $estado304, 'code' => $cod304, 'location' => '' ) : array( 'state' => 'ok', 'code' => 200, 'location' => '' ) ); }, $rotulo, 10, 10 );
+	$b304c = null;
+	foreach ( $r304c['rows'] as $l ) {
+		if ( '/b' === $l['path'] ) {
+			$b304c = $l;
+		}
+	}
+	uox_assert( null !== $b304c && 'not_found' === $b304c['state'] && 300.0 === $b304c['impressions'], "#304: {$cod304} segue not_found e recebe a soma; obteve " . json_encode( $b304c ) );
+}
+
+// #304: o 54 (follow_redirect do Módulo 3) repete a lista dos códigos passageiros porque trata o 59 como opcional. Duas listas
+// só ficam iguais por teste: carrega os dois no mesmo processo e compara, para todo código de 0 a 599.
+$sub_codigos = static function () {
+	$codigo = 'define( "ABSPATH", "/" ); function add_action( ...$a ) {} function add_filter( ...$a ) {} '
+		. 'require getenv( "UOX_59" ); require getenv( "UOX_54" ); '
+		. '$d = array(); for ( $c = 0; $c < 600; $c++ ) { $a = in_array( $c, uonix_intelligence_executive_transient_codes(), true ) || 0 === $c; $b = uonix_intelligence_ai_status_has_no_answer( $c ); if ( $a !== $b ) { $d[] = $c; } } echo json_encode( $d );';
+	$raiz  = dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/';
+	$proc  = proc_open( array( PHP_BINARY, '-n', '-r', $codigo ), array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes, null, array( 'UOX_59' => $raiz . '59-admin-intelligence-executive.php', 'UOX_54' => $raiz . '54-admin-intelligence-ai.php', 'PATH' => (string) getenv( 'PATH' ) ) );
+	$saida = is_resource( $proc ) ? stream_get_contents( $pipes[1] ) : '';
+	$erro  = is_resource( $proc ) ? stream_get_contents( $pipes[2] ) : '';
+	if ( is_resource( $proc ) ) {
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		proc_close( $proc );
+	}
+
+	return array( json_decode( (string) $saida, true ), (string) $erro );
+};
+list( $diferem, $erro_codigos ) = $sub_codigos();
+uox_assert( array() === $diferem, '#304: a lista dos códigos passageiros do 59 e a do 54 são iguais para todo código de 0 a 599; diferem em ' . json_encode( $diferem ) . ' ' . $erro_codigos );
+
 // Teto rígido de consultas: 25 páginas distintas, todas candidatas, e 20 conferências.
 $q     = array();
 $muitas = array();
@@ -856,6 +1051,29 @@ function uox_celula( $html, $titulo ) {
 	$f = strpos( $html, '</td>', $i );
 	return false === $f ? '' : substr( $html, $i, $f - $i );
 }
+
+// #303 no e-mail: as duas caixas dizem o motivo da recusa, com a frase da issue. Os números ATUAIS seguem na tela. O e-mail é
+// montado com uma caixa de cada tipo já com a nota `ga4_collection_gap`, para o teste medir o texto e não a regra.
+$caixaGap = static function ( $chave, $extra ) {
+	return array_merge( array( 'key' => $chave, 'available' => true, 'reason' => '', 'comparable' => false, 'note' => 'ga4_collection_gap', 'gap_days' => 4 ), $extra );
+};
+$execGap  = $exec;
+$execGap['scorecard']['boxes']['visits']     = $caixaGap( 'visits', array( 'source' => 'ga4', 'window' => $W['week'], 'compare_window' => $W['prev_week'], 'current' => 84, 'previous' => null, 'delta_percent' => null, 'consented_only' => true ) );
+$execGap['scorecard']['boxes']['conversion'] = $caixaGap( 'conversion', array( 'source' => 'ga4+fluentform_submissions', 'window' => $W['month'], 'compare_window' => $W['prev_month'], 'leads' => 4, 'sessions' => 294, 'rate' => 4 / 294, 'upper_bound' => true, 'prev_rate' => null ) );
+$htmlGap  = uonix_intelligence_report_html( array( 'analysis' => $analise, 'executive' => $execGap, 'period_label' => '29/08/2026 a 27/09/2026', 'environment' => 'production', 'panel_url' => '' ) );
+$cVisGap  = uox_celula( $htmlGap, 'Visitas' );
+$cConvGap = uox_celula( $htmlGap, 'Conversão' );
+// O texto diz o que se SABE (quantos dias seguidos o GA4 não trouxe dado), e não a causa: num feriado prolongado o dado falta
+// porque ninguém visitou, e "lacuna de coleta" afirmaria uma falha que não houve. A caixa guarda a maior sequência.
+uox_assert( false !== strpos( $cVisGap, 'sem comparação: 4 dias seguidos sem dado do GA4 no período' ) && false === strpos( $cVisGap, 'semana anterior sem visitas registradas' ) && false === strpos( $cVisGap, 'lacuna de coleta' ), '#303: a caixa de visitas diz quantos dias seguidos sem dado, e não afirma a causa nem "semana anterior sem visitas"; obteve ' . strip_tags( $cVisGap ) );
+uox_assert( false !== strpos( $cConvGap, 'sem comparação: 4 dias seguidos sem dado do GA4 no período' ) && false === strpos( $cConvGap, 'período anterior sem visitas registradas' ) && false === strpos( $cConvGap, 'lacuna de coleta' ), '#303: a caixa de conversão diz quantos dias seguidos sem dado, e não afirma a causa nem "período anterior sem visitas"; obteve ' . strip_tags( $cConvGap ) );
+// No plural e no singular do texto (a regra nunca produz 1, mas o texto não pode quebrar se o limiar baixar).
+$caixaUm = $execGap; $caixaUm['scorecard']['boxes']['visits']['gap_days'] = 1;
+uox_assert( false !== strpos( uox_celula( uonix_intelligence_report_html( array( 'analysis' => $analise, 'executive' => $caixaUm, 'period_label' => 'x', 'environment' => 'production', 'panel_url' => '' ) ), 'Visitas' ), 'sem comparação: 1 dia sem dado do GA4 no período' ), '#303: com 1 dia o texto fica no singular' );
+$caixaSem = $execGap; unset( $caixaSem['scorecard']['boxes']['visits']['gap_days'] );
+uox_assert( false !== strpos( uox_celula( uonix_intelligence_report_html( array( 'analysis' => $analise, 'executive' => $caixaSem, 'period_label' => 'x', 'environment' => 'production', 'panel_url' => '' ) ), 'Visitas' ), 'sem comparação: dias seguidos sem dado do GA4 no período' ), '#303: sem o comprimento na caixa o texto não inventa um número' );
+uox_assert( 1 === preg_match( '/font-size:26px[^>]*>84</u', $cVisGap ) && false !== strpos( $cConvGap, 'até 1,4%' ), '#303: o número ATUAL segue na tela, com ou sem lacuna' );
+uox_assert( false === strpos( $cConvGap, 'antes: até' ) && false === strpos( $cVisGap, 'vs. semana anterior' ), '#303: nenhuma taxa anterior nem variação é exibida com lacuna' );
 
 $cLeads = uox_celula( $html, 'Orçamentos' );
 $cVis   = uox_celula( $html, 'Visitas' );
@@ -1082,15 +1300,16 @@ $refreshUnk = uonix_intelligence_executive_refresh_page_status( array( 'today' =
 uox_assert( 0 === ( $refreshUnk['checked'] ?? -1 ) && array() === get_option( $opcaoStatus ), 'status unknown não é gravado' );
 
 
-// M1 da revisão do #349: 301 para uma página que RESPONDE com erro (503). A conferência
-// real devolve unknown com código >= 400, e o top_pages() trata isso como fim de cadeia
-// e soma o 301 nela. Pelo cache, o envio tem de chegar às MESMAS linhas.
+// M1 da revisão do #349: 301 para uma página que RESPONDE com erro. A conferência real devolve unknown com código >= 400,
+// e o top_pages() trata um erro que é resposta do endereço como fim de cadeia e soma o 301 nela. Pelo cache, o envio tem de
+// chegar às MESMAS linhas. O código é 500 (resposta do endereço): o 503 era o exemplo original, mas desde o #304 ele é
+// indisponibilidade passageira e NÃO é fim; o caso do 503 está testado à parte, direto e pelo cache.
 $statusComErro = static function ( $p ) {
 	if ( '/antiga/' === $p ) {
 		return array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/fora-do-ar/' );
 	}
 	if ( '/fora-do-ar/' === $p ) {
-		return array( 'state' => 'unknown', 'code' => 503, 'location' => '' );
+		return array( 'state' => 'unknown', 'code' => 500, 'location' => '' );
 	}
 	return array( 'state' => 'ok', 'code' => 200, 'location' => '' );
 };
@@ -1110,8 +1329,26 @@ $direto = $resumo( uonix_intelligence_executive_collect( $argsErro + array( 'sta
 $GLOBALS['uox_options'] = array();
 uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherErro, 'status_fetcher' => $statusComErro, 'now' => time() ) );
 $viaCache = $resumo( uonix_intelligence_executive_collect( $argsErro ) );
-uox_assert( in_array( array( '/fora-do-ar/', 400.0, 'unknown' ), $direto, true ), 'a conferência direta soma o 301 na página que responde 503; obteve ' . var_export( $direto, true ) );
-uox_assert( $direto === $viaCache, 'pelo cache, o envio chega às mesmas linhas da conferência direta, inclusive com 301 para uma página que responde 503; direto=' . var_export( $direto, true ) . ' cache=' . var_export( $viaCache, true ) );
+uox_assert( in_array( array( '/fora-do-ar/', 400.0, 'unknown' ), $direto, true ), 'a conferência direta soma o 301 na página que responde 500; obteve ' . var_export( $direto, true ) );
+uox_assert( $direto === $viaCache, 'pelo cache, o envio chega às mesmas linhas da conferência direta, inclusive com 301 para uma página que responde 500; direto=' . var_export( $direto, true ) . ' cache=' . var_export( $viaCache, true ) );
+
+// #304 pelo cache: com 503 no destino, a conferência direta e o envio pelo cache também chegam às MESMAS linhas, e nenhuma
+// delas soma o 301 no nó que respondeu 503. O cache guarda o código (`code`), e é por ele que o top_pages() decide.
+$statusCom503 = static function ( $p ) {
+	if ( '/antiga/' === $p ) {
+		return array( 'state' => 'redirect', 'code' => 301, 'location' => 'https://uonix.com.br/fora-do-ar/' );
+	}
+	if ( '/fora-do-ar/' === $p ) {
+		return array( 'state' => 'unknown', 'code' => 503, 'location' => '' );
+	}
+	return array( 'state' => 'ok', 'code' => 200, 'location' => '' );
+};
+$direto503 = $resumo( uonix_intelligence_executive_collect( $argsErro + array( 'status_fetcher' => $statusCom503 ) ) );
+$GLOBALS['uox_options'] = array();
+uonix_intelligence_executive_refresh_page_status( array( 'today' => $HOJE, 'config' => $CFG, 'pages_fetcher' => $fetcherErro, 'status_fetcher' => $statusCom503, 'now' => time() ) );
+$viaCache503 = $resumo( uonix_intelligence_executive_collect( $argsErro ) );
+uox_assert( in_array( array( '/antiga/', 300.0, 'unknown' ), $direto503, true ) && in_array( array( '/fora-do-ar/', 100.0, 'unknown' ), $direto503, true ), '#304: com 503 no destino, a conferência direta NÃO soma o 301 em /fora-do-ar/ (cada um fica com as próprias impressões); obteve ' . var_export( $direto503, true ) );
+uox_assert( $direto503 === $viaCache503, '#304: com 503 no destino, o envio pelo cache chega às mesmas linhas da conferência direta; direto=' . var_export( $direto503, true ) . ' cache=' . var_export( $viaCache503, true ) );
 
 // B2 da revisão do #349: se todas as conferências de hoje falharem por rede, o status
 // ainda válido de ontem não é apagado.
@@ -1177,6 +1414,60 @@ $registrado = array_filter( $GLOBALS['uox_actions'], static function ( $a ) { re
 uox_assert( 1 === count( $registrado ), 'o hook roda o cron de status sem argumentos' );
 $agendaInit = array_filter( $GLOBALS['uox_actions'], static function ( $a ) { return 'init' === $a[0] && 'uonix_intelligence_executive_schedule_status' === $a[1]; } );
 uox_assert( 1 === count( $agendaInit ), 'o agendamento roda no init' );
+$GLOBALS['uox_options'] = array();
+
+// #350: o cron de status tem HORA FIXA, 06:00 no fuso do site, e não "1 h depois do primeiro carregamento". O envio semanal
+// sai segunda às 08:00 e lê o último status gravado; com a hora do cron arbitrária, esse status vinha quase sempre do dia
+// anterior, e uma página que entrasse no topo no dia do envio saía "não verificado". O primeiro disparo é o próximo 06:00
+// (hoje, se ainda não passou; senão amanhã), e depois repete a cada 24 h, então todo dia tem uma conferência às 06:00, duas
+// horas antes do envio de segunda. O relógio é injetável para o teste não depender da hora de verdade.
+$hora_status = static function ( $agora_ts, $fuso = 'America/Sao_Paulo' ) {
+	$GLOBALS['uox_timezone'] = $fuso;
+	$ts = uonix_intelligence_executive_status_first_run( $agora_ts );
+	return array( $ts, ( new DateTimeImmutable( '@' . $ts ) )->setTimezone( new DateTimeZone( $fuso ) )->format( 'Y-m-d H:i:s' ) );
+};
+$sp = new DateTimeZone( 'America/Sao_Paulo' );
+$em = static function ( $texto ) use ( $sp ) { return ( new DateTimeImmutable( $texto, $sp ) )->getTimestamp(); };
+uox_assert( '2026-10-05 06:00:00' === $hora_status( $em( '2026-10-05 05:59:59' ) )[1], '#350: às 05:59:59 o primeiro disparo é hoje às 06:00; obteve ' . $hora_status( $em( '2026-10-05 05:59:59' ) )[1] );
+uox_assert( '2026-10-06 06:00:00' === $hora_status( $em( '2026-10-05 06:00:00' ) )[1], '#350: às 06:00:00 em ponto o primeiro disparo é amanhã (não agenda no passado nem no mesmo instante); obteve ' . $hora_status( $em( '2026-10-05 06:00:00' ) )[1] );
+uox_assert( '2026-10-06 06:00:00' === $hora_status( $em( '2026-10-05 06:00:01' ) )[1], '#350: às 06:00:01 o primeiro disparo é amanhã; obteve ' . $hora_status( $em( '2026-10-05 06:00:01' ) )[1] );
+uox_assert( '2026-10-06 06:00:00' === $hora_status( $em( '2026-10-05 23:59:59' ) )[1], '#350: às 23:59:59 o primeiro disparo é amanhã às 06:00; obteve ' . $hora_status( $em( '2026-10-05 23:59:59' ) )[1] );
+uox_assert( '2026-10-05 06:00:00' === $hora_status( $em( '2026-10-05 00:00:00' ) )[1], '#350: à meia-noite o primeiro disparo é hoje às 06:00; obteve ' . $hora_status( $em( '2026-10-05 00:00:00' ) )[1] );
+// O fuso é o do site. O instante 05:00 de São Paulo é 08:00 UTC: o próximo 06:00 de São Paulo é daqui a 1 h (09:00 UTC), e o
+// próximo 06:00 UTC já é amanhã (21 h depois). Com o fuso errado o resultado seria o outro, e o teste vê.
+$mesmo_instante = $em( '2026-10-05 05:00:00' );
+$sp_ts  = $hora_status( $mesmo_instante, 'America/Sao_Paulo' )[0];
+$utc_ts = $hora_status( $mesmo_instante, 'UTC' )[0];
+uox_assert( HOUR_IN_SECONDS === $sp_ts - $mesmo_instante && 21 * HOUR_IN_SECONDS === $utc_ts - $sp_ts, '#350: o 06:00 é no fuso do site: de 05:00 SP, o próximo 06:00 SP é em 1 h, e o próximo 06:00 UTC vem 21 h depois dele; SP=' . $sp_ts . ' UTC=' . $utc_ts );
+// Fuso com meia hora (Índia, UTC+5:30): o 06:00 do relógio do site, e não um múltiplo de hora de UTC.
+uox_assert( '06:00:00' === substr( $hora_status( $em( '2026-10-05 12:00:00' ), 'Asia/Kolkata' )[1], 11 ), '#350: num fuso de meia hora o disparo ainda é 06:00 do relógio do site' );
+// Na virada de horário de verão o 06:00 continua sendo 06:00 do relógio do site.
+uox_assert( '06:00:00' === substr( $hora_status( $em( '2026-03-28 12:00:00' ), 'Europe/Lisbon' )[1], 11 ), '#350: numa virada de horário o disparo ainda é 06:00 do relógio do site' );
+// A frase da issue: o cron roda DUAS horas antes do envio de segunda (08:00). De domingo às 08:00, o próximo disparo é a
+// segunda às 06:00, que é exatamente 2 h antes do envio.
+$GLOBALS['uox_timezone'] = 'America/Sao_Paulo';
+$segunda_envio = ( new DateTimeImmutable( '2026-10-05 08:00:00', $sp ) )->getTimestamp();
+$cron_segunda  = uonix_intelligence_executive_status_first_run( $segunda_envio - DAY_IN_SECONDS );
+uox_assert( 2 * HOUR_IN_SECONDS === $segunda_envio - $cron_segunda && 'Mon 06:00' === ( new DateTimeImmutable( '@' . $cron_segunda ) )->setTimezone( $sp )->format( 'D H:i' ), '#350: o cron de segunda roda às 06:00, 2 h antes do envio das 08:00; obteve ' . ( new DateTimeImmutable( '@' . $cron_segunda ) )->setTimezone( $sp )->format( 'D H:i' ) );
+// O agendamento de verdade usa esse primeiro disparo, e a recorrência é diária. Sem evento, cria; com evento, não mexe.
+$GLOBALS['uox_cron'] = array();
+$GLOBALS['uox_timezone'] = 'America/Sao_Paulo';
+// Relógio às 03:17, e não às 05:00: com 05:00, o "1 h depois" antigo dá EXATAMENTE 06:00 e o teste não distinguiria o
+// agendamento novo do velho. Às 03:17 o antigo daria 04:17, e o novo dá 06:00.
+uonix_intelligence_executive_schedule_status( $em( '2026-10-05 03:17:00' ) );
+$agendado_em = $GLOBALS['uox_cron']['uonix_intelligence_page_status_daily'] ?? null;
+uox_assert( $em( '2026-10-05 06:00:00' ) === $agendado_em, '#350: o agendamento usa o primeiro disparo às 06:00, e não "1 h depois" (04:17); obteve ' . var_export( $agendado_em, true ) );
+uox_assert( 'daily' === ( $GLOBALS['uox_cron_rec']['uonix_intelligence_page_status_daily'] ?? '' ), '#350: a recorrência segue diária' );
+// Já agendado: nenhuma chamada nova a `wp_schedule_event`, e a data não muda. O stub só sobrescreve a chave, então contar as
+// chamadas é o que separa "não reagenda" de "reagenda para o mesmo valor".
+$GLOBALS['uox_chamadas_agenda'] = 0;
+$agendar_original = $GLOBALS['uox_cron'];
+uonix_intelligence_executive_schedule_status( $em( '2026-10-05 04:40:00' ) );
+uox_assert( $agendado_em === ( $GLOBALS['uox_cron']['uonix_intelligence_page_status_daily'] ?? null ) && $agendar_original === $GLOBALS['uox_cron'], '#350: já agendado, não move a data (reagendar a cada requisição a empurraria para sempre)' );
+$GLOBALS['uox_cron'] = array();
+$GLOBALS['uox_cron']['uonix_intelligence_page_status_daily'] = $em( '2030-01-01 06:00:00' );
+uonix_intelligence_executive_schedule_status( $em( '2026-10-05 04:40:00' ) );
+uox_assert( $em( '2030-01-01 06:00:00' ) === $GLOBALS['uox_cron']['uonix_intelligence_page_status_daily'], '#350: um evento já agendado em OUTRA data (o que a produção tem hoje) NÃO é movido; obteve ' . var_export( $GLOBALS['uox_cron']['uonix_intelligence_page_status_daily'], true ) );
 $GLOBALS['uox_options'] = array();
 
 // ---------------------------------------------------------------------------

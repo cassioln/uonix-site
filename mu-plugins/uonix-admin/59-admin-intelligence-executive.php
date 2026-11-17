@@ -58,6 +58,32 @@ if ( ! function_exists( 'uonix_intelligence_executive_rules' ) ) {
 			'detect_alpha'    => 0.05,
 			'lead_days_read'  => 60,
 			'ga4_buffer'      => 7,
+			// Dias SEGUIDOS sem linha do GA4, dentro de uma janela comparada, a partir dos quais a
+			// comparação é recusada (#303). O que foi MEDIDO em produção (2026-09-11 a 2026-11-16): 4 dias
+			// sem linha em 67, todos de fim de semana (sáb 10/10, dom 25/10, dom 01/11, sáb 14/11), nenhum
+			// seguido de outro (maior sequência = 1), nenhum com zero sessões. O que NÃO foi medido é a
+			// chance de um falso alarme, e os números abaixo são uma faixa de modelo, não um fato.
+			//
+			// O modelo ingênuo (Poisson por dia, média por dia da semana) dá 7,6e-08 para 3 dias seguidos
+			// numa janela de 28 dias. Mas a PRÓPRIA série o rejeita: no fim de semana a variância é 6,7 vezes
+			// a média (Poisson exige 1), o modelo prevê 0,74 dia sem linha e a série tem 4, e 38 de 40 janelas
+			// de 28 dias têm algum dia ausente (o modelo previa 26%). Com a taxa EMPÍRICA do fim de semana
+			// (20% dos dias sem linha), 3 dias seguidos numa janela de 28 dias saem em 2,8e-06 (1 em 360 mil);
+			// com o dia útil suavizado em 1/47, em 6,5e-03 (1 em 154). A faixa honesta vai de 1 em ~150 a 1 em
+			// 13 milhões, conforme a dispersão que se admita, e o dado atual não decide.
+			//
+			// **Feriado prolongado NÃO está coberto pelo cálculo.** Sexta de feriado + sábado + domingo são 3
+			// dias de baixa seguidos: com a taxa de fim de semana (20%/dia) a chance é de 1 em 125 por feriado,
+			// e de 1 em 400 com 2 sessões por dia (o que 12/10 e 02/11 tiveram). Com 3 a 5 desses por ano, de 1% a
+			// 4% de chance de uma recusa por ano, e mais no Carnaval e no recesso de fim de ano. A recusa é do
+			// lado seguro: o e-mail deixa de comparar, o número atual segue na tela, e o texto diz "lacuna de
+			// coleta", que nesse caso pode não ser verdade (foi o feriado, e não a coleta).
+			//
+			// Por que 3, apesar disso: 2 daria falso alarme em quase toda janela com fim de semana de baixa
+			// (15% pela taxa empírica), e 4 deixa de ver uma queda de coleta de exatamente 3 dias. É decisão de
+			// produto, tomada contra o custo (um e-mail que não compara) e não contra uma probabilidade medida.
+			// Revisar com mais histórico, e se o tráfego mudar de ordem de grandeza.
+			'ga4_gap_days'    => 3,
 			'top_pages'       => 5,
 			'page_candidates' => 10,
 			'pages_days'      => 28,
@@ -326,6 +352,76 @@ if ( ! function_exists( 'uonix_intelligence_executive_history_covers' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_executive_longest_missing_run' ) ) {
+	/**
+	 * A maior sequência de dias SEGUIDOS sem linha do GA4, dentro de uma janela (#303).
+	 *
+	 * Dia ausente numa janela encerrada vale zero visitas, e isso é correto com a coleta funcionando
+	 * (a defasagem do GA4 é de horas). Quando a coleta PARA (tag quebrada, container despublicado,
+	 * consentimento bloqueando tudo), o dia ausente é zero MEDIÇÃO, e a divisão da conversão infla:
+	 * uma lacuna de 16 dias na janela anterior fez o e-mail imprimir "antes: até 3,3%" quando a taxa
+	 * real era 1,4%. O que separa os dois casos é o COMPRIMENTO da sequência, e não o dia isolado.
+	 *
+	 * Dia COM linha e zero sessões não é ausente: o GA4 mediu e deu zero. `first_day` (a borda) é
+	 * outra regra, a de `history_covers()`: ela olha o que vem antes da janela; esta olha o miolo.
+	 *
+	 * @param array<string, int|float> $por_dia Sessões por 'Y-m-d' (só dias com linha).
+	 * @param array                    $janela  `start` e `end` ('Y-m-d', inclusive).
+	 * @return int 0 se a janela é inválida ou não tem dia ausente.
+	 */
+	function uonix_intelligence_executive_longest_missing_run( $por_dia, $janela ) {
+		if ( ! is_array( $por_dia ) || ! is_array( $janela ) || ! isset( $janela['start'], $janela['end'] ) ) {
+			return 0;
+		}
+		$fuso = new DateTimeZone( 'UTC' );
+		$dia  = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $janela['start'], $fuso );
+		$fim  = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $janela['end'], $fuso );
+		if ( false === $dia || false === $fim || $dia > $fim ) {
+			return 0;
+		}
+		$maior = 0;
+		$atual = 0;
+		while ( $dia <= $fim ) {
+			if ( array_key_exists( $dia->format( 'Y-m-d' ), $por_dia ) ) {
+				$atual = 0;
+			} else {
+				++$atual;
+				$maior = max( $maior, $atual );
+			}
+			$dia = $dia->modify( '+1 day' );
+		}
+
+		return $maior;
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_executive_collection_gap_days' ) ) {
+	/**
+	 * A maior sequência de dias seguidos sem linha do GA4 entre as janelas comparadas, SE ela chega a
+	 * `ga4_gap_days`; senão, 0. Zero é "sem lacuna"; um número é "há lacuna, e é desse tamanho". (#303)
+	 *
+	 * O comprimento sai junto para o e-mail dizer o que se sabe (quantos dias seguidos sem dado) em vez
+	 * de afirmar uma causa: num feriado prolongado o dado falta porque ninguém visitou, e "lacuna de
+	 * coleta" seria falso.
+	 *
+	 * @param array $ga4     Saída de `uonix_intelligence_executive_ga4_per_day()`.
+	 * @param array ...$janelas Janelas `start`/`end` que entram na comparação.
+	 * @return int
+	 */
+	function uonix_intelligence_executive_collection_gap_days( $ga4, ...$janelas ) {
+		if ( ! is_array( $ga4 ) || ! isset( $ga4['per_day'] ) || ! is_array( $ga4['per_day'] ) ) {
+			return 0;
+		}
+		$limite = (int) uonix_intelligence_executive_rules()['ga4_gap_days'];
+		$maior  = 0;
+		foreach ( $janelas as $janela ) {
+			$maior = max( $maior, uonix_intelligence_executive_longest_missing_run( $ga4['per_day'], $janela ) );
+		}
+
+		return $maior >= $limite ? $maior : 0;
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_executive_ga4_error_reason' ) ) {
 	/**
 	 * Motivo de um erro do GA4. Sem credencial não é "a consulta falhou": nenhuma
@@ -359,9 +455,13 @@ if ( ! function_exists( 'uonix_intelligence_executive_visits_box' ) ) {
 		$semana   = uonix_intelligence_executive_sum( $ga4['per_day'], $w['week'] );
 		$anterior = uonix_intelligence_executive_sum( $ga4['per_day'], $w['prev_week'] );
 		$coberto  = uonix_intelligence_executive_history_covers( $ga4, $w['prev_week'] );
+		// Lacuna de coleta DENTRO de uma das semanas (#303): a borda coberta não basta. A contagem atual
+		// segue sendo mostrada, e só a comparação é recusada.
+		$dias_lacuna = $coberto ? uonix_intelligence_executive_collection_gap_days( $ga4, $w['week'], $w['prev_week'] ) : 0;
+		$lacuna      = $dias_lacuna > 0;
 
 		$delta = null;
-		if ( $coberto && function_exists( 'uonix_analytics_metrics_compare' ) ) {
+		if ( $coberto && ! $lacuna && function_exists( 'uonix_analytics_metrics_compare' ) ) {
 			$comparacao = uonix_analytics_metrics_compare( $semana, $anterior );
 			if ( is_array( $comparacao ) && 'comparable' === ( $comparacao['state'] ?? '' ) ) {
 				$delta = (float) $comparacao['delta_percent'];
@@ -376,10 +476,11 @@ if ( ! function_exists( 'uonix_intelligence_executive_visits_box' ) ) {
 			'window'         => $w['week'],
 			'compare_window' => $w['prev_week'],
 			'current'        => $semana,
-			'previous'       => $coberto ? $anterior : null,
+			'previous'       => $coberto && ! $lacuna ? $anterior : null,
 			'delta_percent'  => $delta,
 			'comparable'     => null !== $delta,
-			'note'           => $coberto ? ( null === $delta ? 'previous_empty' : '' ) : 'no_history',
+			'note'           => ! $coberto ? 'no_history' : ( $lacuna ? 'ga4_collection_gap' : ( null === $delta ? 'previous_empty' : '' ) ),
+			'gap_days'       => $lacuna ? $dias_lacuna : null,
 			'consented_only' => true,
 		);
 	}
@@ -514,9 +615,19 @@ if ( ! function_exists( 'uonix_intelligence_executive_conversion_box' ) ) {
 			'p_value'        => null,
 			'detectable'     => false,
 			'direction'      => 'flat',
+			'gap_days'       => null,
 		);
 
 		if ( ! uonix_intelligence_executive_history_covers( $ga4, $w['prev_month'] ) ) {
+			return $box;
+		}
+		// Lacuna de coleta DENTRO de uma das duas janelas (#303): os orçamentos contam todos, mas as visitas
+		// dos dias sem coleta somam zero, e a taxa de uma janela sai inflada. Recusa a comparação, e a taxa
+		// atual segue sendo mostrada.
+		$dias_lacuna = uonix_intelligence_executive_collection_gap_days( $ga4, $w['month'], $w['prev_month'] );
+		if ( $dias_lacuna > 0 ) {
+			$box['note']     = 'ga4_collection_gap';
+			$box['gap_days'] = $dias_lacuna;
 			return $box;
 		}
 		$sessoes_ant = uonix_intelligence_executive_sum( $ga4['per_day'], $w['prev_month'] );
@@ -786,6 +897,23 @@ if ( ! function_exists( 'uonix_intelligence_executive_page_status' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_executive_transient_codes' ) ) {
+	/**
+	 * Códigos HTTP que dizem "agora não", e não "este endereço é assim" (#304).
+	 *
+	 * 408 é timeout, 429 é limite de taxa, 502 e 504 são o proxy dizendo que a aplicação não
+	 * respondeu, e 503 é indisponibilidade. Um nó que responde assim pode redirecionar de novo
+	 * quando voltar, e tratá-lo como fim da cadeia a parte em duas linhas, o mesmo sintoma que o
+	 * PR #301 corrigiu para o código 0. 500 e os demais 4xx/5xx NÃO entram: o servidor respondeu
+	 * ali, e o visitante chega nele.
+	 *
+	 * @return int[]
+	 */
+	function uonix_intelligence_executive_transient_codes() {
+		return array( 408, 429, 502, 503, 504 );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 	/**
 	 * Páginas mais encontradas na busca (pilar 4), com o status de cada uma conferido.
@@ -962,13 +1090,13 @@ if ( ! function_exists( 'uonix_intelligence_executive_top_pages' ) ) {
 				}
 				// Fim conhecido é onde o servidor RESPONDEU com status próprio: 2xx, 404/410,
 				// ou erro 4xx/5xx — um 500 é resposta do endereço, e o visitante chega nele.
-				// Limitação conhecida: 408, 429, 502, 503 e 504 também caem aqui, embora
-				// sejam indisponibilidade passageira, e o nó possa redirecionar de novo (#304).
-				// Sem resposta (código 0: falha de rede, teto ou orçamento) o nó pode
-				// redirecionar de novo, e 3xx sem `Location` não diz para onde. Nos dois
-				// casos não há fim, e nada é somado (MÉDIO 2 da terceira revisão).
+				// Sem resposta o nó pode redirecionar de novo, e não há fim: código 0 (falha de
+				// rede, teto ou orçamento), 3xx sem `Location` (não diz para onde) e os códigos
+				// de indisponibilidade passageira — 408 (timeout), 429 (limite de taxa), 502 e
+				// 504 (o proxy sem a aplicação) e 503. Nesses casos nada é somado ao nó (MÉDIO 2
+				// da terceira revisão do PR #301, e #304).
 				$codigo = isset( $status['code'] ) ? (int) $status['code'] : 0;
-				if ( ! in_array( $estado, array( 'ok', 'not_found' ), true ) && $codigo < 400 ) {
+				if ( ! in_array( $estado, array( 'ok', 'not_found' ), true ) && ( $codigo < 400 || in_array( $codigo, uonix_intelligence_executive_transient_codes(), true ) ) ) {
 					break;
 				}
 				$resultado = array(
@@ -1244,9 +1372,11 @@ if ( ! function_exists( 'uonix_intelligence_executive_refresh_page_status' ) ) {
 	 *
 	 * Grava só caminho, estado, código, destino e hora: nenhum texto de consulta, nenhuma
 	 * métrica. `unknown` com qualquer código É gravado, porque é resposta do servidor:
-	 * com código >= 400 o `top_pages()` a trata como fim de cadeia (soma o 301 nela), e
-	 * abaixo de 400 (3xx sem `Location`, 300, 304...) como sem fim. Lido do cache, dá o
-	 * mesmo resultado da conferência na hora (MÉDIO 1 e BAIXO 7 da revisão do PR #349).
+	 * com código >= 400, exceto os cinco de `uonix_intelligence_executive_transient_codes()`
+	 * (408, 429, 502, 503 e 504, #304), o `top_pages()` a trata como fim de cadeia (soma o 301
+	 * nela); nesses cinco e abaixo de 400 (3xx sem `Location`, 300, 304...), como sem fim. Lido
+	 * do cache, dá o mesmo resultado da conferência na hora (MÉDIO 1 e BAIXO 7 da revisão do PR
+	 * #349, e preso por teste para cada um dos cinco).
 	 * Sem resposta (código 0, falha de rede) não é estado da página e não é gravado: o
 	 * registro anterior desse caminho, se ainda valer, fica. O status de hoje sempre
 	 * substitui o anterior. Registros de caminhos não conferidos hoje ficam até
@@ -1320,10 +1450,49 @@ if ( ! function_exists( 'uonix_intelligence_executive_refresh_page_status' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_executive_status_first_run' ) ) {
+	/**
+	 * Primeiro disparo do cron de status: o próximo 06:00 no fuso do site (#350).
+	 *
+	 * O envio semanal sai segunda às 08:00 e lê o último status que o cron gravou. Com o cron em
+	 * "1 h depois do primeiro carregamento", o horário dele era arbitrário, e o status lido quase
+	 * sempre vinha de uma execução do dia anterior: uma página que entrasse no topo no dia do
+	 * envio saía "não verificado". Às 06:00 o cron roda duas horas antes do envio, todo dia, porque
+	 * a recorrência é diária. O horário vale como âncora do primeiro disparo: o WP-Cron roda
+	 * depois do horário, nunca antes, e em produção ele passa pelo `crontab` a cada 5 minutos
+	 * (#348), então o atraso é de minutos. Em QA e no local, o WP-Cron dispara por tráfego e pode
+	 * ATRASAR no dia, mas não deriva: `wp_reschedule_event()` ancora a próxima data no horário
+	 * AGENDADO (`now + ( intervalo - ( ( now - agendado ) % intervalo ) )`), e não no horário em que
+	 * rodou, então um disparo às 09:10 não empurra o seguinte. O intervalo é de 86.400 s, então o
+	 * "06:00 do fuso do site" vale enquanto o deslocamento em relação a UTC não muda (o Brasil não tem
+	 * horário de verão desde 2019). O contrato não promete o horário.
+	 *
+	 * Agora, ou antes das 06:00 de hoje: hoje às 06:00. Às 06:00 em ponto ou depois: amanhã. Nunca
+	 * agenda no passado nem no mesmo instante.
+	 *
+	 * @param int|null $now Para teste; o padrão é `time()`.
+	 * @return int Timestamp Unix.
+	 */
+	function uonix_intelligence_executive_status_first_run( $now = null ) {
+		$agora  = is_int( $now ) ? $now : time();
+		$fuso   = function_exists( 'wp_timezone' ) ? wp_timezone() : new DateTimeZone( 'UTC' );
+		$hoje   = ( new DateTimeImmutable( '@' . $agora ) )->setTimezone( $fuso )->setTime( 6, 0, 0 );
+		$alvo   = $hoje->getTimestamp() > $agora ? $hoje : $hoje->modify( '+1 day' )->setTime( 6, 0, 0 );
+
+		return $alvo->getTimestamp();
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_executive_schedule_status' ) ) {
-	function uonix_intelligence_executive_schedule_status() {
+	/**
+	 * Agenda o cron diário de status, se ainda não existe. Não move a data de um evento existente:
+	 * reagendar a cada requisição o empurraria para sempre adiante.
+	 *
+	 * @param int|null $now Para teste; o padrão é `time()`.
+	 */
+	function uonix_intelligence_executive_schedule_status( $now = null ) {
 		if ( function_exists( 'wp_next_scheduled' ) && ! wp_next_scheduled( uonix_intelligence_executive_status_hook() ) ) {
-			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', uonix_intelligence_executive_status_hook() );
+			wp_schedule_event( uonix_intelligence_executive_status_first_run( is_int( $now ) ? $now : null ), 'daily', uonix_intelligence_executive_status_hook() );
 		}
 	}
 }
