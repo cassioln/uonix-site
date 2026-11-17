@@ -252,6 +252,24 @@ if ( ! function_exists( 'uonix_intelligence_report_detect_html' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_report_gap_text' ) ) {
+	/**
+	 * A frase da recusa por dias seguidos sem dado do GA4 (#303). Diz o que se sabe, o comprimento da
+	 * sequência, e não a causa: coleta que parou e feriado sem visita deixam o mesmo rastro, e "lacuna de
+	 * coleta" afirmaria uma falha que pode não ter havido.
+	 *
+	 * @param array $box Caixa de visitas ou de conversão, com `gap_days`.
+	 */
+	function uonix_intelligence_report_gap_text( $box ) {
+		$dias = is_array( $box ) && isset( $box['gap_days'] ) && is_int( $box['gap_days'] ) && $box['gap_days'] > 0 ? $box['gap_days'] : 0;
+		if ( 0 === $dias ) {
+			return 'sem comparação: dias seguidos sem dado do GA4 no período';
+		}
+
+		return sprintf( 'sem comparação: %d %s sem dado do GA4 no período', $dias, 1 === $dias ? 'dia' : 'dias seguidos' );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_report_box_html' ) ) {
 	/**
 	 * Uma célula do scorecard. Toda string vinda de dado passa por `esc_html`.
@@ -293,9 +311,9 @@ if ( ! function_exists( 'uonix_intelligence_report_box_html' ) ) {
 			} elseif ( 'no_history' === ( $box['note'] ?? '' ) ) {
 				$linhas[] = esc_html( 'sem histórico do GA4 para comparar' );
 			} elseif ( 'ga4_collection_gap' === ( $box['note'] ?? '' ) ) {
-				// Dias seguidos sem linha do GA4 dentro de uma das semanas: a coleta pode ter parado, e dizer
-				// "sem visitas" afirmaria que o site não teve visita (#303).
-				$linhas[] = esc_html( 'sem comparação: lacuna de coleta do GA4 no período' );
+				// Dias seguidos sem linha do GA4 dentro de uma das semanas: a coleta pode ter parado, ou ninguém
+				// visitou (um feriado prolongado). O texto diz o que se sabe, e não a causa (#303).
+				$linhas[] = esc_html( uonix_intelligence_report_gap_text( $box ) );
 			} else {
 				$linhas[] = esc_html( 'semana anterior sem visitas registradas' );
 			}
@@ -335,8 +353,8 @@ if ( ! function_exists( 'uonix_intelligence_report_box_html' ) ) {
 				$linhas[] = esc_html( 'sem histórico do GA4 para comparar' );
 			} elseif ( 'ga4_collection_gap' === ( $box['note'] ?? '' ) ) {
 				// A taxa de uma janela com lacuna sai inflada (os orçamentos contam todos, as visitas dos dias
-				// sem coleta somam zero), então a comparação é recusada (#303).
-				$linhas[] = esc_html( 'sem comparação: lacuna de coleta do GA4 no período' );
+				// sem dado somam zero), então a comparação é recusada (#303).
+				$linhas[] = esc_html( uonix_intelligence_report_gap_text( $box ) );
 			} else {
 				$linhas[] = esc_html( 'período anterior sem visitas registradas' );
 			}

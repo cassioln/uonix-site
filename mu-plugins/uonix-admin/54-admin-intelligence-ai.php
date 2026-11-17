@@ -122,6 +122,23 @@ if ( ! function_exists( 'uonix_intelligence_ai_page_object' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_ai_status_has_no_answer' ) ) {
+	/**
+	 * Um código HTTP que não é resposta DO ENDEREÇO: 0 (falha de rede) e os cinco de indisponibilidade
+	 * passageira (408, 429, 502, 503, 504). O nó pode redirecionar de novo quando voltar, e tratá-lo
+	 * como "não leva a página" fazia o cron gravar `no_page` por cima de uma sugestão válida, e regerá-la
+	 * gasta cota do Gemini (#304). É a mesma regra do relatório executivo (59,
+	 * `uonix_intelligence_executive_transient_codes()`); o 54 trata o 59 como opcional, então a lista
+	 * é repetida aqui, e `scripts/tests/test-admin-intelligence-executive.php` confere que as duas são
+	 * iguais.
+	 *
+	 * @param int $codigo Código HTTP.
+	 */
+	function uonix_intelligence_ai_status_has_no_answer( $codigo ) {
+		return 0 === (int) $codigo || in_array( (int) $codigo, array( 408, 429, 502, 503, 504 ), true );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_ai_follow_redirect' ) ) {
 	/**
 	 * Destino final de um endereço antigo que redireciona (#343): o caminho, '' quando com
@@ -170,7 +187,7 @@ if ( ! function_exists( 'uonix_intelligence_ai_follow_redirect' ) ) {
 			}
 			$status = uonix_intelligence_executive_page_status( $atual );
 			$estado = is_array( $status ) && isset( $status['state'] ) ? (string) $status['state'] : 'unknown';
-			if ( 'unknown' === $estado && ( ! isset( $status['code'] ) || 0 === (int) $status['code'] ) ) {
+			if ( 'unknown' === $estado && ( ! isset( $status['code'] ) || uonix_intelligence_ai_status_has_no_answer( (int) $status['code'] ) ) ) {
 				return null;
 			}
 			if ( 'ok' === $estado ) {
