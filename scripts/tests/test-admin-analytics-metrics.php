@@ -496,6 +496,13 @@ if ( function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
 	$assembled_qp_uma_chave = uonix_analytics_metrics_assemble_google_data( $ga4_empty_raw, $ga4_empty_raw, $ga4_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, $gsc_empty_raw, null, '{"responseAggregationType":"byProperty","rows":[{"keys":["so consulta"],"clicks":0,"impressions":3,"ctr":0,"position":6}]}' );
 	uonix_metrics_assert( is_array( $assembled_qp_uma_chave ) && array() === ( $assembled_qp_uma_chave['search_console']['query_pages'] ?? null ), 'Linha de query_pages sem a segunda chave é pulada' );
 
+	// O teto da API é 25000 linhas por requisição: o pedido de 25000 passa intacto, e acima disso a função corta em 25000 (#336).
+	foreach ( array( 24999 => 24999, 25000 => 25000, 25001 => 25000, 30000 => 25000, PHP_INT_MAX => 25000, 0 => 10, -5 => 10 ) as $pedido_rl => $esperado_rl ) {
+		$GLOBALS['uonix_metrics_http_capture'] = array();
+		uonix_analytics_metrics_search_console_rows( 'tok', 'sc-domain:uonix.com.br', array( 'start' => '2026-09-01', 'end' => '2026-09-30' ), array( 'query', 'page' ), $pedido_rl );
+		$corpo_rl = json_decode( (string) ( $GLOBALS['uonix_metrics_http_capture']['args']['body'] ?? '' ), true );
+		uonix_metrics_assert( is_array( $corpo_rl ) && $esperado_rl === ( $corpo_rl['rowLimit'] ?? null ), "#336: o clamp de search_console_rows: pedido {$pedido_rl} sai como {$esperado_rl}; obteve " . var_export( $corpo_rl['rowLimit'] ?? null, true ) );
+	}
 	$GLOBALS['uonix_metrics_http_capture'] = array();
 	uonix_analytics_metrics_search_console_rows( 'tok', 'sc-domain:uonix.com.br', array( 'start' => '2026-09-01', 'end' => '2026-09-30' ), array( 'query', 'page' ), 1000 );
 	$corpo_qp = json_decode( (string) ( $GLOBALS['uonix_metrics_http_capture']['args']['body'] ?? '' ), true );

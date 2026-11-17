@@ -50,7 +50,7 @@ class Uox_Corte extends RuntimeException {}
 function update_option( $k, $v, $a = null ) {
 	$GLOBALS['uox_options'][ $k ]  = $v;
 	$GLOBALS['uox_autoload'][ $k ] = $a;
-	$GLOBALS['uox_gravacoes'][]    = array( $k, $v );
+	$GLOBALS['uox_gravacoes'][]    = array( $k, $v, $a );
 	if ( $GLOBALS['uox_corta_na_gravacao'] > 0 && count( $GLOBALS['uox_gravacoes'] ) >= $GLOBALS['uox_corta_na_gravacao'] ) {
 		throw new Uox_Corte( 'processo cortado na gravação ' . count( $GLOBALS['uox_gravacoes'] ) );
 	}
@@ -227,6 +227,8 @@ uox_ai_assert( is_array( $in_arg ) && false === strpos( json_encode( uonix_intel
 foreach ( array(
 	'%title%'                       => '',
 	'%customfield(titulo_seo)%'     => '',
+	'%customfield()%'               => '',
+	'%date()%'                      => '',
 	'%date(Y)%'                     => '',
 	'%count(x)%'                    => '',
 	'%date(d/m/Y)%'                 => '',
@@ -320,6 +322,11 @@ foreach ( $fora_da_lista as $caso => $json_dif ) {
 	$texto_obj = '{"title":' . json_encode( $ok['title'], JSON_UNESCAPED_UNICODE ) . ',"description":' . json_encode( $ok['description'], JSON_UNESCAPED_UNICODE ) . ',"differentiators_used":' . $json_dif . '}';
 	uox_ai_assert( null === uonix_intelligence_ai_validate( $texto_obj, $P ), "#334 Recusa: differentiators_used como {$caso}" );
 }
+// O que o `json_decode( …, true )` não distingue: um objeto com chaves 0..n-1 em ordem É uma lista depois do decode, e passa.
+// Os valores passam pelas mesmas checagens, e o gravado é uma lista (`array_keys( $usados )`).
+$obj_como_lista = '{"title":' . json_encode( $ok['title'], JSON_UNESCAPED_UNICODE ) . ',"description":' . json_encode( $ok['description'], JSON_UNESCAPED_UNICODE ) . ',"differentiators_used":{"0":"Aço Inox 304/316","1":"Conforme NBR 16325"}}';
+$v_obj = uonix_intelligence_ai_validate( $obj_como_lista, $P );
+uox_ai_assert( is_array( $v_obj ) && array( 'Aço Inox 304/316', 'Conforme NBR 16325' ) === $v_obj['differentiators_used'] && array_is_list( $v_obj['differentiators_used'] ), '#334: o objeto com chaves 0..n-1 em ordem é uma lista depois do decode, passa, e o gravado é uma lista' );
 // Objeto VAZIO (`{}`) vira `array()` no `json_decode( …, true )` e é indistinguível de `[]`: nenhum valor passa por
 // ele, então é inofensivo, e a validação o trata como a lista vazia que ele é (mesma regra dos diferenciais no texto).
 uox_ai_assert( null === uonix_intelligence_ai_validate( '{"title":' . json_encode( $ok['title'], JSON_UNESCAPED_UNICODE ) . ',"description":' . json_encode( $ok['description'], JSON_UNESCAPED_UNICODE ) . ',"differentiators_used":{}}', $P ), '#334: o objeto vazio vira lista vazia, e o texto de $ok usa diferenciais: recusa pela regra 5' );
@@ -720,6 +727,10 @@ $cache_cheio = get_option( uonix_intelligence_ai_option() );
 uox_ai_assert( 5 === count( $cache_cheio ) && count( $GLOBALS['uox_gravacoes'] ) <= 6, '#335: o estado final tem as 5 entradas e a execução grava no máximo 6 vezes (uma por chamada, mais a poda do fim); gravou ' . count( $GLOBALS['uox_gravacoes'] ) );
 $ultima = end( $GLOBALS['uox_gravacoes'] );
 uox_ai_assert( is_array( $ultima ) && $ultima[1] === $cache_cheio, '#335: a última gravação é o estado final' );
+// Toda gravação da execução, a do meio e a do fim, desliga o autoload: uma opção que ainda não existe seria criada com
+// autoload `yes` pela gravação do meio, e uma execução cortada logo depois deixaria o cache carregando em toda página.
+$autoloads = array_map( static function ( $g ) { return $g[2] ?? 'ausente'; }, $GLOBALS['uox_gravacoes'] );
+uox_ai_assert( 6 === count( $autoloads ) && array( false ) === array_values( array_unique( $autoloads, SORT_REGULAR ) ), '#335: as 6 gravações da execução (5 do meio e a da poda) desligam o autoload; obteve ' . var_export( $autoloads, true ) );
 // A entrada NOVA vence a antiga da mesma chave na gravação do meio: o cache de ontem tem a consulta 1 em `unavailable`
 // (a que o cron refaz hoje), e o corte vem logo depois da 1.ª chamada. O cache tem de dizer `ok`, e não `unavailable`.
 $GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array(
@@ -736,6 +747,23 @@ try {
 $GLOBALS['uox_corta_na_gravacao'] = 0;
 $meio = get_option( uonix_intelligence_ai_option() );
 uox_ai_assert( 'ok' === ( $meio[ $k_n( 1 ) ]['status'] ?? '' ) && 'unavailable' === ( $meio[ $k_n( 2 ) ]['status'] ?? '' ), '#335: na gravação do meio a entrada nova (ok) vence a antiga da mesma chave, e a ainda não reavaliada (2) fica como estava; obteve ' . var_export( array( $meio[ $k_n( 1 ) ]['status'] ?? null, $meio[ $k_n( 2 ) ]['status'] ?? null ), true ) );
+// O corte DEPOIS de uma falha: a gravação do meio guarda a falha inteira (HTTP, causa, hora de renovação da cota), e não só
+// as chamadas que deram certo. Sem isso, o cron seguinte refaria a chamada às cegas e perderia o dado que o #404 ainda lê.
+// Cenário: 1.ª chamada com 503 duas vezes, 2.ª com a cota diária; corte logo depois da 2.ª gravação.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http']              = array( uox_http( 503 ), uox_http( 503 ), uox_429( $dia, '27223s' ), uox_gemini( $ok ) );
+$GLOBALS['uox_gravacoes']         = array();
+$GLOBALS['uox_corta_na_gravacao'] = 2;
+try {
+	uonix_intelligence_ai_run( uox_analise( array_slice( $cinco, 0, 3 ) ), 0 );
+} catch ( Uox_Corte $e ) {
+}
+$GLOBALS['uox_corta_na_gravacao'] = 0;
+$falha_meio = get_option( uonix_intelligence_ai_option() );
+uox_ai_assert( 'unavailable' === ( $falha_meio[ $k_n( 1 ) ]['status'] ?? '' ) && 503 === ( $falha_meio[ $k_n( 1 ) ]['http'] ?? null ) && 2 === ( $falha_meio[ $k_n( 1 ) ]['attempts'] ?? null ), '#335: a gravação do meio guarda a FALHA (status, HTTP e tentativas), e não só o que deu certo; obteve ' . var_export( $falha_meio[ $k_n( 1 ) ] ?? null, true ) );
+$cota_meio = $falha_meio[ $k_n( 2 ) ] ?? array();
+uox_ai_assert( 'quota_exhausted' === ( $cota_meio['status'] ?? '' ) && 'quota_id_daily' === ( $cota_meio['quota_source'] ?? null ) && isset( $cota_meio['retry_at'] ), '#335: a gravação do meio, depois de uma cota esgotada, já leva a origem e a hora da renovação; obteve ' . var_export( $cota_meio, true ) );
+uox_ai_assert( ! isset( $falha_meio[ $k_n( 3 ) ] ), '#335: a consulta que ainda não foi alcançada não aparece no cache do meio' );
 // A poda (consulta que saiu da lista) continua valendo no fim, e uma gravação parcial NUNCA apaga o que ficou de outro dia.
 $GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array( 'chave-antiga-de-uma-consulta-que-saiu' => array( 'status' => 'ok', 'input_hash' => str_repeat( 'a', 64 ), 'suggestion' => array( 'title' => 'x', 'description' => 'y', 'differentiators_used' => array() ) ) );
 $GLOBALS['uox_http'] = array_fill( 0, 5, uox_gemini( $ok ) );

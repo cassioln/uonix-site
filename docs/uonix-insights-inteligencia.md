@@ -373,7 +373,7 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 - Ver a entrada 09 do [ROPA](legal/ropa-inventario-dados-uonix.md).
 
 **Validação.** A sugestão só é aceita se tudo abaixo valer. Se algo falhar, o estado é `rejected`, e nada do texto recusado é exibido.
-1. A resposta é JSON com exatamente `title`, `description` e `differentiators_used`, e `differentiators_used` é uma **lista** (`array_is_list`): um objeto JSON recusa, mesmo com valores permitidos (#334).
+1. A resposta é JSON com exatamente `title`, `description` e `differentiators_used`, e `differentiators_used` é uma **lista** (`array_is_list`): um objeto JSON com chaves que não sejam `0..n-1` em ordem recusa, mesmo com valores permitidos (#334). Um objeto com chaves `0..n-1` em ordem é indistinguível de lista depois do `json_decode( …, true )`, e passa: os valores passam pelas mesmas checagens, e o gravado é uma lista.
 2. O título tem de 1 a 60 caracteres, e a descrição de 1 a 155.
 3. Não há HTML.
 4. Todo diferencial declarado está na lista.

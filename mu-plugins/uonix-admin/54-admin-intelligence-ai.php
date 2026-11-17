@@ -421,8 +421,9 @@ if ( ! function_exists( 'uonix_intelligence_ai_validate' ) ) {
 			return null;
 		}
 		// `differentiators_used` é uma LISTA. Um objeto JSON também vira array no `json_decode( …, true )`, e os
-		// valores dele passariam pela checagem dos rótulos: `array_is_list` recusa a forma (#334). O objeto
-		// vazio (`{}`) vira `array()` e é igual a `[]`: nenhum valor passa por ele.
+		// valores dele passariam pela checagem dos rótulos: `array_is_list` recusa o objeto cujas chaves não
+		// sejam 0..n-1 em ordem (#334). O que tem essas chaves é indistinguível de lista depois do decode, e
+		// passa, sem dano: os valores passam pelas mesmas checagens. O objeto vazio (`{}`) vira `array()`.
 		if ( ! is_string( $dados['title'] ) || ! is_string( $dados['description'] ) || ! is_array( $dados['differentiators_used'] ) || ! array_is_list( $dados['differentiators_used'] ) ) {
 			return null;
 		}
