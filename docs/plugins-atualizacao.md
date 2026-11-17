@@ -6,6 +6,8 @@ Plugins, o tema pai (`kadence`) e o núcleo do WordPress de produção são atua
 
 Tudo roda no **seu Mac**, com `scripts/plugins/atualizar.sh`. Os três passos abaixo exigem a **janela SSH da Locaweb aberta** (no painel da hospedagem, em Configurações → Segurança → Habilitar, segundo a página de ajuda da Locaweb; vale 3 h). Com a janela fechada, o comando pendura e é cortado por tempo.
 
+O preparo de uma sessão de navegador exclusiva e a habilitação limitada por ciclo estão em [Abertura da janela SSH](plugins-ssh-painel.md). A CLI exige autorização do recurso/ciclo, confirmação do painel após recarga e sonda autenticada; não fecha nem renova janela preexistente. Sua instalação não autoriza sobrescrita local, atualização de plugins ou integração automática do cron sem as provas descritas no guia.
+
 | # | Comando | O que faz | Muda algo? |
 |---|---|---|---|
 | 1 | `atualizar.sh inventario` | Lê produção e lista o que tem atualização, por camada. | Não |
