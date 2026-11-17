@@ -39,6 +39,22 @@ function uox_assert( $condition, $message ) {
 		fwrite( STDERR, "FAIL: {$message}\n" );
 	}
 }
+// Warning, notice e deprecated de PHP reprovam a suíte, com o arquivo e a linha (#317). `@` suprime de propósito
+// (`error_reporting()` zera), e o handler respeita isso. O `E_ALL` é forçado aqui, e não herdado: o `php.ini` do runner pode
+// silenciar warning ou deprecated, e aí o handler nunca veria nada e a suíte voltaria a ser decorativa.
+error_reporting( E_ALL );
+set_error_handler(
+	static function ( $nivel, $mensagem, $arquivo, $linha ) {
+		global $failures;
+		if ( 0 === ( error_reporting() & $nivel ) ) {
+			return false;
+		}
+		++$failures;
+		fwrite( STDERR, "FAIL: erro de PHP ({$nivel}): {$mensagem} em " . basename( (string) $arquivo ) . ":{$linha}\n" );
+
+		return true;
+	}
+);
 
 class Uox_Die_Exception extends RuntimeException {}
 class Uox_Redirect_Exception extends RuntimeException {}
@@ -898,10 +914,14 @@ uox_assert( false === ( uonix_intelligence_anomaly_get_state()['lead_silence'] ?
 // Lista vazia NÃO consome tentativa. Sem esta asserção, tratar o caso como falha de
 // envio passava despercebido — e aí um episódio que nasce sem destinatário gastaria o
 // teto em dias de espera e nunca avisaria, mesmo depois do cadastro.
-// Ausência da chave e zero são a mesma coisa aqui: nada foi tentado.
-uox_assert( 0 === (int) ( $semDestino['meta']['lead_silence']['attempts'] ?? 0 ), 'lista vazia não pode contar como tentativa de envio, obteve ' . ( $semDestino['meta']['lead_silence']['attempts'] ?? '(ausente)' ) );
+// Ausência da chave NÃO é zero (#317): o `?? 0` fazia `meta['lead_silence']` sumir e a asserção passar vazia. O episódio tem
+// de existir (`meta['lead_silence']` presente) e, se `attempts` existe, vale zero; `attempts` ausente só vale quando o
+// episódio existe. `isset` primeiro, valor depois.
+uox_assert( isset( $semDestino['meta']['lead_silence'] ) && is_array( $semDestino['meta']['lead_silence'] ), '#317: o episódio sem destinatário continua registrado em `meta[lead_silence]`' );
+uox_assert( ! isset( $semDestino['meta']['lead_silence']['attempts'] ) || 0 === (int) $semDestino['meta']['lead_silence']['attempts'], 'lista vazia não pode contar como tentativa de envio, obteve ' . ( $semDestino['meta']['lead_silence']['attempts'] ?? '(ausente)' ) );
 $semDestino2 = uonix_intelligence_anomaly_run_check( $anomalia, $hoje );
-uox_assert( 0 === (int) ( $semDestino2['meta']['lead_silence']['attempts'] ?? 0 ), 'nem depois de várias rodadas sem destinatário as tentativas podem acumular, obteve ' . ( $semDestino2['meta']['lead_silence']['attempts'] ?? '(ausente)' ) );
+uox_assert( isset( $semDestino2['meta']['lead_silence'] ) && is_array( $semDestino2['meta']['lead_silence'] ), '#317: depois de várias rodadas sem destinatário o episódio segue registrado' );
+uox_assert( ! isset( $semDestino2['meta']['lead_silence']['attempts'] ) || 0 === (int) $semDestino2['meta']['lead_silence']['attempts'], 'nem depois de várias rodadas sem destinatário as tentativas podem acumular, obteve ' . ( $semDestino2['meta']['lead_silence']['attempts'] ?? '(ausente)' ) );
 uox_assert( empty( $semDestino2['meta']['lead_silence']['undelivered'] ), 'sem destinatário o episódio nunca pode ser marcado como aviso não entregue: nada foi tentado' );
 
 $GLOBALS['uox_options']['uonix_executive_report_recipients'] = array( 'operador@ksio.dev' );
@@ -982,7 +1002,8 @@ uox_assert( false === ( uonix_intelligence_anomaly_get_state()['lead_silence'] ?
 for ( $i = 0; $i < $teto + 1; $i++ ) {
 	$suspenso = uonix_intelligence_anomaly_run_check( $anomalia, $hoje );
 }
-uox_assert( 0 === (int) ( $suspenso['meta']['lead_silence']['attempts'] ?? 0 ), 'com a licença suspensa nenhuma tentativa pode ser contada, obteve ' . ( $suspenso['meta']['lead_silence']['attempts'] ?? '(ausente)' ) );
+uox_assert( isset( $suspenso['meta']['lead_silence'] ) && is_array( $suspenso['meta']['lead_silence'] ), '#317: com a licença suspensa o episódio segue registrado em `meta[lead_silence]` (sem isto, a asserção de tentativas passaria vazia)' );
+uox_assert( ! isset( $suspenso['meta']['lead_silence']['attempts'] ) || 0 === (int) $suspenso['meta']['lead_silence']['attempts'], 'com a licença suspensa nenhuma tentativa pode ser contada, obteve ' . ( $suspenso['meta']['lead_silence']['attempts'] ?? '(ausente)' ) );
 uox_assert( empty( $suspenso['meta']['lead_silence']['undelivered'] ), 'com a licença suspensa o episódio nunca é marcado como aviso não entregue' );
 uox_assert( 0 === count( $GLOBALS['uox_mail_calls'] ), 'nem depois de várias rodadas suspensas sai e-mail' );
 

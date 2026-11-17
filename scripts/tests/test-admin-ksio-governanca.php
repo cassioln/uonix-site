@@ -18,6 +18,22 @@ function uox_assert( $condition, $message ) {
 		fwrite( STDERR, "FAIL: {$message}\n" );
 	}
 }
+// Warning, notice e deprecated de PHP reprovam a suíte, com o arquivo e a linha (#317). `@` suprime de propósito
+// (`error_reporting()` zera), e o handler respeita isso. O `E_ALL` é forçado aqui, e não herdado: o `php.ini` do runner pode
+// silenciar warning ou deprecated, e aí o handler nunca veria nada e a suíte voltaria a ser decorativa.
+error_reporting( E_ALL );
+set_error_handler(
+	static function ( $nivel, $mensagem, $arquivo, $linha ) {
+		global $failures;
+		if ( 0 === ( error_reporting() & $nivel ) ) {
+			return false;
+		}
+		++$failures;
+		fwrite( STDERR, "FAIL: erro de PHP ({$nivel}): {$mensagem} em " . basename( (string) $arquivo ) . ":{$linha}\n" );
+
+		return true;
+	}
+);
 
 class Uox_Die_Exception extends RuntimeException {}
 class Uox_Redirect_Exception extends RuntimeException {
@@ -383,6 +399,33 @@ uox_assert( false !== strpos( $home, 'uonix-license-card' ), 'a Visão Geral do 
 uox_assert( false !== strpos( $home, 'Sem controle configurado' ), 'sem constante o cartão diz que não há controle configurado' );
 uox_assert( false !== strpos( $home, 'admin.php?page=uonix-analytics&tab=settings#uonix-license-settings' ), 'o cartão leva ao bloco da licença na aba Configurações' );
 uox_assert( false === strpos( $home, 'Não há como mudar por esta tela' ), 'o cartão não diz mais que a licença só muda pelo wp-config.php' );
+
+// #317: o fallback do cartão quando o controle de licença (50) não carregou. Só um subprocesso prova isso: a suíte já
+// carregou o 50, e função não se descarrega. O subprocesso carrega o 46 SEM o 50, como numa instalação onde o 50 falhasse,
+// e renderiza a Visão Geral do dono. O texto tem de dizer que o envio está pausado (a ausência do 50 conta como pausa, como
+// no 57 e no 58), e o cartão não pode quebrar nem deixar um resumo de licença que o 50 não escreveu.
+$sub_sem_50 = static function () {
+	$codigo = 'define( "ABSPATH", "/" ); '
+		. 'function current_user_can( $c ) { return true; } function uonix_ksio_is_owner() { return true; } function wp_die( $m = "" ) { throw new RuntimeException( (string) $m ); } '
+		. 'function esc_url( $u ) { return (string) $u; } function esc_html( $t ) { return htmlspecialchars( (string) $t, ENT_QUOTES, "UTF-8" ); } function admin_url( $p = "" ) { return "https://uonix.com.br/wp-admin/" . $p; } '
+		. 'require getenv( "UOX_46" ); ob_start(); uox_content_render_ksio_tools_home(); $h = (string) ob_get_clean(); '
+		. 'echo json_encode( array( "tem_50" => function_exists( "uonix_intelligence_license_summary" ), "cartao" => false !== strpos( $h, "uonix-license-card" ), "html" => $h ) );';
+	$proc  = proc_open( array( PHP_BINARY, '-n', '-d', 'error_reporting=-1', '-d', 'display_errors=stderr', '-r', $codigo ), array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes, null, array( 'UOX_46' => dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/46-admin-limpeza-conteudo.php', 'PATH' => (string) getenv( 'PATH' ) ) );
+	$saida = is_resource( $proc ) ? stream_get_contents( $pipes[1] ) : '';
+	$erro  = is_resource( $proc ) ? stream_get_contents( $pipes[2] ) : '';
+	if ( is_resource( $proc ) ) {
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		proc_close( $proc );
+	}
+
+	return array( json_decode( (string) $saida, true ), (string) $erro );
+};
+list( $sem_50, $erro_sem_50 ) = $sub_sem_50();
+uox_assert( is_array( $sem_50 ) && false === $sem_50['tem_50'] && true === $sem_50['cartao'], '#317: o subprocesso carregou o 46 SEM o 50 e renderizou o cartão; obteve ' . var_export( $sem_50, true ) . ' ' . $erro_sem_50 );
+uox_assert( is_array( $sem_50 ) && false !== strpos( (string) $sem_50['html'], 'O controle de licença não carregou, e o envio automático do relatório e dos alertas está pausado.' ), '#317: sem o 50, o cartão diz que o controle não carregou e que o envio está pausado' );
+uox_assert( is_array( $sem_50 ) && false === strpos( (string) $sem_50['html'], 'Sem controle configurado' ) && false === strpos( (string) $sem_50['html'], 'O envio está ativo' ), '#317: sem o 50, o cartão não diz que o envio está ativo nem que não há controle' );
+uox_assert( '' === $erro_sem_50, '#317: o cartão sem o 50 não emite aviso de PHP; obteve ' . $erro_sem_50 );
 
 // A licença do painel também aparece no cartão, com a origem.
 $GLOBALS['uox_options']['uonix_intelligence_license'] = array( 'status' => 'suspended', 'valid_until' => '' );

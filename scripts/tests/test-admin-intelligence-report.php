@@ -45,6 +45,22 @@ function uox_assert( $condition, $message ) {
 		fwrite( STDERR, "FAIL: {$message}\n" );
 	}
 }
+// Warning, notice e deprecated de PHP reprovam a suíte, com o arquivo e a linha (#317). `@` suprime de propósito
+// (`error_reporting()` zera), e o handler respeita isso. O `E_ALL` é forçado aqui, e não herdado: o `php.ini` do runner pode
+// silenciar warning ou deprecated, e aí o handler nunca veria nada e a suíte voltaria a ser decorativa.
+error_reporting( E_ALL );
+set_error_handler(
+	static function ( $nivel, $mensagem, $arquivo, $linha ) {
+		global $failures;
+		if ( 0 === ( error_reporting() & $nivel ) ) {
+			return false;
+		}
+		++$failures;
+		fwrite( STDERR, "FAIL: erro de PHP ({$nivel}): {$mensagem} em " . basename( (string) $arquivo ) . ":{$linha}\n" );
+
+		return true;
+	}
+);
 
 class Uox_Redirect_Exception extends RuntimeException {
 	public $url;

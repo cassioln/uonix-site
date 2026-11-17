@@ -20,6 +20,24 @@ function uox_assert( $condition, $message ) {
 		fwrite( STDERR, "FAIL: {$message}\n" );
 	}
 }
+// Warning, notice e deprecated de PHP reprovam a suíte, com o arquivo e a linha (#317). O requisito "sem erro de PHP"
+// da #312 só foi provado porque a revisão rodou as suítes com `-d error_reporting=-1`; sem este handler, nada no CI
+// prendia isso. O `@` suprime de propósito (`error_reporting()` zera), e o handler respeita isso. O `E_ALL` é forçado aqui, e
+// não herdado: o `php.ini` do runner pode silenciar warning ou deprecated, e aí o handler nunca veria nada e a suíte voltaria
+// a ser decorativa.
+error_reporting( E_ALL );
+set_error_handler(
+	static function ( $nivel, $mensagem, $arquivo, $linha ) {
+		global $failures;
+		if ( 0 === ( error_reporting() & $nivel ) ) {
+			return false;
+		}
+		++$failures;
+		fwrite( STDERR, "FAIL: erro de PHP ({$nivel}): {$mensagem} em " . basename( (string) $arquivo ) . ":{$linha}\n" );
+
+		return true;
+	}
+);
 
 // Registra todo hook, para conferir que o arquivo registra só os dois da licença.
 $GLOBALS['uox_hooks']   = array();
@@ -176,6 +194,33 @@ uox_assert( is_array( $r ) && false === $r['sending'] && 'suspended' === $r['rea
 $r = uox_sub( 'define("KSIODEV_INTELLIGENCE_STATUS", "active"); define("KSIODEV_INTELLIGENCE_VALID_UNTIL", "2000-01-01");', 'uonix_intelligence_license_state()' );
 uox_assert( is_array( $r ) && false === $r['sending'] && 'expired' === $r['reason'], 'o leitor lê KSIODEV_INTELLIGENCE_VALID_UNTIL; obteve ' . var_export( $r, true ) );
 
+// #315: constante DEFINIDA como `null` não é constante ausente. `define( 'X', null )` é o que o `wp config set --raw` e uma
+// edição à mão produzem, e é o caminho de quem suspende à mão. A regra documentada diz que valor não reconhecido pausa:
+// definida com `null` é `invalid`, e só a constante AUSENTE é "sem controle". O estado traz `configured` verdadeiro.
+foreach ( array(
+	'status null'                              => array( 'define("KSIODEV_INTELLIGENCE_STATUS", null);', false, true, 'invalid' ),
+	'valid_until null'                         => array( 'define("KSIODEV_INTELLIGENCE_VALID_UNTIL", null);', false, true, 'invalid' ),
+	'as duas null'                             => array( 'define("KSIODEV_INTELLIGENCE_STATUS", null); define("KSIODEV_INTELLIGENCE_VALID_UNTIL", null);', false, true, 'invalid' ),
+	'status null com data futura'              => array( 'define("KSIODEV_INTELLIGENCE_STATUS", null); define("KSIODEV_INTELLIGENCE_VALID_UNTIL", "2099-01-01");', false, true, 'invalid' ),
+	'active com valid_until null'              => array( 'define("KSIODEV_INTELLIGENCE_STATUS", "active"); define("KSIODEV_INTELLIGENCE_VALID_UNTIL", null);', false, true, 'invalid' ),
+	'status false'                             => array( 'define("KSIODEV_INTELLIGENCE_STATUS", false);', false, true, 'invalid' ),
+	'status inteiro'                           => array( 'define("KSIODEV_INTELLIGENCE_STATUS", 1);', false, true, 'invalid' ),
+	'status array'                             => array( 'define("KSIODEV_INTELLIGENCE_STATUS", array("active"));', false, true, 'invalid' ),
+	'nenhuma constante (o controle: sem controle)' => array( '', true, false, '' ),
+	'só active (o controle: envia)'            => array( 'define("KSIODEV_INTELLIGENCE_STATUS", "active");', true, true, '' ),
+) as $caso_c => $c ) {
+	$r = uox_sub( $c[0], 'uonix_intelligence_license_state()' );
+	uox_assert( is_array( $r ) && $c[1] === $r['sending'] && $c[2] === $r['configured'] && $c[3] === $r['reason'], "#315: {$caso_c}: envio " . var_export( $c[1], true ) . ', configurada ' . var_export( $c[2], true ) . ", motivo '{$c[3]}'; obteve " . var_export( $r, true ) );
+}
+// A camada da constante isolada diz o mesmo, e a camada do painel não muda: a opção do painel ausente segue sendo "sem controle".
+$r_camada = uox_sub( 'define("KSIODEV_INTELLIGENCE_STATUS", null);', 'uonix_intelligence_license_state()["constant"]' );
+uox_assert( is_array( $r_camada ) && false === $r_camada['sending'] && true === $r_camada['configured'] && 'invalid' === $r_camada['reason'], '#315: a camada da constante, sozinha, pausa com `invalid`; obteve ' . var_export( $r_camada, true ) );
+$r_painel = uox_sub( 'define("KSIODEV_INTELLIGENCE_STATUS", null);', 'uonix_intelligence_license_state()["panel"]' );
+uox_assert( is_array( $r_painel ) && true === $r_painel['sending'] && false === $r_painel['configured'], '#315: a camada do painel não muda (opção ausente é sem controle); obteve ' . var_export( $r_painel, true ) );
+// A regra pura mantém o contrato do argumento: `null` ali SEGUE sendo "ausente" (quem decide é quem chama).
+$r_pura = uonix_intelligence_license_evaluate( null, null, $GLOBALS['hoje'] );
+uox_assert( true === $r_pura['sending'] && false === $r_pura['configured'], '#315: `evaluate( null, null )` segue sendo "sem controle" (a camada do painel depende disso)' );
+
 // O "hoje" é o do fuso do site. Kiritimati (UTC+14) e Pago Pago (UTC-11) estão
 // sempre em datas diferentes; a data-limite é o dia corrente em Pago Pago.
 $fim = '(new DateTimeImmutable("now", new DateTimeZone("Pacific/Pago_Pago")))->format("Y-m-d")';
@@ -197,6 +242,45 @@ uox_assert( false !== strpos( $msg, '01/09/2026' ) && false !== strpos( $msg, 'k
 $msg = uonix_intelligence_license_message( uox_licenca( 'suspenso', null ) );
 uox_assert( false !== strpos( $msg, 'não é válida' ), 'inválido: o aviso diz que a configuração não é válida; obteve ' . $msg );
 uox_assert( '' !== uonix_intelligence_license_message( 'lixo' ), 'estado que não é array conta como pausado e tem aviso' );
+
+// #314: estado montado à mão, com chave ausente ou de tipo errado. O `set_error_handler` do topo reprova qualquer
+// warning; aqui o que se confere é o TEXTO. Chave ausente conta como vazia, e valor que não é texto também.
+$msg_sem_data = uonix_intelligence_license_message( array( 'reason' => 'expired' ) );
+uox_assert( 0 === strpos( $msg_sem_data, 'A licença da Central de Inteligência venceu, e o envio automático' ) && false !== strpos( $msg_sem_data, 'ksio.dev' ), '#314: vencida sem `valid_until` diz só "venceu", sem "em ," e sem inventar o dia; obteve ' . $msg_sem_data );
+uox_assert( false !== strpos( uonix_intelligence_license_message( array( 'reason' => 'expired', 'valid_until' => '2026-09-01' ) ), 'venceu em 01/09/2026, e o envio' ), '#314: com a data, a frase segue "venceu em DD/MM/AAAA"' );
+$msg_data_array = uonix_intelligence_license_message( array( 'reason' => 'expired', 'valid_until' => array( 'x' ) ) );
+uox_assert( 0 === strpos( $msg_data_array, 'A licença da Central de Inteligência venceu, e o envio automático' ) && false === strpos( $msg_data_array, 'Array' ), '#314: `valid_until` que é array não vira a palavra "Array" nem uma data; obteve ' . $msg_data_array );
+$msg_motivo_array = uonix_intelligence_license_message( array( 'reason' => array( 'expired' ) ) );
+uox_assert( false !== strpos( $msg_motivo_array, 'não é válida' ), '#314: `reason` que é array cai no aviso de configuração inválida; obteve ' . $msg_motivo_array );
+$msg_sem_nada = uonix_intelligence_license_message( array() );
+uox_assert( false !== strpos( $msg_sem_nada, 'não é válida' ), '#314: estado vazio conta como pausado, com o aviso de configuração inválida' );
+foreach ( array( 'null' => null, 'false' => false, 'número' => 7, 'texto' => 'x' ) as $rotulo_m => $estado_m ) {
+	uox_assert( false !== strpos( uonix_intelligence_license_message( $estado_m ), 'não é válida' ), "#314: estado {$rotulo_m} (que não é array) conta como pausado" );
+}
+// O resumo, com o envio ativo mas sem `status` e sem `valid_until`.
+$res_sem_chaves = uonix_intelligence_license_summary( array( 'sending' => true, 'configured' => true ) );
+uox_assert( '' !== $res_sem_chaves && false === strpos( $res_sem_chaves, ' até .' ) && false === strpos( $res_sem_chaves, 'Array' ), '#314: resumo sem `status` nem `valid_until` não imprime "até ." nem "Array"; obteve ' . $res_sem_chaves );
+$res_data_array = uonix_intelligence_license_summary( array( 'sending' => true, 'configured' => true, 'status' => 'active', 'valid_until' => array( 'x' ) ) );
+uox_assert( false === strpos( $res_data_array, 'Array' ), '#314: resumo com `valid_until` que é array não imprime "Array"; obteve ' . $res_data_array );
+$res_status_array = uonix_intelligence_license_summary( array( 'sending' => true, 'configured' => true, 'status' => array( 'trial' ), 'valid_until' => '' ) );
+uox_assert( false === strpos( $res_status_array, 'Cortesia' ) && false === strpos( $res_status_array, 'Array' ), '#314: `status` que é array não vira cortesia nem "Array"; obteve ' . $res_status_array );
+uox_assert( '' !== uonix_intelligence_license_summary( array() ) && '' !== uonix_intelligence_license_summary( null ), '#314: resumo de estado vazio ou nulo existe (conta como pausado)' );
+// `date_label` direto: texto que não é data devolve o texto, e o que não é texto devolve vazio.
+uox_assert( '30/09/2026' === uonix_intelligence_license_date_label( '2026-09-30' ) && 'x' === uonix_intelligence_license_date_label( 'x' ) && '' === uonix_intelligence_license_date_label( array( 'x' ) ) && '' === uonix_intelligence_license_date_label( null ), '#314: `date_label` aceita data, devolve o texto que não é data e devolve vazio para o que não é texto' );
+// Estado que é TEXTO, ou objeto: não se indexa como array. 'lixo'['reason'] seria um erro, e 'lixo'[0] daria 'l'.
+foreach ( array( 'texto' => 'reason', 'texto com o nome da chave' => 'valid_until', 'objeto com a chave' => new ArrayObject( array( 'reason' => 'expired', 'valid_until' => '2026-09-01', 'sending' => false ) ) ) as $rotulo_t => $estado_t ) {
+	$msg_t = uonix_intelligence_license_message( $estado_t );
+	$res_t = uonix_intelligence_license_summary( $estado_t );
+	uox_assert( false !== strpos( $msg_t, 'não é válida' ) && '' !== $res_t && false === strpos( $msg_t . $res_t, 'venceu em 01/09/2026' ), "#314: estado que é {$rotulo_t} conta como pausado e inválido, sem ler a chave dele" );
+}
+// A camada isolada: o `layer_summary` de uma camada montada à mão.
+uox_assert( '' !== uonix_intelligence_license_layer_summary( array( 'configured' => true, 'sending' => true, 'status' => array( 'x' ), 'valid_until' => array( 'y' ) ) ), '#314: `layer_summary` com `status` e `valid_until` que são array não quebra' );
+// Camada que NÃO envia, com `reason` e `valid_until` de tipo errado: o cast dava "Array" no texto e um aviso.
+$camada_ruim = uonix_intelligence_license_layer_summary( array( 'configured' => true, 'sending' => false, 'reason' => array( 'expired' ), 'valid_until' => array( '2026-09-01' ) ) );
+uox_assert( 'Configuração inválida. Pausa o envio.' === $camada_ruim, '#314: `layer_summary` com `reason` array cai em "Configuração inválida"; obteve ' . $camada_ruim );
+$camada_vencida_sem_data = uonix_intelligence_license_layer_summary( array( 'configured' => true, 'sending' => false, 'reason' => 'expired', 'valid_until' => array( 'x' ) ) );
+uox_assert( 'Vencida. Pausa o envio.' === $camada_vencida_sem_data, '#314: `layer_summary` vencida sem data válida diz só "Vencida.", sem "em ." nem "Array"; obteve ' . $camada_vencida_sem_data );
+uox_assert( 'Vencida em 01/09/2026. Pausa o envio.' === uonix_intelligence_license_layer_summary( array( 'configured' => true, 'sending' => false, 'reason' => 'expired', 'valid_until' => '2026-09-01' ) ), '#314: com a data, a camada vencida segue "Vencida em DD/MM/AAAA."' );
 
 uox_assert( 0 === strpos( uonix_intelligence_license_summary( uox_licenca( null, null ) ), 'Sem controle configurado' ), 'resumo sem constante diz que não há controle configurado' );
 uox_assert( false !== strpos( uonix_intelligence_license_summary( uox_licenca( 'trial', '2026-10-31' ) ), 'Cortesia (trial) até 31/10/2026' ), 'resumo da cortesia traz o prazo' );
