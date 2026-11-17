@@ -43,8 +43,10 @@ if ( ! function_exists( 'uonix_intelligence_ai_limits' ) ) {
 		// execução. 60 s é o tamanho de uma janela por minuto; a cota por minuto não foi medida (#384).
 		// `failure_streak`: falhas seguidas que param o cron (#384).
 		// `timeout` em 30 s: medido em produção em 2026-11-17, as falhas gravadas eram todas
-		// `cURL error 28` a 15 s. Três chamadas cabem no `ai_budget` do Radar (150 s) com folga
-		// até o `timeout 290` do crontab: 2 × 30 s + 2 s de pausa por candidata, pior caso 186 s.
+		// `cURL error 28` a 15 s. O pior caso por candidata é 2 × 30 s + 2 s de pausa. O `ai_budget`
+		// é conferido antes de cada chamada, e a pausa vem depois dessa conferência: uma chamada
+		// pode começar em 152 s e durar 62 s, então o pior término do Radar é 214 s, com 76 s até
+		// o `timeout 290` do crontab.
 		return array( 'title' => 60, 'description' => 155, 'per_run' => 5, 'timeout' => 30, 'max_output_tokens' => 1024, 'max_hops' => 3, 'head_max' => 10, 'quota_wait' => 60, 'failure_streak' => 2 );
 	}
 }
@@ -742,9 +744,14 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 					$parada['retry_at']  = $entrada['retry_at'];
 				}
 			} elseif ( in_array( $resultado['status'], array( 'unavailable', 'model_missing' ), true ) ) {
-				++$seguidas;
-				if ( $seguidas >= (int) $limites['failure_streak'] ) {
-					$parada = array( 'reason' => 'failures' );
+				// Timeout (`cURL error 28`) é transitório e não conta na sequência, como no Radar
+				// (#404, revisão do PR #472). DNS e TLS continuam contando.
+				$timeout = isset( $entrada['error'] ) && is_string( $entrada['error'] ) && false !== strpos( $entrada['error'], 'cURL error 28' );
+				if ( ! $timeout ) {
+					++$seguidas;
+					if ( $seguidas >= (int) $limites['failure_streak'] ) {
+						$parada = array( 'reason' => 'failures' );
+					}
 				}
 			} else {
 				$seguidas = 0;

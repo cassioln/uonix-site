@@ -608,12 +608,25 @@ uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
 $cf = get_option( uonix_intelligence_ai_option() );
 uox_ai_assert( 503 === ( $cf[ $k_n( 1 ) ]['http'] ?? null ) && 2 === ( $cf[ $k_n( 1 ) ]['attempts'] ?? null ) && 'failures' === ( $cf[ $k_n( 3 ) ]['reason'] ?? '' ) && ! isset( $cf[ $k_n( 3 ) ]['retry_at'] ), '#384: a falha grava o HTTP 503 e os dois pedidos; a adiada diz o motivo, sem hora de renovação' );
 
+// Timeout não conta na sequência de falhas do Módulo 3 também (#404, #402; revisão do PR #472).
+// O cron grava a parada no cache: com dois timeouts seguidos, a terceira consulta não pode ficar
+// `deferred` por falhas. Medido em produção em 2026-11-17: as falhas eram todas cURL error 28.
+$GLOBALS['uox_options'] = array();
+$timeout_m3 = new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out after 30001 milliseconds with 0 bytes received' );
+$GLOBALS['uox_http'] = array( $timeout_m3, $timeout_m3, uox_gemini( $ok ) );
+uonix_intelligence_ai_run( uox_analise( array( uox_linha( 'alfa predial' ), uox_linha( 'beta predial' ), uox_linha( 'gama predial' ) ) ), 0 );
+$cache_m3   = get_option( uonix_intelligence_ai_option(), array() );
+$estados_m3 = array_map( static function ( $e ) { return $e['status'] ?? '?'; }, array_values( $cache_m3 ) );
+$motivos_m3 = array_map( static function ( $e ) { return $e['reason'] ?? ''; }, array_values( $cache_m3 ) );
+uox_ai_assert( ! in_array( 'failures', $motivos_m3, true ) && 'ok' === ( $estados_m3[2] ?? '' ), 'Módulo 3: dois timeouts seguidos não adiam a terceira consulta por falhas (#404, revisão do PR #472); estados: ' . implode( ',', $estados_m3 ) . ' motivos: ' . implode( ',', $motivos_m3 ) );
+
+
 // #404: o cron grava a causa do erro de transporte no cache, e só nele.
 $GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
-$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' ), uox_http( 503 ), uox_http( 503 ) );
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'DNS: could not resolve host' ), uox_http( 503 ), uox_http( 503 ) );
 uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
 $ct = get_option( uonix_intelligence_ai_option() );
-uox_ai_assert( 'unavailable' === ( $ct[ $k_n( 1 ) ]['status'] ?? '' ) && 0 === ( $ct[ $k_n( 1 ) ]['http'] ?? null ) && 'http_request_failed: cURL error 28: Operation timed out' === ( $ct[ $k_n( 1 ) ]['error'] ?? null ), '#404: a falha de transporte grava a causa no cache; obteve ' . var_export( $ct[ $k_n( 1 ) ] ?? null, true ) );
+uox_ai_assert( 'unavailable' === ( $ct[ $k_n( 1 ) ]['status'] ?? '' ) && 0 === ( $ct[ $k_n( 1 ) ]['http'] ?? null ) && 'http_request_failed: DNS: could not resolve host' === ( $ct[ $k_n( 1 ) ]['error'] ?? null ), '#404: a falha de transporte (DNS, que conta na sequência) grava a causa no cache; obteve ' . var_export( $ct[ $k_n( 1 ) ] ?? null, true ) );
 uox_ai_assert( 503 === ( $ct[ $k_n( 2 ) ]['http'] ?? null ) && ! array_key_exists( 'error', $ct[ $k_n( 2 ) ] ) && ! array_key_exists( 'error', $ct[ $k_n( 3 ) ] ?? array() ), '#404: a falha com resposta HTTP e a adiada não levam a causa' );
 $GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' ) );
 $lido = uonix_intelligence_ai_suggestion_for( $cinco[0] ?? array(), array() );
