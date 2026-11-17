@@ -26,8 +26,16 @@ function wp_parse_url( $url, $component = -1 ) {
 	return parse_url( $url, $component );
 }
 
-function wp_strip_all_tags( $text ) {
-	return strip_tags( $text );
+// Fiel ao `wp_strip_all_tags()` do WordPress 7.1.4 (wp-includes/formatting.php): `<script>` e `<style>` saem COM o conteúdo e
+// depois vem o `strip_tags()`. O stub antigo, só `strip_tags()`, divergia do real em 6 de 14 entradas medidas (script, style,
+// comentário, `<img>` e `<3`), e a #382 depende justamente dessas diferenças.
+function wp_strip_all_tags( $text, $remove_breaks = false ) {
+	$text = preg_replace( '@<(script|style)[^>]*?>.*?</\\1>@si', '', (string) $text );
+	$text = strip_tags( (string) $text );
+	if ( $remove_breaks ) {
+		$text = preg_replace( '/[\r\n\t ]+/', ' ', $text );
+	}
+	return trim( $text );
 }
 
 function trailingslashit( $path ) {
@@ -573,6 +581,93 @@ if ( function_exists( 'uonix_analytics_metrics_sanitize_query' ) ) {
 	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'contato @ empresa.test' ), 'Consulta com e-mail separado por espaços é removida' );
 	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'ligue 11987654321' ), 'Consulta com telefone é removida' );
 	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'https://example.test/caminho' ), 'Consulta URL é removida' );
+
+	// #382: o HTML que só aparece DEPOIS de decodificar não pode voltar. Tirar as tags antes da decodificação deixava passar
+	// `%3Cb%3E`, `&lt;b&gt;`, `&amp;lt;b&amp;gt;`, `&#60;b&#62;`, e o texto com `<b>` ia para o `wp_options`, para o painel,
+	// para o e-mail do Módulo 3 e para o pedido ao Gemini. Medido em 2026-11-17 com o `wp_strip_all_tags` real: 7 codificações
+	// devolviam a tag, e a tripla devolvia a entidade.
+	$html_codificado = array(
+		'%3Cb%3Ex%3C/b%3E'                       => 'percent',
+		'%3Cimg src=x%3E'                        => 'percent com atributo',
+		'&lt;b&gt;x&lt;/b&gt;'                   => 'entidade nomeada',
+		'&amp;lt;b&amp;gt;x&amp;lt;/b&amp;gt;'   => 'entidade nomeada em dobro',
+		'&amp;amp;lt;b&amp;amp;gt;x'             => 'entidade nomeada em triplo',
+		'&amp;amp;amp;lt;b&amp;amp;amp;gt;x'     => 'entidade nomeada em quádruplo: sobra entidade depois das 3 voltas',
+		'&#60;b&#62;x&#60;/b&#62;'               => 'entidade numérica',
+		'&#x3C;b&#x3E;x'                         => 'entidade hexadecimal',
+		'%26lt;b%26gt;x'                         => 'percent de entidade',
+		'%253Cb%253Ex'                           => 'percent em dobro',
+		'<b>%3Cimg%3E</b>'                       => 'tag literal que ENVOLVE uma tag codificada',
+		'&lt;<b></b>script&gt;'                  => 'tag literal vazia que parte uma tag codificada',
+		'%26lt;a%26gt;contato@empresa.test'      => 'e-mail dentro de HTML codificado',
+		'laudo %3C/b%3E fim'                     => 'tag de FECHAMENTO só codificada (a classe `/` da marcação)',
+		'laudo &lt;/b&gt; fim'                   => 'tag de fechamento em entidade',
+		'laudo %3C!-- c --%3E fim'               => 'comentário só codificado (a classe `!`)',
+		'laudo &lt;?php x ?&gt; fim'             => 'instrução de processamento em entidade (a classe `?`)',
+		'%2525253Cb%2525253Ex'                   => 'percent em QUATRO níveis: com 3 voltas sobrava `%3Cb%3E`, que ainda decodifica',
+		'%25252525253Cb'                         => 'percent em seis níveis',
+		'x &#128; y'                             => 'entidade numérica DECIMAL que o decodificador não resolve (`&#128;`): sobra, e é recusada',
+		'x &#x80; y'                             => 'entidade HEXADECIMAL que o decodificador não resolve (`&#x80;`)',
+		'x &foo1; y'                             => 'entidade NOMEADA com dígito desconhecida (`&foo1;`)',
+		'x &foo; y'                              => 'entidade nomeada desconhecida (`&foo;`)',
+		'&amp;amp;amp;amp;amp;amp;amp;amp;amp;lt;b' => 'entidade em nove níveis: não estabiliza em 8 voltas',
+	);
+	foreach ( $html_codificado as $entrada => $rotulo ) {
+		$saida = uonix_analytics_metrics_sanitize_query( $entrada );
+		uonix_metrics_assert( '' === $saida, "#382: consulta com HTML codificado ({$rotulo}) é recusada; obteve " . var_export( $saida, true ) );
+	}
+	// A tag LITERAL na entrada crua segue sendo tirada, como sempre foi (o texto de dentro fica). A #382 não muda isso.
+	$tag_literal = array(
+		'<b>x</b> teste'                      => 'x teste',
+		'<script>alert(1)</script> andaime'   => 'andaime',
+		'<img src=x> laudo'                   => 'laudo',
+		'x<br/>y'                             => 'xy',
+		'<!-- c --> laudo'                    => 'laudo',
+	);
+	foreach ( $tag_literal as $entrada => $esperada ) {
+		uonix_metrics_assert( $esperada === uonix_analytics_metrics_sanitize_query( $entrada ), "#382: a tag literal na entrada continua sendo tirada: {$entrada}; obteve " . var_export( uonix_analytics_metrics_sanitize_query( $entrada ), true ) );
+	}
+	// O `<` colado numa letra é cortado pelo `wp_strip_all_tags` sobre a entrada crua, como sempre foi, e a #382 não muda isso
+	// (medido: idêntico antes e depois). O teste o prende para que ninguém o confunda com um efeito do saneamento novo.
+	foreach ( array( 'a<b' => 'a', 'a<3' => 'a', 'a <= b' => 'a', 'x <- y' => 'x', 'eu <3 ancoragem' => 'eu', 'a <b c> d' => 'a  d' ) as $entrada => $esperada ) {
+		uonix_metrics_assert( $esperada === uonix_analytics_metrics_sanitize_query( $entrada ), "#382: `<` colado numa letra segue cortado pelo wp_strip_all_tags (inalterado): {$entrada}; obteve " . var_export( uonix_analytics_metrics_sanitize_query( $entrada ), true ) );
+	}
+	// O que NÃO pode sair: texto legítimo com `<`, `>` ou `&`.
+	$legitimas = array(
+		'resistência a < 5 kn'             => 'resistência a < 5 kn',
+		'carga > 12 kn'                    => 'carga > 12 kn',
+		'viga a < b e c > d'               => 'viga a < b e c > d',
+		'a < b'                            => 'a < b',
+		'5 > 3'                            => '5 > 3',
+		'ancoragem &amp; linha de vida'    => 'ancoragem & linha de vida',
+		'ancoragem &amp;amp; linha'        => 'ancoragem & linha',
+		'NBR 16325 &#x26; EPI'             => 'NBR 16325 & EPI',
+		'R&D'                              => 'R&D',
+		'ancoragem &amp;amp;amp; linha'    => 'ancoragem & linha',
+		'ancoragem &amp;amp;amp;amp; linha' => 'ancoragem & linha',
+		'carga %25 de 100'                 => 'carga % de 100',
+		'desconto 50%'                     => 'desconto 50%',
+		'a%252520b'                        => 'a b',
+		'caf%25C3%25A9'                    => 'café',
+		'a &apos;b&apos; c'                => "a 'b' c",
+		'a&Tab;b'                          => "a\tb",
+		'linha de vida'                    => 'linha de vida',
+		'%41%42'                           => 'AB',
+	);
+	foreach ( $legitimas as $entrada => $esperada ) {
+		uonix_metrics_assert( $esperada === uonix_analytics_metrics_sanitize_query( $entrada ), "#382: consulta legítima preservada: {$entrada}; obteve " . var_export( uonix_analytics_metrics_sanitize_query( $entrada ), true ) );
+	}
+	// Uma entidade sem sentido que sobra depois de decodificar é recusada (`AT&T;` não é entidade conhecida do HTML5, mas tem a forma).
+	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( 'AT&T;' ), '#382: `&nome;` que sobra depois das voltas é recusado, mesmo sem ser entidade conhecida' );
+	// O teto de 120 vale DEPOIS de decodificar: 121 `%41` são 363 caracteres crus e 121 `A` decodificados.
+	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( str_repeat( '%41', 121 ) ), '#382: o teto de 120 vale DEPOIS de decodificar (121 `%41` viram 121 `A`)' );
+	uonix_metrics_assert( str_repeat( 'A', 120 ) === uonix_analytics_metrics_sanitize_query( str_repeat( '%41', 120 ) ), '#382: 120 caracteres depois de decodificar passam, embora tenham 360 antes' );
+	uonix_metrics_assert( str_repeat( 'A', 50 ) === uonix_analytics_metrics_sanitize_query( str_repeat( '%41', 50 ) ), '#382: 50 caracteres decodificados passam, com 150 crus' );
+	// A consulta que NÃO estabiliza em 8 voltas é recusada, e a de 8 níveis que estabiliza no oitavo passa.
+	// `%` + `25` repetido n vezes + `41` decodifica em n + 1 voltas e precisa de MAIS UMA para confirmar que estabilizou (a que não
+	// muda nada). Com o teto de 8 voltas, n = 6 (7 de decodificação + 1 de confirmação) passa, e n = 7 (8 + 1) é recusada.
+	uonix_metrics_assert( 'A' === uonix_analytics_metrics_sanitize_query( '%' . str_repeat( '25', 6 ) . '41' ), '#382: a consulta que decodifica em 7 voltas e confirma na 8.ª passa' );
+	uonix_metrics_assert( '' === uonix_analytics_metrics_sanitize_query( '%' . str_repeat( '25', 7 ) . '41' ), '#382: a que precisaria de 9 voltas não estabiliza dentro do teto de 8 e é recusada' );
 }
 
 if ( function_exists( 'uonix_analytics_metrics_normalize_ga4' ) ) {
