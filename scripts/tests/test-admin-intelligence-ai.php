@@ -860,6 +860,32 @@ foreach ( $misto_m3 as $caso => $c ) {
 	uox_ai_assert( $c[1] === $rm3['called'] && $c[2] === count( $GLOBALS['uox_pedidos'] ) && $c[3] === $st3 && $c[4] === $mo3, "#474 M3 {$caso}: {$c[1]} chamada(s), {$c[2]} pedido(s), estados " . implode( ',', $c[3] ) . ', motivos ' . implode( ',', $c[4] ) . '; obteve ' . $rm3['called'] . ', ' . count( $GLOBALS['uox_pedidos'] ) . ', ' . implode( ',', $st3 ) . ', ' . implode( ',', $mo3 ) );
 }
 
+// O PIOR CASO do Módulo 3 (revisão do PR #484): cinco candidatas, cada uma "503 e depois timeout". O segundo pedido é o timeout, que não
+// conta na sequência de falhas, então nada para o cron: 5 chamadas, 10 pedidos, nenhuma `deferred`. No teto de 30 s por pedido e 2 s de
+// pausa entre as duas tentativas, são 5 × (2 × 30 + 2) = 310 s de Gemini, e 390 s com os 10 HEADs: acima do `timeout 290`. O que o limita
+// é a gravação por chamada (#335) e o reagendamento antes do hook, não o código do laço. O teste prende o COMPORTAMENTO que o contrato
+// descreve, para ele não voltar a afirmar o contrário.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$fila_503_timeout = array();
+for ( $i = 0; $i < 5; ++$i ) {
+	$fila_503_timeout[] = uox_http( 503 );
+	$fila_503_timeout[] = $tmo_m3;
+}
+$GLOBALS['uox_http']    = $fila_503_timeout;
+$GLOBALS['uox_pedidos'] = array();
+$pior_m3 = uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+$cache_pior = get_option( uonix_intelligence_ai_option() );
+uox_ai_assert( 5 === $pior_m3['called'] && 10 === count( $GLOBALS['uox_pedidos'] ), 'Módulo 3, pior caso: cinco "503 e depois timeout" fazem 5 chamadas e 10 pedidos; obteve ' . $pior_m3['called'] . ' e ' . count( $GLOBALS['uox_pedidos'] ) );
+uox_ai_assert( 5 === count( $cache_pior ) && array( 'unavailable' ) === array_values( array_unique( array_map( static function ( $e ) { return $e['status'] ?? '?'; }, $cache_pior ) ) ), 'Módulo 3, pior caso: as cinco ficam unavailable' );
+uox_ai_assert( array() === array_values( array_filter( array_map( static function ( $e ) { return $e['reason'] ?? ''; }, $cache_pior ) ) ), 'Módulo 3, pior caso: NENHUMA parada por falha (o timeout do segundo pedido não conta), e nenhuma deferred' );
+uox_ai_assert( array( 2 ) === array_values( array_unique( array_map( static function ( $e ) { return $e['attempts'] ?? 0; }, $cache_pior ) ) ) && array( 0 ) === array_values( array_unique( array_map( static function ( $e ) { return $e['http'] ?? -1; }, $cache_pior ) ) ), 'Módulo 3, pior caso: cada entrada guarda 2 pedidos e http 0 (a última tentativa foi o timeout)' );
+// O contraste que explica o pior caso: "503 e depois 503" conta, e a segunda candidata já para o cron.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http']    = array_fill( 0, 10, uox_http( 503 ) );
+$GLOBALS['uox_pedidos'] = array();
+$dois_503 = uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+uox_ai_assert( 2 === $dois_503['called'] && 4 === count( $GLOBALS['uox_pedidos'] ), 'Módulo 3, contraste: "503 e depois 503" conta, e a 2.ª candidata para o cron (2 chamadas, 4 pedidos); obteve ' . $dois_503['called'] . ' e ' . count( $GLOBALS['uox_pedidos'] ) );
+
 // #404: o cron grava a causa do erro de transporte no cache, e só nele.
 $GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
 $GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'DNS: could not resolve host' ), uox_http( 503 ), uox_http( 503 ) );

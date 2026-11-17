@@ -634,6 +634,54 @@ uonix_intelligence_radar_run( array_merge( $base, array( 'clock' => $relogio ) )
 $ad_t = array_values( array_filter( array_column( get_option( $opt )['candidates'], 'ai' ), static function ( $ai ) { return 'deferred' === ( $ai['status'] ?? '' ); } ) );
 uox_rd_assert( 3 === count( $ad_t ) && array( 'budget', 'budget', 'budget' ) === array_column( $ad_t, 'reason' ), '#473: a adiada por orçamento de tempo grava reason=budget; obteve ' . var_export( array_column( $ad_t, 'reason' ), true ) );
 uox_rd_assert( ! isset( $ad_t[0]['retry_at'] ) && ! isset( $ad_t[0]['error'] ) && ! isset( $ad_t[0]['http'] ), '#473: reason=budget não leva hora de renovação, causa nem HTTP' );
+// A contagem de leituras do relógio NÃO muda com o `reason` (revisão do PR #484): `$sem_tempo` guarda a leitura que já existia.
+// Medido no baseline fbb1123 e na ponta, no cenário de +20 s por leitura: 11 leituras nos dois. Um mutante que relê o relógio no
+// ramo do motivo leva a 13, sem mudar nada do que é gravado, e é isso que este pino prende (a ordem e a quantidade de leituras
+// decidem quem é adiado).
+$GLOBALS['uox_options'] = array();
+$tempo_l  = 0.0;
+$leituras = 0;
+$relogio_l = static function () use ( &$tempo_l, &$leituras ) {
+	++$leituras;
+	$agora    = $tempo_l;
+	$tempo_l += 20.0;
+	return $agora;
+};
+uonix_intelligence_radar_run( array_merge( $base, array( 'clock' => $relogio_l ) ) );
+uox_rd_assert( 11 === $leituras, "#473: o `reason` não muda a contagem de leituras do relógio (11 no cenário de +20 s por leitura); obteve {$leituras}" );
+// A contagem em outros relógios, medida no código final: quanto mais cedo o orçamento acaba, MENOS leituras (a leitura da página
+// é pulada quando `$sem_tempo`, e a da chamada só vem quando há página). Um mutante que pule ou duplique uma leitura muda uma
+// destas contagens sem mudar o que é gravado.
+foreach ( array( array( 0.0, 13 ), array( 20.0, 11 ), array( 40.0, 9 ), array( 75.0, 8 ), array( 160.0, 7 ) ) as $rampa ) {
+	$GLOBALS['uox_options'] = array();
+	$t_r  = 0.0;
+	$n_r  = 0;
+	$rel_r = static function () use ( &$t_r, &$n_r, $rampa ) {
+		++$n_r;
+		$agora = $t_r;
+		$t_r  += $rampa[0];
+		return $agora;
+	};
+	uonix_intelligence_radar_run( array_merge( $base, array( 'clock' => $rel_r ) ) );
+	uox_rd_assert( $rampa[1] === $n_r, "#473: relógio de +{$rampa[0]} s por leitura faz {$rampa[1]} leituras; obteve {$n_r}" );
+}
+// O ramo em que o tempo JÁ acabou e `$adiar` é falso (a página de ontem vale): é o único em que ler ou não ler o relógio de novo
+// muda a contagem sem mudar o que é gravado. A 1.ª execução falha por timeout e grava as páginas; na 2.ª o orçamento já nasce
+// estourado e o resolvedor responde "não sei". Medido: 13 leituras, as seis adiadas com `reason: budget`.
+$GLOBALS['uox_options'] = array();
+$causa_tmo = 'http_request_failed: cURL error 28: Operation timed out after 30001 milliseconds with 0 bytes received';
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => static function ( $corpo, $modelo, $pausa ) use ( $causa_tmo ) { return array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 1, 'error' => $causa_tmo ); } ) ) );
+$n_gasto = 0;
+$rel_gasto = static function () use ( &$n_gasto ) {
+	++$n_gasto;
+	return 1 === $n_gasto ? 0.0 : 200.0;
+};
+$nao_sei_g = static function ( $q, $c, &$o ) { return null; };
+$r_gasto = uonix_intelligence_radar_run( array_merge( $base, array( 'clock' => $rel_gasto, 'page_resolver' => $nao_sei_g, 'now' => '2026-10-03T03:00:00+00:00' ) ) );
+$ai_gasto = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( 0 === $r_gasto['called'] && array( 'deferred' ) === array_values( array_unique( array_column( $ai_gasto, 'status' ) ) ) && array( 'budget' ) === array_values( array_unique( array_column( $ai_gasto, 'reason' ) ) ), '#473: com o tempo já gasto e a página de ontem reaproveitada, nenhuma chamada e as seis ficam deferred com reason=budget; obteve ' . var_export( array_column( $ai_gasto, 'reason' ), true ) );
+uox_rd_assert( 13 === $n_gasto, "#473: nesse ramo o relógio é lido 13 vezes (a leitura da página e a da chamada, por candidata); obteve {$n_gasto}" );
+
 // Fronteira do orçamento: exatamente 150,0 s depois do início NÃO é "passou" (`>`, e não `>=`). Com a leitura do início em
 // 0 e todas as seguintes em 150, ninguém é adiado por tempo; com 150,001 todas são. As duas leituras por candidata
 // (a da página e a da chamada) caem do mesmo lado da fronteira.
