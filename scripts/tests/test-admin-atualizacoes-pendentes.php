@@ -481,7 +481,14 @@ $GLOBALS['uox_test_plugins']                           = array();
 // começa por letra (-beta1, -rc.1, +build5). Prefixo numérico não basta: "3f2a9c1" (hash) e
 // "2026-01-15" (data) começam por número e não são versão.
 // ---------------------------------------------------------------------------
-$versoes_validas = array( '1.2.3', '14.2', '2026.1.1', '100.0', '1.2.3.4', '2', '0.0.1', '01.02.03', '1.2.4-beta1', '2.0.0-rc.1', '1.2.3+build5', '1.2-beta.3', ' 1.2.3', '1.2.3 ', "1.2.3\n", '1' . str_repeat( '.1', 31 ) );
+$versoes_validas = array(
+	'1.2.3', '14.2', '2026.1.1', '100.0', '1.2.3.4', '2', '0.0.1', '01.02.03', '1.2.4-beta1', '2.0.0-rc.1', '1.2.3+build5', '1.2-beta.3', ' 1.2.3', '1.2.3 ', "1.2.3\n", '1' . str_repeat( '.1', 31 ),
+	// Revisão do #469 (M1): formatos reais do WordPress.org. O segmento depois do major aceita
+	// qualquer quantidade de dígitos (o tema filho do site é 1.4.3.1768277389), o sufixo aceita
+	// maiúscula, hífen e ponto, e o trim padrão apara \r, \t, \0 e \v.
+	'1.4.3.1768277389', '1.192.0', '2.0.0.202101120840', '4.2.0-RC.1', '1.0.0-RC2', '2.0-beta-1', '1.2.3-beta.1+build.5', '1.2.3-Beta1',
+	"1.2.3\r", "\t1.2.3", "1.2.3\0", "\x0B1.2.3",
+);
 foreach ( $versoes_validas as $v ) {
 	uox_atualizacoes_assert( 'desconhecida' !== uox_get_gravidade_atualizacao( '0.0.1', $v ), 'versão válida não pode ser desconhecida: ' . json_encode( $v ) );
 	uox_atualizacoes_assert( 'desconhecida' !== uox_get_gravidade_atualizacao( $v, '9.9.9' ), 'versão válida (como atual) não pode ser desconhecida: ' . json_encode( $v ) );
@@ -490,6 +497,8 @@ $versoes_invalidas = array(
 	'1abc', '3f2a9c1', '5d41402abc4b2a76b9719d911017c592', '2026-01-15', '3rd-party', 'v1.2.3', '1.2.x', '1..2', '1.', '.1',
 	'20260101', '12345', '2026010100', '?', '', 'abc', '1.2.3-', '1.2.3-1', '1.2.3-+', '1.2.3 4', '1.2.3-beta 1',
 	"٣.٢", "１.２", '1' . str_repeat( '.1', 32 ), '1' . str_repeat( '.1', 200000 ),
+	// Revisão do #469 (M1): o sufixo não tem sublinhado, e NBSP e \f não são aparados pelo trim.
+	'1.0.0_beta', '1.2.3-beta_1', "\xC2\xA01.2.3", "1.2.3\xC2\xA0", "1.2.3\x0C",
 );
 foreach ( $versoes_invalidas as $v ) {
 	$rotulo = json_encode( strlen( $v ) > 40 ? substr( $v, 0, 40 ) . '…(' . strlen( $v ) . ' bytes)' : $v );
@@ -517,7 +526,17 @@ foreach ( array( false, null, array(), 1.5, 7, NAN, INF, -INF, new stdClass() ) 
 	uox_atualizacoes_assert( in_array( uox_get_gravidade_atualizacao( $estranho, '1.0.0' ), array( 'desconhecida', 'baixa', 'media', 'alta' ), true ), 'versão de tipo estranho não deve gerar Warning: ' . $rotulo_estranho );
 }
 // Float não finito e objeto não são versão: desconhecida (NAN e INF viram texto sem número).
-foreach ( array( NAN, INF, -INF, new stdClass(), array( '1.2.3' ), null, false ) as $nao_versao ) {
+// Inteiro é versão: um tema pode publicar `version: 2026` como número JSON, e um inteiro não perde nada.
+uox_atualizacoes_assert( 'alta' === uox_get_gravidade_atualizacao( 2025, 2026 ), 'inteiro 2025 -> 2026 é um salto de major' );
+uox_atualizacoes_assert( 'baixa' === uox_get_gravidade_atualizacao( 2026, 2026 ), 'inteiro 2026 -> 2026 não é salto' );
+// Float NÃO é versão (revisão do #469, B2): 1.10 vira 1.1 e perde o zero final, então 1.9 -> 1.10 sairia
+// "baixa" enquanto o texto "1.9" -> "1.10" é "média". O texto, sim, é preservado.
+uox_atualizacoes_assert( 'media' === uox_get_gravidade_atualizacao( '1.9', '1.10' ), 'o texto 1.9 -> 1.10 é um salto de minor' );
+foreach ( array( 1.5, 1.9, 1.10, 2.0 ) as $um_float ) {
+	uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( $um_float, '1.0.0' ) && 'desconhecida' === uox_get_gravidade_atualizacao( '1.0.0', $um_float ), 'float não é versão: ' . json_encode( $um_float ) );
+}
+uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( 1.9, 1.10 ), 'float 1.9 -> 1.10 não pode sair graduado' );
+foreach ( array( true, NAN, INF, -INF, new stdClass(), array( '1.2.3' ), null, false ) as $nao_versao ) {
 	uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( $nao_versao, '1.0.0' ) && 'desconhecida' === uox_get_gravidade_atualizacao( '1.0.0', $nao_versao ), 'não é versão: desconhecida nos dois lados' );
 }
 
@@ -557,6 +576,20 @@ foreach ( array( array( '6.8.2', '6.9.0' ), array( '6.9.0', '6.8.2' ) ) as $orde
 	$nucleo = uox_atualizacoes_nucleo();
 	uox_atualizacoes_assert( is_array( $nucleo ) && 1 === count( $nucleo ) && '6.9.0' === ( $nucleo[0]['versao_nova'] ?? '' ), 'ofertas ' . implode( ' e ', $ordem ) . ': deve valer a maior (6.9.0); obteve ' . json_encode( $nucleo ) );
 }
+// Revisão do #469 (M1). `response` precisa ser o TEXTO "upgrade": `true == 'upgrade'` é verdadeiro
+// na comparação frouxa do PHP, e uma oferta com `response => true` não pode virar pendência.
+uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( true, '6.8.2' ) ) );
+uox_atualizacoes_assert( array() === uox_atualizacoes_nucleo(), 'response true não é upgrade; obteve ' . json_encode( uox_atualizacoes_nucleo() ) );
+// `current` precisa ser texto: o inteiro 682 não é a versão 6.8.2.
+uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'upgrade', 682 ) ) );
+uox_atualizacoes_assert( array() === uox_atualizacoes_nucleo(), 'current inteiro não é versão do núcleo; obteve ' . json_encode( uox_atualizacoes_nucleo() ) );
+// Sem a global $wp_version (ainda não carregada): o version_compare não pode receber null
+// (Deprecated desde o PHP 8.1) e a oferta aparece.
+unset( $GLOBALS['wp_version'] );
+uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'upgrade', '6.8.2' ) ) );
+$sem_wp = uox_atualizacoes_nucleo();
+uox_atualizacoes_assert( is_array( $sem_wp ) && 1 === count( $sem_wp ), 'sem $wp_version, a oferta upgrade aparece, sem Deprecated; obteve ' . json_encode( $sem_wp ) );
+$GLOBALS['wp_version'] = '6.8.1';
 // Uma oferta que não passa da instalada é ignorada, e a seguinte vale.
 uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'upgrade', '6.8.0' ), uox_atualizacoes_oferta( 'upgrade', '6.8.2' ) ) );
 $nucleo = uox_atualizacoes_nucleo();

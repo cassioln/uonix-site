@@ -1276,9 +1276,11 @@ function uox_render_manutencao_cache()
 // uox_get_gravidade_atualizacao(), ou null se ela não o segue.
 function uox_partes_numericas_da_versao($versao)
 {
-    // Só texto ou número finito: array, objeto, null e NAN não são versão, e
-    // (string) de array ou NAN geraria Warning.
-    if (!is_string($versao) && !is_int($versao) && !(is_float($versao) && is_finite($versao))) {
+    // Só texto ou inteiro. Array, objeto, null e bool não são versão, e (string) de array
+    // gera Warning. Float também não é (#469, B2): "1.10" decodificado como número vira 1.1
+    // e perde o zero final, então ("1.9" -> "1.10") sairia "baixa" em vez de "média". Um
+    // inteiro (2026) não perde nada.
+    if (!is_string($versao) && !is_int($versao)) {
         return null;
     }
 
@@ -1299,11 +1301,15 @@ function uox_partes_numericas_da_versao($versao)
 // WordPress não informa "quantas versões atrasadas", só a atual e a mais
 // nova disponível. O núcleo não passa por aqui — ver uox_get_atualizacoes_pendentes().
 //
-// Contrato da versão (#339, #467): só tem distância calculável a versão INTEIRA no formato
-// número(.número)*, com major de 1 a 4 dígitos e até 32 segmentos, e um sufixo opcional que
-// começa por "-" ou "+" e uma letra (1.2.4-beta1, 2.0.0-rc.1, 1.2.3+build5). Espaço nas
-// pontas é aparado. Qualquer outra coisa devolve 'desconhecida':
-//  - "?", vazia, "v1.2.3", texto sem número, hash (3f2a9c1) e data com traço (2026-01-15);
+// Contrato da versão (#339, #467): só tem distância calculável a versão INTEIRA, em texto ou
+// inteiro, no formato número(.número)*, com major de 1 a 4 dígitos e até 32 segmentos, e um
+// sufixo opcional que começa por "-" ou "+" e uma letra (1.2.4-beta1, 2.0.0-rc.1,
+// 1.2.3+build5). O sufixo aceita qualquer coisa depois da primeira letra, então "2026-Jan-15"
+// vale como major 2026 com sufixo. O trim() padrão apara espaço, tab, \n, \r, \0 e \v nas
+// pontas; NBSP e \f ficam recusados (seguro). Qualquer outra coisa devolve 'desconhecida':
+//  - "?", vazia, "v1.2.3", texto sem número, hash (3f2a9c1) e data numérica com traço
+//    (2026-01-15);
+//  - float, bool, null, array e objeto;
 //  - data compacta, com major de 5 ou mais dígitos (20260101): a diferença entre duas datas
 //    não é um salto de versão. CalVer de ano (2026.1.1) e majors reais (14.2, 100.0) seguem
 //    calculados.
