@@ -564,3 +564,11 @@ jobs:
       - name: Test quote journey contracts and browser fixture
         # Fixture local, sem WordPress, Mailpit, Podman ou dados de produção.
         run: node scripts/tests/test-plugins-jornada.mjs
+
+      - name: Test isolated SSH panel browser and session guards
+        # Apenas fixture loopback; sem painel Locaweb, credenciais ou acesso SSH.
+        run: node scripts/tests/test-plugins-ssh-painel.mjs
+
+      - name: Test single-cycle SSH enabling guards
+        # Clique/modal só em fixture loopback; sem credenciais ou mutação externa.
+        run: node scripts/tests/test-plugins-ssh-abertura.mjs
