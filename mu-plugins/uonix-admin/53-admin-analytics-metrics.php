@@ -115,15 +115,62 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_path' ) ) {
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_sanitize_query' ) ) {
+	/**
+	 * Texto de uma consulta da Search Console, pronto para gravar, mostrar e mandar ao Gemini.
+	 *
+	 * O HTML que vem COLADO na entrada (`<b>x</b> teste`) é tirado como sempre foi: a consulta fica
+	 * `x teste`. O que a #382 corrige é o HTML que só aparece DEPOIS de decodificar: `%3Cb%3E`,
+	 * `&lt;b&gt;`, `&amp;lt;b&amp;gt;`, `&#60;b&#62;` saíam como `<b>`, porque as tags eram tiradas antes
+	 * da decodificação, e o texto com tag ia para o `wp_options`, para o painel, para o e-mail do
+	 * Módulo 3 e para o pedido ao Gemini. Medido em 2026-11-17 com o `wp_strip_all_tags` real: 7
+	 * codificações devolviam a tag, e a tripla devolvia a entidade.
+	 *
+	 * A decodificação vai ATÉ ESTABILIZAR (teto de 8 voltas, e a última só confirma que nada mudou:
+	 * até 7 níveis de codificação passam), e a consulta que não estabiliza é recusada. Um número fixo de voltas é uma aposta na profundidade do atacante: com 3, o percent
+	 * quádruplo (`%2525253Cb%2525253Ex`) saía como `%3Cb%3Ex`, que ainda decodifica para `<b>` e só
+	 * reabria o defeito um nível mais fundo (medido em 2026-11-17).
+	 *
+	 * Depois de estabilizar, a consulta que AINDA tem marcação ou entidade é recusada inteira (devolve
+	 * ''), e não limpa de novo: o que sobrou foi escrito para virar tag, e limpá-lo deixaria um texto
+	 * que ninguém buscou. O Radar (63) tem uma checagem PRÓPRIA, mais estrita (recusa qualquer `<` ou `>`
+	 * solto, e só reconhece entidade nomeada sem dígito) e que não é redundante com esta: `carga > 12 kn`
+	 * passa aqui e o Radar a recusa.
+	 *
+	 * "Marcação" é o que o tokenizador HTML lê como tag: `<` seguido de letra, `/`, `!` ou `?`, ou uma
+	 * entidade `&nome;` / `&#n;` / `&#xh;` que sobrou. `a < 5`, `carga > 12` e `viga a < b e c > d` não
+	 * são tag e passam. Um `<` colado numa letra (`a<b`, `a <= b`) já é cortado pelo `wp_strip_all_tags`
+	 * ANTES de tudo isto, como sempre foi (vira `a`): a #382 não muda esse comportamento. `ancoragem
+	 * &amp;amp;amp;amp; linha` (4 níveis, texto legítimo) agora passa como
+	 * `ancoragem & linha` (com 3 voltas sobrava entidade, e quem a recusava era o Radar). O custo aceito:
+	 * o `AT&T;`, com `&nome;` que não é entidade conhecida, é recusado.
+	 *
+	 * O que a #382 NÃO fecha, medido em 2026-11-17: um caractere de controle entre o `<` e a letra
+	 * (`%3C%00b%3E`, `%3C%01b%3E`) sai como `<` + controle + `b>`, que o regex não casa e o tokenizador
+	 * HTML5 lê como texto. Se um consumidor futuro REMOVER os controles (como o `wp_kses_no_null` faz
+	 * com 0x00 a 0x08, 0x0B, 0x0C e 0x0E a 0x1F), a tag aparece. Hoje nenhum consumidor reprocessa a
+	 * consulta (painel e e-mail usam `esc_html`, o Gemini recebe `wp_json_encode`), e a #487 tem o
+	 * endurecimento. O `%` seguido de dois hexadecimais que não formam UTF-8 (`100%desconto`) já gerava
+	 * texto inválido antes: está na #488.
+	 *
+	 * @param mixed $query Texto cru da Search Console.
+	 * @return string Texto sanitizado, ou '' se a consulta deve sair.
+	 */
 	function uonix_analytics_metrics_sanitize_query( $query ) {
-		$query = trim( wp_strip_all_tags( (string) $query ) );
-		for ( $i = 0; $i < 2; ++$i ) {
+		$query    = trim( wp_strip_all_tags( (string) $query ) );
+		$estavel  = false;
+		for ( $i = 0; $i < 8; ++$i ) {
 			$decoded = html_entity_decode( rawurldecode( $query ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
-			if ( $decoded === $query ) break;
+			if ( $decoded === $query ) {
+				$estavel = true;
+				break;
+			}
 			$query = $decoded;
 		}
+		// Não estabilizou em 8 voltas: codificação em camadas demais para ser uma busca de verdade.
+		if ( ! $estavel ) return '';
 		$query = trim( $query );
 		if ( '' === $query || strlen( $query ) > 120 ) return '';
+		if ( preg_match( '/<[a-z\/!?]|&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]*);/i', $query ) ) return '';
 		if ( preg_match( '/[\w.+-]+\s*@\s*[\w.-]+\s*\.\s*[A-Za-z]{2,}/', $query ) ) return '';
 		if ( preg_match( '/(?:\+?\d[\s().-]*){8,}/', $query ) ) return '';
 		if ( preg_match( '#(?:https?://|www\.)#i', $query ) ) return '';
