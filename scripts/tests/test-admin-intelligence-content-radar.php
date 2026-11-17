@@ -450,6 +450,18 @@ foreach ( $cenarios_rd as $caso => $c ) {
 	$st                     = array_column( array_column( get_option( $opt )['candidates'], 'ai' ), 'status' );
 	uox_rd_assert( $c[1] === $rf['called'] && $c[2] === $st, "#384 {$caso}: {$c[1]} chamada(s), estados " . implode( ',', $c[2] ) . '; obteve ' . $rf['called'] . ', ' . implode( ',', $st ) );
 }
+// Timeout (cURL error 28) é transitório e não conta na sequência de falhas que para o cron.
+// Medido em produção em 2026-11-17: as falhas gravadas do Gemini eram todas timeout de 15 s.
+$GLOBALS['uox_options'] = array();
+$causa28                = 'http_request_failed: cURL error 28: Operation timed out after 30001 milliseconds with 0 bytes received';
+$roteiro                = array( array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 2, 'error' => $causa28 ), array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 2, 'error' => $causa28 ), 'ok', 'ok', 'ok', 'ok' );
+$rt                     = uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$st_to                  = array_column( array_column( get_option( $opt )['candidates'], 'ai' ), 'status' );
+uox_rd_assert( 6 === $rt['called'] && array( 'unavailable', 'unavailable', 'ok', 'ok', 'ok', 'ok' ) === $st_to, 'Dois timeouts seguidos não param o cron: as outras candidatas são tentadas; obteve ' . $rt['called'] . ', ' . implode( ',', $st_to ) );
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 2, 'error' => 'http_request_failed: DNS' ), array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 2, 'error' => 'http_request_failed: DNS' ), 'ok', 'ok', 'ok', 'ok' );
+$rd                     = uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+uox_rd_assert( 2 === $rd['called'], 'Erro de DNS continua contando na sequência e para o cron (só o timeout foi tirado da conta)' );
 $GLOBALS['uox_options'] = array();
 $roteiro                = array( $fora, $fora );
 uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
@@ -463,7 +475,8 @@ uox_rd_assert( ! isset( $am['http'] ) && ! isset( $am['attempts'] ), '#384: HTTP
 
 // #404: a causa do erro de transporte (http 0) fica gravada, para decidir o ajuste com dado.
 $GLOBALS['uox_options'] = array();
-$causa                  = 'http_request_failed: cURL error 28: Operation timed out after 15001 milliseconds with 0 bytes received';
+// A causa de transporte que CONTA na sequência (DNS): o timeout saiu da conta (#404, 2026-11-17).
+$causa                  = 'http_request_failed: cURL error 6: Could not resolve host: generativelanguage.googleapis.com';
 $roteiro                = array( array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 2, 'error' => $causa ), array( 'status' => 'unavailable', 'http' => 503, 'attempts' => 2 ), 'ok', 'ok', 'ok', 'ok' );
 uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
 $ac = array_column( get_option( $opt )['candidates'], 'ai' );

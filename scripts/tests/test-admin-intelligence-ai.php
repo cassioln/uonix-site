@@ -181,7 +181,7 @@ uox_ai_assert( 'chave-de-teste' === uonix_intelligence_ai_api_key(), 'A chave é
 uox_ai_assert( 'gemini-3.8-flash' === uonix_intelligence_ai_model(), 'Sem UONIX_GEMINI_MODEL, o modelo é o fixo gemini-3.8-flash' );
 uox_ai_assert( 'uonix_intelligence_ai_suggestions' === uonix_intelligence_ai_option() && 'uonix_intelligence_ai_daily' === uonix_intelligence_ai_hook(), 'Nomes da opção e do hook seguem o contrato' );
 $lim = uonix_intelligence_ai_limits();
-uox_ai_assert( 60 === $lim['title'] && 155 === $lim['description'] && 5 === $lim['per_run'] && 15 === $lim['timeout'] && 1024 === $lim['max_output_tokens'], 'Limites seguem a especificação' );
+uox_ai_assert( 60 === $lim['title'] && 155 === $lim['description'] && 5 === $lim['per_run'] && 30 === $lim['timeout'] && 1024 === $lim['max_output_tokens'], 'Limites seguem a especificação' );
 
 // ---------------------------------------------------------------------------
 // 2. Página líder → post publicado (foco de revisão 1: 404, 301 e rascunho viram 0).
@@ -273,7 +273,7 @@ $pedido = $GLOBALS['uox_pedidos'][0] ?? array();
 uox_ai_assert( 'ok' === $r['status'] && $ok['title'] === $r['suggestion']['title'], 'Resposta 200 válida vira ok' );
 uox_ai_assert( 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent' === ( $pedido['url'] ?? '' ), 'URL do modelo fixo, sem a chave' );
 uox_ai_assert( false === strpos( $pedido['url'] ?? '', 'chave-de-teste' ) && 'chave-de-teste' === ( $pedido['args']['headers']['x-goog-api-key'] ?? '' ), 'A chave vai no cabeçalho x-goog-api-key, nunca na URL' );
-uox_ai_assert( 15 === ( $pedido['args']['timeout'] ?? 0 ), 'Timeout de 15 s' );
+uox_ai_assert( 30 === ( $pedido['args']['timeout'] ?? 0 ), 'Timeout de 30 s: medido em produção em 2026-11-17, as falhas eram todas cURL error 28 a 15 s (#404)' );
 
 $casos_http = array(
 	'503 e depois 200 (uma nova tentativa)' => array( array( uox_http( 503 ), uox_gemini( $ok ) ), 'ok', 2 ),
@@ -429,7 +429,7 @@ $GLOBALS['uox_http']    = array( uox_gemini( 'x' ) );
 $GLOBALS['uox_pedidos'] = array();
 uonix_intelligence_ai_generate( $corpo_livre, 'gemini-9-flash', 0 );
 $pg = $GLOBALS['uox_pedidos'][0] ?? array();
-uox_ai_assert( 'https://generativelanguage.googleapis.com/v1beta/models/gemini-9-flash:generateContent' === ( $pg['url'] ?? '' ) && 'chave-de-teste' === ( $pg['args']['headers']['x-goog-api-key'] ?? '' ) && 15 === ( $pg['args']['timeout'] ?? 0 ), 'generate usa o modelo recebido, a chave no cabeçalho e o timeout de 15 s' );
+uox_ai_assert( 'https://generativelanguage.googleapis.com/v1beta/models/gemini-9-flash:generateContent' === ( $pg['url'] ?? '' ) && 'chave-de-teste' === ( $pg['args']['headers']['x-goog-api-key'] ?? '' ) && 30 === ( $pg['args']['timeout'] ?? 0 ), 'generate usa o modelo recebido, a chave no cabeçalho e o timeout de 30 s' );
 $casos_generate = array(
 	'503 e depois 200'   => array( array( uox_http( 503 ), uox_gemini( 'ok' ) ), 'ok', 2 ),
 	'429 duas vezes'     => array( array( uox_http( 429 ), uox_http( 429 ) ), 'unavailable', 2 ),
@@ -608,12 +608,25 @@ uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
 $cf = get_option( uonix_intelligence_ai_option() );
 uox_ai_assert( 503 === ( $cf[ $k_n( 1 ) ]['http'] ?? null ) && 2 === ( $cf[ $k_n( 1 ) ]['attempts'] ?? null ) && 'failures' === ( $cf[ $k_n( 3 ) ]['reason'] ?? '' ) && ! isset( $cf[ $k_n( 3 ) ]['retry_at'] ), '#384: a falha grava o HTTP 503 e os dois pedidos; a adiada diz o motivo, sem hora de renovação' );
 
+// Timeout não conta na sequência de falhas do Módulo 3 também (#404, #402; revisão do PR #472).
+// O cron grava a parada no cache: com dois timeouts seguidos, a terceira consulta não pode ficar
+// `deferred` por falhas. Medido em produção em 2026-11-17: as falhas eram todas cURL error 28.
+$GLOBALS['uox_options'] = array();
+$timeout_m3 = new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out after 30001 milliseconds with 0 bytes received' );
+$GLOBALS['uox_http'] = array( $timeout_m3, $timeout_m3, uox_gemini( $ok ) );
+uonix_intelligence_ai_run( uox_analise( array( uox_linha( 'alfa predial' ), uox_linha( 'beta predial' ), uox_linha( 'gama predial' ) ) ), 0 );
+$cache_m3   = get_option( uonix_intelligence_ai_option(), array() );
+$estados_m3 = array_map( static function ( $e ) { return $e['status'] ?? '?'; }, array_values( $cache_m3 ) );
+$motivos_m3 = array_map( static function ( $e ) { return $e['reason'] ?? ''; }, array_values( $cache_m3 ) );
+uox_ai_assert( ! in_array( 'failures', $motivos_m3, true ) && 'ok' === ( $estados_m3[2] ?? '' ), 'Módulo 3: dois timeouts seguidos não adiam a terceira consulta por falhas (#404, revisão do PR #472); estados: ' . implode( ',', $estados_m3 ) . ' motivos: ' . implode( ',', $motivos_m3 ) );
+
+
 // #404: o cron grava a causa do erro de transporte no cache, e só nele.
 $GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
-$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' ), uox_http( 503 ), uox_http( 503 ) );
+$GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'DNS: could not resolve host' ), uox_http( 503 ), uox_http( 503 ) );
 uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
 $ct = get_option( uonix_intelligence_ai_option() );
-uox_ai_assert( 'unavailable' === ( $ct[ $k_n( 1 ) ]['status'] ?? '' ) && 0 === ( $ct[ $k_n( 1 ) ]['http'] ?? null ) && 'http_request_failed: cURL error 28: Operation timed out' === ( $ct[ $k_n( 1 ) ]['error'] ?? null ), '#404: a falha de transporte grava a causa no cache; obteve ' . var_export( $ct[ $k_n( 1 ) ] ?? null, true ) );
+uox_ai_assert( 'unavailable' === ( $ct[ $k_n( 1 ) ]['status'] ?? '' ) && 0 === ( $ct[ $k_n( 1 ) ]['http'] ?? null ) && 'http_request_failed: DNS: could not resolve host' === ( $ct[ $k_n( 1 ) ]['error'] ?? null ), '#404: a falha de transporte (DNS, que conta na sequência) grava a causa no cache; obteve ' . var_export( $ct[ $k_n( 1 ) ] ?? null, true ) );
 uox_ai_assert( 503 === ( $ct[ $k_n( 2 ) ]['http'] ?? null ) && ! array_key_exists( 'error', $ct[ $k_n( 2 ) ] ) && ! array_key_exists( 'error', $ct[ $k_n( 3 ) ] ?? array() ), '#404: a falha com resposta HTTP e a adiada não levam a causa' );
 $GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' ) );
 $lido = uonix_intelligence_ai_suggestion_for( $cinco[0] ?? array(), array() );
