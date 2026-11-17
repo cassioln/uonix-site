@@ -88,6 +88,8 @@ O guarda de cobertura mostra registro/invocação na configuração CI, não exe
 
 ## Integração semanal
 
+O [contrato do agendamento](plugins-ssh-agendamento.md) registra o executor fixo, a sequência de instalação e os gates que devem continuar separados.
+
 Usar somente o job existente de segunda às 09h `America/Sao_Paulo`. Executor deve apontar para revisão fixa fora do scratch; não executar fonte mutável ou worktree que será removida. Antes da integração mutante, provar status pelo scheduler com os mesmos profile, ambiente e diretório, conferindo resultado e entrega separadamente.
 
 O ciclo pode abrir SSH uma vez com a autorização recorrente vigente. Não renovar após expiração ou repetir tentativa ambígua. Sem sessão válida, avisar e parar. Confirmar escopo de sobrescrita local antes de clone/ensaio. Aplicação em produção sempre exige um novo lock explicitamente aprovado em conversa interativa: o job **nunca executa `aplicar-producao`**.
