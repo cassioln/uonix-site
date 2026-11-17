@@ -494,6 +494,21 @@ foreach ( $casos_cota as $caso => $c ) {
 		"generate {$caso}: status {$c[1]}, {$c[2]} pedido(s), HTTP {$c[3]}, retry_after " . var_export( $c[4], true ) . ', quota_source ' . var_export( $c[5] ?? null, true ) . '; obteve ' . var_export( $r, true ) . ' com ' . count( $GLOBALS['uox_pedidos'] ) . ' pedido(s)'
 	);
 }
+// #403: `quota_info()` direto. A espera curta (60 s, a fronteira) não é cota que não volta, e a origem sai vazia;
+// só o `quotaId` diário prova, e ele vence a espera longa na origem.
+foreach ( array(
+	'por minuto, 30 s'                    => array( uox_429( $minuto, '30s' ), false, 30, '' ),
+	'sem QuotaFailure, 60 s (fronteira)'  => array( uox_429( null, '60s' ), false, 60, '' ),
+	'sem QuotaFailure, 61 s'              => array( uox_429( null, '61s' ), true, 61, 'retry_delay' ),
+	'PerDay com espera curta'             => array( uox_429( $dia, '30s' ), true, 30, 'quota_id_daily' ),
+	'PerDay com espera longa: prova vence' => array( uox_429( $dia, '27223s' ), true, 27223, 'quota_id_daily' ),
+	'PerDay sem RetryInfo'                => array( uox_429( $dia ), true, 0, 'quota_id_daily' ),
+	'sem detalhes'                        => array( array( 'code' => 429, 'body' => '{}' ), false, 0, '' ),
+) as $caso => $c ) {
+	$qi = uonix_intelligence_ai_quota_info( $c[0]['body'] );
+	uox_ai_assert( $c[1] === $qi['daily'] && $c[2] === $qi['retry_after'] && $c[3] === $qi['source'], "#403: quota_info {$caso}: daily {$c[1]}, espera {$c[2]}, origem '{$c[3]}'; obteve " . var_export( $qi, true ) );
+}
+uox_ai_assert( array( 'daily' => false, 'retry_after' => 0, 'source' => '' ) === uonix_intelligence_ai_quota_info( 'não é json' ) && array( 'daily' => false, 'retry_after' => 0, 'source' => '' ) === uonix_intelligence_ai_quota_info( null ), '#403: corpo que não é JSON não é cota, e a origem sai vazia' );
 $corpo_estranho = array( 'code' => 429, 'body' => json_encode( array( 'error' => array( 'details' => array( 'texto', array( '@type' => 'type.googleapis.com/google.rpc.QuotaFailure', 'violations' => 'x' ), array( '@type' => 'type.googleapis.com/google.rpc.QuotaFailure', 'violations' => array( 'y', array( 'quotaId' => array( 'PerDay' ) ) ) ), array( '@type' => 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay' => array( 9 ) ) ) ) ) ) );
 $GLOBALS['uox_http']    = array( $corpo_estranho, $corpo_estranho );
 $GLOBALS['uox_pedidos'] = array();
@@ -599,6 +614,13 @@ uox_ai_assert( 1 === $ri['called'] && 'quota_exhausted' === $ci[ $k_n( 1 ) ]['st
 foreach ( array( 2, 3 ) as $n ) {
 	uox_ai_assert( 'deferred' === $ci[ $k_n( $n ) ]['status'] && 'retry_delay' === ( $ci[ $k_n( $n ) ]['quota_source'] ?? null ), "#403: a consulta {$n}, adiada pela cota inferida, herda retry_delay; obteve " . var_export( $ci[ $k_n( $n ) ], true ) );
 }
+// A origem não depende da hora: a cota diária SEM `RetryInfo` grava a origem e nenhuma hora inventada.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http']    = array( uox_429( $dia ), uox_gemini( $ok ) );
+uonix_intelligence_ai_run( uox_analise( array_slice( $cinco, 0, 2 ) ), 0 );
+$cs = get_option( uonix_intelligence_ai_option() );
+uox_ai_assert( 'quota_exhausted' === $cs[ $k_n( 1 ) ]['status'] && 'quota_id_daily' === ( $cs[ $k_n( 1 ) ]['quota_source'] ?? null ) && ! isset( $cs[ $k_n( 1 ) ]['retry_at'] ), '#403: cota diária sem RetryInfo grava a origem e nenhuma hora; obteve ' . var_export( $cs[ $k_n( 1 ) ], true ) );
+uox_ai_assert( 'deferred' === $cs[ $k_n( 2 ) ]['status'] && 'quota_id_daily' === ( $cs[ $k_n( 2 ) ]['quota_source'] ?? null ) && ! isset( $cs[ $k_n( 2 ) ]['retry_at'] ), '#403: a adiada herda a origem mesmo sem hora; obteve ' . var_export( $cs[ $k_n( 2 ) ], true ) );
 // Uma falha comum não grava origem nenhuma.
 $GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
 $GLOBALS['uox_http']    = array( uox_http( 503 ), uox_http( 503 ) );
@@ -706,6 +728,14 @@ foreach ( array( true, 1, 'qualquer', 'QUOTA_ID_DAILY', ' quota_id_daily', 'quot
 $cr[ $k_ok ]['quota_source'] = 'retry_delay';
 update_option( uonix_intelligence_ai_option(), $cr, false );
 uox_ai_assert( 'retry_delay' === ( uonix_intelligence_ai_suggestion_for( uox_linha() )['quota_source'] ?? null ), '#403: retry_delay sai do leitor como está' );
+// Origem válida em um estado que o leitor não conhece (vira pending) ou que não é de cota: não vaza.
+foreach ( array( 'status desconhecido' => 'qualquer', 'unavailable' => 'unavailable' ) as $rotulo => $estado_x ) {
+	$cr[ $k_ok ]['status']       = $estado_x;
+	$cr[ $k_ok ]['quota_source'] = 'quota_id_daily';
+	update_option( uonix_intelligence_ai_option(), $cr, false );
+	$lx = uonix_intelligence_ai_suggestion_for( uox_linha() );
+	uox_ai_assert( ( 'unavailable' === $estado_x ? 'unavailable' : 'pending' ) === $lx['status'] && ( 'unavailable' === $estado_x ? true : ! isset( $lx['quota_source'] ) ), "#403: {$rotulo}: a origem não vaza fora de um estado de cota que o leitor conhece; obteve " . var_export( $lx, true ) );
+}
 uox_ai_assert( '' === uonix_intelligence_ai_quota_source( null ) && '' === uonix_intelligence_ai_quota_source( true ) && '' === uonix_intelligence_ai_quota_source( array( 'quota_id_daily' ) ) && 'quota_id_daily' === uonix_intelligence_ai_quota_source( 'quota_id_daily' ) && 'retry_delay' === uonix_intelligence_ai_quota_source( 'retry_delay' ), '#403: o validador da origem aceita só os dois valores, em string exata' );
 
 // Textos de estado: um texto próprio por estado, e nenhum vazio.
@@ -778,6 +808,11 @@ uox_ai_assert( 'Cota diária do Gemini esgotada. Nova tentativa na próxima gera
 $daqui_1h = array( 'quota_source' => 'quota_id_daily', 'retry_at' => gmdate( 'c', time() + 3600 ) );
 $de_ontem = array( 'quota_source' => 'quota_id_daily', 'retry_at' => gmdate( 'c', time() - 86400 ) );
 uox_ai_assert( false !== strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', $daqui_1h ), 'A cota renova por volta de' ) && false === strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', $de_ontem ), 'renova' ), '#403: sem o parâmetro, vale o relógio do sistema' );
+// Texto numérico e float não são relógio: o `is_int` os recusa, e o sistema decide. Com um "agora" absurdo
+// (depois da hora), `is_numeric` esconderia a hora de uma renovação a 1 h daqui.
+foreach ( array( '9999999999', 9999999999.0, '1791115200', 1.5 ) as $relogio_ruim ) {
+	uox_ai_assert( false !== strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', $daqui_1h, $relogio_ruim ), 'A cota renova por volta de' ), '#403: relógio que não é inteiro (' . var_export( $relogio_ruim, true ) . ') cai no do sistema' );
+}
 uox_ai_assert( false !== strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', $daqui_1h, 'amanhã' ), 'A cota renova por volta de' ) && false === strpos( uonix_intelligence_ai_state_message( 'quota_exhausted', $de_ontem, 'amanhã' ), 'renova' ), '#403: relógio que não é inteiro cai no do sistema' );
 
 // ---------------------------------------------------------------------------

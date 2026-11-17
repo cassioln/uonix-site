@@ -967,8 +967,9 @@ if ( ! function_exists( 'uonix_intelligence_radar_email_items' ) ) {
 			// Novas que não couberam no e-mail. O "Mais N" do e-mail conta só estas: o total do painel
 			// inclui as que já foram por e-mail e as que ainda esperam a pauta (#380).
 			'more'        => max( 0, count( $itens ) - $limite ),
-			// Sem a chave do Gemini as candidatas vão ao e-mail sem pauta: o "Mais N" do e-mail
-			// então fala em consultas, e não em pautas (#459).
+			// Sem a chave do Gemini as candidatas sem pauta também vão ao e-mail (as que já tinham pauta
+			// `ok` com a mesma entrada continuam com ela): o "Mais N" do e-mail então fala em consultas, e
+			// não em pautas (#459).
 			'without_key' => ! $tem_chave,
 			'panel_count' => count( $estado['visible'] ),
 			// De quando é a lista e se a última execução a renovou: o e-mail declara o período de cada

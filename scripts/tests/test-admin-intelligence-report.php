@@ -624,7 +624,34 @@ foreach ( array( 'ancoragem d1', 'ancoragem d2', 'ancoragem d3', 'ancoragem d4',
 $GLOBALS['uox_options'] = uox_radar_opcoes( $cands_459 );
 $ctx_459 = uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null, 'content_radar' => uonix_intelligence_radar_email_items( null, false ) ) );
 $html_459 = uonix_intelligence_report_html( $ctx_459 );
+// O singular: 4 candidatas sem pauta e o teto de 3 no e-mail deixam 1 de fora.
+$GLOBALS['uox_options'] = uox_radar_opcoes( array_slice( $cands_459, 0, 4 ) );
+$ctx_459s  = uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null, 'content_radar' => uonix_intelligence_radar_email_items( null, false ) ) );
+$html_459s = uonix_intelligence_report_html( $ctx_459s );
+uox_assert( false !== strpos( $html_459s, 'Mais 1 consulta nova no painel.' ) && false === strpos( $html_459s, 'Mais 1 consultas' ) && false === strpos( $html_459s, 'Mais 1 pauta' ), '#459: sem a chave, o singular é "Mais 1 consulta nova"; obteve ' . substr( $html_459s, (int) strpos( $html_459s, 'Mais 1' ), 40 ) );
+$GLOBALS['uox_options'] = uox_radar_opcoes( $cands_459 );
 uox_assert( false !== strpos( $html_459, 'Mais 2 consultas novas no painel.' ) && false === strpos( $html_459, 'Mais 2 pautas novas' ), '#459: sem a chave do Gemini, o "Mais N" fala em consultas novas, e não em pautas' );
+// O caminho de produção: o 57 chama `radar_email_items()` SEM argumentos, e a chave vem da constante do
+// wp-config. A constante não se redefine no processo, então cada caso roda em um subprocesso.
+$sub_chave = static function ( $com_chave ) {
+	$codigo = 'define( "ABSPATH", "/" ); define( "DAY_IN_SECONDS", 86400 ); define( "HOUR_IN_SECONDS", 3600 ); define( "OBJECT", "OBJECT" ); '
+		. ( $com_chave ? 'define( "UONIX_GEMINI_API_KEY", "chave-de-teste" ); ' : '' )
+		. 'function add_action( ...$a ) {} function add_filter( ...$a ) {} function get_option( $k, $d = false ) { return $d; } function update_option( ...$a ) { return true; } '
+		. 'function wp_next_scheduled( $h ) { return false; } function wp_schedule_event( ...$a ) { return true; } function wp_json_encode( $v, $f = 0 ) { return json_encode( $v, $f ); } '
+		. 'function wp_strip_all_tags( $t ) { return strip_tags( (string) $t ); } function home_url( $p = "" ) { return "https://uonix.com.br" . $p; } '
+		. 'require getenv( "UOX_RAIZ" ) . "/mu-plugins/uonix-admin/54-admin-intelligence-ai.php"; require getenv( "UOX_RAIZ" ) . "/mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php"; '
+		. '$r = uonix_intelligence_radar_email_items(); echo json_encode( array( "without_key" => $r["without_key"] ?? null ) );';
+	$proc  = proc_open( array( PHP_BINARY, '-n', '-r', $codigo ), array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes, null, array( 'UOX_RAIZ' => dirname( __DIR__, 2 ), 'PATH' => (string) getenv( 'PATH' ) ) );
+	$saida = is_resource( $proc ) ? stream_get_contents( $pipes[1] ) : '';
+	if ( is_resource( $proc ) ) {
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		proc_close( $proc );
+	}
+
+	return (string) $saida;
+};
+uox_assert( '{"without_key":true}' === $sub_chave( false ) && '{"without_key":false}' === $sub_chave( true ), '#459: sem argumentos (como o 57 chama), o radar diz sem a chave quando a constante falta, e com a chave quando existe; obteve ' . $sub_chave( false ) . ' / ' . $sub_chave( true ) );
 uox_assert( true === ( uonix_intelligence_radar_email_items( null, false )['without_key'] ?? null ) && false === ( uonix_intelligence_radar_email_items( null, true )['without_key'] ?? null ), '#459: o radar diz ao e-mail se a chave do Gemini falta' );
 $GLOBALS['uox_options'] = uox_radar_opcoes( array_slice( $cands_380b, 0, 5 ) );
 $html_459b = uonix_intelligence_report_html( uonix_intelligence_report_context( array( 'snapshot' => false, 'executive' => null, 'content_radar' => uonix_intelligence_radar_email_items( null, true ) ) ) );

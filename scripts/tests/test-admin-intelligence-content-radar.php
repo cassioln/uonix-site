@@ -452,6 +452,12 @@ foreach ( array( array( 'x' ), true, 'qualquer', 'QUOTA_ID_DAILY' ) as $malforma
 	$estranha = array_column( get_option( $opt )['candidates'], 'ai' );
 	uox_rd_assert( ! isset( $estranha[0]['quota_source'] ) && ! isset( $estranha[1]['quota_source'] ), '#403: origem malformada de um gerador de fora não é gravada: ' . var_export( $malformada, true ) . '; obteve ' . var_export( array_slice( $estranha, 0, 2 ), true ) );
 }
+// A origem não depende da hora: a cota diária SEM `retry_after` grava a origem e nenhuma hora inventada.
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1, 'quota_source' => 'quota_id_daily' ) );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$sem_espera = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( 'quota_id_daily' === ( $sem_espera[0]['quota_source'] ?? null ) && 'quota_id_daily' === ( $sem_espera[1]['quota_source'] ?? null ) && ! isset( $sem_espera[0]['retry_at'] ) && ! isset( $sem_espera[1]['retry_at'] ), '#403: cota diária sem retry_after grava a origem, e a adiada herda, sem hora; obteve ' . var_export( array_slice( $sem_espera, 0, 2 ), true ) );
 $GLOBALS['uox_options'] = array();
 $roteiro                = array( $fora, $fora );
 uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );

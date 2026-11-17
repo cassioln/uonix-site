@@ -143,6 +143,32 @@ if ( ! function_exists( 'uonix_intelligence_format_ctr' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_opportunity_totals' ) ) {
+	/**
+	 * O número e a legenda da caixa "Oportunidades encontradas" (#371).
+	 *
+	 * O número é o total de oportunidades antes do corte (`matched`), e nunca menos do que a tabela
+	 * mostra: `count( $rows )` já vem cortado em `panel_limit`, e a caixa dizia 5 com 12 oportunidades.
+	 * A legenda só fala em corte quando há corte e a tabela tem linhas.
+	 *
+	 * @param mixed $analysis Resultado de `uonix_intelligence_seo_opportunities()`.
+	 * @param array $rows     As linhas que a tabela mostra.
+	 * @return array{total: int, sub: string}
+	 */
+	function uonix_intelligence_opportunity_totals( $analysis, array $rows ) {
+		$mostradas = count( $rows );
+		$achadas   = is_array( $analysis ) && isset( $analysis['matched'] ) && is_numeric( $analysis['matched'] ) ? (int) $analysis['matched'] : 0;
+		$universo  = is_array( $analysis ) && isset( $analysis['universe'] ) && is_numeric( $analysis['universe'] ) ? (int) $analysis['universe'] : 0;
+		$total     = max( $achadas, $mostradas );
+		$sub       = sprintf( 'de %d consultas analisadas', $universo );
+		if ( $total > $mostradas && $mostradas > 0 ) {
+			$sub .= sprintf( ' · a tabela mostra as %d de maior volume', $mostradas );
+		}
+
+		return array( 'total' => $total, 'sub' => $sub );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 	/**
 	 * Painel da aba "Oportunidades SEO".
@@ -181,18 +207,9 @@ if ( ! function_exists( 'uonix_intelligence_render_panel' ) ) {
 				<div class="uonix-kpi-grid">
 					<div class="uonix-kpi-card">
 						<div class="uonix-kpi-title">Oportunidades encontradas</div>
-						<?php
-						// O total vem de `matched` (antes do corte em `panel_limit`); `count( $rows )` já vem
-						// cortado, e a caixa dizia 5 com 12 oportunidades (#371).
-						$total_opp = isset( $analysis['matched'] ) ? max( (int) $analysis['matched'], count( $rows ) ) : count( $rows );
-						$limite_p  = isset( $rules['panel_limit'] ) ? (int) $rules['panel_limit'] : count( $rows );
-						$sub_opp   = sprintf( 'de %d consultas analisadas', isset( $analysis['universe'] ) ? (int) $analysis['universe'] : 0 );
-						if ( $total_opp > count( $rows ) && $limite_p > 0 ) {
-							$sub_opp .= sprintf( ' · a tabela mostra as %d de maior volume', count( $rows ) );
-						}
-						?>
-						<div class="uonix-kpi-value"><?php echo esc_html( (string) $total_opp ); ?></div>
-						<div class="uonix-kpi-sub"><?php echo esc_html( $sub_opp ); ?></div>
+						<?php $caixa_opp = uonix_intelligence_opportunity_totals( $analysis, $rows ); ?>
+						<div class="uonix-kpi-value"><?php echo esc_html( (string) $caixa_opp['total'] ); ?></div>
+						<div class="uonix-kpi-sub"><?php echo esc_html( $caixa_opp['sub'] ); ?></div>
 					</div>
 				</div>
 

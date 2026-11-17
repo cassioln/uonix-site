@@ -587,8 +587,9 @@ if ( ! function_exists( 'uonix_intelligence_ai_generate' ) ) {
 	 * chamadas seguidas. Os demais erros não são repetidos: o próximo cron diário
 	 * tenta de novo.
 	 *
-	 * O 429 de cota diária (`uonix_intelligence_ai_quota_info()`) não é repetido e volta como
-	 * `quota_exhausted`, com a espera que o Gemini pediu (#384).
+	 * O 429 de cota que não volta nesta execução (`uonix_intelligence_ai_quota_info()['daily']`, que
+	 * inclui a cota só inferida do `retryDelay`) não é repetido e volta como `quota_exhausted`, com a
+	 * espera que o Gemini pediu e a origem da classificação, `quota_source` (#384, #403).
 	 *
 	 * @param array  $body  Corpo do `generateContent`.
 	 * @param string $model Modelo, como `uonix_intelligence_ai_model()` devolve.

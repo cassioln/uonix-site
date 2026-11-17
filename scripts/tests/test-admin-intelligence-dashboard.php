@@ -119,7 +119,15 @@ function uonix_ksio_can_configure_insights() {
 // importa que o painel exiba cada estado e escape o texto.
 $GLOBALS['uox_ia'] = array();
 function uonix_intelligence_ai_suggestion_for( $row ) { return $GLOBALS['uox_ia'][ $row['query'] ?? '' ] ?? array( 'status' => 'pending' ); }
-function uonix_intelligence_ai_state_message( $status, $detalhe = array(), $now = null ) { return 'ESTADO-IA:' . $status . ( isset( $detalhe['retry_at'] ) ? '@' . $detalhe['retry_at'] : '' ); }
+// O stub devolve o que o painel entregou ao texto do estado, com os campos da cota (#403): o teste do fio
+// confere `reason` e `quota_source`, e não só a hora.
+function uonix_intelligence_ai_state_message( $status, $detalhe = array(), $now = null ) {
+	$extra = '';
+	foreach ( array( 'reason', 'quota_source' ) as $campo ) {
+		$extra .= isset( $detalhe[ $campo ] ) ? '#' . $campo . '=' . $detalhe[ $campo ] : '';
+	}
+	return 'ESTADO-IA:' . $status . ( isset( $detalhe['retry_at'] ) ? '@' . $detalhe['retry_at'] : '' ) . $extra;
+}
 function uonix_intelligence_ai_page_post_id( $path ) { return '/produtos/olhal/' === $path ? 10 : 0; }
 function home_url( $p = '' ) { return 'https://uonix.com.br' . $p; }
 function get_edit_post_link( $id ) { return 'https://uonix.com.br/wp-admin/post.php?post=' . (int) $id . '&action=edit'; }
@@ -204,7 +212,7 @@ $snap_ia['search_console']['query_pages'] = array( 'olhal inox' => '/produtos/ol
 $GLOBALS['uox_ia'] = array(
 	'olhal inox' => array( 'status' => 'ok', 'title' => 'Olhal <script>x</script>', 'description' => 'Descrição sugerida', 'current_title' => 'Título atual', 'current_description' => '', 'generated_at' => '2026-10-01T09:00:00+00:00', 'post_id' => 10 ),
 	'sem pagina' => array( 'status' => 'no_page' ),
-	'categoria olhal' => array( 'status' => 'quota_exhausted', 'retry_at' => '2026-10-04T00:00:15+00:00' ),
+	'categoria olhal' => array( 'status' => 'quota_exhausted', 'retry_at' => '2026-10-04T00:00:15+00:00', 'quota_source' => 'quota_id_daily' ),
 	'andaime antigo' => array( 'status' => 'pending', 'object' => array( 'type' => 'post', 'id' => 16 ), 'redirected_to' => '/servico/projeto-andaime-fachadeiro/' ),
 	'teste predial' => array( 'status' => 'ok', 'title' => 'Ensaio de Arrancamento | Uônix', 'description' => 'd', 'current_title' => 'Ensaio de Arrancamento com Laudo | Uônix', 'current_description' => '', 'generated_at' => '', 'post_id' => 15, 'object' => array( 'type' => 'post', 'id' => 15 ), 'redirected_to' => '/servico/ensaios-de-arrancamento/' ),
 );
@@ -216,6 +224,11 @@ uox_assert( false !== strpos( $html_ia, 'Título atual' ) && false !== strpos( $
 uox_assert( false === strpos( $html_ia, '<script>x' ) && false !== strpos( $html_ia, '&lt;script&gt;' ), 'Texto vindo da IA sai escapado' );
 uox_assert( false !== strpos( $html_ia, 'ESTADO-IA:no_page' ) && false !== strpos( $html_ia, 'Não identificada' ), 'Sem página: estado da IA e Página Alvo não identificada' );
 uox_assert( false !== strpos( $html_ia, 'ESTADO-IA:quota_exhausted@2026-10-04T00:00:15+00:00' ), '#384: o painel passa ao texto do estado o que o leitor devolveu, com a hora da renovação' );
+uox_assert( false !== strpos( $html_ia, 'ESTADO-IA:quota_exhausted@2026-10-04T00:00:15+00:00#quota_source=quota_id_daily' ), '#403: o painel do Módulo 3 passa ao texto do estado o que o leitor devolveu, inclusive a origem da classificação; obteve ' . substr( $html_ia, (int) strpos( $html_ia, 'ESTADO-IA:quota_exhausted' ), 90 ) );
+// A adiada pela cota (status deferred) leva ao texto do estado o motivo e a origem, e não só a hora.
+$GLOBALS['uox_ia']['adiada cota'] = array( 'status' => 'deferred', 'reason' => 'quota_exhausted', 'quota_source' => 'retry_delay', 'retry_at' => '2026-10-04T00:00:15+00:00' );
+$html_adiada = uox_render_intelligence( 'intelligence', uox_snapshot( array( uox_q( 'adiada cota', 6.0, 50, .0 ) ) ) );
+uox_assert( false !== strpos( $html_adiada, 'ESTADO-IA:deferred@2026-10-04T00:00:15+00:00#reason=quota_exhausted#quota_source=retry_delay' ), '#403: o painel do Módulo 3 passa à adiada pela cota o motivo e a origem; obteve ' . substr( $html_adiada, (int) strpos( $html_adiada, 'ESTADO-IA:' ), 110 ) );
 uox_assert( false !== strpos( $html_ia, 'term.php?taxonomy=product_cat&tag_ID=34' ) && false !== strpos( $html_ia, '>Editar categoria de produtos<' ), '#344: página de categoria leva ao editor do termo' );
 uox_assert( in_array( array( 'edit_term', 34 ), $GLOBALS['uox_caps'], true ), '#344: o link do editor do termo confere edit_term sobre o termo 34 (BAIXO 3 da revisão do PR #372)' );
 uox_assert( false !== strpos( $html_ia, '→ <a href="https://uonix.com.br/servico/projeto-andaime-fachadeiro/">' ) && false !== strpos( $html_ia, 'post.php?post=16&action=edit' ), '#343: fora do estado ok (pending), o painel também mostra o destino e o link de edição (BAIXO 3 da revisão do PR #373)' );
@@ -228,6 +241,25 @@ foreach ( range( 1, 7 ) as $i ) {
 	$sete[] = uox_q( 'consulta ' . $i, 8.0, 100 - $i, .0 );
 }
 $html_sete = uox_render_intelligence( 'intelligence', uox_snapshot( $sete ) );
+// A conta da caixa, função pura (#371), nas entradas que o 55 nunca produz mas que uma regra futura ou um
+// chamador de fora poderia trazer. A caixa nunca diz menos do que a tabela mostra, e a legenda de corte só
+// aparece quando há corte E a tabela tem linhas. Colunas: analysis, linhas na tabela, total e legenda esperados.
+foreach ( array(
+	'sem corte, 5 de 5'                        => array( array( 'matched' => 5, 'universe' => 113 ), 5, 5, 'de 113 consultas analisadas' ),
+	'corte: 12 oportunidades e 5 linhas'       => array( array( 'matched' => 12, 'universe' => 113 ), 5, 12, 'de 113 consultas analisadas · a tabela mostra as 5 de maior volume' ),
+	'matched menor que as linhas: não encolhe' => array( array( 'matched' => 3, 'universe' => 113 ), 5, 5, 'de 113 consultas analisadas' ),
+	'matched ausente: conta as linhas'         => array( array( 'universe' => 40 ), 4, 4, 'de 40 consultas analisadas' ),
+	'universe ausente'                         => array( array( 'matched' => 2 ), 2, 2, 'de 0 consultas analisadas' ),
+	'matched em texto numérico'                => array( array( 'matched' => '9', 'universe' => 10 ), 5, 9, 'de 10 consultas analisadas · a tabela mostra as 5 de maior volume' ),
+	'matched negativo: não encolhe'            => array( array( 'matched' => -4, 'universe' => 10 ), 5, 5, 'de 10 consultas analisadas' ),
+	'matched lixo e sem linhas: zero'          => array( array( 'matched' => array( 'x' ), 'universe' => 10 ), 0, 0, 'de 10 consultas analisadas' ),
+	'universe lixo: zero'                      => array( array( 'matched' => 5, 'universe' => array( 'x' ) ), 5, 5, 'de 0 consultas analisadas' ),
+	'sem linhas e com matched: sem legenda'    => array( array( 'matched' => 7, 'universe' => 10 ), 0, 7, 'de 10 consultas analisadas' ),
+) as $caso => $c ) {
+	$caixa = uonix_intelligence_opportunity_totals( $c[0], array_fill( 0, $c[1], array( 'query' => 'x' ) ) );
+	uox_assert( is_array( $caixa ) && $c[2] === ( $caixa['total'] ?? null ) && $c[3] === ( $caixa['sub'] ?? null ), "#371: {$caso}; obteve " . var_export( $caixa, true ) );
+}
+uox_assert( array( 'total' => 0, 'sub' => 'de 0 consultas analisadas' ) === uonix_intelligence_opportunity_totals( null, array() ), '#371: analysis que não é array não quebra' );
 uox_assert( 5 === substr_count( $html_sete, '<td><strong>consulta ' ) && false !== strpos( $html_sete, '<td><strong>consulta 5</strong>' ) && false === strpos( $html_sete, '<td><strong>consulta 6</strong>' ), '#291: com 7 oportunidades o painel lista panel_limit (5); obteve ' . substr_count( $html_sete, '<td><strong>consulta ' ) );
 // #371: a caixa "Oportunidades encontradas" mostra o TOTAL (`matched`), e não as linhas já cortadas
 // em panel_limit. Com 7, ela diz 7 e explica que a tabela mostra as 5 de maior volume.
@@ -675,6 +707,11 @@ $t_futura  = uox_pauta_cell( array( 'status' => 'quota_exhausted', 'quota_source
 $t_passada = uox_pauta_cell( array( 'status' => 'quota_exhausted', 'quota_source' => 'quota_id_daily', 'retry_at' => gmdate( 'c', time() - 86400 ) ) );
 uox_assert( false !== strpos( $t_futura, 'A cota renova por volta de' ) && false === strpos( $t_passada, 'renova' ), '#403 Radar: sem o parâmetro, vale o relógio do sistema' );
 uox_assert( false !== strpos( uox_pauta_cell( array( 'status' => 'quota_exhausted', 'retry_at' => gmdate( 'c', time() + 3600 ) ), 'amanhã' ), 'A cota renova por volta de' ), '#403 Radar: relógio que não é inteiro cai no do sistema' );
+// Texto numérico e float não são relógio: o `is_int` os recusa. Com um "agora" absurdo (depois da hora), `is_numeric`
+// esconderia a hora de uma renovação a 1 h daqui.
+foreach ( array( '9999999999', 9999999999.0, 1.5 ) as $relogio_ruim ) {
+	uox_assert( false !== strpos( uox_pauta_cell( array( 'status' => 'quota_exhausted', 'retry_at' => gmdate( 'c', time() + 3600 ) ), $relogio_ruim ), 'A cota renova por volta de' ), '#403 Radar: relógio que não é inteiro (' . var_export( $relogio_ruim, true ) . ') cai no do sistema' );
+}
 // A seção inteira repassa o relógio à célula: com o instante depois da renovação, nenhuma linha anuncia a hora.
 $html_vencida = uox_render_radar( $estado_radar( array(
 	uox_dash_radar_cand( 'cota um', array( 'status' => 'quota_exhausted', 'quota_source' => 'quota_id_daily', 'retry_at' => '2026-10-04T00:00:15+00:00' ) ),
