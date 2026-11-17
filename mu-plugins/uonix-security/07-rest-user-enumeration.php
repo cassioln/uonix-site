@@ -8,9 +8,28 @@
  * metade do trabalho de um ataque de força bruta: o atacante deixa de precisar
  * adivinhar QUEM atacar.
  *
- * O corte é por capacidade, não por rota fixa: quem tem list_users continua com
- * o endpoint, porque é dele que o próprio wp-admin depende para montar telas de
- * autor. Bloquear para todos quebraria o editor.
+ * O corte é por capacidade. Quem tem list_users (o administrador e o
+ * shop_manager do WooCommerce) mantém todas as rotas de usuário. Quem não tem
+ * (o anônimo e, entre os papéis nativos, assinante, colaborador, autor e
+ * editor) perde a coleção, o item por ID e as senhas de aplicativo.
+ *
+ * Uma exceção, e só uma: /wp/v2/users/me fica para qualquer usuário LOGADO. A
+ * LEITURA devolve apenas o próprio usuário, e o editor de blocos depende dela
+ * para ler e gravar as preferências de quem edita. O papel editor NÃO tem
+ * list_users: com o corte total, ele recebia 404 nessa rota e as preferências
+ * não eram gravadas (#346). O anônimo não tem "próprio usuário", e para ele a
+ * rota também some.
+ *
+ * O que a exceção NÃO fecha: a GRAVAÇÃO em /users/me é a do núcleo, inteira.
+ * Ela responde 400 quando o slug ou o e-mail enviados já pertencem a outra
+ * conta, o que confirma a existência a quem está logado, e aceita trocar a
+ * própria senha e o próprio e-mail. Estreitar isso é a #482.
+ *
+ * Efeito que fica de propósito: quem não tem list_users segue sem a lista de
+ * autores (`users?who=authors`) e sem o nome do autor de um post
+ * (`users/<id>`), porque as duas são enumeração. No editor de blocos, o
+ * seletor de autor fica vazio e a linha "Autor" do painel mostra "(sem
+ * autor)" para o papel editor, antes e depois da exceção de /users/me.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -28,9 +47,26 @@ if ( ! function_exists( 'uonix_security_rest_hides_users' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_security_rest_is_own_user_route' ) ) {
+	/**
+	 * Diz se a chave de rota é a do PRÓPRIO usuário, e só ela.
+	 *
+	 * A comparação é exata, de propósito: `/wp/v2/users/me/`, `/wp/v2/users/me-x`
+	 * e as rotas de senha de aplicativo, que também aceitam `me` no meio da
+	 * expressão, não são a rota do próprio usuário e continuam cortadas.
+	 *
+	 * @param mixed $route Chave de rota registrada na REST API.
+	 * @return bool
+	 */
+	function uonix_security_rest_is_own_user_route( $route ) {
+		return '/wp/v2/users/me' === $route;
+	}
+}
+
 if ( ! function_exists( 'uonix_security_filter_rest_user_endpoints' ) ) {
 	/**
-	 * Remove as rotas de usuário — e somente elas — de quem não pode listar.
+	 * Remove as rotas de usuário — e somente elas — de quem não pode listar,
+	 * exceto a do próprio usuário quando há alguém logado.
 	 *
 	 * @param array $endpoints Rotas registradas na REST API.
 	 * @return array
@@ -40,12 +76,22 @@ if ( ! function_exists( 'uonix_security_filter_rest_user_endpoints' ) ) {
 			return $endpoints;
 		}
 
+		$logged_in = is_user_logged_in();
+
 		foreach ( array_keys( $endpoints ) as $route ) {
 			// Casa a coleção e o item, sem tocar em rotas de outros namespaces
-			// que apenas contenham "users" no meio do caminho.
-			if ( preg_match( '#^/wp/v2/users(?:/|$)#', (string) $route ) ) {
-				unset( $endpoints[ $route ] );
+			// que apenas contenham "users" no meio do caminho. A flag `i` alinha
+			// o filtro ao despachante do núcleo, que casa as chaves sem diferenciar
+			// caixa: uma chave '/WP/v2/Users' seria alcançada por /wp/v2/users.
+			if ( ! preg_match( '#^/wp/v2/users(?:/|$)#i', (string) $route ) ) {
+				continue;
 			}
+
+			if ( $logged_in && uonix_security_rest_is_own_user_route( $route ) ) {
+				continue;
+			}
+
+			unset( $endpoints[ $route ] );
 		}
 
 		return $endpoints;
