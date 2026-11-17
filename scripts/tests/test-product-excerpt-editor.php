@@ -104,8 +104,9 @@ excerpt_assert_same(
 	'versão vinculada ao arquivo'
 );
 
-$loader = file_get_contents( $repo_root . '/mu-plugins/uonix-woocommerce/module.php' );
-excerpt_assert_contains( "'24-admin-resumo-editor-estavel.php'", $loader, 'loader inclui o módulo' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( $repo_root . '/mu-plugins/uonix-woocommerce/module.php' );
+excerpt_assert_same( true, in_array( '24-admin-resumo-editor-estavel.php', $carregados, true ), 'loader inclui o módulo' );
 
 printf(
 	"PASS: editor de resumo carrega somente na edição de produto (%d asserções).\n",

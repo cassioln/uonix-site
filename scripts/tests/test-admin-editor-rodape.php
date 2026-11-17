@@ -139,8 +139,9 @@ function uox_er_recusou( $resultado ) {
 }
 
 // Loader.
-$loader = (string) file_get_contents( $raiz . '/mu-plugins/uonix-admin/module.php' );
-uox_er_assert( false !== strpos( $loader, "'64-admin-editor-rodape.php'" ), 'module.php deve carregar 64-admin-editor-rodape.php' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( $raiz . '/mu-plugins/uonix-admin/module.php' );
+uox_er_assert( in_array( '64-admin-editor-rodape.php', $carregados, true ), 'module.php deve carregar 64-admin-editor-rodape.php' );
 
 // Áreas do rodapé.
 uox_er_assert( uonix_admin_editor_rodape_area_do_rodape( 'footer1' ), 'footer1 é rodapé' );

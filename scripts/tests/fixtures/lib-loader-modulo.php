@@ -6,6 +6,13 @@
  * linha comentada (`// '50-...php',`) de uma ativa: o módulo deixa de carregar e o
  * teste segue verde (#354 e #362).
  *
+ * É o jeito de conferir o loader: `test-loader-modulos-completo.php` reprova qualquer teste
+ * que leia um module.php com file_get_contents() (#435), e reprova também um NN-*.php que
+ * exista no diretório e não esteja no loader, ou uma entrada do loader sem arquivo. O
+ * detector de leitura por texto é uma regex de `file_get_contents()`: não vê `file()`,
+ * `fopen()` nem `SplFileObject`, e três testes usam um gravador próprio em vez deste helper
+ * (limitação registrada na #486, junto com o que o guarda não cobre um nível acima).
+ *
  * Define `uonix_mu_require_files()` como um gravador, que guarda os nomes dos
  * arquivos e não carrega nenhum. Só o PHP decide o que está ativo: comentário,
  * `if (false)` ou código morto não contam. Como o loader real
@@ -37,6 +44,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 $GLOBALS['uox_loader_registro'] = array();
+$GLOBALS['uox_loader_ausentes'] = array();
 $GLOBALS['uox_loader_chamadas'] = 0;
 
 if ( ! function_exists( 'uonix_mu_require_files' ) ) {
@@ -53,6 +61,9 @@ if ( ! function_exists( 'uonix_mu_require_files' ) ) {
 		foreach ( $files as $file ) {
 			if ( is_readable( rtrim( (string) $base_dir, '/' ) . '/' . $file ) ) {
 				$GLOBALS['uox_loader_registro'][] = $file;
+			} else {
+				// O loader real só registra `error_log` e segue. Aqui a entrada pendurada fica à parte, para o guarda a acusar.
+				$GLOBALS['uox_loader_ausentes'][] = $file;
 			}
 		}
 	}
@@ -72,6 +83,7 @@ function uox_loader_arquivos_do_modulo( $module_php ) {
 	}
 
 	$GLOBALS['uox_loader_registro'] = array();
+	$GLOBALS['uox_loader_ausentes'] = array();
 	$GLOBALS['uox_loader_chamadas'] = 0;
 	include $module_php;
 
@@ -80,4 +92,16 @@ function uox_loader_arquivos_do_modulo( $module_php ) {
 	}
 
 	return $GLOBALS['uox_loader_registro'];
+}
+
+/**
+ * Entradas que o ÚLTIMO `uox_loader_arquivos_do_modulo()` viu no loader e que não são legíveis em `$base_dir/$file`.
+ *
+ * O loader real só registra `error_log` e segue, então em produção a entrada pendurada vira ruído por requisição, e a lista
+ * devolvida acima a descarta. Quem quer provar que o loader não tem entrada pendurada chama esta função logo depois.
+ *
+ * @return string[]
+ */
+function uox_loader_entradas_ausentes() {
+	return $GLOBALS['uox_loader_ausentes'];
 }

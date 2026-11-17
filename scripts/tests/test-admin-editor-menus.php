@@ -90,8 +90,9 @@ function uox_mn_menu_do_nucleo() {
 }
 
 // Loader.
-$loader = (string) file_get_contents( $raiz . '/mu-plugins/uonix-admin/module.php' );
-uox_mn_assert( false !== strpos( $loader, "'67-admin-editor-menus.php'" ), 'module.php deve carregar 67-admin-editor-menus.php' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( $raiz . '/mu-plugins/uonix-admin/module.php' );
+uox_mn_assert( in_array( '67-admin-editor-menus.php', $carregados, true ), 'module.php deve carregar 67-admin-editor-menus.php' );
 
 // Itens de Seções do Site: mesmos destinos do Acesso Rápido, na ordem pedida.
 uox_mn_assert(

@@ -67,8 +67,8 @@ rfq_test_assert( file_exists( $admin_file ), 'Arquivo admin-new-rfq.php existe' 
 rfq_test_assert( file_exists( $customer_file ), 'Arquivo customer-rfq.php existe' );
 rfq_test_assert( file_exists( $maintenance_file ), 'Arquivo generate-prod-email-thumbs.php existe' );
 
-$module_content = file_get_contents( $module_file );
-rfq_test_assert( false !== strpos( $module_content, '29-rfq-email-imagens-produtos.php' ), 'Módulo 29 registrado em module.php' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+rfq_test_assert( in_array( '29-rfq-email-imagens-produtos.php', uox_loader_arquivos_do_modulo( $module_file ), true ), 'Módulo 29 carregado pelo module.php' );
 
 $header_content = file_get_contents( $header_file );
 rfq_test_assert( false !== strpos( $header_content, 'width="150"' ), 'email-header.php possui atributo width="150"' );

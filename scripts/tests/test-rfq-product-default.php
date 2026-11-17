@@ -143,8 +143,9 @@ $disabled_html = sprintf(
 rfq_assert_contains( 'checked=', $product_html, 'checkbox fica marcado para yes' );
 rfq_assert_not_contains( 'checked=', $disabled_html, 'checkbox respeita no explícito' );
 
-$loader = file_get_contents( $repo_root . '/mu-plugins/uonix-woocommerce/module.php' );
-rfq_assert_contains( "'23-rfq-produto-padrao.php'", $loader, 'loader inclui o módulo RFQ' );
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( $repo_root . '/mu-plugins/uonix-woocommerce/module.php' );
+rfq_assert_same( true, in_array( '23-rfq-produto-padrao.php', $carregados, true ), 'loader inclui o módulo RFQ' );
 
 printf(
 	"PASS: RFQ usa yes somente como default ausente e respeita valor explícito (%d asserções).\n",
