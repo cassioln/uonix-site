@@ -43,10 +43,28 @@ if ( ! function_exists( 'uonix_intelligence_ai_limits' ) ) {
 		// execução. 60 s é o tamanho de uma janela por minuto; a cota por minuto não foi medida (#384).
 		// `failure_streak`: falhas seguidas que param o cron (#384).
 		// `timeout` em 30 s: medido em produção em 2026-11-17, as falhas gravadas eram todas
-		// `cURL error 28` a 15 s. O pior caso por candidata é 2 × 30 s + 2 s de pausa. O `ai_budget`
-		// é conferido antes de cada chamada, e a pausa vem depois dessa conferência: uma chamada
-		// pode começar em 152 s e durar 62 s, então o pior término do Radar é 214 s, com 76 s até
-		// o `timeout 290` do crontab.
+		// `cURL error 28` a 15 s. Um timeout dá UM pedido de 30 s: só 429 e 503 ganham nova
+		// tentativa. Os 62 s por candidata (2 × 30 s + 2 s de pausa) só valem para o 429 ou 503 que
+		// repete e estoura de novo. O `ai_budget` do Radar é conferido antes de cada chamada, e a
+		// pausa vem depois dessa conferência: com 429 ou 503 na última, o pior término é 214 s, com
+		// 76 s até o `timeout 290` do crontab. Com timeout em todas, o Radar termina em 158 s se não
+		// houver HEAD, e até 182 s com HEAD (a última chamada pode começar em 152 s).
+		// O timeout NÃO conta em `failure_streak` (decisão da #473): com a rede caída, nenhuma
+		// parada por falha dispara, e o tempo é o teto, no Radar (`ai_budget`, as restantes ficam
+		// `deferred` com `reason` `budget`). O Módulo 3 não tem relógio: o teto dele é `per_run` (5
+		// candidatas), e entre uma candidata e outra não há pausa (a de 2 s fica só entre as duas
+		// tentativas de um 429 ou 503). Cinco timeouts somam 150 s de Gemini, mais até 80 s de HEADs:
+		// 230 s, com 60 s de folga.
+		// O PIOR CASO do Módulo 3 é outro. Varrer todas as sequências de 5 candidatas com TODAS as
+		// classes de resultado (timeout; 503 e depois 503, que conta; 503 e depois timeout, que é
+		// neutro; 503 e depois ok, que zera; ok; 404; 500; cota diária, que para) dá 310 s de Gemini e
+		// 390 s com os 10 HEADs: 100 s ACIMA do `timeout 290`. O gatilho é cinco vezes "503 e depois
+		// timeout", sem ok no meio e sem nenhuma parada, porque o segundo pedido, o timeout, não conta
+		// na sequência. Medido com o `ai_run` real. Uma varredura que omita as classes de dois pedidos
+		// (as neutras e as que zeram) subestima o teto: com só quatro classes, dava 326 s. O que limita o dano: o `timeout 290` corta a gravação do fim, não a do meio
+		// (#335), então o que já foi pedido fica no cache, e o WP-CLI reagenda o evento ANTES de disparar
+		// o hook. Perde-se a 5.ª candidata do dia, que é tentada no seguinte. A saída, se isso aparecer em
+		// produção, é dar ao Módulo 3 um orçamento de tempo próprio, como o `ai_budget` do Radar.
 		return array( 'title' => 60, 'description' => 155, 'per_run' => 5, 'timeout' => 30, 'max_output_tokens' => 1024, 'max_hops' => 3, 'head_max' => 10, 'quota_wait' => 60, 'failure_streak' => 2 );
 	}
 }
@@ -720,9 +738,10 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 	 * `deferred`, com o motivo em `reason` (#384). Medido em 2026-10-03 no Radar (63): 1 ok e
 	 * 8 falhas, e a cota do dia acabou na mesma rodada. Cada chamada grava o `http` e os `attempts`.
 	 *
-	 * O cache é gravado depois de cada chamada (#335), e não só no fim: o pior caso teórico da execução
-	 * passa do `timeout 290` do `crontab` (5 chamadas de até 62 s, mais até 10 HEADs de 8 s), e um
-	 * processo cortado no meio perderia o que já gastou cota. A gravação do meio mantém o que ainda não
+	 * O cache é gravado depois de cada chamada (#335), e não só no fim: o pior caso da execução passa do
+	 * `timeout 290` do `crontab` (5 chamadas de até 62 s, 310 s, mais até 10 HEADs de 8 s, 390 s: o
+	 * gatilho é "503 e depois timeout" nas cinco, que não para por falhas, ver `uonix_intelligence_ai_limits()`),
+	 * e um processo cortado no meio perderia o que já gastou cota. A gravação do meio mantém o que ainda não
 	 * foi reavaliado; só a do fim tira as consultas que saíram da lista.
 	 *
 	 * @param array|null $analysis Resultado de uonix_intelligence_seo_opportunities(), ou null para ler.

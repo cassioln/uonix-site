@@ -670,7 +670,8 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 			$sem_pagina = array( 'path' => $c['page_path'], 'kind' => '', 'title' => '', 'redirected_to' => '' );
 			// Sem tempo, nenhuma página é resolvida: seguir o 301 faz HEAD, e o HEAD depois do
 			// orçamento empurrava o cron para perto dos 290 s (BAIXO 4 da revisão do PR #378).
-			if ( (float) call_user_func( $relogio ) - $inicio > (float) $regras['ai_budget'] ) {
+			$sem_tempo = (float) call_user_func( $relogio ) - $inicio > (float) $regras['ai_budget'];
+			if ( $sem_tempo ) {
 				$pagina = null;
 			} elseif ( array_key_exists( $c['page_path'], $por_caminho ) ) {
 				$pagina = $por_caminho[ $c['page_path'] ];
@@ -697,7 +698,12 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 			} elseif ( ! $tem_chave ) {
 				$c['ai'] = array( 'status' => 'not_configured' );
 			} elseif ( $adiar || (float) call_user_func( $relogio ) - $inicio > (float) $regras['ai_budget'] ) {
-				$c['ai'] = array( 'status' => 'deferred', 'input_hash' => $hash, 'attempted_at' => $agora );
+				// Adiada por TEMPO (#473) quando o orçamento acabou: ou na leitura de agora (então `$adiar` é
+				// falso), ou antes de resolver a página (`$sem_tempo`, e a página ficou sem saber por isso).
+				// "Não sei" do resolvedor com tempo de sobra não tem motivo. Sem `reason`, nada distinguia
+				// "o dia acabou" de "a rede caiu": o timeout não conta na sequência de falhas, então uma rede
+				// fora gasta o orçamento em vez de parar o cron, e este motivo é o único rastro dela.
+				$c['ai'] = array( 'status' => 'deferred' ) + ( ! $adiar || $sem_tempo ? array( 'reason' => 'budget' ) : array() ) + array( 'input_hash' => $hash, 'attempted_at' => $agora );
 			} elseif ( array() !== $parada ) {
 				$c['ai'] = array( 'status' => 'deferred' ) + $parada + array( 'input_hash' => $hash, 'attempted_at' => $agora );
 			} else {
