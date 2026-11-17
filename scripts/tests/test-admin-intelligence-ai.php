@@ -831,6 +831,61 @@ $motivos_m3 = array_map( static function ( $e ) { return $e['reason'] ?? ''; }, 
 uox_ai_assert( ! in_array( 'failures', $motivos_m3, true ) && 'ok' === ( $estados_m3[2] ?? '' ), 'Módulo 3: dois timeouts seguidos não adiam a terceira consulta por falhas (#404, revisão do PR #472); estados: ' . implode( ',', $estados_m3 ) . ' motivos: ' . implode( ',', $motivos_m3 ) );
 
 
+// #473: o Módulo 3 também tem `ai_budget`? Não: sem relógio. O texto de `budget` existe no Radar; aqui o motivo
+// desconhecido cai no texto genérico, e o texto não afirma o que o Módulo 3 não faz.
+uox_ai_assert( 'Não pedida nesta geração. Nova tentativa na próxima geração diária.' === uonix_intelligence_ai_state_message( 'deferred', array( 'reason' => 'budget' ) ), '#473: motivo de tempo não existe no Módulo 3 (sem relógio): cai no texto genérico, sem inventar causa' );
+
+// #474 (2): sequência MISTA no Módulo 3, com o transporte real. O timeout não conta e não zera a contagem: DNS, timeout, DNS
+// são duas falhas que contam, e a segunda DNS para o cron. Todas em timeout: nenhuma parada, e cada uma pede UMA vez (30 s).
+$dns_m3 = new WP_Error( 'http_request_failed', 'cURL error 6: Could not resolve host: generativelanguage.googleapis.com' );
+$tmo_m3 = new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out after 30001 milliseconds with 0 bytes received' );
+$misto_m3 = array(
+	'DNS, timeout, DNS: a 2ª DNS para'          => array( array( $dns_m3, $tmo_m3, $dns_m3, uox_gemini( $ok ), uox_gemini( $ok ) ), 3, 3, array( 'unavailable', 'unavailable', 'unavailable', 'deferred', 'deferred' ), array( '', '', '', 'failures', 'failures' ) ),
+	'timeout, DNS, timeout, DNS: a 2ª DNS para' => array( array( $tmo_m3, $dns_m3, $tmo_m3, $dns_m3, uox_gemini( $ok ) ), 4, 4, array( 'unavailable', 'unavailable', 'unavailable', 'unavailable', 'deferred' ), array( '', '', '', '', 'failures' ) ),
+	'DNS, ok, timeout, DNS, ok: o ok zera'      => array( array( $dns_m3, uox_gemini( $ok ), $tmo_m3, $dns_m3, uox_gemini( $ok ) ), 5, 5, array( 'unavailable', 'ok', 'unavailable', 'unavailable', 'ok' ), array( '', '', '', '', '' ) ),
+	'cinco em timeout: nenhuma parada'          => array( array( $tmo_m3, $tmo_m3, $tmo_m3, $tmo_m3, $tmo_m3 ), 5, 5, array( 'unavailable', 'unavailable', 'unavailable', 'unavailable', 'unavailable' ), array( '', '', '', '', '' ) ),
+);
+foreach ( $misto_m3 as $caso => $c ) {
+	$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+	$GLOBALS['uox_http']    = $c[0];
+	$GLOBALS['uox_pedidos'] = array();
+	$rm3 = uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+	$cm3 = get_option( uonix_intelligence_ai_option() );
+	$st3 = array();
+	$mo3 = array();
+	foreach ( range( 1, 5 ) as $n ) {
+		$st3[] = $cm3[ $k_n( $n ) ]['status'];
+		$mo3[] = $cm3[ $k_n( $n ) ]['reason'] ?? '';
+	}
+	uox_ai_assert( $c[1] === $rm3['called'] && $c[2] === count( $GLOBALS['uox_pedidos'] ) && $c[3] === $st3 && $c[4] === $mo3, "#474 M3 {$caso}: {$c[1]} chamada(s), {$c[2]} pedido(s), estados " . implode( ',', $c[3] ) . ', motivos ' . implode( ',', $c[4] ) . '; obteve ' . $rm3['called'] . ', ' . count( $GLOBALS['uox_pedidos'] ) . ', ' . implode( ',', $st3 ) . ', ' . implode( ',', $mo3 ) );
+}
+
+// O PIOR CASO do Módulo 3 (revisão do PR #484): cinco candidatas, cada uma "503 e depois timeout". O segundo pedido é o timeout, que não
+// conta na sequência de falhas, então nada para o cron: 5 chamadas, 10 pedidos, nenhuma `deferred`. No teto de 30 s por pedido e 2 s de
+// pausa entre as duas tentativas, são 5 × (2 × 30 + 2) = 310 s de Gemini, e 390 s com os 10 HEADs: acima do `timeout 290`. O que o limita
+// é a gravação por chamada (#335) e o reagendamento antes do hook, não o código do laço. O teste prende o COMPORTAMENTO que o contrato
+// descreve, para ele não voltar a afirmar o contrário.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$fila_503_timeout = array();
+for ( $i = 0; $i < 5; ++$i ) {
+	$fila_503_timeout[] = uox_http( 503 );
+	$fila_503_timeout[] = $tmo_m3;
+}
+$GLOBALS['uox_http']    = $fila_503_timeout;
+$GLOBALS['uox_pedidos'] = array();
+$pior_m3 = uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+$cache_pior = get_option( uonix_intelligence_ai_option() );
+uox_ai_assert( 5 === $pior_m3['called'] && 10 === count( $GLOBALS['uox_pedidos'] ), 'Módulo 3, pior caso: cinco "503 e depois timeout" fazem 5 chamadas e 10 pedidos; obteve ' . $pior_m3['called'] . ' e ' . count( $GLOBALS['uox_pedidos'] ) );
+uox_ai_assert( 5 === count( $cache_pior ) && array( 'unavailable' ) === array_values( array_unique( array_map( static function ( $e ) { return $e['status'] ?? '?'; }, $cache_pior ) ) ), 'Módulo 3, pior caso: as cinco ficam unavailable' );
+uox_ai_assert( array() === array_values( array_filter( array_map( static function ( $e ) { return $e['reason'] ?? ''; }, $cache_pior ) ) ), 'Módulo 3, pior caso: NENHUMA parada por falha (o timeout do segundo pedido não conta), e nenhuma deferred' );
+uox_ai_assert( array( 2 ) === array_values( array_unique( array_map( static function ( $e ) { return $e['attempts'] ?? 0; }, $cache_pior ) ) ) && array( 0 ) === array_values( array_unique( array_map( static function ( $e ) { return $e['http'] ?? -1; }, $cache_pior ) ) ), 'Módulo 3, pior caso: cada entrada guarda 2 pedidos e http 0 (a última tentativa foi o timeout)' );
+// O contraste que explica o pior caso: "503 e depois 503" conta, e a segunda candidata já para o cron.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http']    = array_fill( 0, 10, uox_http( 503 ) );
+$GLOBALS['uox_pedidos'] = array();
+$dois_503 = uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+uox_ai_assert( 2 === $dois_503['called'] && 4 === count( $GLOBALS['uox_pedidos'] ), 'Módulo 3, contraste: "503 e depois 503" conta, e a 2.ª candidata para o cron (2 chamadas, 4 pedidos); obteve ' . $dois_503['called'] . ' e ' . count( $GLOBALS['uox_pedidos'] ) );
+
 // #404: o cron grava a causa do erro de transporte no cache, e só nele.
 $GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
 $GLOBALS['uox_http'] = array( new WP_Error( 'http_request_failed', 'DNS: could not resolve host' ), uox_http( 503 ), uox_http( 503 ) );
