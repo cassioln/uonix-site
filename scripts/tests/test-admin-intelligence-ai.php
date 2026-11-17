@@ -42,7 +42,20 @@ function add_filter( $h, $c = null, $p = 10, $a = 1 ) { return true; }
 $GLOBALS['uox_options']  = array();
 $GLOBALS['uox_autoload'] = array();
 function get_option( $k, $d = false ) { return array_key_exists( $k, $GLOBALS['uox_options'] ) ? $GLOBALS['uox_options'][ $k ] : $d; }
-function update_option( $k, $v, $a = null ) { $GLOBALS['uox_options'][ $k ] = $v; $GLOBALS['uox_autoload'][ $k ] = $a; return true; }
+// Cada gravação fica registrada (ordem e conteúdo). `uox_corta_na_gravacao` faz a N-ésima gravação lançar uma exceção
+// DEPOIS de gravar, o que imita o processo morrendo no meio da execução (o `timeout 290` do crontab, uma queda).
+$GLOBALS['uox_gravacoes']          = array();
+$GLOBALS['uox_corta_na_gravacao'] = 0;
+class Uox_Corte extends RuntimeException {}
+function update_option( $k, $v, $a = null ) {
+	$GLOBALS['uox_options'][ $k ]  = $v;
+	$GLOBALS['uox_autoload'][ $k ] = $a;
+	$GLOBALS['uox_gravacoes'][]    = array( $k, $v, $a );
+	if ( $GLOBALS['uox_corta_na_gravacao'] > 0 && count( $GLOBALS['uox_gravacoes'] ) >= $GLOBALS['uox_corta_na_gravacao'] ) {
+		throw new Uox_Corte( 'processo cortado na gravação ' . count( $GLOBALS['uox_gravacoes'] ) );
+	}
+	return true;
+}
 
 // Site simulado: id => caminho, tipo, status, título e metas. `so_por_slug` simula o
 // produto que url_to_postid() não acha e get_page_by_path() acha.
@@ -166,6 +179,8 @@ function uox_posts_padrao() {
 		14 => array( 'path' => '/home-real/', 'type' => 'page', 'status' => 'publish', 'title' => 'Início', 'meta' => array() ),
 		15 => array( 'path' => '/servico/ensaios-de-arrancamento/', 'type' => 'servicos', 'status' => 'publish', 'title' => 'Ensaios de Arrancamento', 'meta' => array( 'rank_math_title' => 'Ensaio de Arrancamento com Laudo | Uônix' ) ),
 		16 => array( 'path' => '/servico/projeto-andaime-fachadeiro/', 'type' => 'servicos', 'status' => 'publish', 'title' => 'Projeto de Andaime Fachadeiro', 'meta' => array() ),
+		// #332: variáveis do Rank Math COM argumento, que o padrão antigo não reconhecia.
+		17 => array( 'path' => '/servico/variavel-com-argumento/', 'type' => 'page', 'status' => 'publish', 'title' => 'Serviço com Argumento', 'meta' => array( 'rank_math_title' => '%customfield(titulo_seo)% | Uônix', 'rank_math_description' => 'Veja %date(Y)% e %count(x)%' ) ),
 	);
 	$GLOBALS['uox_options']['page_on_front'] = 14;
 }
@@ -202,6 +217,47 @@ uox_ai_assert( 'https://uonix.com.br/produtos/olhal-inox/' === $in['page_url'] &
 $in_tpl = uonix_intelligence_ai_input( uox_linha( 'teste de ancoragem predial', '/servico/teste/' ) );
 uox_ai_assert( is_array( $in_tpl ) && 'Teste de Ancoragem' === $in_tpl['title'], 'Título com variáveis do Rank Math sem resolvedor cai no título do post; obteve ' . var_export( $in_tpl['title'] ?? null, true ) );
 uox_ai_assert( '' === $in_tpl['description'], 'Descrição vazia é aceita' );
+// #332: variável COM argumento, sem resolvedor, também cai no título do post e na descrição vazia. O
+// padrão antigo (`%[a-z_]+%`) não a reconhecia e mandava o template cru ao Gemini.
+$in_arg = uonix_intelligence_ai_input( uox_linha( 'servico com argumento', '/servico/variavel-com-argumento/' ) );
+uox_ai_assert( is_array( $in_arg ) && 'Serviço com Argumento' === $in_arg['title'], '#332: título com %customfield(x)% cai no título do post; obteve ' . var_export( $in_arg['title'] ?? null, true ) );
+uox_ai_assert( is_array( $in_arg ) && '' === $in_arg['description'], '#332: descrição com %date(Y)% e %count(x)% vira vazia; obteve ' . var_export( $in_arg['description'] ?? null, true ) );
+uox_ai_assert( is_array( $in_arg ) && false === strpos( json_encode( uonix_intelligence_ai_request_body( $in_arg ), JSON_UNESCAPED_UNICODE ), '%customfield' ) && false === strpos( json_encode( uonix_intelligence_ai_request_body( $in_arg ), JSON_UNESCAPED_UNICODE ), '%date' ), '#332: nenhum template com argumento chega ao pedido do Gemini' );
+// A função isolada: o que é variável (com ou sem argumento) e o que não é.
+foreach ( array(
+	'%title%'                       => '',
+	'%customfield(titulo_seo)%'     => '',
+	'%customfield()%'               => '',
+	'%date()%'                      => '',
+	'%date(Y)%'                     => '',
+	'%count(x)%'                    => '',
+	'%date(d/m/Y)%'                 => '',
+	'Ensaio %date(Y)% | Uônix'      => '',
+	'%TITLE% | Uônix'               => '',
+	'%sep% %sitename%'              => '',
+	'Ensaio de 100% garantido'      => 'Ensaio de 100% garantido',
+	'Desconto de 50% e 20% extra'   => 'Desconto de 50% e 20% extra',
+	'100%'                          => '100%',
+	'%'                             => '%',
+	'50% (parcelado) 10%'           => '50% (parcelado) 10%',
+	'Olhal Inox | Uônix'            => 'Olhal Inox | Uônix',
+	// Os limites do padrão: o nome é só letra e `_`; o argumento não tem `)` nem `%`.
+	'%cf_x(1)%'                     => '',
+	"%date(\nY)%"                   => '',
+	'%Date(Y)%'                     => '',
+	'%date(Y) | Uônix'              => '%date(Y) | Uônix',
+	'Aço 100%(novo)% fim'           => 'Aço 100%(novo)% fim',
+	'%título%'                      => '%título%',
+	'%%'                            => '%%',
+	// Os limites declarados acima, um caso cada: dígito no NOME, `%` no argumento e `)` no argumento. Nenhum desses
+	// é variável do Rank Math, e o texto passa como está (o custo de errar para este lado é um `%` esquisito no
+	// pedido; o de errar para o outro é apagar um título legítimo).
+	'Ensaio %h1% de 5% desconto'    => 'Ensaio %h1% de 5% desconto',
+	'%customfield(a%b)% x'          => '%customfield(a%b)% x',
+	'%customfield(a)b)% x'          => '%customfield(a)b)% x',
+) as $bruto => $esperado ) {
+	uox_ai_assert( $esperado === uonix_intelligence_ai_meta_text( $bruto, 0 ), '#332: meta_text( ' . var_export( $bruto, true ) . ' ) sem resolvedor; obteve ' . var_export( uonix_intelligence_ai_meta_text( $bruto, 0 ), true ) );
+}
 uox_ai_assert( null === uonix_intelligence_ai_input( uox_linha( 'x', '/olhal-de-ancoragem/' ) ), 'Sem post publicado, não há entrada' );
 uox_ai_assert( null === uonix_intelligence_ai_input( uox_linha( '', '/produtos/olhal-inox/' ) ), 'Sem consulta, não há entrada' );
 uox_ai_assert( uonix_intelligence_ai_input_hash( $in ) !== uonix_intelligence_ai_input_hash( array_merge( $in, array( 'title' => 'Outro' ) ) ), 'O hash muda quando o título atual muda' );
@@ -254,6 +310,32 @@ $recusas = array(
 foreach ( $recusas as $caso => $dados ) {
 	uox_ai_assert( null === uonix_intelligence_ai_validate( json_encode( $dados, JSON_UNESCAPED_UNICODE ), $P ), "Recusa: {$caso}" );
 }
+// #334: `differentiators_used` tem de ser uma LISTA. Um objeto JSON também vira array no `json_decode( …, true )`,
+// e os valores dele passariam pela checagem da lista permitida. O `json_encode` de um array PHP com chaves de texto
+// ou fora de ordem gera objeto; é a forma que o Gemini mandaria.
+$fora_da_lista = array(
+	'objeto com chaves de texto'        => '{"a":"Aço Inox 304/316","b":"Conforme NBR 16325"}',
+	'objeto com chave numérica salteada' => '{"1":"Aço Inox 304/316","2":"Conforme NBR 16325"}',
+	'objeto que começa em 1'            => '{"1":"Aço Inox 304/316","0":"Conforme NBR 16325"}',
+);
+foreach ( $fora_da_lista as $caso => $json_dif ) {
+	$texto_obj = '{"title":' . json_encode( $ok['title'], JSON_UNESCAPED_UNICODE ) . ',"description":' . json_encode( $ok['description'], JSON_UNESCAPED_UNICODE ) . ',"differentiators_used":' . $json_dif . '}';
+	uox_ai_assert( null === uonix_intelligence_ai_validate( $texto_obj, $P ), "#334 Recusa: differentiators_used como {$caso}" );
+}
+// O que o `json_decode( …, true )` não distingue: um objeto com chaves 0..n-1 em ordem É uma lista depois do decode, e passa.
+// Os valores passam pelas mesmas checagens, e o gravado é uma lista (`array_keys( $usados )`).
+$obj_como_lista = '{"title":' . json_encode( $ok['title'], JSON_UNESCAPED_UNICODE ) . ',"description":' . json_encode( $ok['description'], JSON_UNESCAPED_UNICODE ) . ',"differentiators_used":{"0":"Aço Inox 304/316","1":"Conforme NBR 16325"}}';
+$v_obj = uonix_intelligence_ai_validate( $obj_como_lista, $P );
+uox_ai_assert( is_array( $v_obj ) && array( 'Aço Inox 304/316', 'Conforme NBR 16325' ) === $v_obj['differentiators_used'] && array_is_list( $v_obj['differentiators_used'] ), '#334: o objeto com chaves 0..n-1 em ordem é uma lista depois do decode, passa, e o gravado é uma lista' );
+// Objeto VAZIO (`{}`) vira `array()` no `json_decode( …, true )` e é indistinguível de `[]`: nenhum valor passa por
+// ele, então é inofensivo, e a validação o trata como a lista vazia que ele é (mesma regra dos diferenciais no texto).
+uox_ai_assert( null === uonix_intelligence_ai_validate( '{"title":' . json_encode( $ok['title'], JSON_UNESCAPED_UNICODE ) . ',"description":' . json_encode( $ok['description'], JSON_UNESCAPED_UNICODE ) . ',"differentiators_used":{}}', $P ), '#334: o objeto vazio vira lista vazia, e o texto de $ok usa diferenciais: recusa pela regra 5' );
+// O contraste: a MESMA lista, escrita como lista, é aceita (a recusa acima é pela forma, não pelo conteúdo).
+$texto_lista = '{"title":' . json_encode( $ok['title'], JSON_UNESCAPED_UNICODE ) . ',"description":' . json_encode( $ok['description'], JSON_UNESCAPED_UNICODE ) . ',"differentiators_used":["Aço Inox 304/316","Conforme NBR 16325"]}';
+uox_ai_assert( is_array( uonix_intelligence_ai_validate( $texto_lista, $P ) ), '#334: a mesma lista, escrita como lista, é aceita' );
+// Lista vazia continua valendo quando o texto não usa nenhum diferencial.
+$sem_dif = '{"title":"Olhal de ancoragem predial | Uônix","description":"Olhal para ancoragem predial.","differentiators_used":[]}';
+uox_ai_assert( is_array( uonix_intelligence_ai_validate( $sem_dif, $P ) ), '#334: lista vazia é aceita quando nenhum diferencial está no texto' );
 uox_ai_assert( null === uonix_intelligence_ai_validate( 'não é json', $P ) && null === uonix_intelligence_ai_validate( null, $P ), 'Recusa: texto que não é JSON, ou nulo' );
 uox_ai_assert( is_array( uonix_intelligence_ai_validate( json_encode( array( 'title' => str_repeat( 'á', 60 ), 'description' => 'ok', 'differentiators_used' => array() ) ), $P ) ), '60 caracteres acentuados cabem: a contagem é por caractere, não por byte' );
 
@@ -614,6 +696,89 @@ uox_ai_assert( 1 === $ri['called'] && 'quota_exhausted' === $ci[ $k_n( 1 ) ]['st
 foreach ( array( 2, 3 ) as $n ) {
 	uox_ai_assert( 'deferred' === $ci[ $k_n( $n ) ]['status'] && 'retry_delay' === ( $ci[ $k_n( $n ) ]['quota_source'] ?? null ), "#403: a consulta {$n}, adiada pela cota inferida, herda retry_delay; obteve " . var_export( $ci[ $k_n( $n ) ], true ) );
 }
+// #335: o cache é gravado depois de CADA chamada. Se o processo morrer no meio (o `timeout 290` do crontab, uma queda), o
+// que já foi gerado fica, em vez de se perder junto com a execução inteira. Corte simulado na 3.ª gravação.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http']           = array_fill( 0, 5, uox_gemini( $ok ) );
+$GLOBALS['uox_pedidos']        = array();
+$GLOBALS['uox_gravacoes']      = array();
+$GLOBALS['uox_corta_na_gravacao'] = 3;
+$cortou = false;
+try {
+	uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+} catch ( Uox_Corte $e ) {
+	$cortou = true;
+}
+$GLOBALS['uox_corta_na_gravacao'] = 0;
+$cache_cortado = get_option( uonix_intelligence_ai_option() );
+uox_ai_assert( $cortou && 3 === count( $GLOBALS['uox_gravacoes'] ), '#335: o corte simulado aconteceu na 3.ª gravação; houve ' . count( $GLOBALS['uox_gravacoes'] ) . ' gravação(ões)' );
+uox_ai_assert( is_array( $cache_cortado ) && 3 === count( $cache_cortado ) && 'ok' === ( $cache_cortado[ $k_n( 1 ) ]['status'] ?? '' ) && 'ok' === ( $cache_cortado[ $k_n( 2 ) ]['status'] ?? '' ) && 'ok' === ( $cache_cortado[ $k_n( 3 ) ]['status'] ?? '' ), '#335: o processo cortado no meio deixa as 3 sugestões já geradas no cache; obteve ' . var_export( array_map( static function ( $e ) { return $e['status'] ?? '?'; }, (array) $cache_cortado ), true ) );
+// No dia seguinte o cron retoma de onde parou: só as 2 que faltam são chamadas.
+$GLOBALS['uox_http']    = array_fill( 0, 5, uox_gemini( $ok ) );
+$GLOBALS['uox_pedidos'] = array();
+$retoma = uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+uox_ai_assert( 2 === $retoma['called'] && 2 === count( $GLOBALS['uox_pedidos'] ), '#335: depois do corte, o cron seguinte chama só as 2 que faltavam; chamou ' . $retoma['called'] );
+// A gravação a cada chamada não grava mais do que precisa: 5 chamadas, 5 gravações, e o estado final é o mesmo da gravação única.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http']      = array_fill( 0, 5, uox_gemini( $ok ) );
+$GLOBALS['uox_gravacoes'] = array();
+uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+$cache_cheio = get_option( uonix_intelligence_ai_option() );
+uox_ai_assert( 5 === count( $cache_cheio ) && count( $GLOBALS['uox_gravacoes'] ) <= 6, '#335: o estado final tem as 5 entradas e a execução grava no máximo 6 vezes (uma por chamada, mais a poda do fim); gravou ' . count( $GLOBALS['uox_gravacoes'] ) );
+$ultima = end( $GLOBALS['uox_gravacoes'] );
+uox_ai_assert( is_array( $ultima ) && $ultima[1] === $cache_cheio, '#335: a última gravação é o estado final' );
+// Toda gravação da execução, a do meio e a do fim, desliga o autoload: uma opção que ainda não existe seria criada com
+// autoload `yes` pela gravação do meio, e uma execução cortada logo depois deixaria o cache carregando em toda página.
+$autoloads = array_map( static function ( $g ) { return $g[2] ?? 'ausente'; }, $GLOBALS['uox_gravacoes'] );
+uox_ai_assert( 6 === count( $autoloads ) && array( false ) === array_values( array_unique( $autoloads, SORT_REGULAR ) ), '#335: as 6 gravações da execução (5 do meio e a da poda) desligam o autoload; obteve ' . var_export( $autoloads, true ) );
+// A entrada NOVA vence a antiga da mesma chave na gravação do meio: o cache de ontem tem a consulta 1 em `unavailable`
+// (a que o cron refaz hoje), e o corte vem logo depois da 1.ª chamada. O cache tem de dizer `ok`, e não `unavailable`.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array(
+	$k_n( 1 ) => array( 'status' => 'unavailable', 'input_hash' => str_repeat( 'b', 64 ), 'attempted_at' => '2026-11-16T04:45:00+00:00', 'http' => 503, 'attempts' => 2 ),
+	$k_n( 2 ) => array( 'status' => 'unavailable', 'input_hash' => str_repeat( 'c', 64 ), 'attempted_at' => '2026-11-16T04:45:00+00:00', 'http' => 503, 'attempts' => 2 ),
+);
+$GLOBALS['uox_http']              = array_fill( 0, 5, uox_gemini( $ok ) );
+$GLOBALS['uox_gravacoes']         = array();
+$GLOBALS['uox_corta_na_gravacao'] = 1;
+try {
+	uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+} catch ( Uox_Corte $e ) {
+}
+$GLOBALS['uox_corta_na_gravacao'] = 0;
+$meio = get_option( uonix_intelligence_ai_option() );
+uox_ai_assert( 'ok' === ( $meio[ $k_n( 1 ) ]['status'] ?? '' ) && 'unavailable' === ( $meio[ $k_n( 2 ) ]['status'] ?? '' ), '#335: na gravação do meio a entrada nova (ok) vence a antiga da mesma chave, e a ainda não reavaliada (2) fica como estava; obteve ' . var_export( array( $meio[ $k_n( 1 ) ]['status'] ?? null, $meio[ $k_n( 2 ) ]['status'] ?? null ), true ) );
+// O corte DEPOIS de uma falha: a gravação do meio guarda a falha inteira (HTTP, causa, hora de renovação da cota), e não só
+// as chamadas que deram certo. Sem isso, o cron seguinte refaria a chamada às cegas e perderia o dado que o #404 ainda lê.
+// Cenário: 1.ª chamada com 503 duas vezes, 2.ª com a cota diária; corte logo depois da 2.ª gravação.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
+$GLOBALS['uox_http']              = array( uox_http( 503 ), uox_http( 503 ), uox_429( $dia, '27223s' ), uox_gemini( $ok ) );
+$GLOBALS['uox_gravacoes']         = array();
+$GLOBALS['uox_corta_na_gravacao'] = 2;
+try {
+	uonix_intelligence_ai_run( uox_analise( array_slice( $cinco, 0, 3 ) ), 0 );
+} catch ( Uox_Corte $e ) {
+}
+$GLOBALS['uox_corta_na_gravacao'] = 0;
+$falha_meio = get_option( uonix_intelligence_ai_option() );
+uox_ai_assert( 'unavailable' === ( $falha_meio[ $k_n( 1 ) ]['status'] ?? '' ) && 503 === ( $falha_meio[ $k_n( 1 ) ]['http'] ?? null ) && 2 === ( $falha_meio[ $k_n( 1 ) ]['attempts'] ?? null ), '#335: a gravação do meio guarda a FALHA (status, HTTP e tentativas), e não só o que deu certo; obteve ' . var_export( $falha_meio[ $k_n( 1 ) ] ?? null, true ) );
+$cota_meio = $falha_meio[ $k_n( 2 ) ] ?? array();
+uox_ai_assert( 'quota_exhausted' === ( $cota_meio['status'] ?? '' ) && 'quota_id_daily' === ( $cota_meio['quota_source'] ?? null ) && isset( $cota_meio['retry_at'] ), '#335: a gravação do meio, depois de uma cota esgotada, já leva a origem e a hora da renovação; obteve ' . var_export( $cota_meio, true ) );
+uox_ai_assert( ! isset( $falha_meio[ $k_n( 3 ) ] ), '#335: a consulta que ainda não foi alcançada não aparece no cache do meio' );
+// A poda (consulta que saiu da lista) continua valendo no fim, e uma gravação parcial NUNCA apaga o que ficou de outro dia.
+$GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array( 'chave-antiga-de-uma-consulta-que-saiu' => array( 'status' => 'ok', 'input_hash' => str_repeat( 'a', 64 ), 'suggestion' => array( 'title' => 'x', 'description' => 'y', 'differentiators_used' => array() ) ) );
+$GLOBALS['uox_http'] = array_fill( 0, 5, uox_gemini( $ok ) );
+$GLOBALS['uox_corta_na_gravacao'] = 2;
+try {
+	uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+} catch ( Uox_Corte $e ) {
+}
+$GLOBALS['uox_corta_na_gravacao'] = 0;
+uox_ai_assert( isset( get_option( uonix_intelligence_ai_option() )['chave-antiga-de-uma-consulta-que-saiu'] ), '#335: cortado antes do fim, o que já estava no cache e ainda não foi reavaliado fica (a poda só vale quando a execução termina)' );
+$GLOBALS['uox_http'] = array_fill( 0, 5, uox_gemini( $ok ) );
+uonix_intelligence_ai_run( uox_analise( $cinco ), 0 );
+uox_ai_assert( ! isset( get_option( uonix_intelligence_ai_option() )['chave-antiga-de-uma-consulta-que-saiu'] ), '#335: a execução completa poda a consulta que saiu da lista' );
+$GLOBALS['uox_gravacoes'] = array();
+
 // A origem não depende da hora: a cota diária SEM `RetryInfo` grava a origem e nenhuma hora inventada.
 $GLOBALS['uox_options']['uonix_intelligence_ai_suggestions'] = array();
 $GLOBALS['uox_http']    = array( uox_429( $dia ), uox_gemini( $ok ) );

@@ -383,6 +383,22 @@ if ( ! function_exists( 'uonix_analytics_metrics_extended_query_limit' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_analytics_metrics_query_page_limit' ) ) {
+	/**
+	 * Linhas pedidas na chamada `query` + `page`, que dá a página líder de cada consulta (#336).
+	 *
+	 * É o teto da API, 25000, e não o universo de consultas (1000). A Search Console ordena as linhas
+	 * por cliques, e as oportunidades têm CTR baixo, quase sempre zero clique: são as primeiras a
+	 * ficar de fora do corte quando os pares consulta × página passam do limite. Sem a linha, a
+	 * oportunidade fica sem página alvo, e o painel diria "sem página" sobre uma página que existe.
+	 * Hoje os pares cabem em 1000 (cerca de 111 consultas em 30 dias); o teto fecha a porta sem custo
+	 * de dado: só entram na lista as consultas que o universo já retém (#253).
+	 */
+	function uonix_analytics_metrics_query_page_limit() {
+		return 25000;
+	}
+}
+
 if ( ! function_exists( 'uonix_analytics_metrics_sanitize_period_days' ) ) {
 	function uonix_analytics_metrics_sanitize_period_days( $value ) {
 		if ( is_int( $value ) ) {
@@ -847,7 +863,7 @@ if ( ! function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
 		$gsc_previous = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['previous'] );
 		$gsc_queries = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'query', uonix_analytics_metrics_extended_query_limit() );
 		$gsc_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'page' );
-		$gsc_query_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], array( 'query', 'page' ), uonix_analytics_metrics_extended_query_limit() );
+		$gsc_query_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], array( 'query', 'page' ), uonix_analytics_metrics_query_page_limit() );
 		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views, $gsc_query_pages );
 	}
 }

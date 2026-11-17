@@ -233,7 +233,10 @@ if ( ! function_exists( 'uonix_intelligence_ai_meta_text' ) ) {
 		}
 		$texto = trim( html_entity_decode( wp_strip_all_tags( $texto ), ENT_QUOTES, 'UTF-8' ) );
 
-		return 1 === preg_match( '/%[a-z_]+%/i', $texto ) ? '' : $texto;
+		// Variável do Rank Math: `%nome%`, ou `%nome(argumento)%` (`%customfield(x)%`, `%date(Y)%`). Sem o
+		// argumento no padrão, o template com argumento passava cru ao Gemini (#332). Um `%` solto ("100%")
+		// e dois `%` com texto de venda no meio ("50% ... 10%") não casam: o nome é só letra e `_`.
+		return 1 === preg_match( '/%[a-z_]+(\([^)%]*\))?%/i', $texto ) ? '' : $texto;
 	}
 }
 
@@ -417,7 +420,11 @@ if ( ! function_exists( 'uonix_intelligence_ai_validate' ) ) {
 		if ( array( 'description', 'differentiators_used', 'title' ) !== $chaves ) {
 			return null;
 		}
-		if ( ! is_string( $dados['title'] ) || ! is_string( $dados['description'] ) || ! is_array( $dados['differentiators_used'] ) ) {
+		// `differentiators_used` é uma LISTA. Um objeto JSON também vira array no `json_decode( …, true )`, e os
+		// valores dele passariam pela checagem dos rótulos: `array_is_list` recusa o objeto cujas chaves não
+		// sejam 0..n-1 em ordem (#334). O que tem essas chaves é indistinguível de lista depois do decode, e
+		// passa, sem dano: os valores passam pelas mesmas checagens. O objeto vazio (`{}`) vira `array()`.
+		if ( ! is_string( $dados['title'] ) || ! is_string( $dados['description'] ) || ! is_array( $dados['differentiators_used'] ) || ! array_is_list( $dados['differentiators_used'] ) ) {
 			return null;
 		}
 		$titulo    = trim( $dados['title'] );
@@ -696,6 +703,11 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 	 * `deferred`, com o motivo em `reason` (#384). Medido em 2026-10-03 no Radar (63): 1 ok e
 	 * 8 falhas, e a cota do dia acabou na mesma rodada. Cada chamada grava o `http` e os `attempts`.
 	 *
+	 * O cache é gravado depois de cada chamada (#335), e não só no fim: o pior caso teórico da execução
+	 * passa do `timeout 290` do `crontab` (5 chamadas de até 62 s, mais até 10 HEADs de 8 s), e um
+	 * processo cortado no meio perderia o que já gastou cota. A gravação do meio mantém o que ainda não
+	 * foi reavaliado; só a do fim tira as consultas que saíram da lista.
+	 *
 	 * @param array|null $analysis Resultado de uonix_intelligence_seo_opportunities(), ou null para ler.
 	 * @return array{called: int, skipped: string}
 	 */
@@ -791,6 +803,11 @@ if ( ! function_exists( 'uonix_intelligence_ai_run' ) ) {
 				$seguidas = 0;
 			}
 			$novo[ $chave ] = $entrada;
+			// Grava o que já está pronto depois de CADA chamada (#335). Se o processo morrer no meio (o `timeout
+			// 290` do crontab, uma queda), a sugestão já paga em cota não se perde com a execução inteira. O
+			// que ainda não foi reavaliado fica como estava (`$novo + $cache`: a entrada nova vence); só a
+			// gravação do fim poda as consultas que saíram da lista.
+			update_option( uonix_intelligence_ai_option(), $novo + $cache, false );
 		}
 		update_option( uonix_intelligence_ai_option(), $novo, false );
 
