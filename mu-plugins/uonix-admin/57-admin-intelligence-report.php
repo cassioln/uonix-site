@@ -292,6 +292,10 @@ if ( ! function_exists( 'uonix_intelligence_report_box_html' ) ) {
 				$linhas[] = uonix_intelligence_report_delta_html( $box['delta_percent'], 'vs. semana anterior' );
 			} elseif ( 'no_history' === ( $box['note'] ?? '' ) ) {
 				$linhas[] = esc_html( 'sem histórico do GA4 para comparar' );
+			} elseif ( 'ga4_collection_gap' === ( $box['note'] ?? '' ) ) {
+				// Dias seguidos sem linha do GA4 dentro de uma das semanas: a coleta pode ter parado, e dizer
+				// "sem visitas" afirmaria que o site não teve visita (#303).
+				$linhas[] = esc_html( 'sem comparação: lacuna de coleta do GA4 no período' );
 			} else {
 				$linhas[] = esc_html( 'semana anterior sem visitas registradas' );
 			}
@@ -329,6 +333,10 @@ if ( ! function_exists( 'uonix_intelligence_report_box_html' ) ) {
 				$linhas[] = esc_html( 'antes: até ' . number_format( (float) $box['prev_rate'] * 100, 1, ',', '.' ) . '% · ' ) . uonix_intelligence_report_detect_html( (string) $box['direction'] );
 			} elseif ( 'no_history' === ( $box['note'] ?? '' ) ) {
 				$linhas[] = esc_html( 'sem histórico do GA4 para comparar' );
+			} elseif ( 'ga4_collection_gap' === ( $box['note'] ?? '' ) ) {
+				// A taxa de uma janela com lacuna sai inflada (os orçamentos contam todos, as visitas dos dias
+				// sem coleta somam zero), então a comparação é recusada (#303).
+				$linhas[] = esc_html( 'sem comparação: lacuna de coleta do GA4 no período' );
 			} else {
 				$linhas[] = esc_html( 'período anterior sem visitas registradas' );
 			}
