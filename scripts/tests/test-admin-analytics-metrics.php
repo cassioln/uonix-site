@@ -57,6 +57,13 @@ function delete_transient( $key ) { unset( $GLOBALS['uonix_metrics_transients'][
 function wp_remote_retrieve_response_code( $response ) { return $response['response']['code'] ?? 0; }
 function wp_remote_retrieve_body( $response ) { return $response['body'] ?? ''; }
 function wp_remote_post( $url, $args ) {
+	// #336: o token da conta de serviço, só quando o teste liga (as demais chamadas seguem recusando a rede).
+	if ( ! empty( $GLOBALS['uonix_metrics_token_ok'] ) && str_contains( $url, 'oauth2.googleapis.com' ) ) {
+		return array( 'response' => array( 'code' => 200 ), 'body' => '{"access_token":"token-fixture"}' );
+	}
+	if ( isset( $GLOBALS['uonix_metrics_gsc_log'] ) && str_contains( $url, 'searchAnalytics/query' ) ) {
+		$GLOBALS['uonix_metrics_gsc_log'][] = json_decode( (string) ( $args['body'] ?? '' ), true );
+	}
 	if ( null !== $GLOBALS['uonix_metrics_http_capture'] && str_contains( $url, 'analyticsdata.googleapis.com' ) ) {
 		$GLOBALS['uonix_metrics_http_capture'] = array( 'url' => $url, 'args' => $args );
 		return array( 'response' => array( 'code' => 200 ), 'body' => '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"0"}' );
@@ -375,6 +382,45 @@ if ( function_exists( 'uonix_analytics_metrics_fetch_ga4_page_views' ) ) {
 	};
 	$incomplete_page_views = uonix_analytics_metrics_fetch_ga4_page_views( '445033830', 'token-fixture', array( 'start' => '2026-09-01', 'end' => '2026-09-07' ), $incomplete_requester, 2, 3 );
 	uonix_metrics_assert( is_array( $incomplete_page_views ) && false === $incomplete_page_views['complete'] && 1 === count( $incomplete_page_views['rows'] ), 'Paginador não inventa cobertura ao receber página vazia antes de rowCount' );
+}
+
+// #336: a chamada `query` + `page` pede o teto da API (25000 linhas), e não o universo de consultas (1000). A Search
+// Console ordena por cliques, e as oportunidades têm CTR baixo, quase sempre zero clique: são as primeiras a ficar de
+// fora do corte quando os pares consulta × página passam do limite. As demais chamadas não mudam. O teste roda o
+// `fetch_google_data` inteiro, com a rede simulada, e lê o corpo que a Search Console receberia. Assina um JWT de
+// verdade, então exige `openssl`: sem ela o teste FALHA, e não pula.
+if ( function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
+	uonix_metrics_assert( extension_loaded( 'openssl' ) && function_exists( 'openssl_pkey_new' ), '#336: este teste assina um JWT e exige a extensão openssl' );
+	if ( function_exists( 'openssl_pkey_new' ) ) {
+		$chave_rsa = openssl_pkey_new( array( 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA ) );
+		$chave_pem = '';
+		openssl_pkey_export( $chave_rsa, $chave_pem );
+		$config_fetch   = array(
+			'ga4_property_id'         => '445033830',
+			'search_console_site_url' => 'sc-domain:uonix.com.br',
+			'credentials'             => array( 'client_email' => 'conta@projeto.iam.gserviceaccount.com', 'private_key' => $chave_pem, 'token_uri' => 'https://oauth2.googleapis.com/token' ),
+		);
+		$periodos_fetch = array( 'current' => array( 'start' => '2026-09-01', 'end' => '2026-09-30' ), 'previous' => array( 'start' => '2026-08-01', 'end' => '2026-08-31' ) );
+		$GLOBALS['uonix_metrics_token_ok']   = true;
+		$GLOBALS['uonix_metrics_gsc_log']    = array();
+		$GLOBALS['uonix_metrics_http_capture'] = array();
+		$dados_fetch = uonix_analytics_metrics_fetch_google_data( $config_fetch, $periodos_fetch );
+		$gsc_corpos  = $GLOBALS['uonix_metrics_gsc_log'];
+		unset( $GLOBALS['uonix_metrics_gsc_log'] );
+		$GLOBALS['uonix_metrics_token_ok']     = false;
+		$GLOBALS['uonix_metrics_http_capture'] = null;
+		uonix_metrics_assert( is_array( $dados_fetch ) && isset( $dados_fetch['search_console'] ), '#336: o fetch de ponta a ponta devolve os dados, e não um erro; obteve ' . var_export( is_wp_error( $dados_fetch ) ? $dados_fetch->get_error_code() : $dados_fetch, true ) );
+		$por_dimensao = array();
+		foreach ( $gsc_corpos as $corpo_gsc ) {
+			$por_dimensao[ implode( '+', (array) ( $corpo_gsc['dimensions'] ?? array( '(resumo)' ) ) ) ][] = $corpo_gsc['rowLimit'] ?? null;
+		}
+		uonix_metrics_assert( 5 === count( $gsc_corpos ), '#336: o fetch faz as cinco chamadas à Search Console; obteve ' . count( $gsc_corpos ) );
+		uonix_metrics_assert( array( 25000 ) === ( $por_dimensao['query+page'] ?? null ), '#336: a chamada query+page pede o teto da API, 25000 linhas; obteve ' . var_export( $por_dimensao['query+page'] ?? null, true ) );
+		uonix_metrics_assert( array( 1000 ) === ( $por_dimensao['query'] ?? null ), '#336: a chamada query segue pedindo o universo de consultas (1000); obteve ' . var_export( $por_dimensao['query'] ?? null, true ) );
+		uonix_metrics_assert( array( 10 ) === ( $por_dimensao['page'] ?? null ), '#336: a chamada page segue pedindo 10; obteve ' . var_export( $por_dimensao['page'] ?? null, true ) );
+		uonix_metrics_assert( array( 1, 1 ) === ( $por_dimensao['(resumo)'] ?? null ), '#336: os dois resumos seguem pedindo 1 linha; obteve ' . var_export( $por_dimensao['(resumo)'] ?? null, true ) );
+		uonix_metrics_assert( 25000 === uonix_analytics_metrics_query_page_limit() && uonix_analytics_metrics_query_page_limit() > uonix_analytics_metrics_extended_query_limit(), '#336: o limite da chamada query+page é o teto da API, acima do universo de consultas' );
+	}
 }
 
 if ( function_exists( 'uonix_analytics_metrics_ga4_page_views_report' ) ) {

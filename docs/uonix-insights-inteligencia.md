@@ -330,9 +330,9 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 
 | Arquivo | Papel |
 |---|---|
-| `53` | A sincronização diária faz uma chamada a mais à Search Console, com `query` + `page`. Ela grava `search_console.query_pages`, que dá, para cada consulta, a página de mais impressões (empate pelo caminho). Só entra consulta cujo texto `queries_extended` já retém (#253). **O dado é acessório:** se a chamada falhar, o snapshot sai sem a chave, e a sincronização não cai. |
+| `53` | A sincronização diária faz uma chamada a mais à Search Console, com `query` + `page`. Ela grava `search_console.query_pages`, que dá, para cada consulta, a página de mais impressões (empate pelo caminho). Só entra consulta cujo texto `queries_extended` já retém (#253). **A chamada pede 25000 linhas, o teto da API** (`uonix_analytics_metrics_query_page_limit()`, #336), e não as 1000 do universo de consultas: a Search Console ordena por cliques, e as oportunidades têm CTR baixo, quase sempre zero clique, então eram as primeiras a ficar de fora do corte se os pares consulta × página passassem de 1000. Sem a linha, a oportunidade ficaria sem página alvo. **O dado é acessório:** se a chamada falhar, o snapshot sai sem a chave, e a sincronização não cai. |
 | `55` | Cada oportunidade ganha `target_page`: `null` quando o snapshot não tem `query_pages`, `''` quando a consulta não tem página, ou o caminho. `uonix_intelligence_seo_differentiators()` é a lista dos cinco rótulos que a IA pode afirmar. |
-| `54` | O cliente do Gemini e o cron diário `uonix_intelligence_ai_daily`. Ele monta o pedido, valida a resposta e grava o cache `uonix_intelligence_ai_suggestions`, com autoload desligado. O leitor `uonix_intelligence_ai_suggestion_for()` é o que o painel e o e-mail usam. |
+| `54` | O cliente do Gemini e o cron diário `uonix_intelligence_ai_daily`. Ele monta o pedido, valida a resposta e grava o cache `uonix_intelligence_ai_suggestions`, com autoload desligado. **A gravação é depois de cada chamada** (#335), e não só no fim: o pior caso teórico da execução (5 chamadas de até 62 s, mais até 10 HEADs de 8 s, 390 s) passa do `timeout 290` do `crontab`, e um processo cortado no meio perderia o que já gastou cota. A gravação do meio mantém o que ainda não foi reavaliado, e só a do fim tira as consultas que saíram da lista. O leitor `uonix_intelligence_ai_suggestion_for()` é o que o painel e o e-mail usam. |
 | `56` | Colunas **Página Alvo**, com link para a página e para editá-la, e **Sugestão (IA)**, com o texto atual ao lado do sugerido e o aviso "revise antes de publicar", ou o texto do estado. |
 | `57` e `59` | O e-mail mostra "Página: /caminho" e "Título sugerido (IA): …", e o destaque de SEO cita o título sugerido. Sem sugestão, as linhas são omitidas. |
 
@@ -350,7 +350,7 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
   - o tipo de página (`tipo_de_pagina`), só quando ela é um termo, por exemplo "categoria de produtos";
   - os diferenciais permitidos.
 - Nenhum dado de lead vai ao Gemini.
-- O título atual vem de `rank_math_title`, com as variáveis resolvidas pelo Rank Math quando ele expõe o resolvedor. Se sobrar variável sem resolver, vale o título do post.
+- O título atual vem de `rank_math_title`, com as variáveis resolvidas pelo Rank Math quando ele expõe o resolvedor. Se sobrar variável sem resolver, vale o título do post. Variável é `%nome%` ou `%nome(argumento)%` (`%customfield(x)%`, `%date(Y)%`, #332); um `%` solto ("100%") não é variável, e o nome é só letra e `_`.
 - A página líder precisa ter post **publicado** ou ser o arquivo de um termo de taxonomia pública. A home vai para `page_on_front`, e endereço que dá 404 vira `no_page`. A exceção é a URL antiga do próprio termo, como `/product-category/olhal-de-ancoragem/`: o WordPress a canonicaliza por 301, e ela resolve para o termo de destino. Feed e embed do termo não valem como página.
 - **Endereço antigo que redireciona (#343).** No cron, e só nele, `uonix_intelligence_ai_follow_redirect()` segue a cadeia por HEAD (`uonix_intelligence_executive_page_status()`, do `59`).
   - **Quando o destino vale:** os saltos são do próprio domínio, no máximo `max_hops` (3) e sem ciclo, e o destino responde 2xx e é post publicado ou termo.
@@ -373,11 +373,13 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 - Ver a entrada 09 do [ROPA](legal/ropa-inventario-dados-uonix.md).
 
 **Validação.** A sugestão só é aceita se tudo abaixo valer. Se algo falhar, o estado é `rejected`, e nada do texto recusado é exibido.
-1. A resposta é JSON com exatamente `title`, `description` e `differentiators_used`.
+1. A resposta é JSON com exatamente `title`, `description` e `differentiators_used`, e `differentiators_used` é uma **lista** (`array_is_list`): um objeto JSON recusa, mesmo com valores permitidos (#334).
 2. O título tem de 1 a 60 caracteres, e a descrição de 1 a 155.
 3. Não há HTML.
 4. Todo diferencial declarado está na lista.
-5. Declarado é igual a presente no texto, comparado sem acento e sem caixa.
+5. Declarado é igual a presente no texto, **pelo rótulo literal**, comparado sem acento e sem caixa: todo rótulo literal declarado tem de estar no texto, e todo rótulo literal presente no texto tem de estar declarado.
+
+**O que a regra 5 não detecta (#333).** Paráfrase: "inox 304 e 316", "NBR 16325" sem o "Conforme", "laudo e ART". Ela é aceita com `differentiators_used = []`, e a afirmação segue verdadeira, porque é um diferencial aprovado. **E o que ela recusa por grafia:** "Pronta-entrega" com hífen, ou o rótulo com espaço inseparável, caem em `rejected`. Nada errado é exibido; o custo é a taxa de recusa, que não se mediu: a leitura de produção de 2026-11-17 (04:45 UTC) mostrou **0 `rejected` em 3 respostas validadas** (as outras 2 entradas falharam antes da validação, por timeout e por 503). Amostra pequena: ela não prova que a taxa é baixa, só que não é alta. Normalizar hífen e espaço antes de comparar só vale se essa taxa subir.
 
 **Limite declarado:** uma afirmação inventada fora da lista não é detectável pela validação. Na primeira chamada real, o modelo escreveu "máxima resistência e segurança". A proteção é a instrução do pedido e a revisão humana.
 
