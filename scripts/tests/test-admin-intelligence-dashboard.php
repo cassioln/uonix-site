@@ -714,6 +714,15 @@ uox_assert( 2 === substr_count( $html_cota, 'Cota diária do Gemini esgotada. O 
 uox_assert( false !== strpos( $html_cota, 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã. A cota renova por volta de 03/10 21:00.' ), '#384 Radar: a adiada pela cota diz o motivo e a hora, no fuso do site (#386)' );
 uox_assert( false !== strpos( $html_cota, 'Não pedida: falhas seguidas do Gemini nesta execução. O Radar tenta de novo amanhã.' ), '#384 Radar: a adiada pelas falhas diz o motivo' );
 uox_assert( false === strpos( $html_cota, 'Pauta não gerada.' ), '#384 Radar: nenhum dos quatro cai no texto genérico' );
+// #473: a adiada por TEMPO diz que o tempo da execução acabou, e não cai no texto genérico. Com o timeout fora da
+// sequência de falhas, uma rede caída gasta o orçamento de tempo em vez de parar o cron, e este texto é o rastro dela.
+$html_tempo = uox_render_radar( $estado_radar( array(
+	uox_dash_radar_cand( 'tempo um', array( 'status' => 'deferred', 'reason' => 'budget' ) ),
+	uox_dash_radar_cand( 'espera da página', array( 'status' => 'deferred' ) ),
+) ), array(), UOX_ANTES_DA_RENOVACAO );
+uox_assert( 1 === substr_count( $html_tempo, 'Não pedida: o tempo desta execução acabou antes de chegar nela. O Radar tenta de novo amanhã.' ), '#473 Radar: a adiada por tempo diz o motivo; obteve ' . strip_tags( $html_tempo ) );
+uox_assert( 1 === substr_count( $html_tempo, 'Pauta não gerada. O Radar tenta de novo amanhã.' ), '#473 Radar: a adiada sem motivo (página que o resolvedor não soube dizer) segue no texto genérico' );
+uox_assert( false === strpos( $html_tempo, 'renova' ) && false === strpos( $html_tempo, 'cota' ), '#473 Radar: o motivo de tempo não fala de cota nem de renovação' );
 uox_assert( 2 === substr_count( $html_cota, 'A cota renova por volta de' ), '#384 Radar: hora inválida no cache não vira hora no painel' );
 
 // #403 (B2): "diária" só com a prova do `quotaId`. A cota inferida do `retryDelay`, a entrada gravada

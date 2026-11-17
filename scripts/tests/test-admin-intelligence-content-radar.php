@@ -25,8 +25,10 @@ function uox_rd_assert( $condition, $message ) {
 
 class WP_Error {
 	private $code;
-	public function __construct( $code = '' ) { $this->code = $code; }
+	private $message;
+	public function __construct( $code = '', $message = '' ) { $this->code = $code; $this->message = $message; }
 	public function get_error_code() { return $this->code; }
+	public function get_error_message() { return $this->message; }
 }
 class Uox_Die extends RuntimeException {}
 class Uox_Redirect extends RuntimeException {
@@ -39,6 +41,16 @@ function wp_strip_all_tags( $t ) { return strip_tags( (string) $t ); }
 function wp_parse_url( $u, $c = -1 ) { return parse_url( $u, $c ); }
 function home_url( $p = '' ) { return 'https://uonix.com.br' . $p; }
 function esc_html__( $t, $d = '' ) { return $t; }
+// Transporte do WordPress (#474): o Gemini REAL (54) fala por aqui, e o teste devolve o que o `wp_remote_post` devolveria,
+// inclusive um WP_Error com a mensagem de verdade do cURL. Sem isso a classificação do timeout a partir do texto real não era exercitada.
+$GLOBALS['uox_http_fila'] = array();
+$GLOBALS['uox_http_log']  = array();
+function wp_remote_post( $url, $args = array() ) {
+	$GLOBALS['uox_http_log'][] = array( 'url' => $url, 'timeout' => $args['timeout'] ?? null );
+	return array() !== $GLOBALS['uox_http_fila'] ? array_shift( $GLOBALS['uox_http_fila'] ) : new WP_Error( 'sem_resposta' );
+}
+function wp_remote_retrieve_response_code( $r ) { return is_array( $r ) ? (int) ( $r['code'] ?? 0 ) : 0; }
+function wp_remote_retrieve_body( $r ) { return is_array( $r ) ? (string) ( $r['body'] ?? '' ) : ''; }
 function add_action( $h, $c, $p = 10, $a = 1 ) { $GLOBALS['uox_actions'][] = array( $h, $c, $p, $a ); return true; }
 function add_filter( $h, $c = null, $p = 10, $a = 1 ) { return true; }
 
@@ -487,6 +499,69 @@ $roteiro                = array( array( 'status' => 'unavailable', 'http' => 0, 
 $rt                     = uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
 $st_to                  = array_column( array_column( get_option( $opt )['candidates'], 'ai' ), 'status' );
 uox_rd_assert( 6 === $rt['called'] && array( 'unavailable', 'unavailable', 'ok', 'ok', 'ok', 'ok' ) === $st_to, 'Dois timeouts seguidos não param o cron: as outras candidatas são tentadas; obteve ' . $rt['called'] . ', ' . implode( ',', $st_to ) );
+// #474 (2): sequência MISTA de falhas. Cada cenário isolado já estava coberto; a combinação, não. O timeout não conta
+// e não zera a contagem: DNS, timeout, DNS são DUAS falhas que contam (a segunda DNS para o cron), e a do meio fica no caminho.
+$causa_dns = 'http_request_failed: cURL error 6: Could not resolve host: generativelanguage.googleapis.com';
+$dns       = array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 1, 'error' => $causa_dns );
+$tmo       = array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 1, 'error' => $causa28 );
+$mistos    = array(
+	'DNS, timeout, DNS: o timeout do meio não zera, e a 2ª DNS para' => array( array( $dns, $tmo, $dns, 'ok', 'ok', 'ok' ), 3, array( 'unavailable', 'unavailable', 'unavailable', 'deferred', 'deferred', 'deferred' ), 'failures' ),
+	'timeout, DNS, timeout, DNS: a 2ª DNS para'                       => array( array( $tmo, $dns, $tmo, $dns, 'ok', 'ok' ), 4, array( 'unavailable', 'unavailable', 'unavailable', 'unavailable', 'deferred', 'deferred' ), 'failures' ),
+	'DNS, ok, timeout, DNS: o ok zera, e uma DNS só não para'         => array( array( $dns, 'ok', $tmo, $dns, 'ok', 'ok' ), 6, array( 'unavailable', 'ok', 'unavailable', 'unavailable', 'ok', 'ok' ), '' ),
+	'timeout em todas as seis: nenhuma parada por falha'              => array( array( $tmo, $tmo, $tmo, $tmo, $tmo, $tmo ), 6, array( 'unavailable', 'unavailable', 'unavailable', 'unavailable', 'unavailable', 'unavailable' ), '' ),
+);
+foreach ( $mistos as $caso => $c ) {
+	$GLOBALS['uox_options'] = array();
+	$roteiro                = $c[0];
+	$rm                     = uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+	$am                     = array_column( get_option( $opt )['candidates'], 'ai' );
+	$st_m                   = array_column( $am, 'status' );
+	uox_rd_assert( $c[1] === $rm['called'] && $c[2] === $st_m, "#474 {$caso}: {$c[1]} chamada(s), estados " . implode( ',', $c[2] ) . '; obteve ' . $rm['called'] . ', ' . implode( ',', $st_m ) );
+	$motivos_m = array_unique( array_filter( array_column( $am, 'reason' ) ) );
+	uox_rd_assert( ( '' === $c[3] ? array() : array( $c[3] ) ) === array_values( $motivos_m ), "#474 {$caso}: motivo de parada " . ( '' === $c[3] ? 'nenhum' : $c[3] ) . '; obteve ' . var_export( array_values( $motivos_m ), true ) );
+}
+
+// #473: com a rede caída, o timeout não para o cron, e o orçamento de tempo é o teto. O motivo gravado diz a CAUSA do dia
+// perdido: as candidatas que não foram pedidas ficam `deferred` com reason=budget, e as que foram pedidas guardam a causa.
+$GLOBALS['uox_options'] = array();
+$tempo2                 = 0.0;
+$relogio_rede           = static function () use ( &$tempo2 ) {
+	$agora   = $tempo2;
+	$tempo2 += 20.0;
+	return $agora;
+};
+$roteiro                = array_fill( 0, 6, $tmo );
+$rr                     = uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado, 'clock' => $relogio_rede ) ) );
+$ar                     = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( $rr['called'] < 6 && $rr['called'] > 0, '#473: com todas em timeout e o tempo acabando, o orçamento corta antes da última; obteve ' . $rr['called'] . ' chamada(s)' );
+$pedidas_rr  = array_values( array_filter( $ar, static function ( $a ) { return 'unavailable' === ( $a['status'] ?? '' ); } ) );
+$adiadas_rr  = array_values( array_filter( $ar, static function ( $a ) { return 'deferred' === ( $a['status'] ?? '' ); } ) );
+uox_rd_assert( count( $pedidas_rr ) === $rr['called'] && count( $adiadas_rr ) === 6 - $rr['called'], '#473: toda candidata ou foi pedida (e falhou por timeout) ou foi adiada; obteve ' . count( $pedidas_rr ) . ' e ' . count( $adiadas_rr ) );
+uox_rd_assert( array_fill( 0, count( $pedidas_rr ), $causa28 ) === array_column( $pedidas_rr, 'error' ), '#473: as pedidas guardam a causa do timeout' );
+uox_rd_assert( array_fill( 0, count( $adiadas_rr ), 'budget' ) === array_column( $adiadas_rr, 'reason' ), '#473: as adiadas dizem reason=budget, e não ficam sem motivo; obteve ' . var_export( array_column( $adiadas_rr, 'reason' ), true ) );
+
+// #474 (3): um WP_Error REAL, com a mensagem do cURL, passa pelo transporte do Gemini (54) e chega ao radar_run. A classificação
+// do timeout vem do TEXTO que o transporte grava, e não de um resultado já pronto injetado pelo teste.
+$GLOBALS['uox_options'] = array();
+$GLOBALS['uox_http_log'] = array();
+$cu28 = 'cURL error 28: Operation timed out after 30001 milliseconds with 0 bytes received';
+$GLOBALS['uox_http_fila'] = array_fill( 0, 6, new WP_Error( 'http_request_failed', $cu28 ) );
+$real = uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => 'uonix_intelligence_ai_generate' ) ) );
+$ar_real = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( 6 === $real['called'] && 6 === count( $GLOBALS['uox_http_log'] ), '#474: com o transporte real, cada candidata é um pedido (timeout não repete); obteve ' . $real['called'] . ' e ' . count( $GLOBALS['uox_http_log'] ) . ' pedido(s)' );
+uox_rd_assert( 30 === ( $GLOBALS['uox_http_log'][0]['timeout'] ?? null ), '#474: o pedido real leva o timeout de 30 s' );
+uox_rd_assert( 'unavailable' === ( $ar_real[0]['status'] ?? '' ) && 0 === ( $ar_real[0]['http'] ?? null ) && 1 === ( $ar_real[0]['attempts'] ?? null ) && 'http_request_failed: ' . $cu28 === ( $ar_real[0]['error'] ?? null ), '#474: o transporte grava http 0, 1 pedido e a causa com a mensagem do cURL; obteve ' . var_export( $ar_real[0] ?? null, true ) );
+uox_rd_assert( ! in_array( 'failures', array_column( $ar_real, 'reason' ), true ), '#474: timeout vindo do WP_Error real também não conta na sequência' );
+// E o DNS real conta: dois seguidos param o cron, e a causa gravada é a do transporte.
+$GLOBALS['uox_options']   = array();
+$GLOBALS['uox_http_log']  = array();
+$cu6 = 'cURL error 6: Could not resolve host: generativelanguage.googleapis.com';
+$GLOBALS['uox_http_fila'] = array( new WP_Error( 'http_request_failed', $cu6 ), new WP_Error( 'http_request_failed', $cu6 ) );
+$real_dns = uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => 'uonix_intelligence_ai_generate' ) ) );
+$ar_dns   = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( 2 === $real_dns['called'] && 2 === count( $GLOBALS['uox_http_log'] ) && 'failures' === ( $ar_dns[2]['reason'] ?? '' ) && 'http_request_failed: ' . $cu6 === ( $ar_dns[0]['error'] ?? null ), '#474: com o transporte real, dois DNS seguidos param o cron e a causa fica gravada; obteve ' . $real_dns['called'] . ' chamada(s)' );
+$GLOBALS['uox_http_fila'] = array();
+
 $GLOBALS['uox_options'] = array();
 $roteiro                = array( array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 2, 'error' => 'http_request_failed: DNS' ), array( 'status' => 'unavailable', 'http' => 0, 'attempts' => 2, 'error' => 'http_request_failed: DNS' ), 'ok', 'ok', 'ok', 'ok' );
 $rd                     = uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
@@ -550,6 +625,28 @@ $r6  = uonix_intelligence_radar_run( array_merge( $base, array( 'clock' => $relo
 $st6 = array_column( array_column( get_option( $opt )['candidates'], 'ai' ), 'status' );
 uox_rd_assert( 3 === $r6['called'] && array( 'ok', 'ok', 'ok', 'deferred', 'deferred', 'deferred' ) === $st6, 'Depois de 150 s do início, nenhuma chamada começa: as restantes ficam deferred; obteve ' . var_export( $st6, true ) );
 uox_rd_assert( 3 === uonix_intelligence_radar_run( $base )['called'], 'No dia seguinte, as deferred entram' );
+// #473: a adiada por TEMPO diz o motivo. Antes ficava sem `reason`, e nada distinguia "a rede caiu" de "o dia acabou".
+$adiadas6 = array_values( array_filter( array_column( get_option( $opt )['candidates'], 'ai' ), static function ( $ai ) { return 'deferred' === ( $ai['status'] ?? '' ); } ) );
+uox_rd_assert( 0 === count( $adiadas6 ), 'No dia seguinte nada ficou adiado (o rodízio terminou)' );
+$GLOBALS['uox_options'] = array();
+$tempo                  = 0.0;
+uonix_intelligence_radar_run( array_merge( $base, array( 'clock' => $relogio ) ) );
+$ad_t = array_values( array_filter( array_column( get_option( $opt )['candidates'], 'ai' ), static function ( $ai ) { return 'deferred' === ( $ai['status'] ?? '' ); } ) );
+uox_rd_assert( 3 === count( $ad_t ) && array( 'budget', 'budget', 'budget' ) === array_column( $ad_t, 'reason' ), '#473: a adiada por orçamento de tempo grava reason=budget; obteve ' . var_export( array_column( $ad_t, 'reason' ), true ) );
+uox_rd_assert( ! isset( $ad_t[0]['retry_at'] ) && ! isset( $ad_t[0]['error'] ) && ! isset( $ad_t[0]['http'] ), '#473: reason=budget não leva hora de renovação, causa nem HTTP' );
+// Fronteira do orçamento: exatamente 150,0 s depois do início NÃO é "passou" (`>`, e não `>=`). Com a leitura do início em
+// 0 e todas as seguintes em 150, ninguém é adiado por tempo; com 150,001 todas são. As duas leituras por candidata
+// (a da página e a da chamada) caem do mesmo lado da fronteira.
+foreach ( array( array( 150.0, 6, 0 ), array( 150.001, 0, 6 ) ) as $fr ) {
+	$GLOBALS['uox_options'] = array();
+	$lidas_fr               = 0;
+	$relogio_fr             = static function () use ( &$lidas_fr, $fr ) {
+		return 0 === $lidas_fr++ ? 0.0 : $fr[0];
+	};
+	$rfr = uonix_intelligence_radar_run( array_merge( $base, array( 'clock' => $relogio_fr ) ) );
+	$stf = array_column( array_column( get_option( $opt )['candidates'], 'ai' ), 'status' );
+	uox_rd_assert( $fr[1] === $rfr['called'] && $fr[1] === count( array_keys( $stf, 'ok', true ) ) && $fr[2] === count( array_keys( $stf, 'deferred', true ) ), "#473 fronteira do orçamento em {$fr[0]} s: {$fr[1]} pedida(s) e {$fr[2]} adiada(s); obteve " . $rfr['called'] . ' e ' . count( array_keys( $stf, 'deferred', true ) ) );
+}
 
 // MÉDIO 2 da revisão do PR #378: "não sei" da página não refaz a pauta.
 $GLOBALS['uox_options'] = array();
@@ -565,6 +662,7 @@ $GLOBALS['uox_options'] = array();
 $r_m2b                  = uonix_intelligence_radar_run( array_merge( $base, array( 'page_resolver' => $nao_sei ) ) );
 $g_m2b                  = get_option( $opt )['candidates'][0];
 uox_rd_assert( 0 === $r_m2b['called'] && 'deferred' === $g_m2b['ai']['status'] && '' === $g_m2b['page']['title'], '"Não sei" sem página anterior: deferred, sem chamar o Gemini' );
+uox_rd_assert( ! array_key_exists( 'reason', $g_m2b['ai'] ), '#473: "não sei" com tempo de sobra não é falta de tempo: a adiada não ganha reason; obteve ' . var_export( $g_m2b['ai'], true ) );
 uox_rd_assert( 6 === uonix_intelligence_radar_run( $base )['called'], 'No dia seguinte, com a página resolvida, a pauta é gerada' );
 
 // Segunda passada da revisão do PR #378, MÉDIO: dois "não sei" seguidos, sem página anterior,

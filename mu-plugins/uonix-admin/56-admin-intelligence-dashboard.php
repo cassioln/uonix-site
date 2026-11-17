@@ -458,6 +458,11 @@ if ( ! function_exists( 'uonix_intelligence_render_radar_pauta_cell' ) ) {
 				$texto = $diaria ? 'Não pedida: a cota diária do Gemini acabou nesta execução. O Radar tenta de novo amanhã.' : 'Não pedida: a cota do Gemini acabou nesta execução. O Radar tenta de novo amanhã.';
 			} elseif ( 'deferred' === $status && 'failures' === $motivo ) {
 				$texto = 'Não pedida: falhas seguidas do Gemini nesta execução. O Radar tenta de novo amanhã.';
+			} elseif ( 'deferred' === $status && 'budget' === $motivo ) {
+				// O tempo da execução acabou (#473). Timeout não conta na sequência de falhas: com a rede
+				// caída, as candidatas gastam o orçamento de tempo e as restantes caem aqui. Por isso o texto
+				// fala em tempo, e não em cota nem em falhas.
+				$texto = 'Não pedida: o tempo desta execução acabou antes de chegar nela. O Radar tenta de novo amanhã.';
 			} else {
 				$texto = 'Pauta não gerada. O Radar tenta de novo amanhã.';
 			}

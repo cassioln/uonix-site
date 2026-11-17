@@ -43,10 +43,22 @@ if ( ! function_exists( 'uonix_intelligence_ai_limits' ) ) {
 		// execução. 60 s é o tamanho de uma janela por minuto; a cota por minuto não foi medida (#384).
 		// `failure_streak`: falhas seguidas que param o cron (#384).
 		// `timeout` em 30 s: medido em produção em 2026-11-17, as falhas gravadas eram todas
-		// `cURL error 28` a 15 s. O pior caso por candidata é 2 × 30 s + 2 s de pausa. O `ai_budget`
-		// é conferido antes de cada chamada, e a pausa vem depois dessa conferência: uma chamada
-		// pode começar em 152 s e durar 62 s, então o pior término do Radar é 214 s, com 76 s até
-		// o `timeout 290` do crontab.
+		// `cURL error 28` a 15 s. Um timeout dá UM pedido de 30 s: só 429 e 503 ganham nova
+		// tentativa. Os 62 s por candidata (2 × 30 s + 2 s de pausa) só valem para o 429 ou 503 que
+		// repete e estoura de novo. O `ai_budget` do Radar é conferido antes de cada chamada, e a
+		// pausa vem depois dessa conferência: com 429 ou 503 na última, o pior término é 214 s, com
+		// 76 s até o `timeout 290` do crontab. Com timeout em todas, o Radar termina em 158 s.
+		// O timeout NÃO conta em `failure_streak` (decisão da #473): com a rede caída, nenhuma
+		// parada por falha dispara, e o tempo é o teto, no Radar (`ai_budget`, as restantes ficam
+		// `deferred` com `reason` `budget`). O Módulo 3 não tem relógio: o teto dele é `per_run` (5
+		// candidatas), e entre uma candidata e outra não há pausa (a de 2 s fica só entre as duas
+		// tentativas de um 429 ou 503). Cinco timeouts somam 150 s de Gemini, mais até 80 s de HEADs:
+		// 230 s, com 60 s de folga. O pior caso com a regra das duas falhas seguidas, achado por
+		// varredura de todas as sequências de 5, é timeout, 429 ou 503 que repete e falha, ok, e mais
+		// duas dessas: 246 s de Gemini, 326 s com os 10 HEADs, 36 s ACIMA do `timeout 290`. Exige 429 ou 503 três vezes
+		// com o Gemini respondendo ok no meio, e o que o `timeout 290` corta é a gravação do fim, não
+		// a do meio (#335): o que já foi pedido fica no cache, e o WP-CLI reagenda o evento ANTES de
+		// disparar o hook, então o dia seguinte tenta o resto.
 		return array( 'title' => 60, 'description' => 155, 'per_run' => 5, 'timeout' => 30, 'max_output_tokens' => 1024, 'max_hops' => 3, 'head_max' => 10, 'quota_wait' => 60, 'failure_streak' => 2 );
 	}
 }
