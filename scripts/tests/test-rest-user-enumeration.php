@@ -106,6 +106,8 @@ $not_own = array(
 	'/wp/v2/users/ME',
 	'/wp/v2/USERS/me',
 	'/wp/v2/users/me/application-passwords',
+	'/wp/v2/users/x/users/me',
+	'/extra/wp/v2/users/me',
 	'/wp/v2/users/(?P<user_id>(?:[\d]+|me))/application-passwords',
 	'/wp/v2/users/(?P<user_id>(?:[\d]+|me))/application-passwords/introspect',
 	'/wp/v2/posts',
@@ -191,6 +193,34 @@ foreach ( $orders as $label => $input ) {
 	uonix_rest_assert_same( false, array_key_exists( '/wp/v2/users/me-outro', $filtered ), "logado sem list_users ({$label}): rota parecida com /users/me é removida" );
 }
 
+// O despachante do núcleo casa as chaves de rota com a flag `i` (class-wp-rest-server.php): uma chave
+// registrada como '/WP/v2/Users' é alcançada por /wp/v2/users. O filtro tem de tratá-la como rota de
+// usuário, e a exceção continua sendo só a chave exata em minúsculas.
+$caixa = array(
+	'/WP/v2/Users'    => array( 'stub' ),
+	'/wp/v2/USERS/me' => array( 'stub' ),
+	'/wp/v2/users/ME' => array( 'stub' ),
+	'/wp/v2/posts'    => array( 'stub' ),
+);
+$GLOBALS['uonix_test_logged_in'] = false;
+$GLOBALS['uonix_test_caps']      = array();
+uonix_rest_assert_same( array( '/wp/v2/posts' ), array_keys( uonix_security_filter_rest_user_endpoints( $caixa ) ), 'anônimo: chaves com caixa diferente também são removidas' );
+$GLOBALS['uonix_test_logged_in'] = true;
+uonix_rest_assert_same( array( '/wp/v2/posts' ), array_keys( uonix_security_filter_rest_user_endpoints( $caixa ) ), 'logado sem list_users: só a chave exata /wp/v2/users/me é preservada, e as de caixa diferente caem' );
+
+// Anônimo DEPOIS de um logado, no mesmo processo: nenhuma chamada pode guardar a decisão da anterior.
+$GLOBALS['uonix_test_logged_in'] = true;
+$GLOBALS['uonix_test_caps']      = array();
+$antes = uonix_security_filter_rest_user_endpoints( $routes );
+uonix_rest_assert_same( true, array_key_exists( '/wp/v2/users/me', $antes ), 'sequência: logado mantém /users/me' );
+$GLOBALS['uonix_test_logged_in'] = false;
+$depois = uonix_security_filter_rest_user_endpoints( $routes );
+uonix_rest_assert_same( false, array_key_exists( '/wp/v2/users/me', $depois ), 'sequência: o anônimo que vem depois do logado perde /users/me' );
+$GLOBALS['uonix_test_logged_in'] = true;
+$GLOBALS['uonix_test_caps']      = array( 'list_users' => true );
+$cheio = uonix_security_filter_rest_user_endpoints( $routes );
+uonix_rest_assert_same( true, array_key_exists( '/wp/v2/users', $cheio ), 'sequência: quem tem list_users depois do anônimo mantém a coleção' );
+
 // Quem tem list_users (administrador): nada é removido, nem a coleção.
 $GLOBALS['uonix_test_logged_in'] = true;
 $GLOBALS['uonix_test_caps']      = array( 'list_users' => true );
@@ -209,13 +239,20 @@ foreach ( array( null, false, 'texto' ) as $not_a_list ) {
 	uonix_rest_assert_same( $not_a_list, uonix_security_filter_rest_user_endpoints( $not_a_list ), sprintf( 'entrada %s volta como veio', var_export( $not_a_list, true ) ) );
 }
 
-// O módulo precisa estar realmente registrado, não apenas definido.
-$registered = array_column( $GLOBALS['uonix_test_filters'], 0 );
-uonix_rest_assert_same( true, in_array( 'rest_endpoints', $registered, true ), 'registra o filtro rest_endpoints' );
+// O módulo precisa estar realmente registrado, não apenas definido: no gancho certo, com o callback certo
+// e na prioridade 1000 (depois de qualquer plugin que registre rotas de usuário com prioridade comum).
+$registrados = array_values( array_filter( $GLOBALS['uonix_test_filters'], static function ( $f ) {
+	return 'rest_endpoints' === $f[0];
+} ) );
+uonix_rest_assert_same( 1, count( $registrados ), 'registra o filtro rest_endpoints uma vez' );
+uonix_rest_assert_same( 'uonix_security_filter_rest_user_endpoints', $registrados[0][1] ?? null, 'o callback registrado é o filtro, e não o ajudante da decisão' );
+uonix_rest_assert_same( 1000, $registrados[0][2] ?? null, 'prioridade 1000, depois dos plugins que registram rotas de usuário' );
 
 // E o carregador do módulo precisa incluir o arquivo, senão nada disso roda.
-$module = file_get_contents( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-security/module.php' );
-uonix_rest_assert_same( true, false !== strpos( $module, '07-rest-user-enumeration.php' ), 'module.php carrega o arquivo novo' );
+// Executado, e não lido como texto: uma linha comentada no module.php também casa numa busca de texto (#435).
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo( dirname( __DIR__, 2 ) . '/mu-plugins/uonix-security/module.php' );
+uonix_rest_assert_same( true, in_array( '07-rest-user-enumeration.php', $carregados, true ), 'module.php carrega o arquivo novo' );
 
 if ( 0 !== $failures ) {
 	fwrite( STDERR, sprintf( "%d falha(s).\n", $failures ) );

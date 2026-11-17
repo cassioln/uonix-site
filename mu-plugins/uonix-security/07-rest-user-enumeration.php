@@ -8,17 +8,22 @@
  * metade do trabalho de um ataque de força bruta: o atacante deixa de precisar
  * adivinhar QUEM atacar.
  *
- * O corte é por capacidade. Quem tem list_users (o administrador) mantém todas
- * as rotas de usuário. Quem não tem (o anônimo e, entre os papéis nativos,
- * assinante, colaborador, autor e editor) perde a coleção, o item por ID e as
- * senhas de aplicativo.
+ * O corte é por capacidade. Quem tem list_users (o administrador e o
+ * shop_manager do WooCommerce) mantém todas as rotas de usuário. Quem não tem
+ * (o anônimo e, entre os papéis nativos, assinante, colaborador, autor e
+ * editor) perde a coleção, o item por ID e as senhas de aplicativo.
  *
- * Uma exceção, e só uma: /wp/v2/users/me fica para qualquer usuário LOGADO. Ela
- * devolve apenas o próprio usuário, então não enumera ninguém, e o editor de
- * blocos depende dela para ler e gravar as preferências de quem edita. O papel
- * editor NÃO tem list_users: com o corte total, ele recebia 404 nessa rota e as
- * preferências não eram gravadas (#346). O anônimo não tem "próprio usuário",
- * e para ele a rota também some.
+ * Uma exceção, e só uma: /wp/v2/users/me fica para qualquer usuário LOGADO. A
+ * LEITURA devolve apenas o próprio usuário, e o editor de blocos depende dela
+ * para ler e gravar as preferências de quem edita. O papel editor NÃO tem
+ * list_users: com o corte total, ele recebia 404 nessa rota e as preferências
+ * não eram gravadas (#346). O anônimo não tem "próprio usuário", e para ele a
+ * rota também some.
+ *
+ * O que a exceção NÃO fecha: a GRAVAÇÃO em /users/me é a do núcleo, inteira.
+ * Ela responde 400 quando o slug ou o e-mail enviados já pertencem a outra
+ * conta, o que confirma a existência a quem está logado, e aceita trocar a
+ * própria senha e o próprio e-mail. Estreitar isso é a #482.
  *
  * Efeito que fica de propósito: quem não tem list_users segue sem a lista de
  * autores (`users?who=authors`) e sem o nome do autor de um post
@@ -75,8 +80,10 @@ if ( ! function_exists( 'uonix_security_filter_rest_user_endpoints' ) ) {
 
 		foreach ( array_keys( $endpoints ) as $route ) {
 			// Casa a coleção e o item, sem tocar em rotas de outros namespaces
-			// que apenas contenham "users" no meio do caminho.
-			if ( ! preg_match( '#^/wp/v2/users(?:/|$)#', (string) $route ) ) {
+			// que apenas contenham "users" no meio do caminho. A flag `i` alinha
+			// o filtro ao despachante do núcleo, que casa as chaves sem diferenciar
+			// caixa: uma chave '/WP/v2/Users' seria alcançada por /wp/v2/users.
+			if ( ! preg_match( '#^/wp/v2/users(?:/|$)#i', (string) $route ) ) {
 				continue;
 			}
 
