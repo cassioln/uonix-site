@@ -45,6 +45,38 @@ function uox_assert( $condition, $message ) {
 		fwrite( STDERR, "FAIL: {$message}\n" );
 	}
 }
+// Warning, notice e deprecated de PHP reprovam a suíte, com o arquivo e a linha (#317). `@` suprime de propósito
+// (`error_reporting()` zera), e o handler respeita isso. O `E_ALL` é forçado aqui, e não herdado: o `php.ini` do runner pode
+// silenciar warning ou deprecated, e aí o handler nunca veria nada e a suíte voltaria a ser decorativa.
+error_reporting( E_ALL );
+set_error_handler(
+	static function ( $nivel, $mensagem, $arquivo, $linha ) {
+		global $failures;
+		if ( 0 === ( error_reporting() & $nivel ) ) {
+			return false;
+		}
+		++$failures;
+		// A sonda de vida (logo abaixo) conta o erro sem imprimir uma linha "FAIL:" numa suíte verde.
+		if ( empty( $GLOBALS['uox_sonda_do_guarda'] ) ) {
+			fwrite( STDERR, "FAIL: erro de PHP ({$nivel}): {$mensagem} em " . basename( (string) $arquivo ) . ":{$linha}\n" );
+		}
+
+		return true;
+	}
+);
+// Sonda de vida do guarda (#317): um erro de PHP de verdade tem de ser CONTADO por ele. Sem isto, tirar o `error_reporting( E_ALL )`
+// (com o INI do runner em 0), fazer o handler devolver `false` ou não incrementar `$failures` deixava as seis suítes verdes.
+// A sonda dispara um E_USER_NOTICE, confere que `$failures` subiu em um, e desfaz a contagem para a suíte seguir.
+$uox_antes_da_sonda = $failures;
+@trigger_error( '', E_USER_NOTICE );
+uox_assert( $failures === $uox_antes_da_sonda, 'sonda do guarda: o `@` suprime, e o handler respeita (a contagem não muda)' );
+$uox_antes_da_sonda = $failures;
+$GLOBALS['uox_sonda_do_guarda'] = true;
+trigger_error( 'sonda do guarda #317', E_USER_NOTICE );
+$GLOBALS['uox_sonda_do_guarda'] = false;
+$uox_contou = ( $failures === $uox_antes_da_sonda + 1 );
+$failures = $uox_antes_da_sonda;
+uox_assert( $uox_contou, 'sonda do guarda: o handler de erros de PHP CONTA um erro de verdade (E_USER_NOTICE)' );
 
 class Uox_Redirect_Exception extends RuntimeException {
 	public $url;

@@ -38,7 +38,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_license_evaluate' ) ) {
 	/**
-	 * Regra pura da licença. `null` é constante ausente.
+	 * Regra pura da licença. `null` é constante ausente. (Constante definida como `null` chega aqui como
+	 * `''`, por `uonix_intelligence_license_constant_value()`: valor que a regra não reconhece, #315.)
 	 *
 	 * `trial` exige data-limite: cortesia sem fim é configuração incompleta, e pausa.
 	 *
@@ -181,6 +182,29 @@ if ( ! function_exists( 'uonix_intelligence_license_combine' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_license_constant_value' ) ) {
+	/**
+	 * O valor de uma constante de licença para a regra: `null` se ela não está definida, e o valor se está.
+	 *
+	 * Constante DEFINIDA como `null` (o que `wp config set --raw` e uma edição à mão produzem) não é
+	 * constante ausente, e a regra diz que valor não reconhecido pausa. Passar o `null` adiante a faria
+	 * parecer ausente, com o envio ligado e sem aviso, justo no caminho de quem suspende à mão (#315).
+	 * Vira `''`, o mesmo valor que `uonix_intelligence_license_panel_evaluate()` usa para "malformado":
+	 * a regra o recusa, e a camada fica `configured` com `reason` igual a `invalid`.
+	 *
+	 * @param string $nome Nome da constante.
+	 * @return mixed `null` se ausente; `''` se definida como `null`; senão o valor.
+	 */
+	function uonix_intelligence_license_constant_value( $nome ) {
+		if ( ! defined( $nome ) ) {
+			return null;
+		}
+		$valor = constant( $nome );
+
+		return null === $valor ? '' : $valor;
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_license_state' ) ) {
 	/**
 	 * Estado da licença agora: constantes e opção do painel, combinadas.
@@ -193,8 +217,8 @@ if ( ! function_exists( 'uonix_intelligence_license_state' ) ) {
 		}
 
 		$constante = uonix_intelligence_license_evaluate(
-			defined( 'KSIODEV_INTELLIGENCE_STATUS' ) ? constant( 'KSIODEV_INTELLIGENCE_STATUS' ) : null,
-			defined( 'KSIODEV_INTELLIGENCE_VALID_UNTIL' ) ? constant( 'KSIODEV_INTELLIGENCE_VALID_UNTIL' ) : null,
+			uonix_intelligence_license_constant_value( 'KSIODEV_INTELLIGENCE_STATUS' ),
+			uonix_intelligence_license_constant_value( 'KSIODEV_INTELLIGENCE_VALID_UNTIL' ),
 			$today
 		);
 		$painel = uonix_intelligence_license_panel_evaluate(
@@ -208,12 +232,30 @@ if ( ! function_exists( 'uonix_intelligence_license_state' ) ) {
 
 if ( ! function_exists( 'uonix_intelligence_license_date_label' ) ) {
 	/**
-	 * `AAAA-MM-DD` para `DD/MM/AAAA`. Só é chamada com data já validada.
+	 * `AAAA-MM-DD` para `DD/MM/AAAA`. Texto que não é data volta como está, e o que não é texto
+	 * (array, null) volta vazio: o `(string)` direto de um array dava "Array" e um aviso (#314).
 	 */
 	function uonix_intelligence_license_date_label( $valid_until ) {
-		$data = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $valid_until );
+		if ( ! is_string( $valid_until ) ) {
+			return '';
+		}
+		$data = DateTimeImmutable::createFromFormat( '!Y-m-d', $valid_until );
 
-		return false === $data ? (string) $valid_until : $data->format( 'd/m/Y' );
+		return false === $data ? $valid_until : $data->format( 'd/m/Y' );
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_license_text_key' ) ) {
+	/**
+	 * Uma chave de texto de um estado montado à mão: ausente, ou de tipo que não é texto, vira vazio (#314).
+	 * O estado de `uonix_intelligence_license_state()` sempre tem `status`, `valid_until` e `reason` como texto (`configured` e `sending` são bool); esta proteção
+	 * é para um chamador futuro que monte o estado sem elas.
+	 *
+	 * @param mixed  $estado Estado ou camada.
+	 * @param string $chave  Nome da chave.
+	 */
+	function uonix_intelligence_license_text_key( $estado, $chave ) {
+		return is_array( $estado ) && isset( $estado[ $chave ] ) && is_string( $estado[ $chave ] ) ? $estado[ $chave ] : '';
 	}
 }
 
@@ -229,18 +271,19 @@ if ( ! function_exists( 'uonix_intelligence_license_message' ) ) {
 			return '';
 		}
 
-		$motivo  = is_array( $state ) && isset( $state['reason'] ) ? (string) $state['reason'] : '';
+		$motivo  = uonix_intelligence_license_text_key( $state, 'reason' );
 		$pausado = 'o envio automático do relatório semanal e dos alertas de anomalia está pausado';
 
 		if ( 'suspended' === $motivo ) {
 			return 'O serviço da Central de Inteligência está suspenso, e ' . $pausado . '. Para reativar, fale com a ksio.dev.';
 		}
 		if ( 'expired' === $motivo ) {
-			return sprintf(
-				'A licença da Central de Inteligência venceu em %s, e %s. Para renovar, fale com a ksio.dev.',
-				uonix_intelligence_license_date_label( $state['valid_until'] ),
-				$pausado
-			);
+			// Sem a data (estado montado à mão), a frase diz que venceu sem inventar o dia: "venceu em , e" seria
+			// uma frase quebrada na tela do cliente (#314).
+			$data   = uonix_intelligence_license_date_label( uonix_intelligence_license_text_key( $state, 'valid_until' ) );
+			$quando = '' !== $data ? ' em ' . $data : '';
+
+			return sprintf( 'A licença da Central de Inteligência venceu%s, e %s. Para renovar, fale com a ksio.dev.', $quando, $pausado );
 		}
 
 		return 'A configuração de licença da Central de Inteligência não é válida, e ' . $pausado . ' até a correção. Fale com a ksio.dev.';
@@ -280,9 +323,10 @@ if ( ! function_exists( 'uonix_intelligence_license_summary' ) ) {
 			return 'Sem controle configurado: nem constante KSIODEV_INTELLIGENCE_* no wp-config.php, nem licença no painel. O envio segue ativo.';
 		}
 
-		$rotulo = 'trial' === $state['status'] ? 'Cortesia (trial)' : 'Contratada (active)';
-		$prazo  = '' !== $state['valid_until']
-			? ' até ' . uonix_intelligence_license_date_label( $state['valid_until'] )
+		$rotulo = 'trial' === uonix_intelligence_license_text_key( $state, 'status' ) ? 'Cortesia (trial)' : 'Contratada (active)';
+		$data   = uonix_intelligence_license_text_key( $state, 'valid_until' );
+		$prazo  = '' !== $data
+			? ' até ' . uonix_intelligence_license_date_label( $data )
 			: ', sem data-limite';
 
 		return $rotulo . $prazo . ( '' === $origem ? '' : ', pelo ' . $origem ) . '. O envio está ativo.';
@@ -299,18 +343,21 @@ if ( ! function_exists( 'uonix_intelligence_license_layer_summary' ) ) {
 		if ( ! is_array( $layer ) || empty( $layer['configured'] ) ) {
 			return 'Sem controle.';
 		}
-		$motivo = isset( $layer['reason'] ) ? (string) $layer['reason'] : 'invalid';
-		$data   = isset( $layer['valid_until'] ) ? (string) $layer['valid_until'] : '';
+		$motivo = uonix_intelligence_license_text_key( $layer, 'reason' );
+		$data   = uonix_intelligence_license_text_key( $layer, 'valid_until' );
 
 		if ( ! empty( $layer['sending'] ) ) {
-			$rotulo = isset( $layer['status'] ) && 'trial' === $layer['status'] ? 'Cortesia (trial)' : 'Contratada (active)';
+			$rotulo = 'trial' === uonix_intelligence_license_text_key( $layer, 'status' ) ? 'Cortesia (trial)' : 'Contratada (active)';
 			return $rotulo . ( '' !== $data ? ' até ' . uonix_intelligence_license_date_label( $data ) : ', sem data-limite' ) . '. Envia.';
 		}
 		if ( 'suspended' === $motivo ) {
 			return 'Suspensa. Pausa o envio.';
 		}
 		if ( 'expired' === $motivo ) {
-			return 'Vencida em ' . uonix_intelligence_license_date_label( $data ) . '. Pausa o envio.';
+			// Sem a data (camada montada à mão), "Vencida em ." seria uma frase quebrada na tela do dono (#314).
+			$rotulo_data = uonix_intelligence_license_date_label( $data );
+
+			return 'Vencida' . ( '' !== $rotulo_data ? ' em ' . $rotulo_data : '' ) . '. Pausa o envio.';
 		}
 
 		return 'Configuração inválida. Pausa o envio.';
