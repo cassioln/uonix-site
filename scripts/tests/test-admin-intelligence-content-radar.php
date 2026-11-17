@@ -414,7 +414,7 @@ $roteirizado = static function ( $corpo, $modelo, $pausa ) use ( &$roteiro, &$pe
 	$pedidos_ia[] = json_decode( substr( $t, (int) strrpos( $t, "\n" ) + 1 ), true )['consulta'];
 	return $passo;
 };
-$cota_dia = array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1, 'retry_after' => 27223 );
+$cota_dia = array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1, 'retry_after' => 27223, 'quota_source' => 'quota_id_daily' );
 $fora     = array( 'status' => 'unavailable', 'http' => 503, 'attempts' => 2 );
 $GLOBALS['uox_options'] = array();
 $pedidos_ia             = array();
@@ -428,12 +428,41 @@ foreach ( array_slice( $aq, 2 ) as $a ) {
 	$adiadas_ok = $adiadas_ok && 'quota_exhausted' === ( $a['reason'] ?? '' ) && '2026-10-02T10:33:43+00:00' === ( $a['retry_at'] ?? null ) && ! isset( $a['http'] ) && 64 === strlen( $a['input_hash'] ?? '' );
 }
 uox_rd_assert( $adiadas_ok, '#384: as adiadas pela cota dizem o motivo e a hora, sem HTTP; obteve ' . var_export( array_slice( $aq, 2 ), true ) );
+// #403 (B2): a origem da classificação da cota vai para o cache, e as adiadas herdam a mesma.
+$herdou = 'quota_id_daily' === ( $aq[1]['quota_source'] ?? null );
+foreach ( array_slice( $aq, 2 ) as $a ) {
+	$herdou = $herdou && 'quota_id_daily' === ( $a['quota_source'] ?? null );
+}
+uox_rd_assert( $herdou, '#403: a cota e as adiadas gravam quota_source = quota_id_daily; obteve ' . var_export( array_column( $aq, 'quota_source' ), true ) );
 uox_rd_assert( 5 === uonix_intelligence_radar_run( $base )['called'], '#384: no dia seguinte, a da cota e as adiadas são chamadas; a ok fica' );
 $GLOBALS['uox_options'] = array();
 $roteiro                = array( array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1 ) );
 uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
 $sem_hora = array_column( get_option( $opt )['candidates'], 'ai' );
 uox_rd_assert( 'quota_exhausted' === $sem_hora[0]['status'] && ! isset( $sem_hora[0]['retry_at'] ) && ! isset( $sem_hora[1]['retry_at'] ) && 'deferred' === $sem_hora[1]['status'], '#384: sem retryDelay, nenhuma hora inventada' );
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1, 'retry_after' => 7200, 'quota_source' => 'retry_delay' ) );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$inferida = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( 'retry_delay' === ( $inferida[0]['quota_source'] ?? null ) && 'retry_delay' === ( $inferida[1]['quota_source'] ?? null ) && 'deferred' === $inferida[1]['status'], '#403: a cota só inferida do retryDelay grava retry_delay, e a adiada herda; obteve ' . var_export( array_slice( $inferida, 0, 2 ), true ) );
+foreach ( array( array( 'x' ), true, 'qualquer', 'QUOTA_ID_DAILY' ) as $malformada ) {
+	$GLOBALS['uox_options'] = array();
+	$roteiro                = array( array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1, 'quota_source' => $malformada ) );
+	uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+	$estranha = array_column( get_option( $opt )['candidates'], 'ai' );
+	uox_rd_assert( ! isset( $estranha[0]['quota_source'] ) && ! isset( $estranha[1]['quota_source'] ), '#403: origem malformada de um gerador de fora não é gravada: ' . var_export( $malformada, true ) . '; obteve ' . var_export( array_slice( $estranha, 0, 2 ), true ) );
+}
+// A origem não depende da hora: a cota diária SEM `retry_after` grava a origem e nenhuma hora inventada.
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( array( 'status' => 'quota_exhausted', 'http' => 429, 'attempts' => 1, 'quota_source' => 'quota_id_daily' ) );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$sem_espera = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( 'quota_id_daily' === ( $sem_espera[0]['quota_source'] ?? null ) && 'quota_id_daily' === ( $sem_espera[1]['quota_source'] ?? null ) && ! isset( $sem_espera[0]['retry_at'] ) && ! isset( $sem_espera[1]['retry_at'] ), '#403: cota diária sem retry_after grava a origem, e a adiada herda, sem hora; obteve ' . var_export( array_slice( $sem_espera, 0, 2 ), true ) );
+$GLOBALS['uox_options'] = array();
+$roteiro                = array( $fora, $fora );
+uonix_intelligence_radar_run( array_merge( $base, array( 'generate' => $roteirizado ) ) );
+$so_falha = array_column( get_option( $opt )['candidates'], 'ai' );
+uox_rd_assert( ! isset( $so_falha[0]['quota_source'] ) && ! isset( $so_falha[1]['quota_source'] ), '#403: falha comum não grava origem de cota' );
 
 $cenarios_rd = array(
 	'503 em todas'               => array( array( $fora, $fora, $fora, $fora, $fora, $fora ), 2, array( 'unavailable', 'unavailable', 'deferred', 'deferred', 'deferred', 'deferred' ) ),

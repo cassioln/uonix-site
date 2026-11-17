@@ -724,6 +724,13 @@ if ( ! function_exists( 'uonix_intelligence_radar_run' ) ) {
 				}
 				if ( 'quota_exhausted' === $ai['status'] ) {
 					$parada = array( 'reason' => 'quota_exhausted' );
+					// De onde veio a classificação da cota (#403): as adiadas herdam, e o painel só diz
+					// "diária" quando o `quotaId` provou. Um valor que não é dos dois conhecidos não entra.
+					$origem = is_array( $resposta ) && function_exists( 'uonix_intelligence_ai_quota_source' ) ? uonix_intelligence_ai_quota_source( isset( $resposta['quota_source'] ) ? $resposta['quota_source'] : null ) : '';
+					if ( '' !== $origem ) {
+						$ai['quota_source']     = $origem;
+						$parada['quota_source'] = $origem;
+					}
 					$espera = is_array( $resposta ) && isset( $resposta['retry_after'] ) && is_int( $resposta['retry_after'] ) ? $resposta['retry_after'] : 0;
 					if ( $espera > 0 && false !== strtotime( $agora ) ) {
 						$ai['retry_at']     = gmdate( 'c', strtotime( $agora ) + $espera );
@@ -934,7 +941,7 @@ if ( ! function_exists( 'uonix_intelligence_radar_email_items' ) ) {
 	 *
 	 * @param int|null  $now     Para teste; o padrão é `time()`.
 	 * @param bool|null $has_key Para teste; o padrão é a chave do wp-config.php.
-	 * @return array{items: array, more: int, panel_count: int, list_at: string, failed: bool}
+	 * @return array{items: array, more: int, without_key: bool, panel_count: int, list_at: string, failed: bool}
 	 */
 	function uonix_intelligence_radar_email_items( $now = null, $has_key = null ) {
 		$estado    = uonix_intelligence_radar_state();
@@ -960,6 +967,10 @@ if ( ! function_exists( 'uonix_intelligence_radar_email_items' ) ) {
 			// Novas que não couberam no e-mail. O "Mais N" do e-mail conta só estas: o total do painel
 			// inclui as que já foram por e-mail e as que ainda esperam a pauta (#380).
 			'more'        => max( 0, count( $itens ) - $limite ),
+			// Sem a chave do Gemini as candidatas sem pauta também vão ao e-mail (as que já tinham pauta
+			// `ok` com a mesma entrada continuam com ela): o "Mais N" do e-mail então fala em consultas, e
+			// não em pautas (#459).
+			'without_key' => ! $tem_chave,
 			'panel_count' => count( $estado['visible'] ),
 			// De quando é a lista e se a última execução a renovou: o e-mail declara o período de cada
 			// caixa, e com o Search Console fora a lista é a anterior (#381).

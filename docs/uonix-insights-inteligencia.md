@@ -109,6 +109,8 @@ Lista em `wp_options`. E-mail de destinatário não é segredo; token de API é 
 
 WP-Cron `weekly`. O painel exibe o **próximo disparo real** lido do agendador (`wp_next_scheduled`) e o horário do último envio. O texto ao usuário declara apenas a **frequência** — "semanal" — sem horário e **sem período do dia**.
 
+**Com o envio pausado pela licença, a linha do próximo disparo diz isso** (#316): "(envio pausado pela licença)" ao lado da data. O evento continua agendado, e só o envio devolve `license_inactive`; sem a frase, o operador leria uma data que o envio não vai cumprir. Sem o módulo da licença (50) carregado, o envio também está pausado, e a frase aparece. Com o envio ativo, a linha não muda.
+
 É proibido prometer horário ou período do dia na interface e no e-mail, incluindo formulações brandas como "às segundas pela manhã". A única afirmação que o sistema consegue provar é a frequência somada ao próximo disparo agendado.
 
 - **Em QA e no local,** o WP-Cron dispara por tráfego, não por relógio: a deriva pode atravessar o dia inteiro, o que torna "pela manhã" tão insustentável quanto "08:00".
@@ -398,8 +400,10 @@ Desde 2026-09-30, cada oportunidade ganha a **página líder** da consulta e uma
 | `rejected` | Sugestão recusada pela validação: tamanho, formato ou diferencial fora da lista. |
 | `no_page` | Sem página publicada para esta consulta: removida ou redirecionada. |
 | `model_missing` | Modelo indisponível: confira UONIX_GEMINI_MODEL no wp-config.php. |
-| `quota_exhausted` | Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária. Com o `retryDelay` do Gemini, acrescenta "A cota renova por volta de DD/MM HH:MM." no fuso do site (`wp_date`), e com o rótulo "(UTC)" só se o fuso do site não for conhecido (#386). |
-| `deferred` | Não pedida: a cota diária do Gemini acabou nesta geração (ou: falhas seguidas do Gemini nesta geração). Nova tentativa na próxima geração diária. |
+| `quota_exhausted` | **Com a prova** do `quotaId` diário: "Cota diária do Gemini esgotada. Nova tentativa na próxima geração diária." **Sem a prova** (cota só inferida do `retryDelay`, ou entrada gravada antes da #403): "Cota do Gemini esgotada. Nova tentativa na próxima geração diária." Com o `retryDelay` do Gemini, acrescenta "A cota renova por volta de DD/MM HH:MM." no fuso do site (`wp_date`), e com o rótulo "(UTC)" só se o fuso do site não for conhecido (#386). **A hora só entra enquanto ainda está no futuro** (#403): vencida, ou na hora exata, sai, e o resto do texto fica. |
+| `deferred` | Não pedida: a cota do Gemini acabou nesta geração (com "diária" só quando a prova existe, como acima; ou: falhas seguidas do Gemini nesta geração). Nova tentativa na próxima geração diária. A hora da renovação segue a mesma regra de `quota_exhausted`. |
+
+**A prova da cota diária (#403).** `uonix_intelligence_ai_quota_info()` marca como cota que não volta o 429 com `quotaId` `PerDay`, ou o 429 com `retryDelay` acima de 60 s. Só o primeiro **prova** que é diária. O transporte devolve `quota_source` com o que valeu: `quota_id_daily` (o `quotaId` diz PerDay) ou `retry_delay` (só a espera passou de 60 s, que é inferência). O cron grava `quota_source` na entrada da cota, e as adiadas herdam o mesmo valor. O leitor devolve o campo só se for um dos dois valores exatos. O painel diz "diária" só com `quota_id_daily`.
 
 No e-mail, todo estado diferente de `ok` só omite a linha.
 
@@ -451,6 +455,7 @@ A Search Console segue com ~3 dias de atraso (medido de novo no mesmo dia), e po
 - **Os limites:** o e-mail lista `email_limit` (3) oportunidades, e o painel `panel_limit` (5). As duas são regras de `uonix_intelligence_seo_rules()`, no `55`. O e-mail é um resumo de propósito.
 - **A frase:** abaixo da tabela sai "Mais N oportunidades no painel.", com o link para o painel, e só quando N > 0.
 - **O número:** N = min(`matched`, `panel_limit`) − linhas no e-mail. Ele não passa do que o painel mostra a mais.
+- **A caixa "Oportunidades encontradas" do painel conta o total (#371):** `matched`, e não as linhas que a tabela mostra. Com 7 oportunidades e `panel_limit` 5, a caixa diz 7, e a legenda acrescenta "· a tabela mostra as 5 de maior volume". Sem corte, a legenda é só "de N consultas analisadas". Antes, a caixa mostrava só as linhas já cortadas (5, com 12 oportunidades e 113 consultas analisadas), e o operador lia o corte como se fosse o total.
 - **`matched` não é `universe`:** `matched` é o total de oportunidades antes do corte, e `universe` conta todas as consultas peneiradas, oportunidade ou não. Em 23/09 eram 5 contra 113.
 
 ### "Mudança detectável" é um teste, não um limiar
@@ -593,8 +598,8 @@ Arquivo: `mu-plugins/uonix-admin/63-admin-intelligence-content-radar.php`. Decis
 - **"Não sei" não é "não há página":** HEAD sem resposta, ou orçamento de HEAD esgotado, reaproveita a página de ontem, e a pauta pronta fica. Sem página anterior, a pauta fica `deferred`, sem chamada. Tratar o "não sei" como página ausente refazia uma pauta "reforcar" boa como "nova" (MÉDIO 2 da revisão do PR #378, a mesma lição do #373).
   - A página de ontem só vale para o **mesmo** caminho líder.
   - Uma página que ontem já era "não sei" fica marcada (`page_unknown`) e não vale como a de ontem: sem isso, o segundo "não sei" seguido chamava o Gemini sem página.
-- **Transporte:** é o mesmo da sugestão de título, `uonix_intelligence_ai_generate()`, com uma nova tentativa em 429 e 503, menos no 429 de cota diária.
-- **Parada (#384):** depois de um `quota_exhausted`, ou de duas falhas seguidas, nenhuma chamada começa. As restantes ficam `deferred`, com o motivo em `reason`, e a cota esgotada grava a hora da renovação em `retry_at`. O painel tem texto próprio para cada caso. Cada chamada grava `http` e `attempts`, e o erro de transporte grava também a causa em `error` (#404), como na sugestão de título. **Timeout (`cURL error 28`) não conta nessa sequência (#404), nem no Radar nem no Módulo 3:** é transitório, e dois deles seguidos adiavam o dia inteiro. Os outros erros de transporte (DNS, TLS) continuam contando.
+- **Transporte:** é o mesmo da sugestão de título, `uonix_intelligence_ai_generate()`, com uma nova tentativa em 429 e 503, menos no 429 de cota que não volta nesta execução (o `quotaId` diário, ou a espera acima de 60 s: a segunda é inferência, e por isso o painel só diz "diária" com a primeira, #403).
+- **Parada (#384):** depois de um `quota_exhausted`, ou de duas falhas seguidas, nenhuma chamada começa. As restantes ficam `deferred`, com o motivo em `reason`, e a cota esgotada grava a hora da renovação em `retry_at` e a origem da classificação em `quota_source` (#403, como no Módulo 3; as adiadas herdam os dois). O painel tem texto próprio para cada caso: "diária" só com `quota_source` igual a `quota_id_daily`, e a hora da renovação só enquanto ainda é futura. Cada chamada grava `http` e `attempts`, e o erro de transporte grava também a causa em `error` (#404), como na sugestão de título. **Timeout (`cURL error 28`) não conta nessa sequência (#404), nem no Radar nem no Módulo 3:** é transitório, e dois deles seguidos adiavam o dia inteiro. Os outros erros de transporte (DNS, TLS) continuam contando.
 
 ### O que é gravado
 
@@ -613,7 +618,7 @@ São três opções, sem autoload e protegidas no clone:
 
 - **E-mail:** o bloco "Pautas novas para o blog" vem depois das oportunidades e só aparece quando há pauta nova.
   - Pauta nova quer dizer: visível, com pauta `ok` e não enviada nos últimos 180 dias. Sem a chave do Gemini, vão as candidatas sem pauta.
-  - Vão no máximo 3. Se sobrarem novas, o bloco fecha com "Mais N pautas novas no painel", e N conta só as novas que não couberam. As já enviadas, as descartadas e as que ainda esperam a pauta da IA não entram na conta (#380). Sem novas sobrando, a frase não aparece.
+  - Vão no máximo 3. Se sobrarem novas, o bloco fecha com "Mais N pautas novas no painel", e N conta só as novas que não couberam. **Sem a chave do Gemini** (#459), as candidatas sem pauta também vão ao e-mail (as que já tinham pauta `ok` com a mesma entrada continuam com ela, porque a pauta pronta é retida antes de olhar a chave), e a frase passa a "Mais N consultas novas no painel": o N conta o conjunto todo, e chamar de "pauta" o que em parte ainda é só uma consulta prometeria ao leitor o que o painel não tem. As já enviadas, as descartadas e as que ainda esperam a pauta da IA não entram na conta (#380). Sem novas sobrando, a frase não aparece.
   - A linha de fonte do bloco diz de quando é a lista ("lista de DD/MM/AAAA HH:MM (UTC)"). Se a última execução não conseguiu ler o Search Console (`gsc_failed` ou `config_missing`), uma segunda linha avisa que a lista é a anterior (#381). O resto do e-mail continua em UTC, e o bloco segue essa convenção.
   - Os 180 dias impedem que uma consulta oscilando em torno do limite gere e-mail toda semana (#297).
 - **Quem marca uma pauta como enviada** é só `uonix_intelligence_send_scheduled_report()`, o envio semanal agendado, e só quando o e-mail sai. O "Enviar Teste Agora" mostra o mesmo bloco e não gasta a novidade.
