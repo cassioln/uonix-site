@@ -475,6 +475,185 @@ uox_atualizacoes_assert( false !== strpos( $card, 'id="uox-atualizacoes-sistemic
 $GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array( 'response' => array() );
 $GLOBALS['uox_test_plugins']                           = array();
 
+// ---------------------------------------------------------------------------
+// #467: contrato da versão. Tem distância calculável a versão INTEIRA no formato
+// número(.número)*, major de até 4 dígitos, com sufixo opcional de pré-release ou build que
+// começa por letra (-beta1, -rc.1, +build5). Prefixo numérico não basta: "3f2a9c1" (hash) e
+// "2026-01-15" (data) começam por número e não são versão.
+// ---------------------------------------------------------------------------
+$versoes_validas = array(
+	'1.2.3', '14.2', '2026.1.1', '100.0', '1.2.3.4', '2', '0.0.1', '01.02.03', '1.2.4-beta1', '2.0.0-rc.1', '1.2.3+build5', '1.2-beta.3', ' 1.2.3', '1.2.3 ', "1.2.3\n", '1' . str_repeat( '.1', 31 ),
+	// Revisão do #469 (M1): formatos reais do WordPress.org. O segmento depois do major aceita
+	// qualquer quantidade de dígitos (o tema filho do site é 1.4.3.1768277389), o sufixo aceita
+	// maiúscula, hífen e ponto, e o trim padrão apara \r, \t, \0 e \v.
+	'1.4.3.1768277389', '1.192.0', '2.0.0.202101120840', '4.2.0-RC.1', '1.0.0-RC2', '2.0-beta-1', '1.2.3-beta.1+build.5', '1.2.3-Beta1',
+	"1.2.3\r", "\t1.2.3", "1.2.3\0", "\x0B1.2.3",
+);
+foreach ( $versoes_validas as $v ) {
+	uox_atualizacoes_assert( 'desconhecida' !== uox_get_gravidade_atualizacao( '0.0.1', $v ), 'versão válida não pode ser desconhecida: ' . json_encode( $v ) );
+	uox_atualizacoes_assert( 'desconhecida' !== uox_get_gravidade_atualizacao( $v, '9.9.9' ), 'versão válida (como atual) não pode ser desconhecida: ' . json_encode( $v ) );
+}
+$versoes_invalidas = array(
+	'1abc', '3f2a9c1', '5d41402abc4b2a76b9719d911017c592', '2026-01-15', '3rd-party', 'v1.2.3', '1.2.x', '1..2', '1.', '.1',
+	'20260101', '12345', '2026010100', '?', '', 'abc', '1.2.3-', '1.2.3-1', '1.2.3-+', '1.2.3 4', '1.2.3-beta 1',
+	"٣.٢", "１.２", '1' . str_repeat( '.1', 32 ), '1' . str_repeat( '.1', 200000 ),
+	// Revisão do #469 (M1): o sufixo não tem sublinhado, e NBSP e \f não são aparados pelo trim.
+	'1.0.0_beta', '1.2.3-beta_1', "\xC2\xA01.2.3", "1.2.3\xC2\xA0", "1.2.3\x0C",
+);
+foreach ( $versoes_invalidas as $v ) {
+	$rotulo = json_encode( strlen( $v ) > 40 ? substr( $v, 0, 40 ) . '…(' . strlen( $v ) . ' bytes)' : $v );
+	uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( '1.0.0', $v ), "versão nova inválida deve ser desconhecida: {$rotulo}" );
+	uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( $v, '1.0.0' ), "versão atual inválida deve ser desconhecida: {$rotulo}" );
+}
+// Espaço nas pontas é aparado dos dois lados, sem assimetria.
+uox_atualizacoes_assert( 'baixa' === uox_get_gravidade_atualizacao( ' 1.0.0', '1.0.1 ' ), 'espaço nas pontas é aparado nas duas versões' );
+// Só a parte numérica compara: o sufixo de pré-release, com ponto, não vira minor.
+uox_atualizacoes_assert( 'media' === uox_get_gravidade_atualizacao( '2-rc.1', '2.1' ), '"2-rc.1" é 2.0, não 2.1: o ponto do sufixo não conta como segmento' );
+uox_atualizacoes_assert( 'baixa' === uox_get_gravidade_atualizacao( '2.0.0-rc.1', '2.0.1' ), 'pré-release de 2.0.0 para 2.0.1 é correção' );
+// Erro do PCRE devolve false, e false NÃO é versão válida: o item sai desconhecido, não
+// graduado. Reproduzido com o JIT desligado e o limite de retrocesso mínimo, e restaurado.
+$pcre_jit = ini_get( 'pcre.jit' );
+$pcre_bt  = ini_get( 'pcre.backtrack_limit' );
+ini_set( 'pcre.jit', '0' );
+ini_set( 'pcre.backtrack_limit', '1' );
+$sob_erro = uox_get_gravidade_atualizacao( '1.2.3', '1.2.4-beta1' );
+ini_set( 'pcre.jit', $pcre_jit );
+ini_set( 'pcre.backtrack_limit', $pcre_bt );
+uox_atualizacoes_assert( 'desconhecida' === $sob_erro, 'erro do PCRE deve cair em desconhecida (fail-closed), não em uma gravidade; obteve ' . $sob_erro );
+// Tipos que não são texto não geram Warning (o handler o transformaria em exceção).
+foreach ( array( false, null, array(), 1.5, 7, NAN, INF, -INF, new stdClass() ) as $estranho ) {
+	$rotulo_estranho = is_float( $estranho ) && ! is_finite( $estranho ) ? 'float não finito' : json_encode( $estranho );
+	uox_atualizacoes_assert( in_array( uox_get_gravidade_atualizacao( $estranho, '1.0.0' ), array( 'desconhecida', 'baixa', 'media', 'alta' ), true ), 'versão de tipo estranho não deve gerar Warning: ' . $rotulo_estranho );
+}
+// Float não finito e objeto não são versão: desconhecida (NAN e INF viram texto sem número).
+// Inteiro é versão: um tema pode publicar `version: 2026` como número JSON, e um inteiro não perde nada.
+uox_atualizacoes_assert( 'alta' === uox_get_gravidade_atualizacao( 2025, 2026 ), 'inteiro 2025 -> 2026 é um salto de major' );
+uox_atualizacoes_assert( 'baixa' === uox_get_gravidade_atualizacao( 2026, 2026 ), 'inteiro 2026 -> 2026 não é salto' );
+// Float NÃO é versão (revisão do #469, B2): 1.10 vira 1.1 e perde o zero final, então 1.9 -> 1.10 sairia
+// "baixa" enquanto o texto "1.9" -> "1.10" é "média". O texto, sim, é preservado.
+uox_atualizacoes_assert( 'media' === uox_get_gravidade_atualizacao( '1.9', '1.10' ), 'o texto 1.9 -> 1.10 é um salto de minor' );
+foreach ( array( 1.5, 1.9, 1.10, 2.0 ) as $um_float ) {
+	uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( $um_float, '1.0.0' ) && 'desconhecida' === uox_get_gravidade_atualizacao( '1.0.0', $um_float ), 'float não é versão: ' . json_encode( $um_float ) );
+}
+uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( 1.9, 1.10 ), 'float 1.9 -> 1.10 não pode sair graduado' );
+foreach ( array( true, NAN, INF, -INF, new stdClass(), array( '1.2.3' ), null, false ) as $nao_versao ) {
+	uox_atualizacoes_assert( 'desconhecida' === uox_get_gravidade_atualizacao( $nao_versao, '1.0.0' ) && 'desconhecida' === uox_get_gravidade_atualizacao( '1.0.0', $nao_versao ), 'não é versão: desconhecida nos dois lados' );
+}
+
+// ---------------------------------------------------------------------------
+// #468: núcleo. A oferta `upgrade` pode não ser a primeira, e só vale se for maior que a
+// instalada. Uma exceção (Warning ou Error) vira texto, para o teste reprovar com a causa.
+// ---------------------------------------------------------------------------
+function uox_atualizacoes_nucleo() {
+	try {
+		return uox_get_atualizacoes_pendentes()['core'];
+	} catch ( Throwable $e ) {
+		return 'EXCEÇÃO: ' . $e->getMessage();
+	}
+}
+function uox_atualizacoes_oferta( $resposta, $versao ) {
+	return (object) array( 'response' => $resposta, 'current' => $versao );
+}
+function uox_atualizacoes_define_nucleo( $updates ) {
+	$GLOBALS['uox_test_site_transients']['update_core'] = (object) array( 'updates' => $updates );
+}
+$GLOBALS['wp_version'] = '6.8.1';
+
+// Ordem: `autoupdate` antes do `upgrade` não esconde a pendência.
+uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'autoupdate', '6.8.2' ), uox_atualizacoes_oferta( 'upgrade', '6.8.2' ) ) );
+$nucleo = uox_atualizacoes_nucleo();
+uox_atualizacoes_assert( is_array( $nucleo ) && 1 === count( $nucleo ) && '6.8.2' === ( $nucleo[0]['versao_nova'] ?? '' ), '[0] autoupdate e [1] upgrade: o núcleo deve aparecer com 6.8.2; obteve ' . json_encode( $nucleo ) );
+// `autoupdate` com versão MAIOR que a instalada também não é pendência: o próprio WordPress
+// a aplica. Sem esta oferta maior, "aceitar autoupdate" passaria despercebido, porque a oferta
+// do #340 (6.8.1) já é barrada por não passar da instalada.
+uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'autoupdate', '6.8.2' ) ) );
+uox_atualizacoes_assert( array() === uox_atualizacoes_nucleo(), 'autoupdate para 6.8.2, maior que a instalada, não deve virar pendência; obteve ' . json_encode( uox_atualizacoes_nucleo() ) );
+uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'development', '6.9.0' ), uox_atualizacoes_oferta( 'latest', '6.9.0' ) ) );
+uox_atualizacoes_assert( array() === uox_atualizacoes_nucleo(), 'development e latest, mesmo com versão maior, não são pendência; obteve ' . json_encode( uox_atualizacoes_nucleo() ) );
+// Várias ofertas `upgrade`: vale a maior, em qualquer ordem.
+foreach ( array( array( '6.8.2', '6.9.0' ), array( '6.9.0', '6.8.2' ) ) as $ordem ) {
+	uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'upgrade', $ordem[0] ), uox_atualizacoes_oferta( 'upgrade', $ordem[1] ) ) );
+	$nucleo = uox_atualizacoes_nucleo();
+	uox_atualizacoes_assert( is_array( $nucleo ) && 1 === count( $nucleo ) && '6.9.0' === ( $nucleo[0]['versao_nova'] ?? '' ), 'ofertas ' . implode( ' e ', $ordem ) . ': deve valer a maior (6.9.0); obteve ' . json_encode( $nucleo ) );
+}
+// Revisão do #469 (M1). `response` precisa ser o TEXTO "upgrade": `true == 'upgrade'` é verdadeiro
+// na comparação frouxa do PHP, e uma oferta com `response => true` não pode virar pendência.
+uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( true, '6.8.2' ) ) );
+uox_atualizacoes_assert( array() === uox_atualizacoes_nucleo(), 'response true não é upgrade; obteve ' . json_encode( uox_atualizacoes_nucleo() ) );
+// `current` precisa ser texto: o inteiro 682 não é a versão 6.8.2.
+uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'upgrade', 682 ) ) );
+uox_atualizacoes_assert( array() === uox_atualizacoes_nucleo(), 'current inteiro não é versão do núcleo; obteve ' . json_encode( uox_atualizacoes_nucleo() ) );
+// Sem a global $wp_version (ainda não carregada): o version_compare não pode receber null
+// (Deprecated desde o PHP 8.1) e a oferta aparece.
+unset( $GLOBALS['wp_version'] );
+uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'upgrade', '6.8.2' ) ) );
+$sem_wp = uox_atualizacoes_nucleo();
+uox_atualizacoes_assert( is_array( $sem_wp ) && 1 === count( $sem_wp ), 'sem $wp_version, a oferta upgrade aparece, sem Deprecated; obteve ' . json_encode( $sem_wp ) );
+$GLOBALS['wp_version'] = '6.8.1';
+// Uma oferta que não passa da instalada é ignorada, e a seguinte vale.
+uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'upgrade', '6.8.0' ), uox_atualizacoes_oferta( 'upgrade', '6.8.2' ) ) );
+$nucleo = uox_atualizacoes_nucleo();
+uox_atualizacoes_assert( is_array( $nucleo ) && 1 === count( $nucleo ) && '6.8.2' === ( $nucleo[0]['versao_nova'] ?? '' ), '[0] upgrade menor que a instalada e [1] maior: vale a [1]; obteve ' . json_encode( $nucleo ) );
+$nucleo = array();
+// `upgrade` sem diferença (igual ou menor que a instalada) não é pendência: sairia "Crítica".
+foreach ( array( '6.8.1', '6.8.0', '6.7.9', '5.0' ) as $nao_maior ) {
+	uox_atualizacoes_define_nucleo( array( uox_atualizacoes_oferta( 'upgrade', $nao_maior ) ) );
+	uox_atualizacoes_assert( array() === uox_atualizacoes_nucleo(), "upgrade para {$nao_maior}, que não passa de 6.8.1, não deve virar pendência" );
+}
+// Uma oferta que não é objeto no meio da lista é pulada, e a varredura segue: a `upgrade`
+// válida depois dela ainda aparece.
+uox_atualizacoes_define_nucleo( array( array( 'response' => 'upgrade', 'current' => '9.9.9' ), null, 'texto', uox_atualizacoes_oferta( 'upgrade', '6.8.2' ) ) );
+$nucleo = uox_atualizacoes_nucleo();
+uox_atualizacoes_assert( is_array( $nucleo ) && 1 === count( $nucleo ) && '6.8.2' === ( $nucleo[0]['versao_nova'] ?? '' ), 'ofertas que não são objeto (array, null, texto) são puladas e a upgrade válida depois delas aparece; obteve ' . json_encode( $nucleo ) );
+// Formas estranhas do transient: sem Error, sem Warning, sem pendência.
+$formas = array(
+	'updates objeto'              => (object) array( 'updates' => new stdClass() ),
+	'updates null'                => (object) array( 'updates' => null ),
+	'updates texto'               => (object) array( 'updates' => 'texto' ),
+	'updates inteiro'             => (object) array( 'updates' => 5 ),
+	'updates vazio'               => (object) array( 'updates' => array() ),
+	'sem updates'                 => new stdClass(),
+	'response array'              => (object) array( 'updates' => array( (object) array( 'response' => array( 'upgrade' ), 'current' => '6.8.2' ) ) ),
+	'current array'               => (object) array( 'updates' => array( (object) array( 'response' => 'upgrade', 'current' => array( '6.8.2' ) ) ) ),
+	'oferta array'                => (object) array( 'updates' => array( array( 'response' => 'upgrade', 'current' => '6.8.2' ) ) ),
+	'oferta null'                 => (object) array( 'updates' => array( null ) ),
+	'transient array'             => array( 'updates' => array( uox_atualizacoes_oferta( 'upgrade', '6.8.2' ) ) ),
+	'transient false'             => false,
+);
+foreach ( $formas as $rotulo => $transient ) {
+	$GLOBALS['uox_test_site_transients']['update_core'] = $transient;
+	uox_atualizacoes_assert( array() === uox_atualizacoes_nucleo(), "núcleo com {$rotulo}: sem pendência e sem exceção; obteve " . json_encode( uox_atualizacoes_nucleo() ) );
+}
+unset( $GLOBALS['uox_test_site_transients']['update_core'] );
+
+// ---------------------------------------------------------------------------
+// #342: os quatro `?? '?'` de uox_get_atualizacoes_pendentes(). Com '0' no lugar, o item
+// voltaria a sair "Alta", o defeito do #339. Cada caso falta uma só informação.
+// ---------------------------------------------------------------------------
+$GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array( 'response' => array( 'sv/sv.php' => (object) array( 'new_version' => '1.0.1' ) ) );
+$GLOBALS['uox_test_plugins']                           = array( 'sv/sv.php' => array( 'Name' => 'Plugin Sem Versão' ) );
+$item = uox_get_atualizacoes_pendentes()['plugins'][0] ?? array();
+uox_atualizacoes_assert( 'desconhecida' === ( $item['gravidade'] ?? '' ) && '?' === ( $item['versao_atual'] ?? '' ), 'plugin sem Version: versão atual "?" e gravidade desconhecida; obteve ' . json_encode( $item ) );
+
+$GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array( 'response' => array( 'sn/sn.php' => (object) array() ) );
+$GLOBALS['uox_test_plugins']                           = array( 'sn/sn.php' => array( 'Name' => 'Plugin Sem Nova', 'Version' => '1.0.0' ) );
+$item = uox_get_atualizacoes_pendentes()['plugins'][0] ?? array();
+uox_atualizacoes_assert( 'desconhecida' === ( $item['gravidade'] ?? '' ) && '?' === ( $item['versao_nova'] ?? '' ), 'plugin sem new_version: versão nova "?" e gravidade desconhecida; obteve ' . json_encode( $item ) );
+
+$GLOBALS['uox_test_site_transients']['update_plugins'] = (object) array( 'response' => array() );
+$GLOBALS['uox_test_plugins']                           = array();
+$GLOBALS['uox_test_themes']                            = array( 'tn' => array( 'Name' => 'Tema Sem Nova', 'Version' => '1.0.0' ) );
+foreach ( array( 'em array' => array(), 'em objeto' => (object) array() ) as $forma => $dados_tema ) {
+	$GLOBALS['uox_test_site_transients']['update_themes'] = (object) array( 'response' => array( 'tn' => $dados_tema ) );
+	$item = uox_get_atualizacoes_pendentes()['temas'][0] ?? array();
+	uox_atualizacoes_assert( 'desconhecida' === ( $item['gravidade'] ?? '' ) && '?' === ( $item['versao_nova'] ?? '' ), "tema {$forma} sem new_version: versão nova \"?\" e gravidade desconhecida; obteve " . json_encode( $item ) );
+}
+// A cor do rótulo "Desconhecida" é a do cinza, não a de outra gravidade.
+$html_cinza = uox_atualizacoes_render();
+uox_atualizacoes_assert( 1 === preg_match( '~<span style="background:#f1f5f9; color:#475569;[^"]*">Desconhecida</span>~', $html_cinza ), 'o rótulo "Desconhecida" deve ser cinza (#f1f5f9 / #475569)' );
+$GLOBALS['uox_test_site_transients']['update_themes'] = (object) array( 'response' => array() );
+$GLOBALS['uox_test_themes']                            = array();
+
 if ( 0 !== $failures ) {
 	exit( 1 );
 }
