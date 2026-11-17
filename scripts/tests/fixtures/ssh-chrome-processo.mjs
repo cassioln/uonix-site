@@ -16,8 +16,12 @@ entrada.on('data', b => {
       saida.write(JSON.stringify({ id: req.id, error: { code: -1, message: 'fixture' } }) + '\0');
       continue;
     }
+    const antigas = ['aba-recusada', 'aba-pendente'].includes(process.argv[3]) ? [{ type: 'page', targetId: 'antiga' }] : [];
     const result = req.method === 'Target.createTarget' ? { targetId: 'fixture' }
-      : req.method === 'Target.attachToTarget' ? { sessionId: 'fixture' } : {};
+      : req.method === 'Target.attachToTarget' ? { sessionId: 'fixture' }
+      : req.method === 'Target.getTargets' ? { targetInfos: process.argv[3] === 'inventario-invalido'
+        ? null : [{ type: 'page', targetId: 'fixture' }, ...antigas] }
+      : req.method === 'Target.closeTarget' ? { success: process.argv[3] === 'aba-pendente' } : {};
     saida.write(JSON.stringify({ id: req.id, result }) + '\0');
   }
 });

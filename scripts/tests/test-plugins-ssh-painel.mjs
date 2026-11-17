@@ -183,6 +183,11 @@ try {
   rt = prepararRuntime(tmpChrome);
   chrome = await abrirChromePipe(rt);
   assert.ok(!chrome.processo.spawnargs.some(s => s.includes('remote-debugging-port') || s.includes('no-sandbox')));
+  const paginas = async navegador => (await navegador.comando('Target.getTargets')).targetInfos.filter(t => t.type === 'page');
+  assert.equal((await paginas(chrome)).length, 1, 'execução deve manter somente a própria aba no perfil exclusivo');
+  await chrome.comando('Target.createTarget', { url: 'about:blank' });
+  await chrome.comando('Target.createTarget', { url: 'about:blank' });
+  assert.equal((await paginas(chrome)).length, 3, 'fixture prepara abas próprias antigas para a próxima restauração');
   await chrome.comando('Page.navigate', { url: `${url}/entrar` });
   for (let n = 0; n < 50; n += 1) {
     if ((await chrome.avaliar('document.body?.innerText')) === 'autenticado') break;
@@ -196,12 +201,22 @@ try {
   rt.liberar();
   rt = prepararRuntime(tmpChrome);
   chrome = await abrirChromePipe(rt);
+  assert.equal((await paginas(chrome)).length, 1, 'nova execução elimina abas restauradas do perfil exclusivo sem acumular');
   await chrome.comando('Page.navigate', { url });
   for (let n = 0; n < 50; n += 1) {
     if ((await chrome.avaliar('document.body?.innerText')) === 'autenticado') break;
     await new Promise(r => setTimeout(r, 50));
   }
   assert.equal(await chrome.avaliar('document.body.innerText'), 'autenticado', 'novo processo restaura sessão sintética nativa, inclusive cookie sem expiração');
+  await chrome.fechar(); rt.liberar();
+  rt = prepararRuntime(tmpChrome); chrome = await abrirChromePipe(rt);
+  assert.equal((await paginas(chrome)).length, 1, 'terceira execução não volta a acumular abas');
+  await chrome.comando('Page.navigate', { url });
+  for (let n = 0; n < 50; n += 1) {
+    if ((await chrome.avaliar('document.body?.innerText')) === 'autenticado') break;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  assert.equal(await chrome.avaliar('document.body.innerText'), 'autenticado', 'cookie só de sessão sobrevive ao ciclo repetido de limpeza e restauração');
   console.log('OK: Chrome real por pipe e sessão sintética persistente entre processos');
 } finally {
   if (chrome) await chrome.fechar();
@@ -251,3 +266,23 @@ try {
   if (rtFalha) rtFalha.liberar();
   fs.rmSync(pastaFalha, { recursive: true, force: true });
 }
+
+for (const modo of ['aba-recusada', 'inventario-invalido', 'aba-pendente']) {
+  const pasta = fs.mkdtempSync(path.join(tmpdir(), 'ssh-abas-recusadas-'));
+  const pid = path.join(pasta, 'filho.pid');
+  const wrapper = path.join(pasta, 'chrome-falso');
+  fs.writeFileSync(wrapper, `#!/bin/sh\nexec ${shell(process.execPath)} ${shell(fixtureFilhos)} ${shell(pid)} ${modo}\n`, { mode: 0o700 });
+  let rt;
+  try {
+    rt = prepararRuntime(pasta);
+    await assert.rejects(abrirChromePipe(rt, { executavel: wrapper }), /aba/,
+      'inventário ou fechamento incerto deve recusar inicialização, não operar com abas extras');
+    const estado = spawnSync('ps', ['-p', fs.readFileSync(pid, 'utf8'), '-o', 'stat='], { encoding: 'utf8' }).stdout.trim();
+    assert.ok(!estado || estado.startsWith('Z'), 'falha ao isolar aba encerra também descendentes');
+  } finally {
+    if (fs.existsSync(pid)) { try { process.kill(Number(fs.readFileSync(pid, 'utf8')), 'SIGKILL'); } catch {} }
+    if (rt) rt.liberar();
+    fs.rmSync(pasta, { recursive: true, force: true });
+  }
+}
+console.log('OK: uma aba exclusiva por execução, restauração nativa e recusa de limpeza incerta');

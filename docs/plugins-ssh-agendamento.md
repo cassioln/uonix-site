@@ -15,11 +15,13 @@ A rotina do profile Rocky pode abrir temporariamente o SSH da hospedagem **73381
 
 O helper operacional usa uma revisão Git fixa e limpa, em worktree detached fora do scratch. O profile/runtime é privado e separado do perfil pessoal. Atualização dessa revisão é uma operação deliberada: não resolver `HEAD` ou atualizar automaticamente na execução semanal.
 
-Revisão do código da CLI instalada nesta entrega: `004db26debb1da89a5f25a5c5c6b5e6b9e28ff0e`.
+Revisão inicialmente instalada: `004db26debb1da89a5f25a5c5c6b5e6b9e28ff0e`. A revisão efetivamente adotada após correções deve ser conferida no script prévio e no contrato vivo do job, não deduzida desse registro histórico.
 
 Caminho do executor:
 
 `/Users/cassio/.hermes/profiles/rocky/runtimes/uonix-ssh/004db26debb1da89a5f25a5c5c6b5e6b9e28ff0e`
+
+Cada atualização usa outro diretório com seu SHA completo; não editar o runtime fixado anterior. Conferir revisão, CI, sessão e execução somente leitura no scheduler antes de substituir o contrato semanal. A expiração normal da sessão da Locaweb exige reautenticação humana; não tentar mantê-la viva artificialmente.
 
 O script de pré-leitura do profile é `scripts/uonix-ssh-status.sh`, fora do repositório. Ele exige `HERMES_HOME` do Rocky, fixa o PATH operacional, usa o scratch do Rocky como TMPDIR, confere HEAD exato e árvore limpa e executa somente `ssh-painel.mjs status`. Seu resultado é contexto para o agente, não autorização para ultrapassar gates.
 

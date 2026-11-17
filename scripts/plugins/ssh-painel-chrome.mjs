@@ -125,6 +125,32 @@ export async function abrirChromePipe(runtime, { visivel = false, executavel = p
   try {
     await enviar('Browser.getVersion');
     const { targetId } = await enviar('Target.createTarget', { url: 'about:blank' });
+    // A restauração é do perfil exclusivo deste helper, nunca do Chrome pessoal.
+    // Conservar cookies pelo navegador não exige conservar suas abas antigas.
+    const fechando = new Set();
+    const prazoAbas = Date.now() + 5000;
+    let sozinhaDesde;
+    while (true) {
+      const { targetInfos } = await enviar('Target.getTargets');
+      if (!Array.isArray(targetInfos) || targetInfos.length > 128
+          || !targetInfos.some(t => t.type === 'page' && t.targetId === targetId)) throw new Error('abas do perfil não confirmadas');
+      const antigas = targetInfos.filter(t => t.type === 'page' && t.targetId !== targetId);
+      if (!antigas.length) {
+        sozinhaDesde ??= Date.now();
+        if (Date.now() - sozinhaDesde >= 500) break;
+      } else {
+        sozinhaDesde = undefined;
+        await Promise.all(antigas.filter(t => !fechando.has(t.targetId)).map(async t => {
+          if (typeof t.targetId !== 'string' || fechando.size >= 128) throw new Error('aba do perfil inválida');
+          fechando.add(t.targetId);
+          const r = await enviar('Target.closeTarget', { targetId: t.targetId });
+          if (r.success !== true) throw new Error('fechamento de aba antiga não confirmado');
+        }));
+      }
+      // closeTarget aceita o pedido antes de remover a aba do inventário CDP.
+      if (Date.now() >= prazoAbas) throw new Error('aba exclusiva não confirmada');
+      await new Promise(r => setTimeout(r, 50));
+    }
     const { sessionId } = await enviar('Target.attachToTarget', { targetId, flatten: true });
     const comando = (metodo, params) => enviar(metodo, params, sessionId);
     await comando('Page.enable');
