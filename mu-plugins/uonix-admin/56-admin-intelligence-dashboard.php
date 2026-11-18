@@ -649,6 +649,79 @@ if ( ! function_exists( 'uonix_intelligence_anomaly_reason_message' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_intelligence_rewrite_repair_option' ) ) {
+	/**
+	 * Opção em que a guarda das regras de reescrita do Rank Math grava o último reparo (#305).
+	 *
+	 * É o mesmo nome de `uonix_rewrite_guard_repair_option()`, em `uonix-content/50-seo-regras-reescrita-rank-math.php`,
+	 * repetido aqui de propósito: este módulo não depende do `uonix-content`, e o teste do painel prende a igualdade.
+	 * O nome também está em `protected_options_where()` (`scripts/clone-environment.sh`): sem isso, um clone `prod -> qa`
+	 * traria o registro da produção, e a tela do QA afirmaria um reparo que o QA nunca fez.
+	 */
+	function uonix_intelligence_rewrite_repair_option() {
+		return 'uonix_rewrite_rules_repair';
+	}
+}
+
+if ( ! function_exists( 'uonix_intelligence_rewrite_repair_info' ) ) {
+	/**
+	 * O último reparo automático das regras de reescrita, no que a tela pode afirmar (#367).
+	 *
+	 * A guarda grava `array( 'at' => int, 'missing' => string[] )`: a hora do reparo e, no máximo, cinco regras que
+	 * faltavam. Só leitura: sem requisição, sem consulta além da opção, sem gravar.
+	 *
+	 * - `none`: a opção não existe. A guarda nunca regravou neste ambiente, ou não teve sinal para regravar.
+	 * - `unreadable`: a opção existe, mas não tem a forma que a guarda grava, ou a hora é impossível (zero, negativa,
+	 *   texto, decimal, ou mais de um dia no futuro). Dito na tela, e nunca convertido numa data inventada.
+	 * - `recorded`: a hora é um inteiro positivo. `missing` tem só as regras que são texto UTF-8 válido e não vazio, no
+	 *   máximo cinco, cada uma cortada em 120 caracteres: o valor vem de `wp_options` e a tela não cresce sem limite. Uma
+	 *   regra que não é UTF-8 válido é DESCARTADA, e não mostrada com o byte trocado: `mb_substr` põe `?` no lugar (a tela
+	 *   mostraria uma regra diferente da gravada) e o `esc_html` do core esvazia a string inteira (um `<code></code>` vazio).
+	 *   O corte usa PCRE com `u`, que conta caracteres, não depende de `mbstring` e já devolve `false` para UTF-8 inválido. Uma lista malformada deixa de mostrar
+	 *   as regras, mas a data, que é verdadeira, continua.
+	 *
+	 * @param int|null $now Para teste; o padrão é `time()`.
+	 * @return array{state: string, at: int, missing: string[]}
+	 */
+	function uonix_intelligence_rewrite_repair_info( $now = null ) {
+		if ( ! function_exists( 'get_option' ) ) {
+			return array( 'state' => 'none', 'at' => 0, 'missing' => array() );
+		}
+		$bruto = get_option( uonix_intelligence_rewrite_repair_option(), null );
+		if ( null === $bruto ) {
+			return array( 'state' => 'none', 'at' => 0, 'missing' => array() );
+		}
+
+		$agora = is_int( $now ) ? $now : time();
+		if ( ! is_array( $bruto ) || ! isset( $bruto['at'] ) || ! is_int( $bruto['at'] ) || $bruto['at'] <= 0 || $bruto['at'] > $agora + 86400 ) {
+			return array( 'state' => 'unreadable', 'at' => 0, 'missing' => array() );
+		}
+
+		$regras = array();
+		if ( isset( $bruto['missing'] ) && is_array( $bruto['missing'] ) ) {
+			foreach ( $bruto['missing'] as $regra ) {
+				if ( ! is_string( $regra ) || '' === trim( $regra ) ) {
+					continue;
+				}
+				// A MESMA chamada valida e corta: com `u`, o PCRE devolve `false` (e não 1) se a regra não for UTF-8 válido, e uma regra
+				// válida sempre casa (`.{0,120}` aceita zero caracteres). Então "não casou" é "UTF-8 inválido" (ou um erro do PCRE), e a regra
+				// é DESCARTADA, falhando fechado: aparecer inteira e sem limite, ou trocada por `?`, seria pior. Uma checagem `//u` à parte
+				// seria código morto, porque o corte já a faz.
+				if ( 1 !== preg_match( '/^.{0,120}/su', $regra, $corte ) ) {
+					continue;
+				}
+				// A regra é UTF-8 válido, então "cortada diferente do original" é exatamente "tinha mais de 120 caracteres".
+				$regras[] = $corte[0] === $regra ? $regra : $corte[0] . '…';
+				if ( count( $regras ) >= 5 ) {
+					break;
+				}
+			}
+		}
+
+		return array( 'state' => 'recorded', 'at' => $bruto['at'], 'missing' => $regras );
+	}
+}
+
 if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 	/**
 	 * Painel da aba "Anomalias" (Módulo 5).
@@ -837,6 +910,28 @@ if ( ! function_exists( 'uonix_intelligence_render_anomalies_panel' ) ) {
 					</div>
 				<?php endif; ?>
 			<?php endif; ?>
+
+			<?php
+			// Registro da guarda das regras de reescrita (#367). Só leitura de uma opção: a tela mostra o que está gravado.
+			$reparo = uonix_intelligence_rewrite_repair_info();
+			?>
+			<h3>Regras de reescrita do sitemap e das categorias</h3>
+			<p>Uma regravação das regras de reescrita feita sem o Rank Math carregado apaga as regras do sitemap e das categorias de produto, e essas páginas passam a dar 404. A cada requisição comum, a guarda confere se as regras de sitemap do Rank Math estão gravadas e, se não estiverem, agenda a regravação das regras (no máximo uma a cada 15 minutos).</p>
+			<?php if ( 'recorded' === $reparo['state'] ) : ?>
+				<div class="notice notice-info inline">
+					<p><strong><?php echo esc_html( 'Última regravação automática: ' . uonix_intelligence_radar_time( $reparo['at'], 'd/m/Y H:i' ) ); ?></strong></p>
+					<?php if ( array() !== $reparo['missing'] ) : ?>
+						<p>Regras que faltavam: <?php echo implode( ', ', array_map( static function ( $regra ) { return '<code>' . esc_html( $regra ) . '</code>'; }, $reparo['missing'] ) ); ?></p>
+					<?php endif; ?>
+				</div>
+			<?php elseif ( 'unreadable' === $reparo['state'] ) : ?>
+				<div class="notice notice-warning inline">
+					<p><strong>Registro de regravação ilegível.</strong> O valor gravado em <code><?php echo esc_html( uonix_intelligence_rewrite_repair_option() ); ?></code> não tem a forma que a guarda grava (a hora e as regras que faltavam), então não é mostrado.</p>
+				</div>
+			<?php else : ?>
+				<p>Nenhuma regravação automática registrada.</p>
+			<?php endif; ?>
+			<p class="description">A hora é a de quando a guarda agendou a regravação: o registro é gravado antes de a regravação rodar, e guarda só o último reparo. Esta tela não mostra se o reparo funcionou, e a falta de registro não prova que as regras estejam gravadas: a guarda só olha as regras de sitemap do Rank Math, então não vê o caso em que só as das categorias somem, nem o de o módulo de sitemap estar desligado. Um reparo que não resolve é repetido pela guarda e a hora se renova, então uma data sempre recente pode ser esse caso, e a tela não consegue distingui-lo de um reparo único. Para conferir, abra <code>/sitemap_index.xml</code> e uma página de categoria.</p>
 		</section>
 		<?php
 	}
