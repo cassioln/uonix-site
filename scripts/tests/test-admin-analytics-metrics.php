@@ -72,6 +72,16 @@ function wp_remote_post( $url, $args ) {
 	if ( isset( $GLOBALS['uonix_metrics_gsc_log'] ) && str_contains( $url, 'searchAnalytics/query' ) ) {
 		$GLOBALS['uonix_metrics_gsc_log'][] = json_decode( (string) ( $args['body'] ?? '' ), true );
 	}
+	// #300: o corpo de cada pedido ao GA4, e uma resposta programável da Search Console (devolve texto JSON, ou null para seguir o padrão).
+	if ( isset( $GLOBALS['uonix_metrics_ga4_log'] ) && str_contains( $url, 'analyticsdata.googleapis.com' ) ) {
+		$GLOBALS['uonix_metrics_ga4_log'][] = json_decode( (string) ( $args['body'] ?? '' ), true );
+	}
+	if ( is_callable( $GLOBALS['uonix_metrics_gsc_respond'] ?? null ) && str_contains( $url, 'searchAnalytics/query' ) ) {
+		$corpo_programado = call_user_func( $GLOBALS['uonix_metrics_gsc_respond'], json_decode( (string) ( $args['body'] ?? '' ), true ) );
+		if ( is_string( $corpo_programado ) ) {
+			return array( 'response' => array( 'code' => 200 ), 'body' => $corpo_programado );
+		}
+	}
 	if ( null !== $GLOBALS['uonix_metrics_http_capture'] && str_contains( $url, 'analyticsdata.googleapis.com' ) ) {
 		$GLOBALS['uonix_metrics_http_capture'] = array( 'url' => $url, 'args' => $args );
 		return array( 'response' => array( 'code' => 200 ), 'body' => '{"kind":"analyticsData#runReport","metadata":{},"rowCount":"0"}' );
@@ -135,6 +145,105 @@ if ( function_exists( 'uonix_analytics_metrics_periods' ) ) {
 		&& array( 'start' => '2026-08-30', 'end' => '2026-09-05' ) === $seven_day_periods['previous'],
 		'Período de sete dias termina ontem e compara sete dias anteriores'
 	);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// #300: a Search Console do painel compara janelas ASSENTADAS, e declara quantos dias cada uma tem. O painel comparava
+// [hoje-N, ontem] contra a anterior, e a Search Console publica a série final com 2 a 3 dias de atraso: a janela atual somava N-1 a N-2 dias
+// contra N (L-1, com L a defasagem de publicação). Medido em 2026-11-18, dado final: 7 dias, 6 de 7 na atual, -7,4% mostrado; com o dia
+// provisório (`dataState: all`) a MESMA janela dá +19,0%. A semana assentada (outra semana) dá +23,2%.
+// Datas esperadas calculadas por um oráculo independente (Python `datetime`), e não pela função testada.
+// ---------------------------------------------------------------------------------------------------------------------------
+uonix_metrics_assert( function_exists( 'uonix_analytics_metrics_search_console_settle_lag' ) && function_exists( 'uonix_analytics_metrics_search_console_periods' ) && function_exists( 'uonix_analytics_metrics_search_console_windows' ) && function_exists( 'uonix_analytics_metrics_snapshot_search_console_window' ), '#300: o 53 expõe a defasagem, as janelas assentadas, a contagem de dias presentes e o leitor da janela do snapshot' );
+if ( function_exists( 'uonix_analytics_metrics_search_console_periods' ) && function_exists( 'uonix_analytics_metrics_search_console_settle_lag' ) ) {
+	uonix_metrics_assert( 4 === uonix_analytics_metrics_search_console_settle_lag(), '#300: a defasagem é de 4 dias (3 medidos na Search Console, mais um de margem)' );
+	$assentadas = array(
+		// hoje, dias => atual (início, fim), anterior (início, fim)
+		array( '2026-11-18', 7,   '2026-11-08', '2026-11-14', '2026-11-01', '2026-11-07' ),
+		array( '2026-11-18', 30,  '2026-10-16', '2026-11-14', '2026-09-16', '2026-10-15' ),
+		array( '2026-11-18', 90,  '2026-08-17', '2026-11-14', '2026-05-19', '2026-08-16' ),
+		array( '2026-11-18', 365, '2025-11-15', '2026-11-14', '2024-11-15', '2025-11-14' ),
+		array( '2027-01-02', 7,   '2026-12-23', '2026-12-29', '2026-12-16', '2026-12-22' ),
+		array( '2028-03-03', 30,  '2028-01-30', '2028-02-28', '2027-12-31', '2028-01-29' ),
+		array( '2026-10-01', 30,  '2026-08-29', '2026-09-27', '2026-07-30', '2026-08-28' ),
+	);
+	// A janela do GA4 (termina ONTEM), do mesmo oráculo: início e fim da atual e da anterior. Compara com LITERAIS, e não a função com ela
+	// mesma: foi assim que a #300 deixaria passar uma defasagem que vazasse para o GA4.
+	$ga4_esperado = array(
+		'2026-11-18|7'   => array( '2026-11-11', '2026-11-17', '2026-11-04', '2026-11-10' ),
+		'2026-11-18|30'  => array( '2026-10-19', '2026-11-17', '2026-09-19', '2026-10-18' ),
+		'2026-11-18|90'  => array( '2026-08-20', '2026-11-17', '2026-05-22', '2026-08-19' ),
+		'2026-11-18|365' => array( '2025-11-18', '2026-11-17', '2024-11-18', '2025-11-17' ),
+		'2027-01-02|7'   => array( '2026-12-26', '2027-01-01', '2026-12-19', '2026-12-25' ),
+		'2028-03-03|30'  => array( '2028-02-02', '2028-03-02', '2028-01-03', '2028-02-01' ),
+		'2026-10-01|30'  => array( '2026-09-01', '2026-09-30', '2026-08-02', '2026-08-31' ),
+	);
+	foreach ( $assentadas as $caso ) {
+		$p = uonix_analytics_metrics_search_console_periods( $caso[0], $caso[1] );
+		uonix_metrics_assert(
+			array( 'start' => $caso[2], 'end' => $caso[3] ) === $p['current'] && array( 'start' => $caso[4], 'end' => $caso[5] ) === $p['previous'],
+			"#300: janelas assentadas de {$caso[1]} dias em {$caso[0]}; obteve " . var_export( $p, true )
+		);
+		$ga = uonix_analytics_metrics_periods( $caso[0], $caso[1] );
+		uonix_metrics_assert( $p['current']['end'] < $ga['current']['end'], "#300: a janela da Search Console termina ANTES da do GA4 em {$caso[0]} (o GA4 termina ontem)" );
+		$g = $ga4_esperado[ $caso[0] . '|' . $caso[1] ];
+		uonix_metrics_assert(
+			array( 'start' => $g[0], 'end' => $g[1] ) === $ga['current'] && array( 'start' => $g[2], 'end' => $g[3] ) === $ga['previous'],
+			"#300: a janela do GA4 (uonix_analytics_metrics_periods) segue terminando ONTEM em {$caso[0]} ({$caso[1]} dias), sem a defasagem; obteve " . var_export( $ga, true )
+		);
+	}
+	// A asserção anti-regressão central (a da issue): com a série terminando em HOJE - 3 (o que a Search Console publica), a janela do
+	// painel antigo, que termina ontem, tem 5 de 7 dias, e a assentada tem 7 de 7. É o defeito e a correção sobre a MESMA série.
+	if ( function_exists( 'uonix_analytics_metrics_search_console_windows' ) ) {
+		$serie_hoje_menos_3 = array();
+		for ( $d = new DateTimeImmutable( '2026-11-01', new DateTimeZone( 'UTC' ) ); $d->format( 'Y-m-d' ) <= '2026-11-15'; $d = $d->modify( '+1 day' ) ) {
+			$serie_hoje_menos_3[] = array( 'keys' => array( $d->format( 'Y-m-d' ) ), 'clicks' => 1, 'impressions' => 10, 'ctr' => 0.1, 'position' => 5.0 );
+		}
+		$antigo   = uonix_analytics_metrics_search_console_windows( $serie_hoje_menos_3, uonix_analytics_metrics_periods( '2026-11-18', 7 ) );
+		$assentado = uonix_analytics_metrics_search_console_windows( $serie_hoje_menos_3, uonix_analytics_metrics_search_console_periods( '2026-11-18', 7 ) );
+		uonix_metrics_assert( 5 === $antigo['current']['days_present'] && 7 === $antigo['current']['days'], '#300: SEM a correção (janela até ontem) a série até hoje-3 dá 5 de 7 dias na janela atual; obteve ' . var_export( $antigo['current'], true ) );
+		uonix_metrics_assert( 7 === $assentado['current']['days_present'] && 7 === $assentado['previous']['days_present'], '#300: COM a janela assentada a mesma série dá 7 de 7 nas duas janelas; obteve ' . var_export( $assentado, true ) );
+	}
+	// Período inválido volta para 30, como no resto do módulo.
+	$invalido = uonix_analytics_metrics_search_console_periods( '2026-11-18', 13 );
+	uonix_metrics_assert( array( 'start' => '2026-10-16', 'end' => '2026-11-14' ) === $invalido['current'], '#300: período fora da allowlist volta para 30 dias' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_search_console_windows' ) ) {
+	$linhas_serie = static function ( array $datas ) {
+		return array_map( static function ( $d ) { return array( 'keys' => array( $d ), 'clicks' => 1, 'impressions' => 10, 'ctr' => 0.1, 'position' => 5.0 ); }, $datas );
+	};
+	$dias = static function ( $inicio, $fim, array $menos = array() ) {
+		$out = array();
+		for ( $d = new DateTimeImmutable( $inicio, new DateTimeZone( 'UTC' ) ); $d->format( 'Y-m-d' ) <= $fim; $d = $d->modify( '+1 day' ) ) {
+			if ( ! in_array( $d->format( 'Y-m-d' ), $menos, true ) ) { $out[] = $d->format( 'Y-m-d' ); }
+		}
+		return $out;
+	};
+	$p7 = uonix_analytics_metrics_search_console_periods( '2026-11-18', 7 );
+	$completa = uonix_analytics_metrics_search_console_windows( $linhas_serie( $dias( '2026-11-01', '2026-11-14' ) ), $p7 );
+	uonix_metrics_assert( 7 === $completa['current']['days_present'] && 7 === $completa['previous']['days_present'] && 7 === $completa['current']['days'] && 4 === $completa['settle_lag'], '#300: 14 dias presentes: 7 em cada janela; obteve ' . var_export( $completa, true ) );
+	// Buraco no INTERIOR da janela atual: a contagem diz 6 de 7. É o que separa "zero impressões" de "dia ausente" (a API omite os dois).
+	$furada = uonix_analytics_metrics_search_console_windows( $linhas_serie( $dias( '2026-11-01', '2026-11-14', array( '2026-11-11' ) ) ), $p7 );
+	uonix_metrics_assert( 6 === $furada['current']['days_present'] && 7 === $furada['previous']['days_present'], '#300: o dia ausente no meio da janela atual conta: 6 de 7; obteve ' . var_export( $furada, true ) );
+	// Dia FORA da janela não conta (a série pedida cobre as duas janelas, mas uma linha fora delas não pode inflar a contagem).
+	$fora = uonix_analytics_metrics_search_console_windows( $linhas_serie( array_merge( $dias( '2026-11-01', '2026-11-14' ), array( '2026-11-15', '2026-11-16', '2026-10-30' ) ) ), $p7 );
+	uonix_metrics_assert( 7 === $fora['current']['days_present'] && 7 === $fora['previous']['days_present'], '#300: linha fora das duas janelas não entra na contagem; obteve ' . var_export( $fora, true ) );
+	// Fronteiras: o primeiro e o último dia de cada janela entram (inclusivo), e um dia a mais de cada lado não.
+	$bordas = uonix_analytics_metrics_search_console_windows( $linhas_serie( array( '2026-11-01', '2026-11-07', '2026-11-08', '2026-11-14', '2026-10-31', '2026-11-15' ) ), $p7 );
+	uonix_metrics_assert( 2 === $bordas['current']['days_present'] && 2 === $bordas['previous']['days_present'], '#300: início e fim de cada janela entram, e o dia anterior e o seguinte não; obteve ' . var_export( $bordas, true ) );
+	// Série vazia: zero dias nas duas (colapso ou nada publicado: quem lê decide, a contagem só diz o que há).
+	$vazia = uonix_analytics_metrics_search_console_windows( array(), $p7 );
+	uonix_metrics_assert( 0 === $vazia['current']['days_present'] && 0 === $vazia['previous']['days_present'], '#300: série vazia: 0 dias nas duas janelas' );
+	// Duplicata da mesma data conta uma vez; chave que não é data é ignorada.
+	$duplicada = uonix_analytics_metrics_search_console_windows( array_merge( $linhas_serie( array( '2026-11-08', '2026-11-08' ) ), array( array( 'keys' => array( 'nao-e-data' ), 'impressions' => 1 ), array( 'keys' => array(), 'impressions' => 1 ), 'lixo' ) ), $p7 );
+	uonix_metrics_assert( 1 === $duplicada['current']['days_present'], '#300: a mesma data duas vezes conta um dia, e linha sem data válida é ignorada; obteve ' . var_export( $duplicada, true ) );
+	// Só a data EXATA conta: uma chave com hora ou sufixo (`2026-11-08T00:00:00Z`, `2026-11-08x`) não é o dia 2026-11-08. A Search Console devolve
+	// `YYYY-MM-DD` para a dimensão `date`, e aceitar outra forma contaria como presente um dia que ela não declarou.
+	foreach ( array( '2026-11-08T00:00:00Z', '2026-11-08 ', '2026-11-08x' ) as $chave_suja ) {
+		$suja = uonix_analytics_metrics_search_console_windows( array( array( 'keys' => array( $chave_suja ), 'impressions' => 1 ) ), $p7 );
+		uonix_metrics_assert( 0 === $suja['current']['days_present'], '#300: a chave ' . var_export( $chave_suja, true ) . ' não conta como o dia 2026-11-08; obteve ' . $suja['current']['days_present'] );
+	}
 }
 
 if ( function_exists( 'uonix_analytics_metrics_get_snapshot' ) ) {
@@ -408,13 +517,35 @@ if ( function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
 			'search_console_site_url' => 'sc-domain:uonix.com.br',
 			'credentials'             => array( 'client_email' => 'conta@projeto.iam.gserviceaccount.com', 'private_key' => $chave_pem, 'token_uri' => 'https://oauth2.googleapis.com/token' ),
 		);
-		$periodos_fetch = array( 'current' => array( 'start' => '2026-09-01', 'end' => '2026-09-30' ), 'previous' => array( 'start' => '2026-08-01', 'end' => '2026-08-31' ) );
+		// Janelas reais de 30 dias (hoje = 2026-10-01): atual 09-01..09-30 e anterior 08-02..08-31. As assentadas (defasagem 4) são
+		// atual 08-29..09-27 e anterior 07-30..08-28 (#300).
+		$periodos_fetch = uonix_analytics_metrics_periods( '2026-10-01', 30 );
+		if ( function_exists( 'uonix_analytics_metrics_search_console_periods' ) ) {
+			$periodos_fetch['search_console'] = uonix_analytics_metrics_search_console_periods( '2026-10-01', 30 );
+		}
 		$GLOBALS['uonix_metrics_token_ok']   = true;
 		$GLOBALS['uonix_metrics_gsc_log']    = array();
+		$GLOBALS['uonix_metrics_ga4_log']    = array();
 		$GLOBALS['uonix_metrics_http_capture'] = array();
+		// Resposta programável: a série POR DATA (a chamada que conta os dias presentes) devolve uma linha por dia pedido, menos os
+		// dias de `$GLOBALS['uonix_metrics_gsc_buracos']`. As demais chamadas seguem vazias, como antes.
+		$GLOBALS['uonix_metrics_gsc_buracos']  = array( '2026-08-10', '2026-09-20', '2026-09-21' );
+		$GLOBALS['uonix_metrics_gsc_respond']  = static function ( $corpo ) {
+			if ( array( 'date' ) !== ( $corpo['dimensions'] ?? null ) ) {
+				return null;
+			}
+			$linhas = array();
+			for ( $d = new DateTimeImmutable( $corpo['startDate'], new DateTimeZone( 'UTC' ) ); $d->format( 'Y-m-d' ) <= $corpo['endDate']; $d = $d->modify( '+1 day' ) ) {
+				if ( ! in_array( $d->format( 'Y-m-d' ), $GLOBALS['uonix_metrics_gsc_buracos'], true ) ) {
+					$linhas[] = array( 'keys' => array( $d->format( 'Y-m-d' ) ), 'clicks' => 1, 'impressions' => 10, 'ctr' => 0.1, 'position' => 5 );
+				}
+			}
+			return json_encode( array( 'responseAggregationType' => 'byProperty', 'rows' => $linhas ) );
+		};
 		$dados_fetch = uonix_analytics_metrics_fetch_google_data( $config_fetch, $periodos_fetch );
 		$gsc_corpos  = $GLOBALS['uonix_metrics_gsc_log'];
-		unset( $GLOBALS['uonix_metrics_gsc_log'] );
+		$ga4_corpos  = $GLOBALS['uonix_metrics_ga4_log'];
+		unset( $GLOBALS['uonix_metrics_gsc_log'], $GLOBALS['uonix_metrics_ga4_log'], $GLOBALS['uonix_metrics_gsc_respond'] );
 		$GLOBALS['uonix_metrics_token_ok']     = false;
 		$GLOBALS['uonix_metrics_http_capture'] = null;
 		uonix_metrics_assert( is_array( $dados_fetch ) && isset( $dados_fetch['search_console'] ), '#336: o fetch de ponta a ponta devolve os dados, e não um erro; obteve ' . var_export( is_wp_error( $dados_fetch ) ? $dados_fetch->get_error_code() : $dados_fetch, true ) );
@@ -422,13 +553,213 @@ if ( function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
 		foreach ( $gsc_corpos as $corpo_gsc ) {
 			$por_dimensao[ implode( '+', (array) ( $corpo_gsc['dimensions'] ?? array( '(resumo)' ) ) ) ][] = $corpo_gsc['rowLimit'] ?? null;
 		}
-		uonix_metrics_assert( 5 === count( $gsc_corpos ), '#336: o fetch faz as cinco chamadas à Search Console; obteve ' . count( $gsc_corpos ) );
+		uonix_metrics_assert( 6 === count( $gsc_corpos ), '#336/#300: o fetch faz as seis chamadas à Search Console (as cinco de antes e a série por data); obteve ' . count( $gsc_corpos ) );
 		uonix_metrics_assert( array( 25000 ) === ( $por_dimensao['query+page'] ?? null ), '#336: a chamada query+page pede o teto da API, 25000 linhas; obteve ' . var_export( $por_dimensao['query+page'] ?? null, true ) );
 		uonix_metrics_assert( array( 1000 ) === ( $por_dimensao['query'] ?? null ), '#336: a chamada query segue pedindo o universo de consultas (1000); obteve ' . var_export( $por_dimensao['query'] ?? null, true ) );
 		uonix_metrics_assert( array( 10 ) === ( $por_dimensao['page'] ?? null ), '#336: a chamada page segue pedindo 10; obteve ' . var_export( $por_dimensao['page'] ?? null, true ) );
 		uonix_metrics_assert( array( 1, 1 ) === ( $por_dimensao['(resumo)'] ?? null ), '#336: os dois resumos seguem pedindo 1 linha; obteve ' . var_export( $por_dimensao['(resumo)'] ?? null, true ) );
+		// #300: TODA a leitura da Search Console usa a janela assentada, e o GA4 segue na dele (termina ontem). O corpo de cada pedido é lido
+		// da rede simulada, e não deduzido do código.
+		$janelas_gsc = array();
+		foreach ( $gsc_corpos as $corpo_gsc ) {
+			$janelas_gsc[ implode( '+', (array) ( $corpo_gsc['dimensions'] ?? array( '(resumo)' ) ) ) ][] = ( $corpo_gsc['startDate'] ?? '?' ) . '..' . ( $corpo_gsc['endDate'] ?? '?' );
+		}
+		uonix_metrics_assert( array( '2026-08-29..2026-09-27', '2026-07-30..2026-08-28' ) === ( $janelas_gsc['(resumo)'] ?? null ), '#300: os dois resumos da Search Console usam a janela assentada (atual e anterior); obteve ' . var_export( $janelas_gsc['(resumo)'] ?? null, true ) );
+		uonix_metrics_assert( array( '2026-08-29..2026-09-27' ) === ( $janelas_gsc['query'] ?? null ) && array( '2026-08-29..2026-09-27' ) === ( $janelas_gsc['page'] ?? null ) && array( '2026-08-29..2026-09-27' ) === ( $janelas_gsc['query+page'] ?? null ), '#300: consultas, páginas e consulta+página usam a MESMA janela assentada do resumo; obteve ' . var_export( array( $janelas_gsc['query'] ?? null, $janelas_gsc['page'] ?? null, $janelas_gsc['query+page'] ?? null ), true ) );
+		uonix_metrics_assert( array( '2026-07-30..2026-09-27' ) === ( $janelas_gsc['date'] ?? null ) && array( 25000 ) === ( $por_dimensao['date'] ?? null ), '#300: a série por data cobre as duas janelas (anterior e atual) em uma chamada só, pedindo o teto da API (nenhum corte silencioso); obteve ' . var_export( array( $janelas_gsc['date'] ?? null, $por_dimensao['date'] ?? null ), true ) );
+		$janelas_ga4 = array();
+		foreach ( $ga4_corpos as $corpo_ga4 ) {
+			$janelas_ga4[] = ( $corpo_ga4['dateRanges'][0]['startDate'] ?? '?' ) . '..' . ( $corpo_ga4['dateRanges'][0]['endDate'] ?? '?' );
+		}
+		uonix_metrics_assert( 4 === count( $ga4_corpos ), '#300: o GA4 faz 4 chamadas por sincronização (atual, anterior, páginas de entrada e uma página de visualizações; o fixture não pagina) e a Search Console 6: 10, contra 9 antes e os 8 que o contrato dizia; obteve ' . count( $ga4_corpos ) );
+		uonix_metrics_assert( array() !== $janelas_ga4 && array() === array_diff( array_unique( $janelas_ga4 ), array( '2026-09-01..2026-09-30', '2026-08-02..2026-08-31' ) ), '#300: o GA4 NÃO muda de janela (termina ontem: a defasagem dele é de horas); obteve ' . var_export( array_unique( $janelas_ga4 ), true ) );
+		uonix_metrics_assert( isset( $dados_fetch['search_console']['windows'] ) && array( 'settle_lag' => 4, 'current' => array( 'start' => '2026-08-29', 'end' => '2026-09-27', 'days' => 30, 'days_present' => 28 ), 'previous' => array( 'start' => '2026-07-30', 'end' => '2026-08-28', 'days' => 30, 'days_present' => 29 ) ) === $dados_fetch['search_console']['windows'], '#300: o fetch declara quantos dias de cada janela têm dado (28 de 30 na atual, 29 de 30 na anterior); obteve ' . var_export( $dados_fetch['search_console']['windows'] ?? null, true ) );
 		uonix_metrics_assert( 25000 === uonix_analytics_metrics_query_page_limit() && uonix_analytics_metrics_query_page_limit() > uonix_analytics_metrics_extended_query_limit(), '#336: o limite da chamada query+page é o teto da API, acima do universo de consultas' );
 	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// #300: o leitor da janela da Search Console no snapshot, a normalização com dia faltando, o montador e a sincronização.
+// ---------------------------------------------------------------------------------------------------------------------------
+if ( function_exists( 'uonix_analytics_metrics_snapshot_search_console_window' ) ) {
+	$w_ok = array(
+		'settle_lag' => 4,
+		'current'    => array( 'start' => '2026-11-08', 'end' => '2026-11-14', 'days' => 7, 'days_present' => 7 ),
+		'previous'   => array( 'start' => '2026-11-01', 'end' => '2026-11-07', 'days' => 7, 'days_present' => 6 ),
+	);
+	$com = static function ( $w ) { return array( 'search_console' => array( 'windows' => $w ) ); };
+	uonix_metrics_assert( $w_ok === uonix_analytics_metrics_snapshot_search_console_window( $com( $w_ok ) ), '#300: o leitor devolve a janela declarada pelo snapshot, validada' );
+	// Snapshot legado (gerado antes da #300), ausente ou lixo: NULL, e quem lê não afirma janela assentada.
+	foreach ( array( false, null, 'x', array(), array( 'search_console' => array() ), array( 'search_console' => array( 'windows' => 'x' ) ), array( 'search_console' => array( 'windows' => array() ) ) ) as $legado ) {
+		uonix_metrics_assert( null === uonix_analytics_metrics_snapshot_search_console_window( $legado ), '#300: snapshot sem janela válida devolve null: ' . var_export( $legado, true ) );
+	}
+	$mut = static function ( callable $f ) use ( $w_ok ) { $w = $w_ok; $f( $w ); return $w; };
+	$invalidas = array(
+		'dias da janela não bate com as datas'          => $mut( static function ( &$w ) { $w['current']['days'] = 8; } ),
+		'dias presentes acima dos dias da janela'       => $mut( static function ( &$w ) { $w['current']['days_present'] = 8; } ),
+		'dias presentes negativo'                       => $mut( static function ( &$w ) { $w['previous']['days_present'] = -1; } ),
+		'início depois do fim'                          => $mut( static function ( &$w ) { $w['current']['start'] = '2026-11-15'; $w['current']['days'] = 7; } ),
+		'data que não existe (30/02)'                   => $mut( static function ( &$w ) { $w['previous']['start'] = '2026-02-30'; } ),
+		'data com formato errado'                       => $mut( static function ( &$w ) { $w['current']['end'] = '14/11/2026'; } ),
+		'janelas sobrepostas'                           => $mut( static function ( &$w ) { $w['previous']['end'] = '2026-11-08'; $w['previous']['days'] = 8; } ),
+		'as duas janelas declaram 8 dias, e as datas têm 7' => array( 'settle_lag' => 4, 'current' => array( 'start' => '2026-11-08', 'end' => '2026-11-14', 'days' => 8, 'days_present' => 7 ), 'previous' => array( 'start' => '2026-11-01', 'end' => '2026-11-07', 'days' => 8, 'days_present' => 7 ) ),
+		'janelas de tamanhos diferentes (6 e 7)'        => $mut( static function ( &$w ) { $w['previous']['start'] = '2026-11-02'; $w['previous']['days'] = 6; $w['previous']['days_present'] = 6; } ),
+		'janelas SEPARADAS por um dia (não adjacentes)' => $mut( static function ( &$w ) { $w['previous'] = array( 'start' => '2026-10-31', 'end' => '2026-11-06', 'days' => 7, 'days_present' => 7 ); } ),
+		'janelas coladas mas a anterior ENCOSTA na atual' => $mut( static function ( &$w ) { $w['previous'] = array( 'start' => '2026-11-02', 'end' => '2026-11-08', 'days' => 7, 'days_present' => 7 ); } ),
+		'janela de 366 dias (acima do maior período)'   => array( 'settle_lag' => 4, 'current' => array( 'start' => '2025-11-14', 'end' => '2026-11-14', 'days' => 366, 'days_present' => 366 ), 'previous' => array( 'start' => '2024-11-13', 'end' => '2025-11-13', 'days' => 366, 'days_present' => 366 ) ),
+		'data que não existe numa ponta (31/11)'        => $mut( static function ( &$w ) { $w['current']['end'] = '2026-11-31'; } ),
+		'31/11 que o PHP rola para 01/12 e fecha a conta' => array( 'settle_lag' => 4, 'current' => array( 'start' => '2026-11-31', 'end' => '2026-12-07', 'days' => 7, 'days_present' => 7 ), 'previous' => array( 'start' => '2026-11-24', 'end' => '2026-11-30', 'days' => 7, 'days_present' => 7 ) ),
+		'dia 00'                                        => $mut( static function ( &$w ) { $w['current']['start'] = '2026-11-00'; } ),
+		'anterior DEPOIS da atual'                      => array( 'settle_lag' => 4, 'current' => $w_ok['previous'], 'previous' => $w_ok['current'] ),
+		'defasagem negativa'                            => $mut( static function ( &$w ) { $w['settle_lag'] = -1; } ),
+		'defasagem como texto'                          => $mut( static function ( &$w ) { $w['settle_lag'] = '4'; } ),
+		'dias como texto'                               => $mut( static function ( &$w ) { $w['current']['days'] = '7'; } ),
+		'dias presentes como decimal'                   => $mut( static function ( &$w ) { $w['current']['days_present'] = 6.0; } ),
+		'sem a janela anterior'                         => array( 'settle_lag' => 4, 'current' => $w_ok['current'] ),
+	);
+	foreach ( $invalidas as $rotulo => $w ) {
+		uonix_metrics_assert( null === uonix_analytics_metrics_snapshot_search_console_window( $com( $w ) ), "#300: janela inválida é recusada ({$rotulo})" );
+	}
+	// O leitor devolve o `settle_lag` GRAVADO, e não a constante (revisão do PR): um fixture com 3, 5 e as fronteiras 0 e 30 o diferencia, e 31 é recusado.
+	foreach ( array( 0, 3, 5, 30 ) as $lag_gravado ) {
+		$w_lag = $w_ok; $w_lag['settle_lag'] = $lag_gravado;
+		$lido = uonix_analytics_metrics_snapshot_search_console_window( $com( $w_lag ) );
+		uonix_metrics_assert( is_array( $lido ) && $lag_gravado === $lido['settle_lag'], "#300: o leitor devolve o settle_lag gravado ({$lag_gravado}), e não a constante; obteve " . var_export( $lido['settle_lag'] ?? null, true ) );
+	}
+	$w_lag31 = $w_ok; $w_lag31['settle_lag'] = 31;
+	uonix_metrics_assert( null === uonix_analytics_metrics_snapshot_search_console_window( $com( $w_lag31 ) ), '#300: settle_lag 31 (acima do limite de 30) é recusado' );
+	// A fronteira de cima: 365 dias, o maior período permitido, é aceito.
+	$w_365 = array( 'settle_lag' => 4, 'current' => array( 'start' => '2025-11-15', 'end' => '2026-11-14', 'days' => 365, 'days_present' => 94 ), 'previous' => array( 'start' => '2024-11-15', 'end' => '2025-11-14', 'days' => 365, 'days_present' => 0 ) );
+	uonix_metrics_assert( $w_365 === uonix_analytics_metrics_snapshot_search_console_window( $com( $w_365 ) ), '#300: a janela de 365 dias (o maior período) é aceita, mesmo com poucos dias presentes: a contagem é dado, e a recusa da comparação é de quem lê' );
+	// Chave extra e ordem diferente: o leitor devolve a forma canônica, e não repassa lixo.
+	$extra = $w_ok; $extra['lixo'] = '<script>'; $extra['current']['x'] = 1;
+	uonix_metrics_assert( $w_ok === uonix_analytics_metrics_snapshot_search_console_window( $com( $extra ) ), '#300: chave extra não atravessa o leitor' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
+	$base_gsc = array(
+		'summary_current'  => array( 'clicks' => 15, 'impressions' => 100, 'ctr' => 0.15, 'position' => 8.2 ),
+		'summary_previous' => array( 'clicks' => 10, 'impressions' => 80, 'ctr' => 0.125, 'position' => 9.1 ),
+		'queries'          => array(),
+		'pages'            => array(),
+	);
+	$janela = static function ( $atual_presentes, $anterior_presentes ) {
+		return array(
+			'settle_lag' => 4,
+			'current'    => array( 'start' => '2026-11-08', 'end' => '2026-11-14', 'days' => 7, 'days_present' => $atual_presentes ),
+			'previous'   => array( 'start' => '2026-11-01', 'end' => '2026-11-07', 'days' => 7, 'days_present' => $anterior_presentes ),
+		);
+	};
+	$completo = uonix_analytics_metrics_normalize_search_console( $base_gsc + array( 'windows' => $janela( 7, 7 ) ) );
+	uonix_metrics_assert( is_array( $completo ) && $janela( 7, 7 ) === ( $completo['windows'] ?? null ), '#300: a normalização preserva a janela declarada' );
+	uonix_metrics_assert( is_array( $completo ) && 'comparable' === $completo['summary']['impressions']['state'] && 25.0 === $completo['summary']['impressions']['delta_percent'], '#300: com as duas janelas completas a comparação segue comparável (+25,0%)' );
+	// Dia faltando em QUALQUER das janelas: as quatro métricas viram `incomplete`, e a variação não é calculada.
+	foreach ( array( 'atual 6/7' => $janela( 6, 7 ), 'anterior 6/7' => $janela( 7, 6 ), 'atual 0/7' => $janela( 0, 7 ), 'anterior 0/7' => $janela( 7, 0 ), 'as duas' => $janela( 3, 4 ) ) as $rotulo => $w ) {
+		$n = uonix_analytics_metrics_normalize_search_console( $base_gsc + array( 'windows' => $w ) );
+		$estados = is_array( $n ) ? array_values( array_unique( array_column( $n['summary'], 'state' ) ) ) : array( 'erro' );
+		uonix_metrics_assert( array( 'incomplete' ) === $estados, "#300: janela incompleta ({$rotulo}) recusa a comparação das quatro métricas; obteve " . var_export( $estados, true ) );
+		uonix_metrics_assert( is_array( $n ) && null === $n['summary']['impressions']['delta_percent'] && null === $n['summary']['clicks']['delta_absolute'], "#300: janela incompleta ({$rotulo}) não deixa variação nem diferença calculadas" );
+		uonix_metrics_assert( is_array( $n ) && 100.0 === $n['summary']['impressions']['current'] && 80.0 === $n['summary']['impressions']['previous'], "#300: janela incompleta ({$rotulo}) segue mostrando a soma dos dias que têm dado" );
+	}
+	// O estado `incomplete` vem do normalizador, e não do dado de entrada: um resumo que já traga percentual não escapa da recusa.
+	$com_delta = $base_gsc; $com_delta['summary_current']['delta_percent'] = 99.0; $com_delta['summary_previous']['delta_percent'] = 1.0;
+	$n_delta = uonix_analytics_metrics_normalize_search_console( $com_delta + array( 'windows' => $janela( 6, 7 ) ) );
+	uonix_metrics_assert( is_array( $n_delta ) && null === $n_delta['summary']['impressions']['delta_percent'] && 'incomplete' === $n_delta['summary']['impressions']['state'], '#300: um percentual que já viesse no dado de entrada não atravessa a recusa da janela incompleta' );
+	// `windows` PRESENTE e nulo é janela declarada e inválida, e falha fechado: `isset()` o trataria como ausente e cairia no ramo legado,
+	// comparável e sem verificação (revisão do PR).
+	$com_nulo = uonix_analytics_metrics_normalize_search_console( $base_gsc + array( 'windows' => null ) );
+	uonix_metrics_assert( is_wp_error( $com_nulo ) && 'search_console_windows_invalid' === $com_nulo->get_error_code(), '#300: `windows` presente e nulo falha FECHADO (não é o legado); obteve ' . var_export( is_wp_error( $com_nulo ) ? $com_nulo->get_error_code() : ( $com_nulo['summary']['impressions']['state'] ?? '?' ), true ) );
+	$invalido = uonix_analytics_metrics_normalize_search_console( $base_gsc + array( 'windows' => array( 'settle_lag' => 4 ) ) );
+	uonix_metrics_assert( is_wp_error( $invalido ) && 'search_console_windows_invalid' === $invalido->get_error_code(), '#300: janela declarada e inválida falha FECHADO, e não vira comparação sem verificação' );
+	$legado = uonix_analytics_metrics_normalize_search_console( $base_gsc );
+	uonix_metrics_assert( is_array( $legado ) && ! array_key_exists( 'windows', $legado ) && 'comparable' === $legado['summary']['impressions']['state'], '#300: sem janela declarada (legado e fetchers antigos) a normalização é a de antes' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_assemble_google_data' ) && function_exists( 'uonix_analytics_metrics_search_console_periods' ) ) {
+	$sc_assemble = uonix_analytics_metrics_search_console_periods( '2026-11-18', 7 );
+	$ga_vazio    = '{"kind":"analyticsData#runReport","metadata":{}}';
+	$gsc_vazio   = '{"responseAggregationType":"byProperty","rows":[]}';
+	$datas_raw   = json_encode( array( 'responseAggregationType' => 'byProperty', 'rows' => array_map( static function ( $d ) { return array( 'keys' => array( $d ), 'clicks' => 1, 'impressions' => 10, 'ctr' => 0.1, 'position' => 5 ); }, array( '2026-11-01', '2026-11-02', '2026-11-08', '2026-11-09', '2026-11-10' ) ) ) );
+	$montado     = uonix_analytics_metrics_assemble_google_data( $ga_vazio, $ga_vazio, $ga_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, null, null, $datas_raw, $sc_assemble );
+	uonix_metrics_assert( is_array( $montado ) && 2 === ( $montado['search_console']['windows']['previous']['days_present'] ?? null ) && 3 === ( $montado['search_console']['windows']['current']['days_present'] ?? null ), '#300: o montador conta os dias presentes de cada janela a partir da série por data; obteve ' . var_export( $montado['search_console']['windows'] ?? null, true ) );
+	$sem_serie = uonix_analytics_metrics_assemble_google_data( $ga_vazio, $ga_vazio, $ga_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio );
+	uonix_metrics_assert( is_array( $sem_serie ) && ! array_key_exists( 'windows', $sem_serie['search_console'] ), '#300: sem a série por data o montador não inventa janela (chamadores antigos seguem como antes)' );
+	$serie_ruim = uonix_analytics_metrics_assemble_google_data( $ga_vazio, $ga_vazio, $ga_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, null, null, '{"responseAggregationType":"byProperty","rows":[{"keys":[],"clicks":1,"impressions":1,"ctr":1,"position":1}]}', $sc_assemble );
+	uonix_metrics_assert( is_wp_error( $serie_ruim ), '#300: série por data inválida derruba a montagem (a contagem de dias é o que torna a comparação honesta): ' . var_export( is_wp_error( $serie_ruim ) ? $serie_ruim->get_error_code() : $serie_ruim, true ) );
+	try {
+		$erro_http = uonix_analytics_metrics_assemble_google_data( $ga_vazio, $ga_vazio, $ga_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, null, null, uonix_analytics_metrics_error( 'google_http_503' ), $sc_assemble );
+	} catch ( Throwable $falha_montagem ) {
+		$erro_http = $falha_montagem;
+	}
+	uonix_metrics_assert( is_wp_error( $erro_http ) && 'google_http_503' === $erro_http->get_error_code(), '#300: a série por data que falhou na rede derruba a montagem, com a causa original (e não com uma exceção do decodificador); obteve ' . var_export( is_wp_error( $erro_http ) ? $erro_http->get_error_code() : ( $erro_http instanceof Throwable ? get_class( $erro_http ) : $erro_http ), true ) );
+	// A série por data presente e as janelas com LIMITES inválidos (data que não existe, início depois do fim, janela anterior ausente): erro com
+	// nome próprio, e não a causa 'janelas ausentes' (são problemas diferentes para quem for investigar).
+	foreach ( array(
+		'data que não existe (31/11)'   => array( 'current' => array( 'start' => '2026-11-31', 'end' => '2026-12-07' ), 'previous' => array( 'start' => '2026-11-24', 'end' => '2026-11-30' ) ),
+		'início depois do fim'          => array( 'current' => array( 'start' => '2026-11-14', 'end' => '2026-11-08' ), 'previous' => array( 'start' => '2026-11-01', 'end' => '2026-11-07' ) ),
+		'sem a janela anterior'         => array( 'current' => array( 'start' => '2026-11-08', 'end' => '2026-11-14' ) ),
+	) as $rotulo_limite => $periodos_ruins ) {
+		$limite_ruim = uonix_analytics_metrics_assemble_google_data( $ga_vazio, $ga_vazio, $ga_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, null, null, $datas_raw, $periodos_ruins );
+		uonix_metrics_assert( is_wp_error( $limite_ruim ) && 'search_console_periods_invalid' === $limite_ruim->get_error_code(), "#300: janelas com limites inválidos ({$rotulo_limite}) são erro `search_console_periods_invalid`; obteve " . var_export( is_wp_error( $limite_ruim ) ? $limite_ruim->get_error_code() : 'array sem erro', true ) );
+	}
+	// As janelas SEM a série por data (o esquecimento inverso): erro, e não um snapshot sem `windows` que o painel rotularia de legado.
+	$sem_serie_com_periodos = uonix_analytics_metrics_assemble_google_data( $ga_vazio, $ga_vazio, $ga_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, null, null, null, $sc_assemble );
+	uonix_metrics_assert( is_wp_error( $sem_serie_com_periodos ) && 'search_console_dates_missing' === $sem_serie_com_periodos->get_error_code(), '#300: as janelas assentadas sem a série por data são erro (um sem o outro, nas DUAS direções); obteve ' . var_export( is_wp_error( $sem_serie_com_periodos ) ? $sem_serie_com_periodos->get_error_code() : 'array sem erro', true ) );
+	$sem_periodos = uonix_analytics_metrics_assemble_google_data( $ga_vazio, $ga_vazio, $ga_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, $gsc_vazio, null, null, $datas_raw, null );
+	uonix_metrics_assert( is_wp_error( $sem_periodos ) && 'search_console_periods_missing' === $sem_periodos->get_error_code(), '#300: série por data sem as janelas é erro de programação e falha fechado' );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
+	$GLOBALS['uonix_metrics_token_ok']     = true;
+	$GLOBALS['uonix_metrics_gsc_log']      = array();
+	$GLOBALS['uonix_metrics_ga4_log']      = array();
+	$GLOBALS['uonix_metrics_http_capture'] = array();
+	$sem_sc = uonix_analytics_metrics_fetch_google_data(
+		array( 'ga4_property_id' => '445033830', 'search_console_site_url' => 'sc-domain:uonix.com.br', 'credentials' => array( 'client_email' => 'c@p.iam.gserviceaccount.com', 'private_key' => ( function () { $k = openssl_pkey_new( array( 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA ) ); openssl_pkey_export( $k, $pem ); return $pem; } )(), 'token_uri' => 'https://oauth2.googleapis.com/token' ) ),
+		uonix_analytics_metrics_periods( '2026-10-01', 30 )
+	);
+	$chamadas_sem_sc = count( $GLOBALS['uonix_metrics_gsc_log'] ) + count( $GLOBALS['uonix_metrics_ga4_log'] );
+	unset( $GLOBALS['uonix_metrics_gsc_log'], $GLOBALS['uonix_metrics_ga4_log'] );
+	$GLOBALS['uonix_metrics_token_ok']     = false;
+	$GLOBALS['uonix_metrics_http_capture'] = null;
+	uonix_metrics_assert( is_wp_error( $sem_sc ) && 'search_console_periods_missing' === $sem_sc->get_error_code(), '#300: o fetch sem as janelas assentadas falha fechado, e não volta em silêncio à janela com viés; obteve ' . var_export( is_wp_error( $sem_sc ) ? $sem_sc->get_error_code() : 'array', true ) );
+	uonix_metrics_assert( 0 === $chamadas_sem_sc, '#300: o fetch sem as janelas falha ANTES de qualquer chamada de rede (nenhuma ao GA4 nem à Search Console); fez ' . $chamadas_sem_sc );
+}
+
+if ( function_exists( 'uonix_analytics_metrics_sync' ) && function_exists( 'uonix_analytics_metrics_search_console_periods' ) ) {
+	$GLOBALS['uonix_metrics_options'] = array();
+	$config_300  = array( 'ga4_property_id' => '445033830', 'search_console_site_url' => 'sc-domain:uonix.com.br', 'credentials' => array() );
+	$recebido_300 = null;
+	$fetcher_300 = static function ( $config, $periods ) use ( &$recebido_300 ) {
+		$recebido_300 = $periods;
+		return array(
+			'ga4'            => array( 'summary_current' => array( 'activeUsers' => 3, 'sessions' => 4 ), 'summary_previous' => array( 'activeUsers' => 2, 'sessions' => 2 ), 'landing_pages' => array() ),
+			'search_console' => array(
+				'summary_current'  => array( 'clicks' => 15, 'impressions' => 100, 'ctr' => 0.15, 'position' => 8.2 ),
+				'summary_previous' => array( 'clicks' => 10, 'impressions' => 80, 'ctr' => 0.125, 'position' => 9.1 ),
+				'queries'          => array(),
+				'pages'            => array(),
+				'windows'          => array(
+					'settle_lag' => 4,
+					'current'    => array( 'start' => $periods['search_console']['current']['start'], 'end' => $periods['search_console']['current']['end'], 'days' => 7, 'days_present' => 6 ),
+					'previous'   => array( 'start' => $periods['search_console']['previous']['start'], 'end' => $periods['search_console']['previous']['end'], 'days' => 7, 'days_present' => 7 ),
+				),
+			),
+		);
+	};
+	$snap_300 = uonix_analytics_metrics_sync( $fetcher_300, $config_300, 7 );
+	uonix_metrics_assert( is_array( $snap_300 ) && 'updated' === ( $snap_300['status'] ?? '' ), '#300: a sincronização com a janela da Search Console grava o snapshot; obteve ' . var_export( is_wp_error( $snap_300 ) ? $snap_300->get_error_code() : ( $snap_300['error'] ?? 'ok' ), true ) );
+	$ga_fim = is_array( $recebido_300 ) ? $recebido_300['current']['end'] : '';
+	uonix_metrics_assert( is_array( $recebido_300 ) && isset( $recebido_300['search_console'] ), '#300: o fetcher recebe as janelas assentadas junto das do GA4' );
+	// hoje = fim do GA4 + 1 dia: a relação não depende do relógio do teste.
+	$hoje_300 = ( new DateTimeImmutable( $ga_fim, new DateTimeZone( 'UTC' ) ) )->modify( '+1 day' )->format( 'Y-m-d' );
+	uonix_metrics_assert( is_array( $recebido_300 ) && uonix_analytics_metrics_search_console_periods( $hoje_300, 7 ) === $recebido_300['search_console'], '#300: as janelas entregues ao fetcher são as assentadas de hoje (GA4 termina em ontem); obteve ' . var_export( $recebido_300['search_console'] ?? null, true ) );
+	uonix_metrics_assert( is_array( $snap_300 ) && array( 'current', 'previous' ) === array_keys( $snap_300['periods'] ) && uonix_analytics_metrics_periods( $hoje_300, 7 ) === $snap_300['periods'], '#300: o snapshot segue guardando em `periods` só as janelas do GA4 (o resto do sistema lê dali)' );
+	uonix_metrics_assert( is_array( $snap_300 ) && 6 === ( $snap_300['search_console']['windows']['current']['days_present'] ?? null ), '#300: o snapshot guarda a janela da Search Console com os dias presentes' );
+	uonix_metrics_assert( is_array( $snap_300 ) && 'incomplete' === ( $snap_300['search_console']['summary']['impressions']['state'] ?? '' ) && 'comparable' === ( $snap_300['ga4']['summary']['sessions']['state'] ?? '' ), '#300: a Search Console recusa a comparação (6 de 7 dias) e o GA4 segue comparável (4 contra 2); obteve ' . var_export( array( $snap_300['search_console']['summary']['impressions']['state'] ?? null, $snap_300['ga4']['summary']['sessions']['state'] ?? null ), true ) );
+	$ga4_estados = is_array( $snap_300 ) ? array_column( $snap_300['ga4']['summary'], 'state' ) : array();
+	uonix_metrics_assert( array() === array_diff( $ga4_estados, array( 'comparable', 'new', 'empty' ) ), '#300: nenhum KPI do GA4 ganha o estado incomplete: ' . var_export( $ga4_estados, true ) );
+	$GLOBALS['uonix_metrics_options'] = array();
 }
 
 if ( function_exists( 'uonix_analytics_metrics_ga4_page_views_report' ) ) {

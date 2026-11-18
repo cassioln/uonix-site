@@ -52,11 +52,19 @@ if ( ! function_exists( 'uonix_intelligence_report_seo_window_label' ) ) {
 	 * semana do relatório (#308), é a procedência do bloco que a declara.
 	 */
 	function uonix_intelligence_report_seo_window_label( $snapshot ) {
-		if ( ! is_array( $snapshot ) || ! isset( $snapshot['periods']['current']['start'], $snapshot['periods']['current']['end'] ) ) {
+		if ( ! is_array( $snapshot ) ) {
 			return '';
 		}
-		$inicio = strtotime( (string) $snapshot['periods']['current']['start'] );
-		$fim    = strtotime( (string) $snapshot['periods']['current']['end'] );
+		// #300: as consultas do bloco vêm da Search Console, cuja janela termina alguns dias antes de hoje e é declarada em
+		// `search_console.windows`. `periods` é a janela do GA4 (até ontem) e descreveria dias que as consultas não cobrem. O leitor
+		// valida o que foi gravado; sem janela válida (snapshot legado ou corrompido), o rótulo é o de `periods`, como antes.
+		$janela = function_exists( 'uonix_analytics_metrics_snapshot_search_console_window' ) ? uonix_analytics_metrics_snapshot_search_console_window( $snapshot ) : null;
+		$atual  = null !== $janela ? $janela['current'] : ( isset( $snapshot['periods']['current'] ) && is_array( $snapshot['periods']['current'] ) ? $snapshot['periods']['current'] : array() );
+		if ( ! isset( $atual['start'], $atual['end'] ) ) {
+			return '';
+		}
+		$inicio = strtotime( (string) $atual['start'] );
+		$fim    = strtotime( (string) $atual['end'] );
 		if ( false === $inicio || false === $fim || $fim < $inicio ) {
 			return '';
 		}

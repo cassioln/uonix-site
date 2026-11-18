@@ -97,6 +97,10 @@ function uonix_analytics_dashboard_metric_comparison( $metric )
 	if ( 'empty' === $metric['state'] ) {
 		return array( 'label' => 'Sem dados nos dois períodos', 'class' => 'uonix-trend-empty' );
 	}
+	// #300: a janela da Search Console com dia faltando. O estado decide sozinho: um `delta_percent` que tenha sobrado no dado não aparece.
+	if ( 'incomplete' === $metric['state'] ) {
+		return array( 'label' => 'Comparação indisponível: dados incompletos', 'class' => 'uonix-trend-empty' );
+	}
 	if ( 'comparable' !== $metric['state'] || ! isset( $metric['delta_percent'] ) || ! is_numeric( $metric['delta_percent'] ) ) {
 		return $fallback;
 	}
@@ -112,6 +116,50 @@ function uonix_analytics_dashboard_metric_comparison( $metric )
 		'label' => $prefix . number_format_i18n( $delta_percent, 1 ) . '% vs. período anterior',
 		'class' => $class,
 	);
+}
+
+/**
+ * Nota sobre a janela da Search Console, mostrada abaixo dos KPIs de Cliques e Impressões (#300).
+ *
+ * A Search Console só publica os últimos dias com ~3 dias de atraso, e a API omite o dia não publicado. O GA4 compara os dias até
+ * ontem; a Search Console compara janelas que terminam alguns dias antes de hoje, e a tela diz isso. Três casos:
+ *  - snapshot SEM `search_console.windows` (gerado antes da #300): a janela dele termina ontem e pode estar enviesada. A nota diz isso e
+ *    NÃO afirma janela assentada;
+ *  - janela completa: declara as duas janelas e o porquê;
+ *  - janela com dia faltando: declara quantos dias de cada janela têm dado e que a variação não é calculada.
+ * A janela vem de `uonix_analytics_metrics_snapshot_search_console_window()`, que valida o que foi gravado: data ou contagem fora do
+ * formato não chega ao HTML, e o snapshot cai no caso do legado.
+ *
+ * @param mixed $snapshot Snapshot lido por `uonix_analytics_metrics_get_snapshot()`.
+ * @return string Texto simples (o chamador escapa), ou '' quando não há como falar de janela.
+ */
+function uonix_analytics_dashboard_search_console_note( $snapshot )
+{
+	if ( ! is_array( $snapshot ) || ! isset( $snapshot['search_console'] ) ) {
+		return '';
+	}
+	$window = function_exists( 'uonix_analytics_metrics_snapshot_search_console_window' ) ? uonix_analytics_metrics_snapshot_search_console_window( $snapshot ) : null;
+	if ( null === $window ) {
+		return 'Search Console: este snapshot é anterior à janela assentada e compara os dias até ontem, que podem estar sem dado ainda publicado. A próxima atualização corrige.';
+	}
+	$date = static function ( $value ) {
+		$parsed = DateTimeImmutable::createFromFormat( '!Y-m-d', (string) $value, new DateTimeZone( 'UTC' ) );
+		return false === $parsed ? '' : $parsed->format( 'd/m/Y' );
+	};
+	$days_label = static function ( $days ) {
+		return 1 === $days ? '1 dia' : $days . ' dias';
+	};
+	$current  = $window['current'];
+	$previous = $window['previous'];
+	$text = 'Search Console: ' . $date( $current['start'] ) . ' a ' . $date( $current['end'] ) . ', comparada com ' . $date( $previous['start'] ) . ' a ' . $date( $previous['end'] ) . '.';
+	if ( $current['days_present'] < $current['days'] || $previous['days_present'] < $previous['days'] ) {
+		return 'Faltam dados na Search Console: atual ' . $current['days_present'] . ' de ' . $days_label( $current['days'] ) . ' e a anterior ' . $previous['days_present'] . ' de ' . $days_label( $previous['days'] ) . '. A variação não é calculada, porque somar um número de dias diferente de cada lado dá um número sabidamente errado. ' . $text;
+	}
+	$lag = (int) $window['settle_lag'];
+	if ( 0 === $lag ) {
+		return $text . ' A janela termina no dia de hoje; o GA4 usa os dias até ontem.';
+	}
+	return $text . ' A janela termina ' . ( 1 === $lag ? '1 dia' : $lag . ' dias' ) . ' antes de hoje porque o Google publica os últimos dias com atraso; o GA4 usa os dias até ontem.';
 }
 
 /**
@@ -1143,6 +1191,8 @@ function uonix_render_analytics_dashboard_page()
 	$metrics_period_days = function_exists( 'uonix_analytics_metrics_sanitize_period_days' ) ? uonix_analytics_metrics_sanitize_period_days( $requested_period ) : 30;
 	$metrics_snapshot = function_exists( 'uonix_analytics_metrics_get_snapshot' ) ? uonix_analytics_metrics_get_snapshot( $metrics_period_days ) : false;
 	$metrics_status = is_array( $metrics_snapshot ) ? ( $metrics_snapshot['status'] ?? 'updated' ) : 'unavailable';
+	// A janela da Search Console que o snapshot declara (#300), validada; nula no snapshot anterior à correção ou com valor gravado inválido.
+	$metrics_gsc_window = function_exists( 'uonix_analytics_metrics_snapshot_search_console_window' ) ? uonix_analytics_metrics_snapshot_search_console_window( $metrics_snapshot ) : null;
 	$metrics_is_fresh = function_exists( 'uonix_analytics_metrics_snapshot_is_fresh' ) && uonix_analytics_metrics_snapshot_is_fresh( $metrics_snapshot );
 	$metrics_refresh_attempted = isset( $_GET['uonix_metrics_refresh'] ) && is_string( $_GET['uonix_metrics_refresh'] ) && '1' === wp_unslash( $_GET['uonix_metrics_refresh'] );
 	$metrics_updated_at = is_array( $metrics_snapshot ) && isset( $metrics_snapshot['updated_at'] ) && is_string( $metrics_snapshot['updated_at'] ) ? $metrics_snapshot['updated_at'] : '';
@@ -1169,8 +1219,8 @@ function uonix_render_analytics_dashboard_page()
 		: array( 'state' => 'normal', 'label' => 'Sistema normal' );
 	// O auto-refresh só pode disparar na aba de métricas. O formulário e o script
 	// que o submetem vivem dentro do painel de métricas, que é renderizado em toda
-	// aba e apenas escondido; sem esta guarda, abrir outra aba dispara um sync de 8
-	// chamadas de API e um redirect que descarta os avisos daquela aba — o aviso de
+	// aba e apenas escondido; sem esta guarda, abrir outra aba dispara um sync de 10
+	// chamadas de API (4 do GA4 e 6 da Search Console) e um redirect que descarta os avisos daquela aba — o aviso de
 	// destinatários recusados, por exemplo, morria antes de ser lido.
 	$metrics_auto_refresh = current_user_can( 'manage_options' )
 		&& 'metrics' === $active_dashboard_tab
@@ -1211,7 +1261,7 @@ function uonix_render_analytics_dashboard_page()
 			<div class="uonix-panel-header uonix-metrics-panel-header">
 				<div class="uonix-metrics-copy">
 					<h2 id="uonix-metrics-title">Métricas agregadas dos últimos <?php echo esc_html( $metrics_period_days ); ?> dias</h2>
-					<p><?php echo esc_html( 'updated' === $metrics_status ? 'Fonte: GA4 Data API e Search Console API. Comparação com os ' . $metrics_period_days . ' dias anteriores.' : ( 'stale' === $metrics_status ? 'Último snapshot disponível; atualização pendente.' : 'Conexão não configurada ou sem snapshot. Nenhuma métrica é exibida.' ) ); ?></p>
+					<p><?php echo esc_html( 'updated' === $metrics_status ? 'Fonte: GA4 Data API e Search Console API. ' . ( null !== $metrics_gsc_window ? 'Cada fonte compara com os ' . $metrics_period_days . ' dias anteriores à sua janela (a Search Console termina alguns dias antes de hoje, como diz a nota abaixo dos KPIs).' : 'Comparação com os ' . $metrics_period_days . ' dias anteriores.' ) : ( 'stale' === $metrics_status ? 'Último snapshot disponível; atualização pendente.' : 'Conexão não configurada ou sem snapshot. Nenhuma métrica é exibida.' ) ); ?></p>
 					<div class="uonix-metrics-cache-meta">
 						<span class="uonix-metrics-cache-status <?php echo esc_attr( $metrics_cache_class ); ?>"><?php echo esc_html( $metrics_cache_label ); ?></span>
 						<?php if ( '' !== $metrics_updated_label ) : ?>
@@ -1291,6 +1341,10 @@ function uonix_render_analytics_dashboard_page()
 				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['clicks'] ) ); ?></span><span class="uonix-kpi-title">Cliques orgânicos</span><span class="uonix-kpi-comparison <?php echo esc_attr( $clicks_comparison['class'] ); ?>"><?php echo esc_html( $clicks_comparison['label'] ); ?></span></div></div>
 				<div class="uonix-kpi-card"><div class="uonix-kpi-data"><span class="uonix-kpi-value"><?php echo esc_html( $metric_value( $gsc_summary['impressions'] ) ); ?></span><span class="uonix-kpi-title">Impressões orgânicas</span><span class="uonix-kpi-comparison <?php echo esc_attr( $impressions_comparison['class'] ); ?>"><?php echo esc_html( $impressions_comparison['label'] ); ?></span></div></div>
 			</div>
+			<?php $gsc_note = uonix_analytics_dashboard_search_console_note( $metrics_snapshot ); ?>
+			<?php if ( '' !== $gsc_note ) : ?>
+				<p class="uonix-ranking-note uonix-gsc-window-note"><?php echo esc_html( $gsc_note ); ?></p>
+			<?php endif; ?>
 			<div class="uonix-ranking-grid">
 				<section class="uonix-ranking-chart" aria-labelledby="uonix-landing-pages-chart-title">
 					<h3 id="uonix-landing-pages-chart-title">Principais páginas de entrada</h3>

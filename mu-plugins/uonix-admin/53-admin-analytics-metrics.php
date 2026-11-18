@@ -61,6 +61,27 @@ if ( ! function_exists( 'uonix_analytics_metrics_get_config' ) ) {
 	}
 }
 
+if ( ! function_exists( 'uonix_analytics_metrics_compare_incomplete' ) ) {
+	/**
+	 * Comparação de uma janela com dia faltando (#300): mostra os dois valores, e NÃO calcula variação.
+	 *
+	 * A diferença e o percentual de duas somas com número de dias diferente são um número sabidamente errado, e o painel não deve exibi-lo
+	 * nem com aviso. Os valores seguem presentes (a soma dos dias que têm dado), e o estado `incomplete` diz que não são comparáveis.
+	 */
+	function uonix_analytics_metrics_compare_incomplete( $current, $previous ) {
+		$current  = uonix_analytics_metrics_finite_number( $current );
+		$previous = uonix_analytics_metrics_finite_number( $previous );
+		if ( null === $current || null === $previous ) return uonix_analytics_metrics_error( 'metric_not_finite' );
+		return array(
+			'current'        => $current,
+			'previous'       => $previous,
+			'delta_absolute' => null,
+			'delta_percent'  => null,
+			'state'          => 'incomplete',
+		);
+	}
+}
+
 if ( ! function_exists( 'uonix_analytics_metrics_compare' ) ) {
 	function uonix_analytics_metrics_compare( $current, $previous ) {
 		$current  = uonix_analytics_metrics_finite_number( $current );
@@ -394,15 +415,31 @@ if ( ! function_exists( 'uonix_analytics_metrics_normalize_search_console' ) ) {
 				return uonix_analytics_metrics_error( 'search_console_metric_missing' );
 			}
 		}
+		// Janela declarada (#300): a Search Console só publica ~3 dias depois, e a API omite o dia não publicado. Se uma das duas janelas
+		// não tem todos os dias, a soma de uma contra a da outra é enviesada, e a variação não é calculada (estado `incomplete`).
+		// Sem janela declarada (fetchers antigos e testes), a normalização é a de antes.
+		$windows = null;
+		$incomplete = false;
+		if ( array_key_exists( 'windows', $data ) ) {
+			$windows = uonix_analytics_metrics_snapshot_search_console_window( array( 'search_console' => array( 'windows' => $data['windows'] ) ) );
+			if ( null === $windows ) return uonix_analytics_metrics_error( 'search_console_windows_invalid' );
+			$incomplete = $windows['current']['days_present'] < $windows['current']['days'] || $windows['previous']['days_present'] < $windows['previous']['days'];
+		}
+		$compare = static function ( $now, $before ) use ( $incomplete ) {
+			return $incomplete ? uonix_analytics_metrics_compare_incomplete( $now, $before ) : uonix_analytics_metrics_compare( $now, $before );
+		};
 		$summary = array(
-			'clicks' => uonix_analytics_metrics_compare( $current['clicks'], $previous['clicks'] ),
-			'impressions' => uonix_analytics_metrics_compare( $current['impressions'], $previous['impressions'] ),
-			'ctr' => uonix_analytics_metrics_compare( $current['ctr'], $previous['ctr'] ),
-			'position' => uonix_analytics_metrics_compare( $current['position'], $previous['position'] ),
+			'clicks' => $compare( $current['clicks'], $previous['clicks'] ),
+			'impressions' => $compare( $current['impressions'], $previous['impressions'] ),
+			'ctr' => $compare( $current['ctr'], $previous['ctr'] ),
+			'position' => $compare( $current['position'], $previous['position'] ),
 		);
 		foreach ( $summary as $comparison ) if ( is_wp_error( $comparison ) ) return $comparison;
 
 		$saida = array( 'summary' => $summary, 'queries' => $queries, 'queries_extended' => $queries_extended, 'pages' => $pages );
+		if ( null !== $windows ) {
+			$saida['windows'] = $windows;
+		}
 		if ( null !== $query_pages ) {
 			$saida['query_pages'] = $query_pages;
 		}
@@ -460,6 +497,12 @@ if ( ! function_exists( 'uonix_analytics_metrics_sanitize_period_days' ) ) {
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_periods' ) ) {
+	/**
+	 * Janelas do GA4 (e do snapshot em `periods`): a atual termina ONTEM. A defasagem do GA4 é de horas.
+	 *
+	 * NÃO é a janela da Search Console, que só publica ~3 dias depois: ela usa `uonix_analytics_metrics_search_console_periods()` (#300).
+	 * Esta função segue como estava, porque o GA4, o snapshot e o rótulo do relatório dependem dela.
+	 */
 	function uonix_analytics_metrics_periods( $today = null, $days = 30 ) {
 		$days = uonix_analytics_metrics_sanitize_period_days( $days );
 		$timezone = new DateTimeZone( 'America/Sao_Paulo' );
@@ -471,6 +514,158 @@ if ( ! function_exists( 'uonix_analytics_metrics_periods' ) ) {
 			'current' => array( 'start' => $current_start->format( 'Y-m-d' ), 'end' => $current_end->format( 'Y-m-d' ) ),
 			'previous' => array( 'start' => $previous_end->modify( '-' . ( $days - 1 ) . ' days' )->format( 'Y-m-d' ), 'end' => $previous_end->format( 'Y-m-d' ) ),
 		);
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_search_console_settle_lag' ) ) {
+	/**
+	 * Quantos dias antes de hoje a janela da Search Console termina (#300).
+	 *
+	 * A Search Console não publica os últimos dias, e a API OMITE a linha de um dia não publicado: ela não volta como zero, e é o mesmo
+	 * byte de um dia sem impressões. Medido: a série final terminava 3 dias antes de hoje em 2026-09-23 e em 2026-09-28, e 2 dias antes
+	 * em 2026-11-18 (09:13). O quarto dia é margem. Fixar o número só é seguro porque a contagem de dias presentes de cada janela é
+	 * conferida à parte (`uonix_analytics_metrics_search_console_windows()`): se o Google atrasar mais, a comparação é recusada em vez
+	 * de enviesada.
+	 *
+	 * É o mesmo valor de `organic_settle_lag_days` do Módulo 5 (58), que carrega DEPOIS do 53 e não pode ser chamado daqui. O teste
+	 * `test-admin-intelligence-anomalies.php` prende a igualdade, como o de retenção faz com as faixas do 53 e do 55.
+	 *
+	 * O GA4 NÃO usa esta defasagem: a dele é de horas, e a janela dele termina ontem (`uonix_analytics_metrics_periods()`).
+	 */
+	function uonix_analytics_metrics_search_console_settle_lag() {
+		return 4;
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_search_console_periods' ) ) {
+	/**
+	 * Janelas da Search Console: de calendário fixo, terminando `settle_lag` dias antes de hoje (#300).
+	 *
+	 * Mesma forma de `uonix_analytics_metrics_periods()`, que segue sendo a janela do GA4 (termina ontem) e não é tocada: ela também
+	 * alimenta o snapshot (`periods`) e quem o lê. A anterior termina no dia anterior ao início da atual e tem o mesmo tamanho. **A
+	 * composição de dias da semana só é a mesma quando o período é múltiplo de 7** (o de 7 dias; o de 30, 90 e 365 não): em 2026-11-18, a
+	 * janela de 30 dias tem 5 sextas e 5 sábados, e a anterior, 5 quartas e 5 quintas. Como sábado e domingo valem ~1/3 dos outros dias neste
+	 * site, isso pesa cerca de −3,3 pontos nos +5,6% de 30 dias (+9,2% com a mesma composição). É propriedade das janelas desde antes da
+	 * #300, e não foi corrigida aqui (#489).
+	 *
+	 * @param string|null $today Hoje, `Y-m-d`. Nulo: hoje em `America/Sao_Paulo`, FIXO, como `uonix_analytics_metrics_periods()`; o Módulo
+	 *                           5 usa `wp_timezone()`, e os dois só coincidem se o fuso do site for São Paulo (não verificado em produção; #490).
+	 * @param int|string  $days  7, 30, 90 ou 365 (qualquer outro valor volta para 30).
+	 * @return array{current: array{start: string, end: string}, previous: array{start: string, end: string}}
+	 */
+	function uonix_analytics_metrics_search_console_periods( $today = null, $days = 30 ) {
+		$days = uonix_analytics_metrics_sanitize_period_days( $days );
+		$timezone = new DateTimeZone( 'America/Sao_Paulo' );
+		$today = $today ? new DateTimeImmutable( $today, $timezone ) : new DateTimeImmutable( 'today', $timezone );
+		$current_end = $today->modify( '-' . uonix_analytics_metrics_search_console_settle_lag() . ' days' );
+		$current_start = $current_end->modify( '-' . ( $days - 1 ) . ' days' );
+		$previous_end = $current_start->modify( '-1 day' );
+		$previous_start = $previous_end->modify( '-' . ( $days - 1 ) . ' days' );
+		return array(
+			'current' => array( 'start' => $current_start->format( 'Y-m-d' ), 'end' => $current_end->format( 'Y-m-d' ) ),
+			'previous' => array( 'start' => $previous_start->format( 'Y-m-d' ), 'end' => $previous_end->format( 'Y-m-d' ) ),
+		);
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_window_bounds' ) ) {
+	/**
+	 * Lê `{start, end}` (`Y-m-d`, datas que existem) e devolve as pontas e o tamanho INCLUSIVO, ou null.
+	 *
+	 * Recusa início depois do fim e janela maior que o maior período permitido (365): a janela vem do snapshot, que é dado gravado.
+	 *
+	 * @param mixed $window
+	 * @return array{start: DateTimeImmutable, end: DateTimeImmutable, days: int}|null
+	 */
+	function uonix_analytics_metrics_window_bounds( $window ) {
+		if ( ! is_array( $window ) ) return null;
+		$bounds = array();
+		foreach ( array( 'start', 'end' ) as $edge ) {
+			$value = $window[ $edge ] ?? null;
+			if ( ! is_string( $value ) || 1 !== preg_match( '/^(\d{4})-(\d{2})-(\d{2})$/D', $value, $parts ) || ! checkdate( (int) $parts[2], (int) $parts[3], (int) $parts[1] ) ) return null;
+			$date = DateTimeImmutable::createFromFormat( '!Y-m-d', $value, new DateTimeZone( 'UTC' ) );
+			if ( false === $date ) return null;
+			$bounds[ $edge ] = $date;
+		}
+		if ( $bounds['start'] > $bounds['end'] ) return null;
+		$days = (int) $bounds['start']->diff( $bounds['end'] )->days + 1;
+		if ( $days > max( uonix_analytics_metrics_allowed_period_days() ) ) return null;
+		return array( 'start' => $bounds['start'], 'end' => $bounds['end'], 'days' => $days );
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_search_console_windows' ) ) {
+	/**
+	 * Quantos dos dias de cada janela têm dado na série diária da Search Console (#300).
+	 *
+	 * A API omite a linha de um dia não publicado e a de um dia sem impressões, e os dois são o mesmo byte: **esta contagem NÃO os
+	 * separa.** Um dia que de fato teve zero impressão conta como ausente e faz a janela sair `incomplete`. É a escolha de falhar fechado: a
+	 * comparação é recusada em vez de enviesada, ao custo de recusar uma janela cuja soma seria exata. Na série real de 96 dias não há dia
+	 * sem linha (o mínimo é 48 impressões por dia), então hoje isso não dispara. O que a contagem faz melhor que "a última data com
+	 * dado" é não esconder o colapso a zero (lição do Módulo 5, `uonix_intelligence_anomaly_organic_windows()`).
+	 *
+	 * A contagem é por data distinta dentro de cada janela, inclusive nas pontas: uma linha fora das duas janelas não conta, a mesma
+	 * data duas vezes conta uma, e chave que não é data é ignorada.
+	 *
+	 * @param array $rows    Linhas decodificadas da chamada por data (`keys[0]` = `Y-m-d`).
+	 * @param array $periods `current` e `previous` com `start` e `end`.
+	 * @return array|null `settle_lag`, `current` e `previous` (`start`, `end`, `days`, `days_present`), ou null se um período for inválido.
+	 */
+	function uonix_analytics_metrics_search_console_windows( $rows, $periods ) {
+		$present = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			// Só importa a chave que COINCIDE com uma data formatada da janela; chave de outro formato nunca é consultada.
+			if ( is_array( $row ) && isset( $row['keys'][0] ) && is_string( $row['keys'][0] ) ) {
+				$present[ $row['keys'][0] ] = true;
+			}
+		}
+		$windows = array( 'settle_lag' => uonix_analytics_metrics_search_console_settle_lag() );
+		foreach ( array( 'current', 'previous' ) as $name ) {
+			$bounds = uonix_analytics_metrics_window_bounds( is_array( $periods ) && isset( $periods[ $name ] ) ? $periods[ $name ] : null );
+			if ( null === $bounds ) return null;
+			$days_present = 0;
+			for ( $day = $bounds['start']; $day <= $bounds['end']; $day = $day->modify( '+1 day' ) ) {
+				if ( isset( $present[ $day->format( 'Y-m-d' ) ] ) ) ++$days_present;
+			}
+			$windows[ $name ] = array( 'start' => $bounds['start']->format( 'Y-m-d' ), 'end' => $bounds['end']->format( 'Y-m-d' ), 'days' => $bounds['days'], 'days_present' => $days_present );
+		}
+		return $windows;
+	}
+}
+
+if ( ! function_exists( 'uonix_analytics_metrics_snapshot_search_console_window' ) ) {
+	/**
+	 * A janela da Search Console que o snapshot declara, validada, ou null (#300).
+	 *
+	 * Null é o snapshot gerado ANTES da correção (a Search Console dele usa a janela do GA4, que termina ontem) ou um valor gravado que
+	 * não passa na validação. Quem lê não afirma janela assentada nesses casos. A janela vem de `wp_options`, então nada é repassado
+	 * sem checagem: datas que existem, início antes do fim, `days` igual ao tamanho real, `days_present` entre 0 e `days`, as duas
+	 * janelas do mesmo tamanho e ADJACENTES (a anterior termina no dia anterior ao início da atual). A saída é a forma canônica, sem chave extra.
+	 *
+	 * @param mixed $snapshot
+	 * @return array{settle_lag: int, current: array, previous: array}|null
+	 */
+	function uonix_analytics_metrics_snapshot_search_console_window( $snapshot ) {
+		if ( ! is_array( $snapshot ) || ! isset( $snapshot['search_console']['windows'] ) || ! is_array( $snapshot['search_console']['windows'] ) ) return null;
+		$declared = $snapshot['search_console']['windows'];
+		$lag = $declared['settle_lag'] ?? null;
+		if ( ! is_int( $lag ) || $lag < 0 || $lag > 30 ) return null;
+		$windows = array( 'settle_lag' => $lag );
+		$edges = array();
+		foreach ( array( 'current', 'previous' ) as $name ) {
+			$item = isset( $declared[ $name ] ) ? $declared[ $name ] : null;
+			$bounds = uonix_analytics_metrics_window_bounds( $item );
+			if ( null === $bounds ) return null;
+			$days = $item['days'] ?? null;
+			$days_present = $item['days_present'] ?? null;
+			if ( ! is_int( $days ) || $days !== $bounds['days'] || ! is_int( $days_present ) || $days_present < 0 || $days_present > $days ) return null;
+			$windows[ $name ] = array( 'start' => $item['start'], 'end' => $item['end'], 'days' => $days, 'days_present' => $days_present );
+			$edges[ $name ] = $bounds;
+		}
+		// A anterior termina NO DIA ANTERIOR ao início da atual (é o que `uonix_analytics_metrics_search_console_periods()` produz), e as duas
+		// têm o mesmo tamanho: é o que `uonix_analytics_metrics_search_console_periods()` produz, e um dado que fuja disso não veio do nosso código.
+		if ( $windows['current']['days'] !== $windows['previous']['days'] || $edges['previous']['end']->modify( '+1 day' )->format( 'Y-m-d' ) !== $edges['current']['start']->format( 'Y-m-d' ) ) return null;
+		return $windows;
 	}
 }
 
@@ -858,7 +1053,15 @@ if ( ! function_exists( 'uonix_analytics_metrics_search_console_rows' ) ) {
 }
 
 if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
-	function uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views = null, $gsc_query_pages = null ) {
+	/**
+	 * Monta os dados brutos do Google no formato que o normalizador lê.
+	 *
+	 * `$gsc_dates` e `$gsc_periods` (#300) são a série diária da Search Console e as janelas assentadas que ela cobre: com eles o
+	 * resultado declara quantos dias de cada janela têm dado (`search_console.windows`), e é isso que deixa o normalizador recusar a
+	 * comparação de uma janela incompleta. Sem eles (chamadores antigos), nenhuma janela é declarada. Um sem o outro é erro, e a série
+	 * que falhou derruba a montagem: sem a contagem não há como saber se a comparação é honesta.
+	 */
+	function uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views = null, $gsc_query_pages = null, $gsc_dates = null, $gsc_periods = null ) {
 		$ga_current = uonix_analytics_metrics_decode_ga4_report( $ga_current );
 		$ga_previous = uonix_analytics_metrics_decode_ga4_report( $ga_previous );
 		$ga_pages = uonix_analytics_metrics_decode_ga4_report( $ga_pages, true );
@@ -867,6 +1070,17 @@ if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
 		$gsc_queries = uonix_analytics_metrics_decode_search_console_report( $gsc_queries, true );
 		$gsc_pages = uonix_analytics_metrics_decode_search_console_report( $gsc_pages, true );
 		foreach ( array( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views ) as $report ) if ( is_wp_error( $report ) ) return $report;
+		// Série diária da Search Console (#300): quantos dias de cada janela têm dado.
+		$gsc_windows = null;
+		if ( null === $gsc_dates && null !== $gsc_periods ) return uonix_analytics_metrics_error( 'search_console_dates_missing' );
+		if ( null !== $gsc_dates ) {
+			if ( is_wp_error( $gsc_dates ) ) return $gsc_dates;
+			if ( null === $gsc_periods ) return uonix_analytics_metrics_error( 'search_console_periods_missing' );
+			$gsc_dates = uonix_analytics_metrics_decode_search_console_report( $gsc_dates, true );
+			if ( is_wp_error( $gsc_dates ) ) return $gsc_dates;
+			$gsc_windows = uonix_analytics_metrics_search_console_windows( $gsc_dates['rows'], $gsc_periods );
+			if ( null === $gsc_windows ) return uonix_analytics_metrics_error( 'search_console_periods_invalid' );
+		}
 		// Página líder por consulta (sugestão por IA): dado ACESSÓRIO. Falha aqui não
 		// derruba a sincronização; o snapshot sai sem `query_pages`, e quem lê trata a
 		// ausência como "aguardando a próxima sincronização".
@@ -891,6 +1105,9 @@ if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
 		if ( null !== $query_pages ) {
 			$search_console['query_pages'] = $query_pages;
 		}
+		if ( null !== $gsc_windows ) {
+			$search_console['windows'] = $gsc_windows;
+		}
 		return array(
 			'ga4' => array( 'summary_current' => isset( $ga_current_rows[0] ) ? $ga_current_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'summary_previous' => isset( $ga_previous_rows[0] ) ? $ga_previous_rows[0] : uonix_analytics_metrics_empty_summary( array( 'activeUsers', 'sessions' ) ), 'landing_pages' => array_map( function( $row ) { return array( 'path' => $row['path'], 'sessions' => $row['sessions'] ); }, uonix_analytics_metrics_ga4_rows( $ga_pages, 'path' ) ), 'page_views' => $ga_page_views['rows'], 'page_views_complete' => $ga_page_views['complete'] ),
 			'search_console' => $search_console,
@@ -900,18 +1117,25 @@ if ( ! function_exists( 'uonix_analytics_metrics_assemble_google_data' ) ) {
 
 if ( ! function_exists( 'uonix_analytics_metrics_fetch_google_data' ) ) {
 	function uonix_analytics_metrics_fetch_google_data( $config, $periods ) {
+		// Search Console: TODAS as chamadas usam a janela assentada (#300), e nunca a do GA4. Sem ela o fetch falha fechado, ANTES de
+		// qualquer chamada de rede, em vez de voltar em silêncio à janela que termina ontem e tem o viés que a #300 corrige.
+		$sc = isset( $periods['search_console']['current'], $periods['search_console']['previous'] ) ? $periods['search_console'] : null;
+		if ( null === $sc ) return uonix_analytics_metrics_error( 'search_console_periods_missing' );
 		$token = uonix_analytics_metrics_get_access_token( $config );
 		if ( is_wp_error( $token ) ) return $token;
 		$ga_current = uonix_analytics_metrics_ga4_report( $config['ga4_property_id'], $token, $periods['current'] );
 		$ga_previous = uonix_analytics_metrics_ga4_report( $config['ga4_property_id'], $token, $periods['previous'] );
 		$ga_pages = uonix_analytics_metrics_ga4_report( $config['ga4_property_id'], $token, $periods['current'], array( array( 'name' => 'landingPagePlusQueryString' ) ), 10000 );
 		$ga_page_views = uonix_analytics_metrics_fetch_ga4_page_views( $config['ga4_property_id'], $token, $periods['current'] );
-		$gsc_current = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'] );
-		$gsc_previous = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['previous'] );
-		$gsc_queries = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'query', uonix_analytics_metrics_extended_query_limit() );
-		$gsc_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], 'page' );
-		$gsc_query_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $periods['current'], array( 'query', 'page' ), uonix_analytics_metrics_query_page_limit() );
-		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views, $gsc_query_pages );
+		$sc_span = array( 'start' => $sc['previous']['start'], 'end' => $sc['current']['end'] );
+		$gsc_current = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $sc['current'] );
+		$gsc_previous = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $sc['previous'] );
+		$gsc_queries = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $sc['current'], 'query', uonix_analytics_metrics_extended_query_limit() );
+		$gsc_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $sc['current'], 'page' );
+		$gsc_query_pages = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $sc['current'], array( 'query', 'page' ), uonix_analytics_metrics_query_page_limit() );
+		// A série POR DATA das duas janelas, em uma chamada só (cabe: 2 x 365 dias são 730 linhas, e o teto da API é 25000).
+		$gsc_dates = uonix_analytics_metrics_search_console_rows( $token, $config['search_console_site_url'], $sc_span, 'date', 25000 );
+		return uonix_analytics_metrics_assemble_google_data( $ga_current, $ga_previous, $ga_pages, $gsc_current, $gsc_previous, $gsc_queries, $gsc_pages, $ga_page_views, $gsc_query_pages, $gsc_dates, $sc );
 	}
 }
 
@@ -949,7 +1173,10 @@ if ( ! function_exists( 'uonix_analytics_metrics_sync' ) ) {
 		try {
 			$fetcher = is_callable( $fetcher ) ? $fetcher : 'uonix_analytics_metrics_fetch_google_data';
 			$periods = uonix_analytics_metrics_periods( null, $days );
-			$data = call_user_func( $fetcher, $config, $periods );
+			// As janelas da Search Console (#300) viajam só para o fetcher: o snapshot segue guardando em `periods` as do GA4, que é o que
+			// o resto do sistema lê (rótulo do relatório, comparação do GA4). A janela da Search Console fica em `search_console.windows`.
+			$fetch_periods = $periods + array( 'search_console' => uonix_analytics_metrics_search_console_periods( null, $days ) );
+			$data = call_user_func( $fetcher, $config, $fetch_periods );
 			if ( ! is_array( $data ) || ! isset( $data['ga4'], $data['search_console'] ) ) throw new RuntimeException( 'google_response_invalid' );
 			$ga4 = uonix_analytics_metrics_normalize_ga4( $data['ga4'] );
 			$search_console = uonix_analytics_metrics_normalize_search_console( $data['search_console'] );

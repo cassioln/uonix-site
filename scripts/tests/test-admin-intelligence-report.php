@@ -354,6 +354,20 @@ uox_assert( '' === uonix_intelligence_report_seo_window_label( uox_snapshot( arr
 $invertido = uox_snapshot( array() );
 $invertido['periods']['current'] = array( 'start' => '2026-09-21', 'end' => '2026-08-23' );
 uox_assert( '' === uonix_intelligence_report_seo_window_label( $invertido ), '#308: janela com o fim antes do início não vira "(-28 dias)"' );
+// #300: com a janela assentada declarada pelo snapshot, a procedência do bloco de SEO diz os dias que as consultas REALMENTE cobrem
+// (a Search Console termina alguns dias antes de hoje), e não os de `periods` (GA4, até ontem). Sem a janela (snapshot legado), o
+// rótulo é o de antes. Janela declarada e corrompida também cai no de antes: nada é repassado sem validação.
+$assentado = uox_snapshot( array() );
+$assentado['search_console']['windows'] = array( 'settle_lag' => 4, 'current' => array( 'start' => '2026-08-19', 'end' => '2026-09-17', 'days' => 30, 'days_present' => 30 ), 'previous' => array( 'start' => '2026-07-20', 'end' => '2026-08-18', 'days' => 30, 'days_present' => 30 ) );
+uox_assert( '19/08 a 17/09 (30 dias)' === uonix_intelligence_report_seo_window_label( $assentado ), '#300: o rótulo do SEO é a janela ASSENTADA que o snapshot declara, e não a de `periods`; obteve ' . var_export( uonix_intelligence_report_seo_window_label( $assentado ), true ) );
+$assentado_furado = $assentado;
+$assentado_furado['search_console']['windows']['current']['days_present'] = 27;
+uox_assert( '19/08 a 17/09 (30 dias)' === uonix_intelligence_report_seo_window_label( $assentado_furado ), '#300: a janela com dia faltando segue sendo a janela do rótulo (a falta é dita no painel, e o e-mail só diz o período)' );
+$assentado_ruim = $assentado;
+$assentado_ruim['search_console']['windows']['current']['start'] = 'x<b>';
+uox_assert( '23/08 a 21/09 (30 dias)' === uonix_intelligence_report_seo_window_label( $assentado_ruim ), '#300: janela declarada e corrompida cai no rótulo de `periods`, sem repassar o texto gravado; obteve ' . var_export( uonix_intelligence_report_seo_window_label( $assentado_ruim ), true ) );
+$ctx_assentado = uonix_intelligence_report_context( array( 'snapshot' => $assentado, 'executive' => null ) );
+uox_assert( '19/08 a 17/09 (30 dias)' === $ctx_assentado['seo_period_label'], '#300: o contexto do e-mail leva a janela assentada para a procedência do bloco de SEO; obteve ' . var_export( $ctx_assentado['seo_period_label'], true ) );
 $assunto_semana = uonix_intelligence_report_subject( array( 'period_label' => uonix_intelligence_report_badge_label( $exec_semana, '01/09/2026 a 30/09/2026' ) ) );
 uox_assert( false !== strpos( $assunto_semana, '(Semana de 24/09 a 30/09/2026)' ) && false === strpos( $assunto_semana, '01/09/2026' ), '#308: o assunto leva a semana, não o período do SEO; obteve ' . $assunto_semana );
 // A ligação: o contexto monta o selo pela semana e guarda o período do SEO à parte.

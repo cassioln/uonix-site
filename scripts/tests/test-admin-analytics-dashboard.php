@@ -132,7 +132,7 @@ function uonix_analytics_metrics_snapshot_is_fresh( $snapshot ) {
 function uonix_analytics_metrics_get_snapshot( $days = 30 ) {
 	$days = uonix_analytics_metrics_sanitize_period_days( $days );
 	$GLOBALS['uonix_test_snapshot_periods'][] = $days;
-	return array(
+	$snapshot = array(
 		'period_days' => $days,
 		'status'     => 'updated',
 		'updated_at' => '2026-09-11T12:00:00+00:00',
@@ -167,6 +167,11 @@ function uonix_analytics_metrics_get_snapshot( $days = 30 ) {
 			'pages'   => array( array( 'page' => '/servicos/', 'clicks' => 6, 'impressions' => 30, 'ctr' => .2, 'position' => 5 ) ),
 		),
 	);
+	// #300: cada teste pode trocar a janela e os estados da Search Console; sem mutador, o snapshot é o LEGADO (sem `windows`).
+	if ( is_callable( $GLOBALS['uonix_test_snapshot_mutator'] ?? null ) ) {
+		$snapshot = call_user_func( $GLOBALS['uonix_test_snapshot_mutator'], $snapshot );
+	}
+	return $snapshot;
 }
 
 function get_posts( $args = array() ) {
@@ -366,6 +371,14 @@ if ( function_exists( 'uonix_analytics_dashboard_metric_comparison' ) ) {
 	uonix_dashboard_assert( array( 'label' => 'Novo no período', 'class' => 'uonix-trend-new' ) === $comparison_new, 'Base anterior zero usa estado novo' );
 	uonix_dashboard_assert( array( 'label' => 'Sem dados nos dois períodos', 'class' => 'uonix-trend-empty' ) === $comparison_empty, 'Dois períodos zerados usam estado vazio' );
 	uonix_dashboard_assert( array( 'label' => 'Comparação indisponível', 'class' => 'uonix-trend-empty' ) === $comparison_invalid, 'Variação inválida falha fechado' );
+	// #300: a janela da Search Console com dia faltando não mostra variação nenhuma, e diz por quê (o motivo exato vem da nota abaixo do KPI).
+	$comparison_incomplete = uonix_analytics_dashboard_metric_comparison( array( 'current' => 100, 'previous' => 80, 'delta_absolute' => null, 'delta_percent' => null, 'state' => 'incomplete' ) );
+	uonix_dashboard_assert( array( 'label' => 'Comparação indisponível: dados incompletos', 'class' => 'uonix-trend-empty' ) === $comparison_incomplete, '#300: estado incompleto diz que faltam dados, em vez do genérico "Comparação indisponível"' );
+	uonix_dashboard_assert( false === strpos( $comparison_incomplete['label'], '%' ), '#300: estado incompleto nunca mostra percentual' );
+	$comparison_incomplete_forjado = uonix_analytics_dashboard_metric_comparison( array( 'delta_percent' => 12.0, 'state' => 'incomplete' ) );
+	uonix_dashboard_assert( array( 'label' => 'Comparação indisponível: dados incompletos', 'class' => 'uonix-trend-empty' ) === $comparison_incomplete_forjado, '#300: o estado incompleto decide, e um delta_percent que sobrou no dado não aparece; obteve ' . var_export( $comparison_incomplete_forjado, true ) );
+	$comparison_incomplete_forjado2 = uonix_analytics_dashboard_metric_comparison( array( 'delta_percent' => -43.0, 'delta_absolute' => -500, 'current' => 100, 'previous' => 600, 'state' => 'incomplete' ) );
+	uonix_dashboard_assert( false === strpos( $comparison_incomplete_forjado2['label'], '43' ) && false === strpos( $comparison_incomplete_forjado2['label'], '-' ), '#300: queda de 43% que sobrou no dado incompleto não vira texto' );
 }
 
 // Asserção 1: o 52 e o 53 não registram menu. Quem registra é o 49, e um segundo
@@ -576,6 +589,109 @@ uonix_dashboard_assert( 30 === end( $GLOBALS['uonix_test_snapshot_periods'] ), '
 uonix_dashboard_assert( strpos( $output_invalid_period, 'Métricas agregadas dos últimos 30 dias' ) !== false, 'Título não reflete período inválido' );
 $_GET = array();
 
+// ---------------------------------------------------------------------------------------------------------------------------
+// #300: o painel declara a janela da Search Console, e a variação só aparece quando as duas janelas têm todos os dias.
+// ---------------------------------------------------------------------------------------------------------------------------
+$janela_sc = static function ( $atual_presentes, $anterior_presentes ) {
+	return array(
+		'settle_lag' => 4,
+		'current'    => array( 'start' => '2026-09-04', 'end' => '2026-10-03', 'days' => 30, 'days_present' => $atual_presentes ),
+		'previous'   => array( 'start' => '2026-08-05', 'end' => '2026-09-03', 'days' => 30, 'days_present' => $anterior_presentes ),
+	);
+};
+$com_janela = static function ( $atual_presentes, $anterior_presentes, $estado_gsc ) use ( $janela_sc ) {
+	return static function ( $snapshot ) use ( $janela_sc, $atual_presentes, $anterior_presentes, $estado_gsc ) {
+		$snapshot['search_console']['windows'] = $janela_sc( $atual_presentes, $anterior_presentes );
+		if ( 'incomplete' === $estado_gsc ) {
+			foreach ( array( 'clicks', 'impressions', 'ctr', 'position' ) as $m ) {
+				$snapshot['search_console']['summary'][ $m ] = array( 'current' => $snapshot['search_console']['summary'][ $m ]['current'], 'previous' => $snapshot['search_console']['summary'][ $m ]['previous'], 'delta_absolute' => null, 'delta_percent' => null, 'state' => 'incomplete' );
+			}
+		}
+		return $snapshot;
+	};
+};
+$_GET = array();
+$GLOBALS['uonix_test_snapshot_fresh'] = true;
+
+// Legado (sem `windows`): o painel diz que a janela termina ontem e pode estar enviesada, e NÃO afirma janela assentada.
+$GLOBALS['uonix_test_snapshot_mutator'] = null;
+ob_start();
+uonix_render_analytics_dashboard_page();
+$saida_legado = ob_get_clean();
+$texto_legado = uonix_dashboard_visible_text( $saida_legado );
+uonix_dashboard_assert( 1 === substr_count( $texto_legado, 'Search Console: este snapshot é anterior à janela assentada' ), '#300: snapshot legado declara que a janela da Search Console termina ontem e pode estar enviesada (uma vez)' );
+// A agulha anterior ('dado assentado') nunca era impressa pelo 52, e a asserção passava com QUALQUER conteúdo (revisão do PR). Estas três são frases
+// que SÓ a nota de janela completa tem: um legado que passasse a declarar janela as imprimiria.
+foreach ( array( 'A janela termina', 'comparada com', 'antes de hoje porque o Google publica' ) as $so_da_nota_completa ) {
+	uonix_dashboard_assert( false === strpos( $texto_legado, $so_da_nota_completa ), "#300: snapshot legado NÃO afirma janela assentada (a frase `{$so_da_nota_completa}` é só da nota completa)" );
+}
+uonix_dashboard_assert( 0 === preg_match( '#\d{2}/\d{2}/\d{4} a \d{2}/\d{2}/\d{4}#', $texto_legado ), '#300: snapshot legado não imprime nenhum intervalo de datas da Search Console' );
+uonix_dashboard_assert( strpos( $saida_legado, '>+100,0% vs. período anterior</span>' ) !== false, '#300: no legado a variação segue sendo a gravada (a nota avisa; o dado não é reescrito na tela)' );
+
+// Janela completa: declara as duas janelas e o porquê, e mostra a variação.
+$GLOBALS['uonix_test_snapshot_mutator'] = $com_janela( 30, 30, 'comparable' );
+ob_start();
+uonix_render_analytics_dashboard_page();
+$saida_completa = ob_get_clean();
+$texto_completo = uonix_dashboard_visible_text( $saida_completa );
+uonix_dashboard_assert( 1 === substr_count( $texto_completo, 'Search Console: 04/09/2026 a 03/10/2026, comparada com 05/08/2026 a 03/09/2026.' ), '#300: janela completa declara as duas janelas da Search Console, com ano; obteve ' . substr( $texto_completo, (int) strpos( $texto_completo, 'Search Console: 0' ), 160 ) );
+uonix_dashboard_assert( strpos( $texto_completo, 'termina 4 dias antes de hoje' ) !== false && strpos( $texto_completo, 'o GA4 usa os dias até ontem' ) !== false, '#300: a nota diz que termina 4 dias antes de hoje (o Google publica com atraso) e que o GA4 usa os dias até ontem' );
+uonix_dashboard_assert( false === strpos( $texto_completo, 'Faltam dados' ) && false === strpos( $texto_completo, 'anterior à janela assentada' ), '#300: janela completa não alega falta de dados nem snapshot legado' );
+uonix_dashboard_assert( strpos( $saida_completa, '>+100,0% vs. período anterior</span>' ) !== false && strpos( $saida_completa, '>+25,0% vs. período anterior</span>' ) !== false, '#300: janela completa mostra a variação dos KPIs orgânicos' );
+
+// Janela incompleta: sem variação nenhuma nos KPIs da Search Console, e a nota diz quantos dias faltam.
+foreach ( array( 'atual 28/30' => array( 28, 30, 'atual 28 de 30 dias e a anterior 30 de 30 dias' ), 'anterior 29/30' => array( 30, 29, 'atual 30 de 30 dias e a anterior 29 de 30 dias' ), 'as duas' => array( 27, 28, 'atual 27 de 30 dias e a anterior 28 de 30 dias' ) ) as $rotulo => $caso ) {
+	$GLOBALS['uonix_test_snapshot_mutator'] = $com_janela( $caso[0], $caso[1], 'incomplete' );
+	ob_start();
+	uonix_render_analytics_dashboard_page();
+	$saida_inc = ob_get_clean();
+	$texto_inc = uonix_dashboard_visible_text( $saida_inc );
+	uonix_dashboard_assert( strpos( $texto_inc, 'Faltam dados na Search Console: ' . $caso[2] . '. A variação não é calculada' ) !== false, "#300: janela incompleta ({$rotulo}) diz quantos dias de cada janela têm dado; obteve " . substr( $texto_inc, (int) strpos( $texto_inc, 'Faltam' ), 120 ) );
+	uonix_dashboard_assert( strpos( $texto_inc, 'A variação não é calculada' ) !== false, "#300: janela incompleta ({$rotulo}) diz que a variação não é calculada" );
+	uonix_dashboard_assert( 2 === substr_count( $saida_inc, '>Comparação indisponível: dados incompletos</span>' ), "#300: janela incompleta ({$rotulo}): os DOIS KPIs orgânicos (cliques e impressões) dizem que faltam dados" );
+	uonix_dashboard_assert( strpos( $saida_inc, '>+100,0% vs. período anterior</span>' ) === false && strpos( $saida_inc, '>+25,0% vs. período anterior</span>' ) === false, "#300: janela incompleta ({$rotulo}) não mostra a variação da Search Console" );
+	uonix_dashboard_assert( strpos( $saida_inc, '>+20,0% vs. período anterior</span>' ) !== false && strpos( $saida_inc, '>Novo no período</span>' ) !== false, "#300: janela incompleta ({$rotulo}) não afeta a comparação do GA4" );
+	uonix_dashboard_assert( 4 === substr_count( $saida_inc, 'class="uonix-kpi-comparison ' ), "#300: janela incompleta ({$rotulo}) mantém os quatro KPIs com comparação" );
+	uonix_dashboard_assert( array( '42', '60', '20', '100', '2', '1', '1', 'Externa' ) === uonix_dashboard_span_texts( $saida_inc, 'uonix-kpi-value' ), "#300: janela incompleta ({$rotulo}) segue mostrando os valores da Search Console (a soma dos dias que têm dado)" );
+}
+
+// O `settle_lag` gravado no snapshot é o que o painel imprime (e não a constante), com o singular de 1 dia e as fronteiras 0 e 30 (revisão do PR).
+foreach ( array( 3 => 'A janela termina 3 dias antes de hoje', 5 => 'A janela termina 5 dias antes de hoje', 1 => 'A janela termina 1 dia antes de hoje', 0 => 'A janela termina no dia de hoje', 30 => 'A janela termina 30 dias antes de hoje' ) as $lag_gravado => $frase_esperada ) {
+	$GLOBALS['uonix_test_snapshot_mutator'] = static function ( $snapshot ) use ( $janela_sc, $lag_gravado ) { $w = $janela_sc( 30, 30 ); $w['settle_lag'] = $lag_gravado; $snapshot['search_console']['windows'] = $w; return $snapshot; };
+	ob_start();
+	uonix_render_analytics_dashboard_page();
+	$texto_lag = uonix_dashboard_visible_text( ob_get_clean() );
+	uonix_dashboard_assert( strpos( $texto_lag, $frase_esperada ) !== false, "#300: o painel imprime o `settle_lag` GRAVADO ({$lag_gravado}): `{$frase_esperada}`" );
+}
+$GLOBALS['uonix_test_snapshot_mutator'] = static function ( $snapshot ) use ( $janela_sc ) { $w = $janela_sc( 30, 30 ); $w['settle_lag'] = 31; $snapshot['search_console']['windows'] = $w; return $snapshot; };
+ob_start();
+uonix_render_analytics_dashboard_page();
+$texto_lag31 = uonix_dashboard_visible_text( ob_get_clean() );
+uonix_dashboard_assert( strpos( $texto_lag31, 'antes de hoje porque' ) === false && strpos( $texto_lag31, 'anterior à janela assentada' ) !== false, '#300: `settle_lag` 31 (fora do limite) é recusado e o painel cai na nota do legado' );
+// O cabeçalho do painel não diz mais que as duas fontes comparam a mesma janela (#300): o GA4 usa os dias até ontem, e a Search Console, a janela assentada.
+$GLOBALS['uonix_test_snapshot_mutator'] = $com_janela( 30, 30, 'comparable' );
+ob_start();
+uonix_render_analytics_dashboard_page();
+$saida_cabecalho = ob_get_clean();
+$texto_cabecalho = uonix_dashboard_visible_text( $saida_cabecalho );
+uonix_dashboard_assert( strpos( $texto_cabecalho, 'Comparação com os 30 dias anteriores.' ) === false, '#300: o cabeçalho não afirma uma comparação única para as duas fontes' );
+uonix_dashboard_assert( strpos( $texto_cabecalho, 'Fonte: GA4 Data API e Search Console API. Cada fonte compara com os 30 dias anteriores à sua janela' ) !== false, '#300: o cabeçalho diz que cada fonte compara com os 30 dias anteriores à sua própria janela' );
+// MÉDIO do revisor: com snapshot LEGADO, o cabeçalho dizia que a Search Console termina antes de hoje 'como diz a nota', e a nota do legado diz que
+// ela compara os dias até ontem. O cabeçalho agora só descreve a janela da Search Console quando o snapshot a declara.
+$GLOBALS['uonix_test_snapshot_mutator'] = null;
+ob_start();
+uonix_render_analytics_dashboard_page();
+$texto_cab_legado = uonix_dashboard_visible_text( ob_get_clean() );
+uonix_dashboard_assert( strpos( $texto_cab_legado, 'termina alguns dias antes de hoje' ) === false, '#300: o cabeçalho do snapshot LEGADO não afirma que a Search Console termina antes de hoje' );
+uonix_dashboard_assert( strpos( $texto_cab_legado, 'Fonte: GA4 Data API e Search Console API. Comparação com os 30 dias anteriores.' ) !== false, '#300: o cabeçalho do legado volta ao texto de antes (a nota abaixo dos KPIs avisa da janela)' );
+// Janela declarada e inválida (valor gravado corrompido): nenhuma janela é afirmada, e o painel cai na nota do legado.
+$GLOBALS['uonix_test_snapshot_mutator'] = static function ( $snapshot ) { $snapshot['search_console']['windows'] = array( 'settle_lag' => 4, 'current' => array( 'start' => 'x<script>', 'end' => '2026-10-03', 'days' => 30, 'days_present' => 30 ), 'previous' => array( 'start' => '2026-08-05', 'end' => '2026-09-03', 'days' => 30, 'days_present' => 30 ) ); return $snapshot; };
+ob_start();
+uonix_render_analytics_dashboard_page();
+$saida_corrompida = ob_get_clean();
+uonix_dashboard_assert( strpos( $saida_corrompida, 'x<script>' ) === false && strpos( uonix_dashboard_visible_text( $saida_corrompida ), 'este snapshot é anterior à janela assentada' ) !== false, '#300: janela gravada inválida não é repassada ao HTML e cai na nota do legado' );
+$GLOBALS['uonix_test_snapshot_mutator'] = null;
+
 $visible_output = uonix_dashboard_visible_text( $output );
 $marketing_claim_patterns = array(
 	'/\b(?:convers(?:ão|oes)|lead|cliente)s?\s+(?:confirmad[oa]s?|realizad[oa]s?)\b/iu',
@@ -683,7 +799,7 @@ echo "ok   Insights oculto recusa a página e o refresh manual\n";
 
 // O auto-refresh de métricas vive dentro do painel de métricas, que é renderizado
 // em toda aba e apenas escondido. Sem guarda de aba, abrir outra aba dispara um
-// sync de 8 chamadas de API e um redirect que descarta os avisos daquela aba.
+// sync de 10 chamadas de API (4 do GA4 e 6 da Search Console, #300; mais se a leitura de visualizações paginar) e um redirect que descarta os avisos daquela aba.
 $GLOBALS['uonix_test_can_edit'] = true;
 $GLOBALS['uonix_test_can_manage'] = true;
 // Snapshot vencido é a precondição do auto-refresh; com cache fresco ele nunca
