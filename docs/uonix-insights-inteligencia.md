@@ -196,6 +196,30 @@ A medição considera apenas intervalos **encerrados**. Dois recortes, e o segun
 
 Havendo orçamento antes da janela, a medição começa na **borda** e o valor é um **piso** do real, porque a consulta não enxerga além dela — o painel declara isso com "dias ou MAIS". Não havendo, começa no primeiro orçamento. Portanto `longest_gap` significa "o maior intervalo encerrado observável nesta janela", e **não** o maior intervalo absoluto entre dois orçamentos consecutivos.
 
+### O registro da guarda das regras de reescrita aparece na aba Anomalias (#367)
+
+A guarda do #305 (`mu-plugins/uonix-content/50-seo-regras-reescrita-rank-math.php`) **agenda** a regravação das regras de reescrita (no `shutdown`, no máximo uma a cada 15 minutos) quando uma regravação feita sem o Rank Math as perdeu. Cada agendamento grava `uonix_rewrite_rules_repair` (`array( 'at' => int, 'missing' => string[] )`, **sem autoload**, com no máximo as cinco primeiras regras que faltavam). Por **40 horas** em 2026-11-16 a 18 esse registro existiu em produção sem nenhuma tela que o mostrasse: a guarda disparou em 2026-11-16 às 22:35 (America/Sao_Paulo), com as três regras de sitemap do Rank Math faltando, e ninguém soube. Medido em 2026-11-18, por uma leitura de produção só de leitura.
+
+**O que a aba faz.** Mostra "Última regravação automática: `d/m/Y H:i`", no **fuso do site** (`wp_date`; sem ela, a hora cai em UTC e a tela diz "(UTC)"), e as regras que faltavam. **A hora é a do agendamento**, e não a do `flush`: a guarda grava o registro **antes** de a regravação rodar (medido com a guarda real: `update_option`, depois `flush_rewrite_rules`). Se o `shutdown` não rodar (processo morto), há registro de uma regravação que não aconteceu. É **só leitura de uma opção**: sem requisição nova, sem e-mail, sem consulta além do `get_option`. `uonix_intelligence_rewrite_repair_info()` (`56`) devolve três estados:
+
+| Estado | Quando | O que a tela diz |
+|---|---|---|
+| `none` | a opção não existe | "Nenhuma regravação automática registrada." |
+| `unreadable` | a opção existe e não tem a forma da guarda: não é array, sem `at`, `at` que não é inteiro, `at` menor ou igual a zero, ou mais de um dia no futuro | "Registro de regravação ilegível." Nunca vira uma data inventada |
+| `recorded` | `at` é um inteiro positivo | a data e as regras. `missing` malformado tira só a lista de regras: a data, que é verdadeira, fica |
+
+Cada regra é cortada em 120 caracteres (por caractere, não por byte; o corte usa PCRE com `u`, que não depende de `mbstring`) e são mostradas no máximo cinco, porque o valor vem de `wp_options`. O texto sai por `esc_html`. **Regra que não é UTF-8 válido é descartada**, e não mostrada: `mb_substr` a trocaria por `?` (a tela mostraria uma regra diferente da gravada) e o `esc_html` do core esvazia a string inteira, o que deixaria um `<code></code>` vazio. O `esc_html` do teste (um `htmlspecialchars`) **não** reproduz essa diferença, e por isso o produto decide antes de escapar.
+
+**O que a tela NÃO cobre, e diz.** O registro só existe quando a guarda **agiu**. A tela não mostra se o reparo funcionou, e a **falta** de registro não prova que as regras estejam gravadas: a guarda só olha as regras de sitemap do Rank Math, então não vê o caso em que só as das categorias somem, nem o de o módulo de sitemap estar desligado. **Um reparo que não resolve aparece como uma data sempre recente**, e não como falha: a guarda o repete a cada 15 minutos, no máximo 4 vezes por hora, e cada tentativa sobrescreve `at` (medido com a guarda real: `scheduled` em t+0, `cooldown` em t+60 e t+899, `scheduled` de novo em t+900). A tela diz isso ("a hora se renova") e **não consegue distinguir** esse caso de um reparo único. Cobrir esses casos é o item 2 do norte da #367, um gatilho do Módulo 5 que confira `/sitemap_index.xml` e uma categoria por HTTP. **Foi decidido não fazê-lo agora** (decisão do Cassio em 2026-11-18): custa dois GETs por dia e é o maior PR da família.
+
+**O registro guarda só o último reparo.** Dois reparos em dias diferentes aparecem como um só, o mais recente. A tela diz "Última", e não conta quantas vezes a guarda agiu.
+
+**É estado por ambiente, e entra no clone.** A opção está em `protected_options_where()` (`scripts/clone-environment.sh`), na tabela de `docs/clone-ambientes.md` e na lista `state_options` de `scripts/tests/test-clone-activation-options.sh`. Esse teste reprova se ela sair do predicado e, **para todo nome literal do predicado** (cada um do `IN (...)` e o `= '...'`, extraídos do próprio SQL, e não de uma lista escrita à mão), se ele sair da **tabela** da doc: citar o nome numa frase solta não vale. Os padrões `LIKE` não passam por essa conferência (a doc os grava sem as barras de escape, e dois deles, `googlesitekit%` e `uonix_analytics_metrics_snapshot%`, nem constam na tabela hoje). Sem isso, um clone `prod -> qa` traria a hora da produção, e a tela do QA afirmaria um reparo que o QA nunca fez. É a mesma categoria de `uonix_intelligence_anomaly_state`: o dano é na **afirmação** da tela, e o guard de e-mail não contém nada disso.
+
+**O nome da opção existe em dois lugares**, e o teste do painel prende a igualdade (`uonix_rewrite_guard_repair_option()` contra `uonix_intelligence_rewrite_repair_option()`), porque este módulo não depende do `uonix-content`. O mesmo teste executa a guarda real e confere que o que ela grava é o que a tela lê.
+
+**O que não foi medido.** Qual foi o gatilho da regravação de 16/11 (a hipótese do #305, uma regravação pedida pelo WooCommerce durante um heartbeat, combina, mas não foi confirmada). Se houve outros reparos antes: o registro guarda só o último.
+
 ### Anomalia não reverificada tem prazo
 
 Quando a fonte falha, uma anomalia já observada continua na tela — apagá-la esconderia um incidente ativo. O que a sustenta é o `observed`, **não** o sinalizador de "já avisei": a contabilidade de aviso não pode governar o que a tela afirma, e conflacionar os dois deixava a proteção inerte e permanentemente na configuração sem destinatário, que é a que esta seção declara suportada.

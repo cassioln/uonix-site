@@ -17,6 +17,7 @@ declare( strict_types=1 );
 define( 'ABSPATH', __DIR__ );
 define( 'HOUR_IN_SECONDS', 3600 );
 define( 'DAY_IN_SECONDS', 86400 );
+define( 'MINUTE_IN_SECONDS', 60 );
 define( 'UONIX_ENV', 'local' );
 
 $failures = 0;
@@ -104,7 +105,7 @@ function add_filter( $hook, $callback, $priority = 10, $args = 1 ) { return true
 function add_shortcode( $tag, $callback ) { return true; }
 function add_menu_page() { return ''; }
 function get_option( $key, $default = false ) { return array_key_exists( $key, $GLOBALS['uox_options'] ) ? $GLOBALS['uox_options'][ $key ] : $default; }
-function update_option( $key, $value, $autoload = null ) { $GLOBALS['uox_options'][ $key ] = $value; return true; }
+function update_option( $key, $value, $autoload = null ) { $GLOBALS['uox_escritas'][] = (string) $key; $GLOBALS['uox_options'][ $key ] = $value; return true; }
 function add_option( $key, $value, $d = '', $autoload = null ) { if ( array_key_exists( $key, $GLOBALS['uox_options'] ) ) return false; $GLOBALS['uox_options'][ $key ] = $value; return true; }
 function delete_option( $key ) { unset( $GLOBALS['uox_options'][ $key ] ); return true; }
 function get_transient( $key ) { return false; }
@@ -138,11 +139,18 @@ function wp_schedule_event( $ts, $rec, $hook ) { $GLOBALS['uox_cron'][ $hook ] =
 function wp_clear_scheduled_hook( $hook ) { unset( $GLOBALS['uox_cron'][ $hook ] ); }
 function wp_get_schedules() { return $GLOBALS['uox_schedules']; }
 function wp_timezone() { return new DateTimeZone( $GLOBALS['uox_timezone'] ); }
-function wp_date( $format, $ts = null ) { return gmdate( $format, null === $ts ? time() : (int) $ts ); }
+function wp_date( $format, $ts = null ) { $d = new DateTimeImmutable( '@' . ( null === $ts ? time() : (int) $ts ) ); return $d->setTimezone( new DateTimeZone( $GLOBALS['uox_timezone'] ) )->format( $format ); }
 function wp_remote_post( $url, $args = array() ) { return array(); }
 function wp_remote_get( $url, $args = array() ) { return array(); }
 function wp_remote_retrieve_response_code( $r ) { return 0; }
 function wp_remote_retrieve_body( $r ) { return ''; }
+// A guarda das regras de reescrita (#305) grava `uonix_rewrite_rules_repair`; o teste do #367 a executa de verdade.
+function flush_rewrite_rules( $hard = true ) {}
+class WP_Rewrite {
+	public $extra_rules_top     = array();
+	public $permalink_structure = '/%postname%/';
+	public function using_permalinks() { return '' !== $this->permalink_structure; }
+}
 
 $RAIZ = dirname( __DIR__, 2 );
 require_once $RAIZ . '/mu-plugins/uonix-admin/50-admin-intelligence-license.php';
@@ -150,6 +158,7 @@ require_once $RAIZ . '/mu-plugins/uonix-admin/53-admin-analytics-metrics.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/55-admin-intelligence-metrics.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php';
 require_once $RAIZ . '/mu-plugins/uonix-admin/58-admin-intelligence-anomalies.php';
+require_once $RAIZ . '/mu-plugins/uonix-content/50-seo-regras-reescrita-rank-math.php';
 
 /** Captura o HTML de um render. */
 function uox_render( $tab = 'anomalies' ) {
@@ -404,6 +413,250 @@ uox_assert( false !== strpos( uox_render( 'metrics' ), 'hidden' ), 'em outra aba
 // sai sempre com `hidden` e o módulo inteiro fica invisível. Propriedade afirmada em
 // prosa e asserida pela metade — mesma classe do grep por nome solto no 52.
 uox_assert( false === strpos( uox_render( 'anomalies' ), ' hidden>' ), 'na aba DELE o painel não pode sair escondido, senão a aba abre em branco' );
+
+// ---------------------------------------------------------------------------
+// #367: a última regravação automática das regras de reescrita, lida de `uonix_rewrite_rules_repair`.
+//
+// A guarda do #305 grava `array( 'at' => int, 'missing' => string[] )` quando regrava as regras do
+// Rank Math. Em 2026-11-16 ela disparou em produção e o registro ficou 40 horas sem nenhuma tela. A
+// aba mostra o que está GRAVADO, sem requisição nova. O formato abaixo é o lido em produção.
+// ---------------------------------------------------------------------------
+
+$REPARO = 'uonix_rewrite_rules_repair';
+$AT     = 1794879308; // 2026-11-17 01:35:08 UTC = 2026-11-16 22:35:08 em America/Sao_Paulo.
+$REGRAS = array( 'sitemap_index\.xml$', '([^/]+?)-sitemap([0-9]+)?\.xml$', '([a-z]+)?-?sitemap\.xsl$' );
+
+uox_semear( array( uox_finding( array( 'anomalous' => false ) ) ), 0, 0 );
+unset( $GLOBALS['uox_options'][ $REPARO ] );
+$sem_registro = uox_render();
+uox_assert( false !== strpos( $sem_registro, 'Regras de reescrita' ), '#367: o painel tem a seção das regras de reescrita' );
+uox_assert( false !== strpos( $sem_registro, 'Nenhuma regravação automática registrada' ), '#367: sem registro a tela diz que nenhuma regravação foi registrada' );
+uox_assert( false === strpos( $sem_registro, 'Última regravação automática:' ), '#367: sem registro a tela NÃO afirma uma data' );
+
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => $REGRAS );
+$com_registro = uox_render();
+uox_assert( false !== strpos( $com_registro, 'Última regravação automática: 16/11/2026 22:35' ), '#367: a data sai no FUSO DO SITE (22:35 de 16/11, e não 01:35 de 17/11, que é UTC)' );
+uox_assert( false === strpos( $com_registro, '17/11/2026 01:35' ), '#367: a hora em UTC não aparece' );
+uox_assert( false === strpos( $com_registro, 'Nenhuma regravação automática registrada' ), '#367: com registro, a frase de "nenhuma" some' );
+foreach ( array( 'sitemap_index', '-sitemap(', 'sitemap\.xsl' ) as $trecho ) {
+	uox_assert( false !== strpos( $com_registro, $trecho ), "#367: a tela nomeia a regra que faltava ({$trecho})" );
+}
+// A tela diz o que NÃO cobre: o registro só existe quando a guarda agiu, e não prova que o reparo "pegou".
+// Cada ressalva é uma frase própria, e CADA UMA tem de existir nos TRÊS estados (sem registro, com registro e ilegível):
+// "Nenhuma regravação automática registrada" lido como "as regras estão gravadas" é o erro que a ressalva existe para evitar.
+$ressalvas = array(
+	'a hora é a do AGENDAMENTO, e o registro guarda só o último' => 'a guarda agendou a regravação',
+	'não mostra se o reparo funcionou'                           => 'não mostra se o reparo funcionou',
+	'a falta de registro não prova que as regras estejam gravadas' => 'a falta de registro não prova que as regras estejam gravadas',
+	'a guarda só olha o sitemap do Rank Math'                    => 'a guarda só olha as regras de sitemap do Rank Math',
+	'não vê só as categorias sumirem'                            => 'só as das categorias somem',
+	'não vê o módulo de sitemap desligado'                       => 'módulo de sitemap estar desligado',
+	'um reparo que não resolve renova a hora'                    => 'a hora se renova',
+	'como conferir de verdade'                                   => '/sitemap_index.xml</code> e uma página de categoria',
+);
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => $REGRAS );
+$tres = array( 'com registro' => uox_render(), 'sem registro' => '', 'ilegível' => '' );
+unset( $GLOBALS['uox_options'][ $REPARO ] );
+$tres['sem registro'] = uox_render();
+$GLOBALS['uox_options'][ $REPARO ] = 'lixo';
+$tres['ilegível'] = uox_render();
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => $REGRAS );
+foreach ( $tres as $estado => $html_estado ) {
+	foreach ( $ressalvas as $nome => $trecho ) {
+		uox_assert( false !== strpos( $html_estado, $trecho ), "#367: a ressalva \"{$nome}\" está na tela ({$estado})" );
+	}
+}
+// A frase do cabeçalho da seção promete a guarda SÓ no que ela faz: agenda, com intervalo, e não "regrava a cada requisição".
+uox_assert( false !== strpos( $com_registro, 'agenda a regravação das regras (no máximo uma a cada 15 minutos)' ), '#367: a tela diz que a guarda AGENDA a regravação, no máximo uma a cada 15 minutos' );
+uox_assert( false === strpos( $com_registro, 'regrava as regras sozinha' ), '#367: a tela não afirma que a guarda "regrava as regras sozinha" (ela agenda, e uma vez a cada 15 minutos)' );
+uox_assert( uonix_rewrite_guard_cooldown() === 15 * MINUTE_IN_SECONDS, '#367: os "15 minutos" do texto da tela são o intervalo REAL da guarda (' . uonix_rewrite_guard_cooldown() . ' s)' );
+// Somente leitura: o registro é uma opção que o painel NÃO escreve, e a aba não regrava nada. A conferência vem DEPOIS de
+// renderizar, e o `update_option` é contado (não só o valor final): escrever o MESMO valor também é escrever.
+$GLOBALS['uox_escritas'] = array();
+$antes_do_render = $GLOBALS['uox_options'];
+uox_render();
+uox_assert( array() === $GLOBALS['uox_escritas'], '#367: renderizar a aba não escreve em NENHUMA opção; escreveu ' . implode( ', ', $GLOBALS['uox_escritas'] ) );
+uox_assert( $antes_do_render === $GLOBALS['uox_options'], '#367: renderizar a aba não altera nenhuma opção' );
+
+// O nome da opção é o MESMO do escritor: se um dos dois mudar, a tela fica "sem registro" para sempre sem nada reprovar.
+uox_assert( uonix_rewrite_guard_repair_option() === uonix_intelligence_rewrite_repair_option(), '#367: o painel lê a mesma opção que a guarda grava' );
+
+// ROUND-TRIP com a guarda REAL: o que ela grava, a tela lê. É o teste que não depende de eu ter copiado o formato certo.
+$ini_log = ini_get( 'error_log' );
+$log_367 = tempnam( sys_get_temp_dir(), 'uox367' );
+ini_set( 'error_log', $log_367 );
+$GLOBALS['wp_rewrite']                  = new WP_Rewrite();
+$GLOBALS['wp_rewrite']->extra_rules_top = array(
+	'sitemap_index\.xml$'             => 'index.php?sitemap=1',
+	'([^/]+?)-sitemap([0-9]+)?\.xml$' => 'index.php?sitemap=$matches[1]&sitemap_n=$matches[2]',
+	'([a-z]+)?-?sitemap\.xsl$'        => 'index.php?xsl=$matches[1]',
+);
+$GLOBALS['uox_options']['rewrite_rules'] = array( '(.?.+?)(?:/([0-9]+))?/?$' => 'index.php?pagename=$matches[1]&page=$matches[2]' );
+unset( $GLOBALS['uox_options'][ $REPARO ] );
+$_POST = array();
+uox_assert( 'scheduled' === uonix_rewrite_guard_check( $AT ), '#367: a guarda real reparou (pré-condição do round-trip)' );
+uox_assert( isset( $GLOBALS['uox_options'][ $REPARO ] ), '#367: a guarda real gravou o registro (pré-condição do round-trip)' );
+$ida_e_volta = uox_render();
+uox_assert( false !== strpos( $ida_e_volta, 'Última regravação automática: 16/11/2026 22:35' ), '#367: round-trip: a data que a guarda gravou é a que a tela mostra' );
+uox_assert( false !== strpos( $ida_e_volta, '<code>sitemap_index\.xml$</code>' ) && false !== strpos( $ida_e_volta, '<code>([a-z]+)?-?sitemap\.xsl$</code>' ), '#367: round-trip: as regras que a guarda gravou são as que a tela lista' );
+uox_assert( false === strpos( $ida_e_volta, 'Registro de regravação ilegível' ), '#367: round-trip: o registro que a própria guarda grava nunca é "ilegível"' );
+ini_set( 'error_log', (string) $ini_log );
+@unlink( $log_367 );
+unset( $GLOBALS['wp_rewrite'], $GLOBALS['uox_options']['rewrite_rules'] );
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => $REGRAS );
+
+// Limites da hora (função pura, com `$now`): inteiro positivo; no máximo um dia no futuro (relógio adiantado e corrigido).
+$agora_367 = 1800000000;
+foreach ( array(
+	array( 1,                       'recorded',   'at = 1 (menor inteiro positivo)' ),
+	array( $agora_367 - 86400 * 400, 'recorded',  'at de 400 dias atrás (a guarda não apaga o registro)' ),
+	array( $agora_367,              'recorded',   'at = agora' ),
+	array( $agora_367 + 86400,      'recorded',   'at = agora + 1 dia (tolera relógio adiantado)' ),
+	array( $agora_367 + 86401,      'unreadable', 'at = agora + 1 dia + 1 s' ),
+	array( 0,                       'unreadable', 'at = 0' ),
+	array( -1,                      'unreadable', 'at = -1' ),
+) as $caso ) {
+	$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $caso[0], 'missing' => array() );
+	uox_assert( $caso[1] === uonix_intelligence_rewrite_repair_info( $agora_367 )['state'], '#367: ' . $caso[2] . ' é ' . $caso[1] );
+}
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => $REGRAS );
+
+// O fuso é do SITE: com outro fuso, a mesma hora gravada muda de dia.
+$GLOBALS['uox_timezone'] = 'UTC';
+uox_assert( false !== strpos( uox_render(), 'Última regravação automática: 17/11/2026 01:35' ), '#367: com o site em UTC a mesma hora sai como 17/11/2026 01:35' );
+$GLOBALS['uox_timezone'] = 'America/Sao_Paulo';
+
+// Valor vindo do banco NÃO sai cru: a regra é texto livre gravado em `wp_options`.
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( '<script>alert(1)</script>' ) );
+$veneno = uox_render();
+uox_assert( false === strpos( $veneno, '<script>alert(1)' ), '#367: a regra gravada é escapada' );
+uox_assert( false !== strpos( $veneno, '&lt;script&gt;alert(1)&lt;/script&gt;' ), '#367: a regra sai como texto' );
+
+// Registro malformado ou de forma inesperada: a tela não quebra e NÃO afirma uma data inventada.
+$malformados = array(
+	'texto'                      => 'lixo',
+	'inteiro'                    => 7,
+	'lista vazia'                => array(),
+	'sem at'                     => array( 'missing' => $REGRAS ),
+	'at texto'                   => array( 'at' => 'ontem', 'missing' => $REGRAS ),
+	'at numérico em texto'       => array( 'at' => '1794879308', 'missing' => $REGRAS ),
+	'at float'                   => array( 'at' => 1794879308.5, 'missing' => $REGRAS ),
+	'at zero'                    => array( 'at' => 0, 'missing' => $REGRAS ),
+	'at negativo'                => array( 'at' => -5, 'missing' => $REGRAS ),
+	'at booleano'                => array( 'at' => true, 'missing' => $REGRAS ),
+	'at no futuro distante'      => array( 'at' => PHP_INT_MAX, 'missing' => $REGRAS ),
+	// Um objeto no lugar do array: `isset( $objeto['at'] )` LANÇA `Error` num objeto sem `ArrayAccess`, e a aba inteira cairia.
+	'objeto'                     => new stdClass(),
+	'objeto com at'              => (object) array( 'at' => $AT, 'missing' => $REGRAS ),
+);
+foreach ( $malformados as $nome => $valor ) {
+	$GLOBALS['uox_options'][ $REPARO ] = $valor;
+	try {
+		$html = uox_render();
+	} catch ( Throwable $e ) {
+		while ( ob_get_level() > 0 ) {
+			ob_end_clean();
+		}
+		uox_assert( false, "#367: registro malformado ({$nome}) derrubou a aba com " . get_class( $e ) );
+		continue;
+	}
+	uox_assert( false === strpos( $html, 'Última regravação automática:' ), "#367: registro malformado ({$nome}) NÃO vira uma data na tela" );
+	uox_assert( false !== strpos( $html, 'Registro de regravação ilegível' ), "#367: registro malformado ({$nome}) é dito ilegível, e não passa por ausência" );
+}
+
+// `missing` malformado com `at` válido: a data é verdadeira e continua aparecendo; só a lista de regras some.
+$parciais = array(
+	'missing ausente'     => array( 'at' => $AT ),
+	'missing texto'       => array( 'at' => $AT, 'missing' => 'sitemap' ),
+	'missing com número'  => array( 'at' => $AT, 'missing' => array( 5, null, array( 'x' ) ) ),
+	'missing vazio'       => array( 'at' => $AT, 'missing' => array() ),
+);
+foreach ( $parciais as $nome => $valor ) {
+	$GLOBALS['uox_options'][ $REPARO ] = $valor;
+	$html = uox_render();
+	uox_assert( false !== strpos( $html, 'Última regravação automática: 16/11/2026 22:35' ), "#367: {$nome}: a data válida continua aparecendo" );
+	uox_assert( false === strpos( $html, 'Registro de regravação ilegível' ), "#367: {$nome}: com `at` válido o registro não é ilegível" );
+}
+
+// A guarda grava no máximo 5 regras, e a tela também mostra no máximo 5, mesmo se o registro vier maior.
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( 'r1', 'r2', 'r3', 'r4', 'r5', 'r6-nao-mostrar', 'r7-nao-mostrar' ) );
+$grande = uox_render();
+uox_assert( false !== strpos( $grande, 'r5' ) && false === strpos( $grande, 'r6-nao-mostrar' ), '#367: a tela mostra no máximo 5 regras' );
+
+// Texto longo de uma regra é cortado em 120 caracteres (a regra vem de `wp_options` e a tela não pode crescer sem limite).
+// A fronteira é exata: 120 sai inteira e SEM reticências; 121 sai com 120 e as reticências.
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( str_repeat( 'x', 120 ) ) );
+uox_assert( false !== strpos( uox_render(), '<code>' . str_repeat( 'x', 120 ) . '</code>' ), '#367: regra de exatamente 120 caracteres sai inteira e sem reticências' );
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( str_repeat( 'x', 121 ) ) );
+$cortada = uox_render();
+uox_assert( false !== strpos( $cortada, '<code>' . str_repeat( 'x', 120 ) . '…</code>' ) && false === strpos( $cortada, str_repeat( 'x', 121 ) ), '#367: regra de 121 caracteres sai com 120 e reticências' );
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( str_repeat( 'x', 5000 ) ) );
+uox_assert( false === strpos( uox_render(), str_repeat( 'x', 121 ) ), '#367: regra de 5000 caracteres não passa de 120 na tela' );
+// O limite é em CARACTERES, e não em bytes: 120 letras acentuadas são 240 bytes e saem inteiras, sem reticências.
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( str_repeat( 'é', 120 ) ) );
+uox_assert( false !== strpos( uox_render(), '<code>' . str_repeat( 'é', 120 ) . '</code>' ), '#367: regra de 120 caracteres acentuados (240 bytes) sai inteira e sem reticências' );
+// O corte é por caractere, e não por byte: um acento no limite não pode ser partido ao meio (HTML com UTF-8 inválido).
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( str_repeat( 'é', 121 ) ) );
+$acento = uox_render();
+uox_assert( false !== strpos( $acento, '<code>' . str_repeat( 'é', 120 ) . '…</code>' ) && 1 === preg_match( '//u', $acento ), '#367: o corte por caractere preserva o UTF-8' );
+
+// UTF-8 inválido numa regra: a regra é DESCARTADA. `mb_substr` a trocaria por `?` (a tela mostraria uma regra diferente da
+// gravada) e o `esc_html` do core, que esvazia a string inteira, deixaria um `<code></code>` vazio. O que o stub do teste faz
+// com UTF-8 inválido NÃO é o que o core faz, então o produto precisa decidir antes de escapar. O HTML segue UTF-8 válido e a data fica.
+foreach ( array( 'byte solto' => "regra\xC3", 'byte solto no fim de uma regra longa' => str_repeat( 'a', 200 ) . "\xC3", 'sequência truncada' => "ab\xE2\x82", 'overlong' => "\xC0\xAF" ) as $nome => $ruim ) {
+	$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( $ruim, 'boa' ) );
+	$invalida = uox_render();
+	uox_assert( 1 === preg_match( '//u', $invalida ), "#367: regra com UTF-8 inválido ({$nome}) não quebra o UTF-8 do HTML da aba" );
+	// A lista mostrada é EXATAMENTE a regra boa. Procurar só um texto específico (como "regra?") deixaria passar qualquer
+	// outra troca do byte inválido: `mb_substr` põe "?" e o resultado depende da sequência, então a comparação é pela lista inteira.
+	$mostradas = 1 === preg_match( '/Regras que faltavam: (.*?)<\/p>/su', $invalida, $mp ) && preg_match_all( '/<code>(.*?)<\/code>/su', $mp[1], $mc ) ? $mc[1] : null;
+	uox_assert( array( 'boa' ) === $mostradas, "#367: com UTF-8 inválido ({$nome}) a tela mostra EXATAMENTE a regra boa; mostrou " . var_export( $mostradas, true ) );
+	uox_assert( false === strpos( $invalida, '…' ) && false === strpos( $invalida, '<code></code>' ), "#367: regra com UTF-8 inválido ({$nome}) não deixa reticências nem <code> vazio" );
+	uox_assert( false !== strpos( $invalida, 'Última regravação automática: 16/11/2026 22:35' ), "#367: a data continua com UTF-8 inválido ({$nome})" );
+}
+// A única regra é inválida: a data fica e a frase "Regras que faltavam" não aparece.
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( "so\xC3" ) );
+$so_ruim = uox_render();
+uox_assert( false !== strpos( $so_ruim, 'Última regravação automática: 16/11/2026 22:35' ) && false === strpos( $so_ruim, 'Regras que faltavam' ), '#367: com a única regra inválida, a data fica e "Regras que faltavam" não aparece' );
+// NUL e quebra de linha são UTF-8 válido: a regra aparece, e o HTML continua válido.
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( "a\0b", "c\nd" ) );
+$nul = uox_render();
+uox_assert( 1 === preg_match( '//u', $nul ) && false !== strpos( $nul, "<code>a\0b</code>" ), '#367: regra com byte NUL (UTF-8 válido) aparece, e o HTML segue válido' );
+
+// Regra em branco não vira um `<code></code>` vazio, e a vírgula só vem ENTRE regras.
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( '', '   ', 'a-regra', 'b-regra' ) );
+$branco = uox_render();
+uox_assert( false === strpos( $branco, '<code></code>' ) && false === strpos( $branco, '<code>   </code>' ), '#367: regra em branco é descartada' );
+uox_assert( 1 === preg_match( '/Regras que faltavam: <code>a-regra<\/code>, <code>b-regra<\/code><\/p>/', $branco ), '#367: a vírgula separa as regras (sem espaço antes dela) e não precede a primeira nem sucede a última' );
+// Só regras inválidas: a data continua e a frase "Regras que faltavam" não aparece com a lista vazia.
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => array( '', null, 5 ) );
+$so_invalidas = uox_render();
+uox_assert( false !== strpos( $so_invalidas, 'Última regravação automática: 16/11/2026 22:35' ) && false === strpos( $so_invalidas, 'Regras que faltavam' ), '#367: sem nenhuma regra válida a frase "Regras que faltavam" não aparece' );
+
+// A seção aparece também quando outra aba está ativa (o painel é renderizado escondido, como os irmãos).
+$GLOBALS['uox_options'][ $REPARO ] = array( 'at' => $AT, 'missing' => $REGRAS );
+$outra_aba = uox_render( 'metrics' );
+uox_assert( false !== strpos( $outra_aba, 'Última regravação automática: 16/11/2026 22:35' ), '#367: a seção é renderizada mesmo com outra aba ativa' );
+uox_assert( false !== strpos( $outra_aba, '<h3>Regras de reescrita do sitemap e das categorias</h3>' ), '#367: o título da seção também é renderizado com outra aba ativa (a seção inteira fica escondida com o painel, como os irmãos)' );
+unset( $GLOBALS['uox_options'][ $REPARO ] );
+
+// Sem `wp_date`: a hora cai em UTC e a tela DIZ "(UTC)" ao lado da data (M3 da revisão). A suíte define `wp_date` no escopo
+// global, então o ramo só se alcança em subprocesso, com o 56 carregado sozinho (ele só declara funções), como no teste do
+// dashboard (#456). O helper `uonix_intelligence_radar_time` já é testado lá; aqui se prende que A SEÇÃO NOVA o chama COM o rótulo.
+$sub_sem_wp_date = static function ( $registro ) {
+	$codigo = 'define( "ABSPATH", "/" ); function get_option( $k, $d = false ) { return json_decode( getenv( "UOX_R" ), true ); } function esc_html( $t ) { return htmlspecialchars( (string) $t, ENT_QUOTES, "UTF-8" ); } function esc_attr( $t ) { return esc_html( $t ); } require getenv( "UOX_F" ); echo function_exists( "wp_date" ) ? "WP_DATE_EXISTE" : "sem wp_date", "\n"; ob_start(); uonix_intelligence_render_anomalies_panel( "anomalies" ); echo ob_get_clean();';
+	$proc   = proc_open( array( PHP_BINARY, '-n', '-d', 'date.timezone=America/Sao_Paulo', '-r', $codigo ), array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes, null, array( 'UOX_F' => dirname( __DIR__, 2 ) . '/mu-plugins/uonix-admin/56-admin-intelligence-dashboard.php', 'UOX_R' => (string) json_encode( $registro ) ) );
+	$saida  = is_resource( $proc ) ? stream_get_contents( $pipes[1] ) : '';
+	if ( is_resource( $proc ) ) {
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		proc_close( $proc );
+	}
+	return (string) $saida;
+};
+$html_sem = $sub_sem_wp_date( array( 'at' => $AT, 'missing' => $REGRAS ) );
+uox_assert( 0 === strpos( $html_sem, 'sem wp_date' ), '#367: o subprocesso do teste NÃO tem wp_date (pré-condição); obteve ' . substr( $html_sem, 0, 40 ) );
+uox_assert( false !== strpos( $html_sem, 'Última regravação automática: 17/11/2026 01:35 (UTC)' ), '#367: sem wp_date, a hora da seção sai em UTC e DIZ "(UTC)" (date.timezone do processo é São Paulo, e a hora não vira 22:35)' );
 
 // ---------------------------------------------------------------------------
 // #351: o aviso de "primeira verificação" só fala em tráfego com WP-Cron por visita.

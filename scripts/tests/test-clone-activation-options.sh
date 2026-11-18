@@ -90,12 +90,17 @@ fi
 # As três do Radar de Pautas (Módulo 8) guardam as candidatas, os descartes e o que já
 # foi ao e-mail. Herdadas, o destino mostraria as pautas da ORIGEM e acharia que já
 # mandou por e-mail o que nunca mandou.
+# `uonix_rewrite_rules_repair` (#367) guarda a hora e as regras do último reparo automático das
+# regras de reescrita do Rank Math (#305). A aba Anomalias mostra "Última regravação automática".
+# Herdada, a tela do QA afirmaria um reparo que o QA nunca fez, com a hora da PRODUÇÃO. Medido
+# em 2026-11-18: a opção existe em produção (gravada em 2026-11-16 22:35, sem autoload).
 state_options=(
   'uonix_intelligence_anomaly_state'
   'uonix_intelligence_page_status_cache'
   'uonix_intelligence_content_radar'
   'uonix_intelligence_content_radar_dismissed'
   'uonix_intelligence_content_radar_emailed'
+  'uonix_rewrite_rules_repair'
 )
 
 for option in "${state_options[@]}"; do
@@ -118,6 +123,41 @@ for option in "${license_options[@]}"; do
     report "opção de licença '$option' NÃO está na lista IN de protected_options_where(); clonar trocaria a licença do destino pela da origem."
   fi
 done
+
+# A tabela "Opções preservadas do destino" de `docs/clone-ambientes.md` lista o que o predicado protege. Sem esta
+# conferência, a opção entrava no SQL e a doc seguia dizendo o contrário: quem lê a doc para decidir se pode clonar
+# acharia que a opção viaja.
+#
+# Os nomes saem do PRÓPRIO predicado (cada nome literal do `IN (...)` e do `= '...'`), e não de três listas escritas à
+# mão: uma lista à mão deixa de fora o nome que alguém acrescentar ao SQL e esquecer aqui (seis nomes do `IN` estavam
+# fora da conferência, e a revisão do #367 achou). A busca é só dentro das linhas da TABELA (as que começam com `|`, do
+# cabeçalho `Tipo` até a linha `Uônix Insights`), e não no arquivo inteiro: citar a opção numa frase solta da doc não vale
+# como constar na tabela. O nome vai entre crases, para `..._content_radar` não casar com `..._content_radar_dismissed`.
+CLONE_DOC="$ROOT_DIR/docs/clone-ambientes.md"
+if [ -f "$CLONE_DOC" ]; then
+  doc_table="$(awk '/^\| Tipo \| Nomes ou padrões preservados \|/{f=1} f && /^\|/{print} f && /^\| Uônix Insights/{exit}' "$CLONE_DOC")"
+  if [ -z "$doc_table" ]; then
+    report "a tabela 'Tipo | Nomes ou padrões preservados' não foi encontrada em docs/clone-ambientes.md."
+  else
+    literal_names="$(
+      {
+        printf '%s\n' "$protected_sql" | grep -oE "IN \([^)]*\)" | grep -oE "'[^']+'"
+        printf '%s\n' "$protected_sql" | grep -oE "option_name = '[^']+'" | grep -oE "'[^']+'"
+      } | tr -d "'"
+    )"
+    # O vazio aqui deixaria o laço abaixo sem nada a conferir, e o teste verde sem provar nada.
+    literal_count="$(printf '%s\n' "$literal_names" | grep -c .)"
+    [ "$literal_count" -ge 10 ] || report "só $literal_count nome(s) literal(is) extraído(s) do predicado; esperado ao menos 10 (a extração quebrou)."
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      if ! printf '%s\n' "$doc_table" | grep -qF "\`$name\`"; then
+        report "a opção '$name' está protegida no script, mas NÃO consta na TABELA de docs/clone-ambientes.md: a doc diria que ela viaja no clone."
+      fi
+    done <<< "$literal_names"
+  fi
+else
+  report "docs/clone-ambientes.md não encontrado em $CLONE_DOC."
+fi
 
 # Quem consome o invariante precisa continuar amarrando agendamento a
 # destinatário. Se essa amarração sair, proteger a opção deixa de bastar.
