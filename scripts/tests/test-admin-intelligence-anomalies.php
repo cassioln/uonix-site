@@ -313,6 +313,15 @@ uox_assert( $esperado_fim === ( $j['current']['end'] ?? '' ), 'a janela atual de
 $ontem = ( new DateTimeImmutable( $hoje, $fuso ) )->modify( '-1 day' )->format( 'Y-m-d' );
 uox_assert( ( $j['current']['end'] ?? '' ) !== $ontem, 'a janela atual NÃO pode terminar em ontem: é o defeito que este módulo existe para evitar' );
 uox_assert( $ATRASO >= 3, 'a defasagem configurada deve cobrir a medição de 3 dias de 2026-09-23' );
+// #300: o painel de Métricas (53) usa a MESMA defasagem para a Search Console. O 53 carrega antes do 58 e não pode lê-la daqui, então
+// a igualdade é verificada, e não presumida: com defasagens diferentes, o painel e o alerta de anomalia comparariam janelas que não
+// terminam no mesmo dia e mostrariam números diferentes para a mesma semana.
+uox_assert( function_exists( 'uonix_analytics_metrics_search_console_settle_lag' ), '#300: o 53 expõe a defasagem da Search Console' );
+uox_assert( function_exists( 'uonix_analytics_metrics_search_console_settle_lag' ) && $ATRASO === uonix_analytics_metrics_search_console_settle_lag(), '#300: a defasagem do painel (53) é igual à do Módulo 5 (58): ' . ( function_exists( 'uonix_analytics_metrics_search_console_settle_lag' ) ? uonix_analytics_metrics_search_console_settle_lag() : '?' ) . ' x ' . $ATRASO );
+if ( function_exists( 'uonix_analytics_metrics_search_console_periods' ) ) {
+	$painel_janelas = uonix_analytics_metrics_search_console_periods( $hoje, $JANELA );
+	uox_assert( $painel_janelas['current'] === array( 'start' => $j['current']['start'], 'end' => $j['current']['end'] ) && $painel_janelas['previous'] === array( 'start' => $j['previous']['start'], 'end' => $j['previous']['end'] ), '#300: as janelas do painel de 7 dias são as MESMAS do Módulo 5 para o mesmo dia; painel ' . json_encode( $painel_janelas ) . ' x módulo 5 ' . json_encode( array( $j['current'], $j['previous'] ) ) );
+}
 
 // Tamanho e distância exatos: sem isso, comparar 7 dias com dois fins de semana
 // contra 7 com um já acusaria queda sem nada ter acontecido.
