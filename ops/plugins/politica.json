@@ -68,7 +68,7 @@
     "was-this-article-helpful": {"camada": "comum", "contrato": false, "motivo": "Avaliação de artigos."},
     "wp-crontrol": {"camada": "comum", "contrato": false, "motivo": "Ferramenta do painel para o cron."},
     "seo-by-rank-math-pro": {"camada": "decisao_pendente", "contrato": false, "motivo": "Inativo em produção."},
-    "wordpress-importer": {"camada": "decisao_pendente", "contrato": false, "motivo": "Ferramenta de migração ativa em produção."}
+    "wordpress-importer": {"camada": "comum", "contrato": false, "motivo": "Ferramenta de migração, ativa em produção; sem dependência medida nem fluxo crítico."}
   },
   "nucleo": {
     "wordpress": {"camada": "nucleo", "contrato": false, "motivo": "Núcleo do WordPress; atualizado pela esteira com backup de wp-admin, wp-includes e da raiz."}

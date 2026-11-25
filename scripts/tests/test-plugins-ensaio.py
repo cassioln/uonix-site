@@ -49,7 +49,7 @@ inv = {"plugins": [
     item("fluentform", "6.2.15", "6.2.16"),              # crítica, lançada há 10 dias -> cumprida
     item("google-site-kit", "1.188.0", "1.189.0"),       # acoplada -> entra sem quarentena
     item("loco-translate", "2.8.9", "2.9.0"),            # comum -> entra
-    item("wordpress-importer", "0.9.6", "0.9.7"),        # decisao_pendente -> fora
+    item("seo-by-rank-math-pro", "3.0.99", "3.0.100"),   # decisao_pendente -> fora
     item("user-role-editor", "4.66.2", "4.67", update="unavailable"),  # requisito -> fora
     item("plugin-novo", "1.0", "1.1"),                   # sem classificação -> fora
     item("bnfw", "1.9.9.2", "", update="none"),          # sem pendência -> ignorado
@@ -71,7 +71,7 @@ checar(entram == ["google-site-kit", "loco-translate", "fluentform", "kadence-bl
 checar("quarentena: lançada há 0 de 7" in fora.get("woocommerce", ""), f"woocommerce deveria cumprir quarentena: {fora.get('woocommerce')}")
 checar("não verificável" in fora.get("seo-by-rank-math", ""), "sem API, a quarentena deveria ser não verificável")
 checar("--aceitar-major=megamenu" in fora.get("megamenu", ""), "major na crítica deveria bloquear")
-checar("não é atualizada" in fora.get("wordpress-importer", ""), "decisao_pendente deveria ficar fora")
+checar("não é atualizada" in fora.get("seo-by-rank-math-pro", ""), "decisao_pendente deveria ficar fora")
 checar("não é atualizada" in fora.get("kadence-child", ""), "camada propria deveria ficar fora")
 checar("exige PHP" in fora.get("user-role-editor", ""), "unavailable deveria ficar fora")
 checar("sem classificação" in fora.get("plugin-novo", ""), "plugin sem classificação deveria ficar fora")
@@ -814,7 +814,7 @@ with tempfile.TemporaryDirectory() as tmp:
     finally:
         ensaio.executar = original
     checar(rc == 0 and not marcador.exists(), "main() deveria passar a invalidação que apaga o marcador do clone")
-    checar({"kadence-child", "seo-by-rank-math-pro", "wordpress-importer"} <= chamado.get("proprios", set()),
+    checar({"kadence-child", "seo-by-rank-math-pro", "twentytwentythree"} <= chamado.get("proprios", set()),
            f"main() deveria ignorar no alinhamento por versão as camadas com aplicacao 'nunca': {chamado.get('proprios')}")
 
 # Jornada vital: vermelho na baseline bloqueia antes de qualquer atualização,
