@@ -81,9 +81,10 @@ if (!is_file($module)) {
 }
 
 // O módulo precisa estar na lista de carga do WooCommerce.
-$lista = (string) file_get_contents($root . '/mu-plugins/uonix-woocommerce/module.php');
-if (strpos($lista, "'34-checkout-pais-oculto.php'") === false) {
-    uonix_test_fail('module.php não carrega 34-checkout-pais-oculto.php');
+require_once __DIR__ . '/fixtures/lib-loader-modulo.php';
+$carregados = uox_loader_arquivos_do_modulo($root . '/mu-plugins/uonix-woocommerce/module.php');
+if (!in_array('34-checkout-pais-oculto.php', $carregados, true)) {
+    uonix_test_fail('módulo não está registrado em mu-plugins/uonix-woocommerce/module.php');
 }
 
 // O plugin que oferece o filtro precisa ter contrato, para o ensaio avisar se uma versão o remover.
