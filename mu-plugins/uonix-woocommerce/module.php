@@ -32,6 +32,7 @@ uonix_mu_require_files(
 		'31-rfq-lazy-cookie-session.php',
 		'32-rfq-stable-asset-version.php',
 		'33-rfq-session-cookie-samesite.php',
+		'34-checkout-pais-oculto.php',
 	),
 	'uonix-woocommerce'
 );

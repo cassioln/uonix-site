@@ -53,7 +53,7 @@
     "woocommerce-products-filter": {"camada": "acoplada", "contrato": true, "motivo": "Tema filho estiliza e manipula a marcação dos filtros do catálogo."},
     "wp-reviews-plugin-for-google": {"camada": "acoplada", "contrato": true, "motivo": "Avaliações Google carregadas pelo nosso mu-plugin via shortcode."},
     "google-site-kit": {"camada": "acoplada", "contrato": true, "motivo": "A política de analytics lê as opções googlesitekit_*_settings."},
-    "woo-checkout-field-editor-pro": {"camada": "acoplada", "contrato": false, "motivo": "Define os campos do checkout da cotação; sem acoplamento de código medido."},
+    "woo-checkout-field-editor-pro": {"camada": "acoplada", "contrato": true, "motivo": "Define os campos do checkout da cotação; o mu-plugin 34 liga o filtro que preserva o país oculto."},
     "conditional-menus": {"camada": "comum", "contrato": false, "motivo": "Menus condicionais; sem acoplamento de código medido."},
     "wb-custom-product-tabs-for-woocommerce": {"camada": "comum", "contrato": false, "motivo": "Conteúdo das abas de produto; sem acoplamento de código medido."},
     "pods-alternative-cache": {"camada": "comum", "contrato": false, "motivo": "Cache do Pods."},
