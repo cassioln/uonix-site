@@ -100,6 +100,14 @@
         "woocommerce_email_recipient_new_rfq"
       ]
     },
+    "woo-checkout-field-editor-pro": {
+      "usado_em": [
+        "mu-plugins/uonix-woocommerce/34-checkout-pais-oculto.php"
+      ],
+      "marcadores": [
+        "thwcfd_preserve_hidden_country_field"
+      ]
+    },
     "fluentform": {
       "usado_em": [
         "mu-plugins/uonix-fluentforms",
